@@ -185,3 +185,9 @@ releases the guard. After a crash, a later owner can reclaim a complete dead-PID
 record without modifying `state.json`. Unresolved calls still require gateway
 receipt reconciliation. A malformed record, a live owner, or an unavailable
 guard leaves platform models unavailable while the app continues to start.
+
+A confirmed funding rejection whose authoritative receipt asset is `CREDIT/6`
+returns `platform_model_credits_required`. The UI opens credit membership or
+add-ons for that exact refusal. Missing asset and cash receipts retain
+`platform_model_funding_required` and its cash destination. Both require the
+original call's REJECTED receipt; neither starts another model call.

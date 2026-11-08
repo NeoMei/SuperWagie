@@ -765,3 +765,35 @@ test('a legacy receipt requires explicit application without losing its recorded
   expect(findButton('Test and apply to features')?.disabled).toBe(false);
   expect(mutations()).toHaveLength(0);
 });
+
+test('choosing credits only reads readiness and an explicit activation posts the credit mode', async () => {
+  readPayload = readyState();
+  await render();
+  readPayload = { ...emptyState(), fundingMode: 'credits', nativeCredits: { ready: true } };
+  await click('Credits');
+  expect(mutations()).toHaveLength(0);
+  expect(requests.at(-1)?.path).toContain('fundingMode=credits');
+  writePayload = { ...readyState(), fundingMode: 'credits', nativeCredits: { ready: true } };
+  await click('Activate and configure');
+  expect(JSON.parse(String(mutations()[0]?.body))).toEqual({ accountId: 'account-a', action: 'activate', fundingMode: 'credits' });
+});
+
+test('credits stay disabled when authoritative readiness is absent', async () => {
+  await render();
+  readPayload = { ...emptyState(), fundingMode: 'credits' };
+  await click('Credits');
+  expect(findButton('Activate and configure')?.disabled).toBe(true);
+  expect(host?.textContent).toContain('Credits are not available for model calls yet.');
+  expect(mutations()).toHaveLength(0);
+});
+
+test('an authoritative credits pre-admission refusal clears pending issuance and explains readiness', async () => {
+  await render();
+  readPayload = { ...emptyState(), fundingMode: 'credits', nativeCredits: { ready: true } };
+  await click('Credits');
+  pendingWrite = Promise.resolve(Response.json({ error: 'native_credits_unavailable' }, { status: 409 }));
+  await click('Activate and configure');
+  expect(host?.textContent).toContain('Credits are not available for model calls yet.');
+  expect(findButton('Cash balance')?.disabled).toBe(false);
+  expect(mutations()).toHaveLength(1);
+});

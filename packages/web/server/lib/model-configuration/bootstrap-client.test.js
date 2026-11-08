@@ -497,3 +497,18 @@ describe('quick setup service endpoints', () => {
     expect(called).toBe(false);
   });
 });
+
+
+it('passes explicit credit funding to account discovery and validates conversion without calculating a price', async () => {
+  const conversion = { version: 'fixture-credit-v3', numerator: '90071992547409931', denominator: '20000000000000000', rounding: 'lr-cumulative-ceil-v1' };
+  const bodies = [];
+  const client = createUniHubBootstrapClient({ platformAccount: { request: async (_identity, _path, init) => {
+    bodies.push(JSON.parse(init.body));
+    return { model_scope: 'llmrouter_available', pricing_source: 'llmrouter_native_credit', native_credit_conversion: conversion, models: [{ id: 'chat', name: 'Chat', operations: ['chat'] }] };
+  } } });
+  const result = await client.discover({ source: 'session', identity: {}, accountId: 'account-1', fundingMode: 'credits' });
+  expect(bodies).toEqual([{ model_scope: 'llmrouter_available', funding_mode: 'credits' }]);
+  expect(result.native_credit_conversion).toEqual(conversion);
+  const invalid = createUniHubBootstrapClient({ platformAccount: { request: async () => ({ pricing_source: 'llmrouter_native', models: [] }) } });
+  await expect(invalid.discover({ source: 'session', identity: {}, accountId: 'account-1', fundingMode: 'credits' })).rejects.toMatchObject({ code: 'account_key_catalog_invalid' });
+});

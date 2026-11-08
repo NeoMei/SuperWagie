@@ -66,7 +66,7 @@ export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, o
   }));
   app.put('/api/platform-account/account', express.json({ limit: '4kb' }), route(async (req, res) => res.json(await runtime.selectAccount(await identity(req, res), req.body?.accountId))));
   for (const [product, prefix] of [['superwagie', ''], ['llmrouter', '/llmrouter']]) {
-    for (const kind of ['summary', 'calls']) {
+    for (const kind of product === 'superwagie' ? ['summary', 'calls', 'activity'] : ['summary', 'calls']) {
       app.get(`/api/platform-account/usage/:accountId${prefix}/${kind}`, route(async (req, res) => {
         res.json(await runtime.readUsage(await identity(req, res), req.params.accountId, kind, product));
       }));

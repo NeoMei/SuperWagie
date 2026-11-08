@@ -90,7 +90,7 @@ successful probe. Other purposes continue. Verification timestamps alone do not
 invalidate a selection.
 
 Issuance explicitly requests `model_scope: llmrouter_available` and requires
-`pricing_source: llmrouter_native` plus a positive `credential_version`. Legacy
+the pricing marker matching the explicitly selected funding mode plus a positive `credential_version`. Legacy
 receipts default to selected scope. An explicit resume, retest or quick-setup
 apply upgrades that same Key through the account/key `/scope` endpoint. The
 returned ID, actor, account, product, instance, creation time and expiry must
@@ -405,3 +405,29 @@ binding even when the catalog contains chat models. Existing routing bindings
 are preserved in both modes. Apply recomputes this plan; a plan without
 additions or replacements records an idempotent result without creating a
 connection or copying a key, and rollback leaves the model configuration intact.
+
+### Why credits keep a separate activation receipt
+
+Credits setup sends `funding_mode: credits` and dynamic `llmrouter_available` scope.
+Discovery must carry `llmrouter_native_credit` and an authoritative conversion
+snapshot with positive canonical int64 numerator and denominator. Issuance and
+scope upgrades require that pricing marker, `funding_mode: credits` and
+`asset: CREDIT/6`, but no conversion field. Missing or inconsistent credit
+fields leave issuance unknown before credential storage or provider setup.
+Legacy cash responses may omit mode and asset; present values must remain
+`prepaid_cash` and `CNY/6`. Cash
+receipts retain their original storage identity and `llmrouter_native` marker.
+Credits receipts add the funding mode to their identity. Both modes share the
+owner lock, so setup cannot mutate the same configuration concurrently.
+Selecting a mode reads its receipt and never issues or applies a key. Explicit
+setup uses the existing probe-then-apply flow, preserving each previous binding
+until its replacement probe passes. Failed credit setup never issues a cash key.
+Restart restores both credential-owner mappings without changing bindings.
+
+Credits writes require the trusted `/v1/capabilities` `native_credits.ready`
+field. Missing readiness is unavailable. This field reflects the server's
+configured tariff and routing support, not account balance or paid membership.
+Client code validates conversion strings and their rounding version but performs
+no conversion arithmetic. The upstream billing runtime freezes the tariff for
+each admitted call. Quick-setup discoveries persist the selected funding mode
+through preview and apply; imported credentials retain their own authorization.

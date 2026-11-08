@@ -1,5 +1,6 @@
 import { productHelpI18n } from './product-help.i18n';
 import { platformAccountI18n } from './platform-account.i18n';
+import { platformUsageActivityI18n } from './platform-usage-activity.i18n';
 import { creationI18n } from './creation.i18n';
 import { modelConfigurationI18n } from './model-configuration.i18n';
 import type { I18nKey } from './en';
@@ -130,6 +131,7 @@ export const dict: Record<I18nKey, string> = {
     'chat.agentStatus.limit.later': '额度将在{date} {time}重置',
   ...productHelpI18n['zh-CN'],
   ...platformAccountI18n['zh-CN'],
+  ...platformUsageActivityI18n['zh-CN'],
   ...creationI18n['zh-CN'],
   ...modelConfigurationI18n['zh-CN'],
   "opencodeCompatibility.bundled": "内核由犇马管理，会自动检查 OpenCode 官方更新。若仍不兼容，请更新犇马。",
@@ -3604,7 +3606,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.weekly': '每周',
   'quota.window.daily': '每日',
   'quota.window.monthly': '每月',
-  'quota.window.credits': '点数额度',
+  'quota.window.credits': '积分额度',
   'quota.window.keyLimit': '密钥限额',
   'quota.window.creditsBalance': '额度余额',
   'quota.window.monthlyCredits': '每月积分',
@@ -3619,7 +3621,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.premium': '高级交互',
   'quota.window.chat': '聊天请求',
   'quota.window.completions': '补全',
-  'quota.window.premiumInteractions': 'AI 点数',
+  'quota.window.premiumInteractions': '积分',
   'chat.workStatus.ariaLabel': '工作状态',
   'chat.workStatus.mobileEmpty': '此会话暂无可显示的内容',
   'chat.workStatus.context.label': '上下文',

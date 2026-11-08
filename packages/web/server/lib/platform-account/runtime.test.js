@@ -51,8 +51,8 @@ const fixture = async (options = {}) => {
   app.use('/v1', (req, res, next) => { expect(req.headers.authorization).toBe(`Bearer ${currentAccess}`); next(); });
   app.get('/v1/me', (_req, res) => res.json({ id: 'actor-a', name: 'Alice', email: 'alice@example.test' }));
   app.get('/v1/accounts', (_req, res) => res.json([{ id: 'personal-a', name: 'Alice', kind: 'personal', role: 'owner' }, { id: 'team-a', name: 'Team A', kind: 'team', role: 'member' }]));
-  app.get('/v1/accounts/:account/subscriptions', (_req, res) => res.json([{ id: 'sub-a', product_id: 'superwagie', status: 'active', paid_through: new Date(clock + 100000).toISOString(), offer: { name: 'Test plan' } }]));
-  app.get('/v1/accounts/:account/credits', (_req, res) => failCredits ? res.status(503).end() : res.json([
+  app.get('/v1/accounts/:account/subscriptions', (_req, res) => res.json([{ id: 'sub-a', product_id: 'superwagie', status: 'active', paid_through: new Date(clock + 100000).toISOString(), offer: { name: 'Test plan', ...options.subscriptionOffer } }]));
+  app.get('/v1/accounts/:account/credits', (_req, res) => failCredits ? res.status(503).end() : res.json(options.creditBatches ?? [
     { id: 'credit-a', available: '9007199254740993', reserved: '7', starts_at: new Date(clock - 1000).toISOString(), expires_at: new Date(clock + 100000).toISOString(), frozen: false },
     { id: 'expired', available: '99', reserved: '3', starts_at: new Date(clock - 1000).toISOString(), expires_at: new Date(clock - 1).toISOString(), frozen: false },
   ]));
@@ -85,6 +85,56 @@ const apiKeyApp = (runtime, who = identity) => {
 };
 
 describe('personal SuperWagie API key metadata', () => {
+  it('permits only exact quote routes on the captured payer and refuses a replaced session', async () => {
+    const f = await fixture(); await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const seen = [];
+    f.app.get('/v1/accounts/:account/checkouts', (_req, res) => res.json([]));
+    f.app.get('/v1/accounts/:account/checkouts/:checkout', (_req, res) => res.json({ id: 'checkout-a' }));
+    f.app.post('/v1/accounts/:account/checkouts/:checkout/:action', (req, res) => { expect(req.headers['idempotency-key']).toBe('original-key'); res.json({ id: 'checkout-a' }); });
+    f.app.post('/v1/accounts/:account/quotes', (req, res) => { seen.push(req.originalUrl); res.json({ id: 'quote-a' }); });
+    f.app.post('/v1/accounts/:account/quotes/:quote/accept', (req, res) => { seen.push(req.originalUrl); expect(req.headers['idempotency-key']).toBe('original-key'); res.json({ id: 'order-a' }); });
+    const session = f.runtime.captureCommerceSession(identity);
+    const init = { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'original-key' }, body: '{}' };
+    await expect(session.request('/v1/accounts/personal-a/checkouts')).resolves.toEqual([]);
+    await expect(session.request('/v1/accounts/personal-a/checkouts/checkout-a')).resolves.toEqual({ id: 'checkout-a' });
+    for (const action of ['reconcile', 'close', 'refund']) await expect(session.request(`/v1/accounts/personal-a/checkouts/checkout-a/${action}`, init)).resolves.toEqual({ id: 'checkout-a' });
+    await expect(session.request('/v1/accounts/team-a/checkouts/checkout-a/refund', init)).rejects.toMatchObject({ code: 'platform_account_forbidden' });
+    await expect(session.request('/v1/accounts/personal-a/checkouts/checkout-a/refund/extra', init)).rejects.toMatchObject({ code: 'platform_request_forbidden' });
+    await expect(session.request('/v1/accounts/personal-a/checkouts/checkout-a/settle', init)).rejects.toMatchObject({ code: 'platform_request_forbidden' });
+    await expect(session.request('/v1/accounts/personal-a/quotes', init)).resolves.toEqual({ id: 'quote-a' });
+    await expect(session.request('/v1/accounts/personal-a/quotes/quote-a/accept', init)).resolves.toEqual({ id: 'order-a' });
+    await expect(session.request('/v1/accounts/team-a/quotes', init)).rejects.toMatchObject({ code: 'platform_account_forbidden' });
+    await expect(session.request('/v1/accounts/personal-a/quotes/quote-a/accept/extra', init)).rejects.toMatchObject({ code: 'platform_request_forbidden' });
+    await expect(session.request('/v1/accounts/personal-a/quotes/quote-a', { method: 'GET' })).rejects.toMatchObject({ code: 'platform_request_forbidden' });
+    await f.runtime.selectAccount(identity, 'team-a');
+    await expect(session.request('/v1/accounts/personal-a/quotes', init)).rejects.toMatchObject({ code: 'platform_session_changed' });
+    expect(seen).toHaveLength(2);
+  });
+
+  it('projects exact point batches with explicit ownership and keeps legacy or other products shared', async () => {
+    const starts = new Date(Date.now() - 10_000).toISOString(); const ends = new Date(Date.now() + 100_000).toISOString();
+    const base = { available: '1000000', reserved: '7', starts_at: starts, expires_at: ends, frozen: false };
+    const f = await fixture({ subscriptionOffer: { id: 'offer-a', rank: 2, period: 'month', price: '99000000', monthly_credit: '3000000000' }, creditBatches: [
+      { ...base, id: 'subscription', kind: 'subscription', source_scope: 'product', product_id: 'superwagie' },
+      { ...base, id: 'addon', kind: 'addon', source_scope: 'product', product_id: 'superwagie', private_order: 'not-public' },
+      { ...base, id: 'external', kind: 'addon', source_scope: 'product', product_id: 'another-product' },
+      { ...base, id: 'legacy' },
+      { ...base, id: 'future', starts_at: new Date(Date.now() + 60_000).toISOString() },
+      { ...base, id: 'frozen', frozen: true },
+    ] });
+    await f.runtime.callback(await f.begin());
+    const state = await f.runtime.publicSession(identity);
+    expect(state.credits).toMatchObject({ available: '4000000', reserved: '42' });
+    expect(state.credits.batches.map((batch) => [batch.id, batch.kind, batch.sourceScope, batch.productId])).toEqual([
+      ['subscription', 'subscription', 'product', 'superwagie'], ['addon', 'addon', 'product', 'superwagie'],
+      ['external', 'other', 'shared', undefined], ['legacy', 'other', 'shared', undefined], ['future', 'other', 'shared', undefined], ['frozen', 'other', 'shared', undefined],
+    ]);
+    expect(state.membership[0].offer).toMatchObject({ id: 'offer-a', rank: 2, period: 'month', price: '99000000', monthly_credit: '3000000000' });
+    expect(JSON.stringify(state.credits)).not.toMatch(/another-product|not-public|private_order/);
+    f.failCredits(); await expect(f.runtime.publicSession(identity)).rejects.toThrow();
+  });
+
   it('allows same-key model additions only for the captured payer and exact route', async () => {
     const f = await fixture();
     await f.runtime.callback(await f.begin());

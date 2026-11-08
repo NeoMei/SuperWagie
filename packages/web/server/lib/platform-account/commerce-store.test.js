@@ -49,4 +49,27 @@ describe('commerce recovery store', () => {
     await expect(openCommerceStore(f.directory)).rejects.toThrow('platform_commerce_store_unsafe');
     expect(await fs.readFile(target, 'utf8')).toBe('{"private":"untouched"}');
   });
+  it('reads a version-one journal and preserves legacy intents when adding upgrade recovery', async () => {
+    const f = await fixture(); await f.store.close();
+    const file = path.join(f.directory, 'unihub-commerce/state.json');
+    await fs.writeFile(file, JSON.stringify({ version: 1, intents: { legacy: f.intent } }));
+    const reopened = await openCommerceStore(f.directory); cleanups.push(() => reopened.close());
+    expect(reopened.read().legacy).toEqual(f.intent); expect(reopened.readQuotes()).toEqual({});
+    const upgrade = { ...f.intent, kind: 'upgrade', offerId: 'offer-b', quoteId: 'quote-a', subscriptionId: 'sub-a' };
+    await reopened.mutate((intents) => { intents.upgrade = upgrade; });
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    expect(stored.version).toBe(2); expect(stored.intents.legacy).toEqual(f.intent); expect(stored.intents.upgrade).toEqual(upgrade);
+    await expect(reopened.mutate((intents) => { delete intents.upgrade.quoteId; })).rejects.toThrow();
+    expect(reopened.read().upgrade.quoteId).toBe('quote-a');
+  });
+});
+
+
+it('round-trips external quote funding, checkout provider and original refund recovery without credentials', async () => {
+  const f=await fixture();const refundKey=crypto.randomUUID();
+  const checkout={...f.intent,kind:'checkout',provider:'alipay',paymentSource:'external',resourceId:'checkout1',refundKey,refundReason:'Customer requested refund'};
+  const quote={id:'quote1',serviceId:'hub-a',actorId:'actor-a',accountId:'account-a',subscriptionId:'sub1',offerId:'offer1',amount:'1010000',expiresAt:'2027-01-01T00:00:00Z',sandbox:false,paymentSource:'external'};
+  await f.store.mutate((intents,quotes)=>{intents.checkout=checkout;quotes.quote=quote;});await f.store.close();
+  const reopened=await openCommerceStore(f.directory);cleanups.push(()=>reopened.close());
+  expect(reopened.read().checkout).toEqual(checkout);expect(reopened.readQuotes().quote).toEqual(quote);
 });

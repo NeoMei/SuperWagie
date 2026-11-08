@@ -8,7 +8,7 @@ model overrides. Local OpenCode/BYOK providers remain independent.
 
 ## Ownership
 
-This module owns UniHub browser and JSON login, registration, the global user gate, self-service profile operations, account projection, personal API key metadata reads and sandbox commerce for managed web and desktop backends. UI authentication and device pairing remain in `ui-auth` and `client-auth`. UniHub owns identity, billing membership, credits, funds and account permissions. Platform model transport owns immutable task payer bindings separately.
+This module owns UniHub browser and JSON login, registration, the global user gate, self-service profile operations, account projection, personal API key metadata reads, subscription purchases and upgrade quotes for managed web and desktop backends. UI authentication and device pairing remain in `ui-auth` and `client-auth`. UniHub owns identity, billing membership, credits, funds and account permissions. Platform model transport owns immutable task payer bindings separately.
 
 ## Invariants
 
@@ -52,6 +52,8 @@ This module owns UniHub browser and JSON login, registration, the global user ga
 - Reporting reads existing records from the configured identity and billing service. It submits no new usage, prompt or telemetry and adds no gateway or provider egress. The account gate and managed web/desktop support are unchanged; VS Code, hosted mobile, Capacitor and external OpenCode remain unsupported.
 - `GET /api/platform-account/api-keys?accountId=...` reads existing UniHub managed API key metadata for the selected account. It captures the refreshed login and account selection, checks both before and after upstream IO (including failures), and never lets a stale authentication response revoke a newer selection or login. UniHub checks its registered `model-credentials:write` scope, client instance and current account role. The adapter additionally filters by the captured actor, account and `superwagie` product, including for account owners and billing administrators.
 - The key response is `{ accountId, keys: [{ id, name, createdAt, expiresAt, revokedAt }], incomplete }`; expiry and revocation may be null. IDs are record identifiers, not usable keys. Credentials, digests, masks, model scopes and internal ownership fields are not projected. A malformed list or failed read remains an error. `incomplete` is true when the original upstream list reaches its 500-row cap, before owner filtering, and does not claim that older keys are absent. No key is issued, revealed, copied, revoked or configured by this read, and it does not describe LLMRouter native keys or host-wide model connections. This fixed identity/billing-service read remains available in enterprise mode and adds no provider entry, model request, listener or telemetry.
+
+- SuperWagie usage activity reads a fixed 365-date UTC window from midnight 364 days ago to the captured request time. UniHub accepts at most 90 days per report, so the adapter uses contiguous windows of at most 90 days and reads the newest window first. It requests 100 rows per page with a shared maximum of 50 pages across the year. Cursors and total-stability checks reset per window; every page retains the selected session/account check and fixed product, actor visibility, instance and permission binding. Only daily integer counts reach the renderer. This is a live traversal: `complete` requires finishing every window with stable per-window totals matching its unique records. A limit or changing total preserves explicitly partial counts; a failed page or invalid cursor fails the read. Repeated undated-history counts take their maximum across windows and never receive a calendar date.
 
 ## Decisions
 
@@ -114,11 +116,11 @@ An identity insert can succeed before the response or local persistence fails. T
 
 Adding a provider requires immutable task identity and durable model call recovery. Account login displays membership and credits. The injected model-runtime availability check controls whether the page offers platform model guidance. That check reports configured managed service availability, while task settlement remains an independently queried authoritative state. Identity reads contain no conversation content and create no provider entry.
 
-## Sandbox commerce
+## Subscription commerce
 
 The commerce adapter owns product-wallet recharge intent, sandbox settlement,
-first or expired membership purchases, add-on purchases, and read-only order
-projection. UniHub owns prices, membership authorization, wallets, payment
+first or expired membership purchases, add-on purchases, upgrade quote acceptance,
+and read-only order projection. UniHub owns prices, membership authorization, wallets, payment
 operations and fulfillment. The adapter neither calculates model charges nor
 uses a redirect or HTTP success as evidence of funds arriving.
 
@@ -126,17 +128,39 @@ uses a redirect or HTTP success as evidence of funds arriving.
   backend session before work begins. Its request closure rejects account or
   session changes. Financial actions recheck membership, financial role and
   product scopes against UniHub; caller-supplied account IDs must match.
-- This release accepts only sandbox recharge and sandbox published offers.
-  Settlement requires an explicit action and authoritative sandbox capability.
-  Non-sandbox mutations are refused even when the caller has a wallet balance.
+- Published SuperWagie memberships and addons, plus legacy llmrouter addons,
+  remain visible. Existing authorized cash can purchase legacy formal offers.
+  `payments.mode` describes external funding, while `canPurchase` describes
+  financial authorization. Real external collection remains unconfigured.
+  Sandbox recharge and settlement require separate explicit actions and the
+  authoritative sandbox capability; refresh never advances those actions.
+- Formal offers marked `entitlements.pricing_program=superwagie-ai-points-v1`
+  expose `purchaseReadiness` with `points_runtime_unavailable`. New purchases,
+  quotes and first acceptance are refused even with cash. The current native
+  model key consumes cash, so CREDIT rates alone do not establish usable point
+  benefits. Sandbox offers remain testable; the marker does not block recovery
+  of an already admitted original intent.
 - Cash values remain canonical decimal integer strings in CNY/6. External
-  recharge amounts must be positive whole cents. An add-on is charged against
-  its own llmrouter wallet; it is never charged to SuperWagie's wallet by inference.
-- A fresh active membership cannot be purchased again through this flow.
-  Upgrades and renewal use separate UniHub contracts and are not exposed here.
+  recharge amounts must be positive whole cents. UniHub chooses the offer's own
+  product wallet and any explicitly authorized unified-wallet funding. The
+  adapter never transfers another product's cash or simulates real collection.
+- A fresh active membership cannot be purchased again. An explicit upgrade
+  obtains UniHub's quote, with exact charge, incremental credits, subscription
+  version and expiry. The quote is persisted under its actor, account and service
+  before it is returned. First acceptance checks that binding and expiry, then
+  journals an upgrade intent with the original quote and idempotency key.
+  Unknown acceptance can recover after quote expiry with the same key. A known
+  order is read from the account order list; missing order IDs are never replaced
+  by a newly generated request. Renewal is not exposed through this adapter.
+- Only an upgrade acceptance returning HTTP 409 `quote_invalidated` is a
+  definitive pre-admission quote rejection. It marks the intent FAILED so a
+  freshly quoted action can proceed. Generic `conflict` remains UNKNOWN because
+  it can originate in ledger work; it never authorizes another financial command.
 - The private `unihub-commerce/state.json` journal persists actor, account,
-  service namespace, idempotency key, original amount or offer, status and object
-  IDs before network mutation. It stores no token, password, balance or model
+  service namespace, idempotency key, original amount, offer or upgrade quote,
+  status and object IDs before network mutation. Version 2 also stores immutable
+  quote bindings. Version 1 recharge/purchase records remain readable and are
+  retained on the next version-2 write. It stores no token, password, balance or model
   content. Service namespaces include API URL and authenticated client ID.
 - Passive overview requests never submit financial commands. Explicit recovery
   reads a known object; if the original response was lost before its ID was
@@ -168,11 +192,29 @@ A response can disappear after funds were applied. Persisted keys let UniHub
 return the original result, while an explicit recovery action prevents page
 mounts, refreshes and account switches from initiating payments.
 
-### Why registration and commerce use separate requests
+### Why sandbox funding and purchase remain separate
 
-Registering creates an identity. Creating a recharge, confirming sandbox funds
-and purchasing an offer have separate idempotency and authorization boundaries.
-The UI can resume each step without assuming a later step succeeded.
+Creating a recharge, confirming sandbox funds and purchasing an offer have
+separate idempotency and authorization boundaries. A combined checkout would
+need a durable parent operation to bind and recover those steps. This adapter
+keeps each step explicit and does not report a completed direct-payment flow.
+
+### Why points have a separate runtime readiness gate
+
+Published model CREDIT rates describe pricing. They do not prove that the
+activated native API key consumes CREDIT. The formal points program stays
+blocked until its execution and settlement path is verified. Cash funding
+guidance continues to target the cash wallet for current native calls.
+
+### Why credit batches preserve their declared scope
+
+The account projection returns batch balances, reservation, start, expiry and
+frozen state. Only a batch explicitly marked for SuperWagie can appear as a
+subscription or addon. Legacy batches and other products remain `other/shared`,
+with no foreign product or source-order identifiers. Totals retain exact integer
+arithmetic and exclude frozen, future and expired available amounts. Subscription
+offer metadata is optional for older servers; missing fields do not invent an
+upgrade tier or price.
 
 ## Sandbox setup
 
@@ -244,3 +286,55 @@ multiple users against a shared runtime.
 Usage summaries preserve optional `native_usage` operation/measurement dimensions and `usage_coverage` canonical decimal counts after the existing scope and finance checks. Missing coverage from an older server remains absent. Native quantities use exact decimal strings, scales 0 through 9, unique operation/dimension keys, known units and compatible operations. Aggregated values may exceed the 38-digit per-call limit; the adapter bounds totals and coverage at 1024 digits, groups at 10 and dimensions at 4096 per operation. Integer dimensions require scale 0. No provider token observations are inferred from settled counts or billing completeness.
 
 Catalog offers preserve optional transport-only `sales_readiness` as public `salesReadiness`. Absence supplies no readiness evidence and retains old-server purchase compatibility. Existing orders, balances and recovery reads do not depend on current sale readiness. Only a purchase rejected with exact `credit_rates_unavailable` and HTTP 409 marks its dispatched intent FAILED without a resource ID. Other conflicts and uncertain failures retain UNKNOWN and same-key recovery. UniHub owns the pre-admission guarantee that this rejection creates no new order or billing command; the BFF never infers that guarantee from a generic HTTP status.
+
+
+## Direct merchant checkout
+
+Commerce exposes exact account-scoped checkout routes through the private
+UniHub method/path allowlist. Web and Electron use the managed backend;
+VS Code, hosted mobile, Capacitor and external OpenCode retain their explicit
+unsupported account state. These routes send financial metadata to the existing
+account service and add no model-provider entry, conversation egress or listener.
+
+A checkout uses exactly one offer or external upgrade quote and an explicit
+WeChat or Alipay provider. The backend persists the original idempotency key,
+actor, service, account, product, amount and provider before dispatch. An unknown
+create is recovered with that same key. A known checkout reconciles its original
+record. Unresolved local checkout intent blocks a new payment attempt. UniHub
+owns cross-instance commercial exclusion, verified payment and fulfillment.
+
+External quote requests include `payment_source: external`. Local quote storage
+retains the funding source; wallet acceptance refuses an external quote and
+external checkout refuses a wallet quote. The authoritative external quote must
+carry `cny_cent_ceil_v1`, its original amount, and the exact rounded-up cent total.
+No adapter rounds an ordinary wallet quote for checkout.
+
+Checkout reads preserve separate payment, fulfillment and refund states.
+Closing, reconciliation and refund always target the original checkout.
+Refund recovery persists its original refund key before network IO, including
+for a server-listed checkout first recovered on this instance. Expiration is
+only display metadata; it never proves closure. Capability loss does not hide
+existing checkout records. Old servers lacking the checkout capability retain
+their existing wallet path.
+
+Payment sessions are parsed at both HTTP boundaries. WeChat `weixin:` data only
+becomes a locally encoded QR image. Alipay redirects require HTTPS, the exact
+`openapi.alipay.com` host and `/gateway.do` path, with no credentials or alternate
+port. The renderer opens an accepted link only through the shared external URL
+boundary after an explicit click. Payment artifacts and merchant credentials
+are never persisted in the local recovery journal.
+
+The formal credit program is available only when `native_credits.ready` is
+explicitly true. Missing readiness stays unavailable. Sandbox behavior and
+legacy offer funding retain their earlier contracts. Merchant configuration is
+separate from native-credit readiness, and a capability never proves an actual
+payment or model settlement.
+
+
+A validated checkout list synchronizes matching local recovery intent. Matching
+includes captured service, actor, account, original checkout ID, product,
+provider and exact amount. Failed reads and unknown creates without a resource
+ID remain unresolved. The saved intent snapshot and active-operation fence
+prevent an older read from overwriting a newer refund or reconciliation.
+An external quote rejected with exactly `quote_invalidated` and HTTP 409 keeps
+its original failed key and permits a fresh quote only after new confirmation.

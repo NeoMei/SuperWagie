@@ -1,6 +1,7 @@
 import express from 'express';
 import { z } from 'zod';
 
+import { fundingModeSchema } from './native-credit-contract.js';
 import { ModelConfigurationError } from './runtime.js';
 
 const source = z.enum(['session', 'imported-key']);
@@ -41,7 +42,7 @@ export const registerModelBootstrapRoutes = (app, { bootstrapRuntime, resolveIde
   const optionalIdentity = async (request) => {
     try { return await identity(request, null); } catch { return undefined; }
   };
-  const accountKeyInput = z.object({ accountId: z.string().min(1).max(200).regex(/^[A-Za-z0-9_-]+$/) }).strict();
+  const accountKeyInput = z.object({ accountId: z.string().min(1).max(200).regex(/^[A-Za-z0-9_-]+$/), fundingMode: fundingModeSchema.optional() }).strict();
   app.get('/api/model-configuration/bootstrap/account-key', route(async (request, response) => {
     response.set('Cache-Control', 'no-store');
     response.set('Referrer-Policy', 'no-referrer');
@@ -56,10 +57,10 @@ export const registerModelBootstrapRoutes = (app, { bootstrapRuntime, resolveIde
   }));
   app.post('/api/model-configuration/bootstrap/discover', route(async (request, response) => {
     if (!bootstrapRuntime) return unsupported();
-    const input = body(z.object({ source, key: z.string().min(1).max(8192).optional() }).strict(), request.body);
+    const input = body(z.object({ source, key: z.string().min(1).max(8192).optional(), fundingMode: fundingModeSchema.optional() }).strict(), request.body);
     return bootstrapRuntime.discover({ ...input, identity: input.source === 'session' ? await requiredIdentity(request, response) : undefined, owner: await requiredOwner(request, response) });
   }));
-  app.post('/api/model-configuration/bootstrap/issue-key', route(async (request, response) => bootstrapRuntime ? bootstrapRuntime.issueKey({ ...body(z.object({ models: z.array(z.string().min(1).max(200)).max(100).optional(), expiresAt: z.string().max(100).optional() }).strict(), request.body), identity: await requiredIdentity(request, response), owner: await requiredOwner(request, response) }) : unsupported()));
+  app.post('/api/model-configuration/bootstrap/issue-key', route(async (request, response) => bootstrapRuntime ? bootstrapRuntime.issueKey({ ...body(z.object({ fundingMode: fundingModeSchema.optional(), models: z.array(z.string().min(1).max(200)).max(100).optional(), expiresAt: z.string().max(100).optional() }).strict(), request.body), identity: await requiredIdentity(request, response), owner: await requiredOwner(request, response) }) : unsupported()));
   app.post('/api/model-configuration/bootstrap/preview', route(async (request, response) => bootstrapRuntime ? bootstrapRuntime.preview({ ...body(z.object({ discoveryId: z.string().min(1).max(100), revision: z.number().int().nonnegative(), mode: z.enum(['fill-missing', 'replace-managed']).default('fill-missing'), purposes, selections: z.record(z.string(), z.string().max(200)).optional() }).strict(), request.body), identity: await optionalIdentity(request), owner: await requiredOwner(request, response) }) : unsupported()));
   app.post('/api/model-configuration/bootstrap/apply', route(async (request, response) => bootstrapRuntime ? bootstrapRuntime.apply({ ...body(z.object({ operationId: z.string().min(1).max(100), discoveryId: z.string().min(1).max(100), revision: z.number().int().nonnegative(), mode: z.enum(['fill-missing', 'replace-managed']).default('fill-missing'), selections: z.record(z.string(), z.string().max(200)).optional() }).strict(), request.body), identity: await optionalIdentity(request), owner: await requiredOwner(request, response) }) : unsupported()));
   app.post('/api/model-configuration/bootstrap/test', route((request) => bootstrapRuntime ? bootstrapRuntime.startTests(body(z.object({ revision: z.number().int().nonnegative(), purposes, expensive: z.boolean().default(false) }).strict(), request.body)) : unsupported()));

@@ -42,6 +42,23 @@ describe('model bootstrap routes', () => {
     expect(seen[2].owner).toEqual({ type: 'session', token: 'runtime-identity' });
   });
 
+  it('preserves explicit funding selection at each account bootstrap route', async () => {
+    const app = express();
+    const seen = [];
+    const accept = async (input) => { seen.push(input); return { accepted: true }; };
+    registerModelBootstrapRoutes(app, {
+      resolveIdentity: async () => ({ type: 'session', token: 'fixture-owner' }),
+      bootstrapRuntime: { discover: accept, issueKey: accept, accountKey: { read: accept, activate: accept } },
+    });
+    await request(app).get('/api/model-configuration/bootstrap/account-key?accountId=account-1&fundingMode=credits').expect(200);
+    await request(app).post('/api/model-configuration/bootstrap/account-key').send({ accountId: 'account-1', action: 'activate', fundingMode: 'credits' }).expect(200);
+    await request(app).post('/api/model-configuration/bootstrap/discover').send({ source: 'session', fundingMode: 'credits' }).expect(200);
+    await request(app).post('/api/model-configuration/bootstrap/issue-key').send({ fundingMode: 'credits' }).expect(200);
+    expect(seen.map((input) => input.fundingMode)).toEqual(['credits', 'credits', 'credits', 'credits']);
+    await request(app).post('/api/model-configuration/bootstrap/account-key').send({ accountId: 'account-1', action: 'activate', fundingMode: 'unknown' }).expect(400);
+    expect(seen).toHaveLength(4);
+  });
+
   it('allows an imported key with only the local UI owner', async () => {
     const app = express();
     const seen = [];

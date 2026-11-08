@@ -99,3 +99,19 @@ test('an explicit retest posts exactly once and never retries an ambiguous trans
   await expect(runPlatformAccountKeySetup('account-a', 'retest')).rejects.toThrow('platform_unavailable');
   expect(calls).toBe(1);
 });
+
+test('selects credits explicitly and retains authoritative readiness and pricing markers', async () => {
+  const response = { ...receipt(), fundingMode: 'credits', nativeCredits: { ready: true }, activation: { ...receipt().activation, fundingMode: 'credits', pricingSource: 'llmrouter_native_credit' } };
+  intercept(async (_url, init) => {
+    expect(JSON.parse(String(init?.body))).toEqual({ accountId: 'account-a', action: 'activate', fundingMode: 'credits' });
+    return Response.json(response);
+  });
+  const result = await runPlatformAccountKeySetup('account-a', 'activate', 'credits');
+  expect(result.nativeCredits?.ready).toBe(true);
+  expect(result.activation?.pricingSource).toBe('llmrouter_native_credit');
+});
+
+test('refuses an old server cash receipt in response to an explicit credits read', async () => {
+  intercept(async () => Response.json(receipt()));
+  await expect(readPlatformAccountKeySetup('account-a', 'credits')).rejects.toMatchObject({ code: 'platform_response_invalid' });
+});

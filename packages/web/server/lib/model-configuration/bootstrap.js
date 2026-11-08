@@ -5,6 +5,7 @@ import { MODEL_PRESETS, MODEL_PURPOSES, PURPOSE_IDS } from './catalog.js';
 import { ModelConfigurationError } from './runtime.js';
 import { createModelBootstrapStore } from './bootstrap-store.js';
 import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
+import { fundingModeSchema, nativeCreditDiscoverySchema } from './native-credit-contract.js';
 import { createAccountKeyActivation } from './account-key-activation.js';
 
 const fail = (code, status = 400) => { throw new ModelConfigurationError(code, status); };
@@ -65,6 +66,7 @@ const ownerFingerprint = (owner) => owner?.token ? createHash('sha256').update(J
 const publicDiscovery = (record) => ({
   discoveryId: record.id,
   source: record.source,
+  fundingMode: record.fundingMode,
   accountId: record.accountId ?? null,
   instanceId: record.instanceId ?? null,
   originProductId: record.originProductId,
@@ -113,29 +115,32 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     if (!normalizedCatalog(payload).length) return fail('model_configuration_bootstrap_empty_catalog', 404);
     return { originProductId, instanceId: instanceId ?? expectedInstance ?? null, accountId: accountId ?? expectedAccount ?? null };
   };
-  const discover = async ({ source, key, identity, owner } = {}) => {
+  const discover = async ({ source, key, identity, owner, fundingMode } = {}) => {
     parse(sourceSchema, source);
+    if (fundingMode !== undefined) parse(fundingModeSchema, fundingMode);
+    if (source === 'imported-key' && fundingMode !== undefined) fail('model_configuration_invalid_input');
     if (source === 'imported-key' && (!key || key.length > 8192)) return fail('model_configuration_invalid_input');
     const baseUrl = source === 'imported-key' ? llmRouterInferenceApiUrl(env) : null;
-    const payload = await callClient(uniHubClient, ['discover', 'discoverModels', 'modelDiscovery'], { source, key, identity, accountId: accountValue('accountId', identity), instanceId: accountValue('instanceId', identity), originProductId: 'superwagie', fetchImpl });
+    const payload = await callClient(uniHubClient, ['discover', 'discoverModels', 'modelDiscovery'], { source, key, identity, fundingMode, accountId: accountValue('accountId', identity), instanceId: accountValue('instanceId', identity), originProductId: 'superwagie', fetchImpl });
     if (!payload) return fail('model_configuration_bootstrap_unavailable', 501);
+    if (fundingMode === 'credits') parse(nativeCreditDiscoverySchema, payload);
     const scope = assertScope(payload, identity);
     const secret = source === 'imported-key' ? await store.putSecret(key) : payload.secret ? await store.putSecret(payload.secret) : null;
     const actor = identity && platformAccount?.actor instanceof Function ? platformAccount.actor(identity) : null;
-    const record = await store.create({ source, ...scope, baseUrl, ownerUserId: actor?.actingUserId ?? null, ownerAuthSession: actor?.authSession ?? null, ownerRuntimeFingerprint: ownerFingerprint(owner), expiresAt: payload.expires_at ?? payload.expiresAt ?? null, catalog: normalizedCatalog(payload), keyFingerprint: secret?.fingerprint ?? payload.key_fingerprint ?? payload.keyFingerprint ?? null, keyLast4: secret?.last4 ?? null, secretRef: secret?.ref ?? null, status: 'discovered' });
+    const record = await store.create({ source, fundingMode, ...scope, baseUrl, ownerUserId: actor?.actingUserId ?? null, ownerAuthSession: actor?.authSession ?? null, ownerRuntimeFingerprint: ownerFingerprint(owner), expiresAt: payload.expires_at ?? payload.expiresAt ?? null, catalog: normalizedCatalog(payload), keyFingerprint: secret?.fingerprint ?? payload.key_fingerprint ?? payload.keyFingerprint ?? null, keyLast4: secret?.last4 ?? null, secretRef: secret?.ref ?? null, status: 'discovered' });
     return publicDiscovery(record);
   };
   const issueKey = async (input = {}) => {
     const baseUrl = llmRouterInferenceApiUrl(env);
     if (input.expiresAt !== undefined) return fail('model_configuration_invalid_input');
-    const payload = await accountKey.prepareCredential({ identity: input.identity, owner: input.owner, accountId: accountValue('accountId', input.identity) });
+    const payload = await accountKey.prepareCredential({ identity: input.identity, owner: input.owner, accountId: accountValue('accountId', input.identity), fundingMode: input.fundingMode });
     if (!payload?.key) return fail('model_configuration_bootstrap_key_unavailable', 502);
     let discovery;
     if (normalizedCatalog(payload).length) {
       const scope = assertScope(payload, input.identity);
       const secret = await store.putSecret(payload.key);
       const actor = input.identity && platformAccount?.actor instanceof Function ? platformAccount.actor(input.identity) : null;
-      const record = await store.create({ source: 'imported-key', ...scope, baseUrl, ownerUserId: actor?.actingUserId ?? null, ownerAuthSession: actor?.authSession ?? null, ownerRuntimeFingerprint: ownerFingerprint(input.owner), expiresAt: payload.expires_at ?? payload.expiresAt ?? null, catalog: normalizedCatalog(payload), keyFingerprint: secret.fingerprint, keyLast4: secret.last4, secretRef: secret.ref, status: 'discovered' });
+      const record = await store.create({ source: 'imported-key', fundingMode: payload.funding_mode, ...scope, baseUrl, ownerUserId: actor?.actingUserId ?? null, ownerAuthSession: actor?.authSession ?? null, ownerRuntimeFingerprint: ownerFingerprint(input.owner), expiresAt: payload.expires_at ?? payload.expiresAt ?? null, catalog: normalizedCatalog(payload), keyFingerprint: secret.fingerprint, keyLast4: secret.last4, secretRef: secret.ref, status: 'discovered' });
       discovery = publicDiscovery(record);
     } else {
       discovery = await discover({ source: 'imported-key', key: payload.key, identity: input.identity, owner: input.owner });
@@ -226,7 +231,7 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
       return updated.result;
     }
     if (discovery.source === 'session') {
-      const payload = await accountKey.prepareCredential({ identity, owner, accountId: discovery.accountId });
+      const payload = await accountKey.prepareCredential({ identity, owner, accountId: discovery.accountId, fundingMode: discovery.fundingMode });
       const scope = assertScope(payload, identity);
       const secret = await store.putSecret(payload.key);
       discovery = await store.update(discoveryId, { source: 'imported-key', ...scope, baseUrl: llmRouterInferenceApiUrl(env), expiresAt: payload.expires_at ?? null, catalog: normalizedCatalog(payload), secretRef: secret.ref, keyFingerprint: secret.fingerprint, keyLast4: secret.last4 });

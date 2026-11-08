@@ -1,13 +1,17 @@
 import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
+import { nativeCreditDiscoverySchema } from './native-credit-contract.js';
 import { parseAccountKeyCatalog } from './account-key-catalog.js';
 
 const fail = (code, status) => { throw Object.assign(new Error(code), { code, status }); };
 
 export const createUniHubBootstrapClient = ({ platformAccount, env = process.env, fetchImpl = fetch }) => ({
-  discover: async ({ source, key, identity, accountId, instanceId }) => {
+  discover: async ({ source, key, identity, accountId, instanceId, fundingMode }) => {
     if (source === 'session') {
       if (!identity || !accountId) return fail('platform_account_required', 409);
-      const catalog = await platformAccount.request(identity, `/v1/accounts/${encodeURIComponent(accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_scope: 'llmrouter_available' }) });
+      const input = { model_scope: 'llmrouter_available' };
+      if (fundingMode) input.funding_mode = fundingMode;
+      const catalog = await platformAccount.request(identity, `/v1/accounts/${encodeURIComponent(accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+      if (fundingMode === 'credits' && !nativeCreditDiscoverySchema.safeParse(catalog).success) return fail('account_key_catalog_invalid', 502);
       return { ...catalog, models: parseAccountKeyCatalog({ object: 'list', data: catalog.models }) };
     }
     const baseUrl = llmRouterInferenceApiUrl(env);

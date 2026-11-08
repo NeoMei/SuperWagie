@@ -220,6 +220,36 @@ describe('headless platform identity', () => {
     await request(local).get('/api/platform-account/usage/personal-a/summary').expect(403, { error: 'forbidden' });
   });
 
+  it('reads scoped paginated usage activity and rejects an account change between pages', async () => {
+    const f = await fixture();
+    const queries = [];
+    let changeAccount = false;
+    f.app.get('/v1/accounts/personal-a/calls', async (req, res) => {
+      const query = req.query;
+      queries.push(query);
+      const second = Boolean(query.cursor);
+      if (second && changeAccount) await f.runtime.selectAccount(identity, 'team-a');
+      const scope = { account_id: 'personal-a', origin_product_id: 'superwagie', instance_id: 'fixture', visibility: 'account' };
+      res.json({ scope, financial_details: true, total: '2', unknown_time: '0', has_more: !second,
+        next_cursor: second ? undefined : `fixture.${Date.parse(query.from)}`,
+        items: [{ account_id: 'personal-a', origin_product_id: 'superwagie', actor_id: 'actor-a', instance_id: 'fixture',
+          call_id: `${Date.parse(query.from)}-${second ? 'older' : 'newer'}`, created_at: new Date(Date.parse(query.to) - (second ? 120_000 : 60_000)).toISOString() }] });
+    });
+    const local = express();
+    registerPlatformAccountRoutes(local, { runtime: f.runtime, resolveIdentity: () => identity });
+    await f.runtime.passwordLogin(identity, { username: 'alice', password });
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const activity = await request(local).get('/api/platform-account/usage/personal-a/activity').expect(200);
+    expect(activity.body).toMatchObject({ total: '10', complete: true, visibility: 'account' });
+    expect(activity.body.days).toHaveLength(365);
+    expect(queries).toHaveLength(10);
+    expect(queries[0]).toMatchObject({ limit: '100' });
+    expect(queries[1]).toEqual({ ...queries[0], cursor: `fixture.${Date.parse(queries[0].from)}` });
+    expect(JSON.stringify(activity.body)).not.toContain('actor-a');
+    changeAccount = true;
+    await request(local).get('/api/platform-account/usage/personal-a/activity').expect(409, { error: 'platform_session_changed' });
+  });
+
   it.each(['superwagie', 'llmrouter'])('preserves confirmed %s charges during an unknown refund without settling the call', async (product) => {
     const f = await fixture();
     const scope = { account_id: 'personal-a', origin_product_id: product, visibility: 'account', actor_id: 'actor-a',

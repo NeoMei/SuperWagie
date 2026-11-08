@@ -8,6 +8,7 @@ import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
 import { createAccountKeyStore } from './account-key-store.js';
 import { parseAccountKeyCatalog, readAccountKeyCatalog } from './account-key-catalog.js';
 import { selectAccountKeyModels, planAccountKeyTests } from './account-key-test-plan.js';
+import { fundingModeSchema, nativePricingSourceSchema, nativeCreditDiscoverySchema, nativeCreditCapabilitiesSchema } from './native-credit-contract.js';
 import { accountNativeSelectionsMatch } from './account-key-provider.js';
 
 const id = z.string().min(1).max(200);
@@ -19,10 +20,14 @@ const discoverySchema = z.object({ account_id: id, origin_product_id: z.literal(
 const keySchema = z.object({
   id, token: z.string().min(16).max(8192), credential_kind: z.literal('api_key'),
   actor_id: id, account_id: id, origin_product_id: z.literal('superwagie'), instance_id: instanceId,
-  model_scope: z.literal('llmrouter_available'), pricing_source: z.literal('llmrouter_native'), credential_version: z.number().int().positive(),
+  model_scope: z.literal('llmrouter_available'), pricing_source: nativePricingSourceSchema, credential_version: z.number().int().positive(),
+  funding_mode: fundingModeSchema.optional(), asset: z.enum(['CNY/6', 'CREDIT/6']).optional(),
   models: z.array(id).max(1000), created_at: date, expires_at: date.nullable(), revoked_at: z.null(),
 });
 const scopedKeySchema = keySchema.omit({ token: true });
+const matchesNativeFunding = (key, fundingMode) => fundingMode === 'credits'
+  ? key.pricing_source === 'llmrouter_native_credit' && key.funding_mode === 'credits' && key.asset === 'CREDIT/6'
+  : key.pricing_source === 'llmrouter_native' && (key.funding_mode === undefined || key.funding_mode === 'prepaid_cash') && (key.asset === undefined || key.asset === 'CNY/6');
 const purposeSelection = (configuration, legacy, purpose) => {
   const binding = configuration.bindings.find((entry) => entry.purpose === purpose);
   if (binding) {
@@ -68,7 +73,8 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
   const timestamp = () => new Date(now()).toISOString();
   const enterprise = () => isEnterpriseMode(enterpriseOptions);
   const requireEntry = () => { if (enterprise()) fail('enterprise_mode', 403); };
-  const context = ({ accountId, identity, owner }) => {
+  const context = ({ accountId, identity, owner, fundingMode: requestedFundingMode }) => {
+    const fundingMode = parse(fundingModeSchema, requestedFundingMode ?? 'prepaid_cash', 'model_configuration_invalid_input');
     parse(accountIdSchema, accountId, 'model_configuration_invalid_input');
     if (!owner?.token || !identity) fail('platform_account_required', 401);
     const session = platformAccount.captureCommerceSession(identity);
@@ -77,22 +83,24 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     if (session.billingAccountId !== accountId || actor.billingAccountId !== accountId) fail('platform_account_forbidden', 403);
     if (!principal.issuer || principal.userId !== session.actingUserId || actor.actingUserId !== session.actingUserId || !actor.authSession) fail('platform_account_forbidden', 403);
     const ownership = { issuer: principal.issuer, serviceId: session.serviceId, actorId: session.actingUserId, accountId };
-    const storageId = hash(ownership);
-    const activeId = `${dataDir}:${storageId}`;
+    const lockId = hash(ownership);
+    const storageId = fundingMode === 'credits' ? hash({ ...ownership, fundingMode }) : lockId;
+    const activeId = `${dataDir}:${lockId}`;
     const assertSession = () => {
       const current = platformAccount.actor(identity);
       const currentSession = platformAccount.captureCommerceSession(identity);
       if (current.authSession !== actor.authSession || current.actingUserId !== actor.actingUserId || current.billingAccountId !== accountId || currentSession.serviceId !== session.serviceId || platformAccount.instancePrincipal(identity).issuer !== ownership.issuer) fail('platform_session_changed');
     };
     const assertCurrent = () => { requireEntry(); assertSession(); };
-    return { ownership, session, storageId, activeId, consumerId: hash([storageId, actor.authSession]), assertCurrent, assertSession };
+    return { ownership, session, storageId, lockId, fundingMode, activeId, receiptId: `${dataDir}:${storageId}`, consumerId: hash([storageId, actor.authSession]), assertCurrent, assertSession };
   };
   const assertOwner = (ctx, record) => {
+    if (record && (record.fundingMode ?? 'prepaid_cash') !== ctx.fundingMode) fail('account_key_configuration_conflict');
     if (record && Object.entries(ctx.ownership).some(([name, value]) => record[name] !== value)) fail('platform_account_forbidden', 403);
   };
   const project = (ctx, record) => {
     assertOwner(ctx, record);
-    if (!record) return { accountId: ctx.ownership.accountId, enterpriseMode: enterprise(), activation: null };
+    if (!record) return { accountId: ctx.ownership.accountId, enterpriseMode: enterprise(), fundingMode: ctx.fundingMode, nativeCredits: ctx.nativeCredits, activation: null };
     let { status, stage, test, tests, errorCode: code } = record;
     if (!active.has(ctx.activeId)) {
       if (status === 'issuing') { status = 'unknown'; code = 'account_key_issue_unknown'; }
@@ -104,15 +112,34 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     }
     const actions = active.has(ctx.activeId) || enterprise() || !record.key ? []
       : stage === 'configure' ? ['resume'] : stage === 'test' ? ['retest'] : [];
-    return { accountId: ctx.ownership.accountId, enterpriseMode: enterprise(), activation: {
-      operationId: record.operationId, status, stage, key: record.key,
+    return { accountId: ctx.ownership.accountId, enterpriseMode: enterprise(), fundingMode: ctx.fundingMode, nativeCredits: ctx.nativeCredits, activation: {
+      operationId: record.operationId, fundingMode: record.fundingMode ?? 'prepaid_cash', pricingSource: record.pricingSource, status, stage, key: record.key,
       modelId: record.modelId, connectionId: record.connectionId, providerId: record.providerId,
       test, testRunId: record.testRunId, tests, errorCode: code, actions,
     } };
   };
+  const readNativeCredits = async (ctx) => {
+    const capabilities = parse(nativeCreditCapabilitiesSchema, await ctx.session.request('/v1/capabilities'), 'account_key_catalog_invalid', 502);
+    ctx.assertSession();
+    ctx.nativeCredits = capabilities.native_credits ?? { ready: false };
+  };
+  const requireCredits = async (ctx) => {
+    if (ctx.fundingMode !== 'credits') return;
+    await readNativeCredits(ctx);
+    if (!ctx.nativeCredits.ready) fail('native_credits_unavailable');
+  };
   const read = async (input) => {
     const ctx = context(input);
-    const record = await observe(ctx, unsavedTests.get(ctx.activeId) ?? await journal.read(ctx.storageId));
+    if (ctx.fundingMode === 'credits') await readNativeCredits(ctx);
+    // Restore both credential owners after restart without applying either Key.
+    if (input.fundingMode === undefined) {
+      const credits = context({ ...input, fundingMode: 'credits' });
+      // A damaged separate receipt must not hide the readable cash receipt.
+      const stored = await journal.read(credits.storageId).catch(() => null);
+      assertOwner(credits, stored);
+      rememberConsumerOwner(credits, stored);
+    }
+    const record = await observe(ctx, unsavedTests.get(ctx.receiptId) ?? await journal.read(ctx.storageId));
     ctx.assertSession();
     rememberConsumerOwner(ctx, record);
     return project(ctx, record);
@@ -156,7 +183,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
   };
   const persist = async (ctx, record) => {
     const saved = await journal.write(ctx.storageId, { ...record, updatedAt: timestamp() });
-    unsavedTests.delete(ctx.activeId);
+    unsavedTests.delete(ctx.receiptId);
     return saved;
   };
   const selectionSnapshot = async (ctx) => {
@@ -178,8 +205,11 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       const models = await readKeyCatalog({ apiKey, baseUrl: record.baseUrl, instanceId: record.instanceId, assertCurrent: ctx.assertCurrent, fetchImpl, env, enterpriseOptions });
       payload = { account_id: record.accountId, origin_product_id: 'superwagie', instance_id: record.instanceId, models };
     } else {
-      payload = await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_scope: 'llmrouter_available' }) });
+      const input = { model_scope: 'llmrouter_available' };
+      if (ctx.fundingMode === 'credits') input.funding_mode = 'credits';
+      payload = await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
     }
+    if (!record && ctx.fundingMode === 'credits') parse(nativeCreditDiscoverySchema, payload, 'account_key_catalog_invalid', 502);
     const catalog = parse(discoverySchema, payload, 'account_key_catalog_invalid', 502);
     // The proxy carries the same technical metadata as the Key catalog.
     // Preserve native protocols before the public discovery schema strips it.
@@ -198,7 +228,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     const { catalog, selection } = await discover(ctx);
     const operationId = randomUUID();
     let record = await persist(ctx, {
-      version: 1, ...ctx.ownership, operationId, instanceId: catalog.instance_id,
+      version: 1, ...ctx.ownership, fundingMode: ctx.fundingMode, operationId, instanceId: catalog.instance_id,
       status: 'issuing', stage: 'issue', errorCode: null, key: null, secretRef: null, keyFingerprint: null,
       baseUrl: llmRouterInferenceApiUrl(env), providerId: `superwagie-account-${operationId}`, connectionId: `account-key-${operationId}`,
       ...selection, test: null, testRunId: null, tests: [], createdAt: timestamp(),
@@ -207,11 +237,14 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     // unknown and retains this receipt; it must never issue another key.
     try {
       ctx.assertCurrent();
+      const input = { name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: record.instanceId, model_scope: 'llmrouter_available' };
+      if (ctx.fundingMode === 'credits') input.funding_mode = 'credits';
       const raw = await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/api-keys`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: record.instanceId, model_scope: 'llmrouter_available' }),
+        body: JSON.stringify(input),
       });
       const key = parse(keySchema, raw, 'account_key_issue_unknown', 502);
+      if (!matchesNativeFunding(key, ctx.fundingMode)) fail('account_key_issue_unknown');
       if (key.actor_id !== record.actorId || key.account_id !== record.accountId || key.instance_id !== record.instanceId) fail('account_key_issue_unknown');
       const secret = await store.putSecret(key.token);
       record = await persist(ctx, { ...record, modelScope: key.model_scope, pricingSource: key.pricing_source, credentialVersion: key.credential_version, status: 'configuring', stage: 'configure', secretRef: secret.ref, keyFingerprint: secret.fingerprint, key: { id: key.id, last4: secret.last4, createdAt: key.created_at, expiresAt: key.expires_at } });
@@ -232,6 +265,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     } catch { fail('account_key_scope_unavailable'); }
     ctx.assertCurrent();
     const key = parse(scopedKeySchema, value, 'account_key_scope_unavailable', 502);
+    if (!matchesNativeFunding(key, record.fundingMode ?? 'prepaid_cash')) fail('account_key_scope_unavailable');
     if (key.id !== record.key.id || key.actor_id !== record.actorId || key.account_id !== record.accountId || key.instance_id !== record.instanceId
       || key.created_at !== record.key.createdAt || key.expires_at !== record.key.expiresAt || key.credential_version <= (record.credentialVersion ?? 0)) fail('account_key_scope_unavailable');
     return persist(ctx, { ...record, modelScope: key.model_scope, pricingSource: key.pricing_source, credentialVersion: key.credential_version });
@@ -314,7 +348,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       writes = writes.then(async () => {
         if (stopped === 'account_key_test_state_failed') return false;
         try { await persist(ctx, snapshot); return true; }
-        catch { stopped = 'account_key_test_state_failed'; unsavedTests.set(ctx.activeId, current); return false; }
+        catch { stopped = 'account_key_test_state_failed'; unsavedTests.set(ctx.receiptId, current); return false; }
       });
       return writes;
     };
@@ -403,10 +437,10 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     const status = !measured.length || measured.some((row) => row.status === 'unknown' || row.applicationError?.status === 'unknown') ? 'unknown' : measured.some((row) => row.status === 'failed' || row.status === 'skipped' || !row.applied) ? 'failed' : 'verified';
     const code = stopped ?? (status === 'verified' ? null : status === 'unknown' ? 'account_key_test_unknown' : 'account_key_test_failed');
     current = { ...current, status: status === 'verified' && !stopped ? 'ready' : status === 'failed' ? 'failed' : 'unknown', errorCode: code, test: { status: stopped ? 'unknown' : status, testedAt: timestamp(), errorCode: code } };
-    try { current = await persist(ctx, current); unsavedTests.delete(ctx.activeId); }
+    try { current = await persist(ctx, current); unsavedTests.delete(ctx.receiptId); }
     catch {
       current = { ...current, status: 'unknown', errorCode: 'account_key_test_state_failed', test: { status: 'unknown', testedAt: null, errorCode: 'account_key_test_state_failed' } };
-      unsavedTests.set(ctx.activeId, current);
+      unsavedTests.set(ctx.receiptId, current);
     }
     return current;
   };
@@ -418,12 +452,13 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     await platformAccount.refreshSession(input.identity);
     ctx.assertCurrent();
     ctx = context(input);
+    await requireCredits(ctx);
     if (active.has(ctx.activeId)) fail('account_key_busy', 409);
     active.add(ctx.activeId);
     let result;
     try {
-      result = await journal.withLock(ctx.storageId, async () => {
-        let record = await observe(ctx, unsavedTests.get(ctx.activeId) ?? await journal.read(ctx.storageId));
+      result = await journal.withLock(ctx.lockId, async () => {
+        let record = await observe(ctx, unsavedTests.get(ctx.receiptId) ?? await journal.read(ctx.storageId));
         assertOwner(ctx, record);
         ctx.assertCurrent();
         if (!record) {
@@ -455,7 +490,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
           const code = errorCode(error, 'test');
           const interrupted = { ...record, stage: 'test', status: 'unknown', errorCode: code, testRunId: randomUUID(), tests: [], test: { status: 'unknown', testedAt: null, errorCode: code } };
           try { return await persist(ctx, interrupted); }
-          catch { unsavedTests.set(ctx.activeId, interrupted); return interrupted; }
+          catch { unsavedTests.set(ctx.receiptId, interrupted); return interrupted; }
         }
       });
     } finally { active.delete(ctx.activeId); }
@@ -474,10 +509,11 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     await platformAccount.refreshSession(input.identity);
     ctx.assertCurrent();
     ctx = context(input);
+    await requireCredits(ctx);
     if (active.has(ctx.activeId)) fail('account_key_busy', 409);
     active.add(ctx.activeId);
     try {
-      return await journal.withLock(ctx.storageId, async () => {
+      return await journal.withLock(ctx.lockId, async () => {
         let record = await journal.read(ctx.storageId);
         assertOwner(ctx, record);
         ctx.assertCurrent();
@@ -489,7 +525,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
         if (!key || store.fingerprint(key) !== record.keyFingerprint) fail('account_key_configuration_conflict');
         ctx.assertCurrent();
         rememberConsumerOwner(ctx, record);
-        return { key, origin_product_id: 'superwagie', account_id: record.accountId, instance_id: record.instanceId, expires_at: record.key.expiresAt, data: catalog.models };
+        return { key, funding_mode: record.fundingMode ?? 'prepaid_cash', pricing_source: record.pricingSource, origin_product_id: 'superwagie', account_id: record.accountId, instance_id: record.instanceId, expires_at: record.key.expiresAt, data: catalog.models };
       });
     } finally { active.delete(ctx.activeId); }
   };

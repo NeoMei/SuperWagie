@@ -1137,6 +1137,18 @@ describe('UniHub model transport', () => {
     expect(f.requests()).toBe(2);
   });
 
+  it('routes a confirmed CREDIT funding refusal to credits without replaying the call', async () => {
+    const f = await fixture({ fundingErrorCode: 'platform_insufficient_funds', receiptFields: { asset: 'CREDIT/6', charged: '' } });
+    f.gatewayMode('funding-denied');
+    await f.runtime().admit(alice, session(), 'msg_test');
+    await f.prepare('credit-funding-contract');
+    const response = await f.completion('credit-funding-contract');
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({ error: { code: 'platform_model_credits_required' } });
+    expect(f.requests()).toBe(1);
+    expect(f.runtime().status(alice, 'ses_one').blocked).toBe(false);
+  });
+
   it('keeps a funding error without an authoritative receipt blocked for reconciliation', async () => {
     const f = await fixture();
     f.gatewayMode('funding-uncertain');

@@ -1,5 +1,6 @@
 import { productHelpI18n } from './product-help.i18n';
 import { platformAccountI18n } from './platform-account.i18n';
+import { platformUsageActivityI18n } from './platform-usage-activity.i18n';
 import { creationI18n } from './creation.i18n';
 import { modelConfigurationI18n } from './model-configuration.i18n';
 import { settingsDict } from './en.settings';
@@ -138,6 +139,7 @@ export const dict = {
     'chat.agentStatus.limit.later': 'Limit resets {date}, {time}',
   ...productHelpI18n.en,
   ...platformAccountI18n.en,
+  ...platformUsageActivityI18n.en,
   ...creationI18n['en'],
   ...modelConfigurationI18n['en'],
   "opencodeCompatibility.bundled": "Engine is managed by SuperWagie and checks official OpenCode updates automatically. If the engine remains incompatible, update SuperWagie.",

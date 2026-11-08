@@ -134,6 +134,11 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   if (path.endsWith('/api/platform-account/commerce')) { commerceReads++; if (failCommerceAfterPurchase && purchaseRequests) return Response.json({ error: 'service_unavailable' }, { status: 503 }); return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'sandbox', canRecharge: false, canPurchase: false } }); }
   if (path.endsWith('/api/platform-account/usage/team-a/summary')) return usageStatus === 200
     ? Response.json(nativeOverride ?? (nativeScenario ? { ...nativeRequestSummary, visibility: 'account' } : { ...usageSummary, usage_coverage: legacyCoverageUnknown ? undefined : usageSummary.usage_coverage })) : Response.json({ error: 'forbidden' }, { status: usageStatus });
+  if (path.endsWith('/api/platform-account/usage/team-a/activity')) return usageStatus === 200 ? Response.json({
+    visibility: 'actor', from: '2025-11-09T00:00:00Z', to: '2026-11-08T12:00:00Z', asOf: '2026-11-08T12:00:00Z',
+    days: Array.from({ length: 365 }, (_, index) => ({ date: new Date(Date.parse('2025-11-09T00:00:00Z') + index * 86_400_000).toISOString().slice(0, 10), calls: index === 364 ? '3' : '0' })),
+    total: '3', complete: true, unknownTime: '0',
+  }) : Response.json({ error: 'forbidden' }, { status: usageStatus });
   if (path.endsWith('/api/platform-account/usage/team-a/calls')) return Response.json({
     has_more: false, items: [{ call_id: 'call-a', model: 'Central model', status: 'SETTLED', created_at: null, asset: 'CREDIT/6' }],
   });
@@ -177,7 +182,7 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   const apis = createWebAPIs();
   await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider>{showFundingNotice ? <ManagedModelFundingNotice /> : <PlatformAccountPage />}</I18nProvider></RuntimeAPIContext.Provider>));
-  if (!vscode && host.querySelector('[data-platform-account-tab]')) await tab(initialTab === 'usage' ? 'Consumption records' : initialTab === 'profile' ? 'Personal details' : 'Wallet and subscription');
+  if (!vscode && host.querySelector('[data-platform-account-tab]')) await tab(initialTab === 'usage' ? 'Consumption records' : initialTab === 'profile' ? 'Personal details' : 'Membership and usage');
 };
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; usageStatus = 200; nativeReportRequests = 0; nativeScenario = false; legacyCoverageUnknown = false; nativeOverride = null; purchaseFailure = null; failCommerceAfterPurchase = false; if (commerce.offers?.[0]) delete commerce.offers[0].salesReadiness; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
@@ -203,8 +208,8 @@ const submit = async (scope: ParentNode = host) => {
   if (!form) throw new Error('Missing form');
   await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
 };
-const chooseOffer = async (name = 'Credit add-ons') => {
-  if (name === 'Credit add-ons') await act(async () => button('Credit add-ons').click());
+const chooseOffer = async (name = 'Buy extra credits') => {
+  if (name === 'Buy extra credits') await act(async () => button('Buy extra credits').click());
   const option = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((item) => item.getAttribute('aria-label') === name);
   if (!option) throw new Error(`Missing offer option ${name}`);
   await act(async () => option.click());
@@ -231,7 +236,7 @@ describe('PlatformAccountPage', () => {
     await tab('Orders');
     expect(host.textContent).toContain('Requests and purchase orders');
     expect(host.textContent).not.toContain('Fixture plan');
-    await tab('Wallet and subscription');
+    await tab('Membership and usage');
     expect(host.textContent).toContain('Fixture plan');
     expect(rechargeRequests).toBe(0);
     expect(purchaseRequests).toBe(0);
@@ -329,7 +334,7 @@ describe('PlatformAccountPage', () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; purchaseFailure = 'intent'; failCommerceAfterPurchase = true;
     if (commerce.wallets?.[1]) commerce.wallets[1].amount = '10000000';
     await render(); await chooseOffer();
-    const buy = [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.startsWith('Buy Credit add-ons'));
+    const buy = [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.startsWith('Buy Buy extra credits'));
     if (!buy) throw new Error('Missing purchase');
     await act(async () => buy.click());
     expect(purchaseRequests).toBe(1);
@@ -370,9 +375,9 @@ describe('PlatformAccountPage', () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true;
     const offer = commerce.offers?.[0]; if (!offer) throw new Error('Missing fixture offer');
     offer.salesReadiness = { ready: false, reason: 'credit_rates_unavailable' };
-    await render(); await act(async () => button('Credit add-ons').click());
-    const option = host.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Credit add-ons"]');
-    expect(option?.disabled).toBe(true); expect(host.textContent).toContain('no usable model CREDIT rates');
+    await render(); await act(async () => button('Buy extra credits').click());
+    const option = host.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Buy extra credits"]');
+    expect(option?.disabled).toBe(true); expect(host.textContent).toContain('complete its model credit rates');
     expect(host.textContent).toContain('9007199254.740993');
     expect(purchaseRequests).toBe(0);
   });
@@ -381,7 +386,7 @@ describe('PlatformAccountPage', () => {
     if (commerce.wallets?.[1]) commerce.wallets[1].amount = '10000000';
     commerce.orders = [{ id: 'paid-before', productId: 'llmrouter', offerName: 'Previously paid benefit', amount: '1000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' }];
     await render(); await chooseOffer();
-    const buy = [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.startsWith('Buy Credit add-ons'));
+    const buy = [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.startsWith('Buy Buy extra credits'));
     if (!buy) throw new Error('Missing purchase');
     await act(async () => buy.click());
     expect(purchaseRequests).toBe(1);
@@ -389,11 +394,11 @@ describe('PlatformAccountPage', () => {
       expect(host.textContent).toContain('unknown');
       expect(host.textContent).toContain('Recover');
     } else {
-      expect(host.textContent).toContain('no usable model CREDIT rates');
+      expect(host.textContent).toContain('complete its model credit rates');
       expect(host.textContent).not.toContain('Recover original request');
       expect(host.textContent).toContain('9007199254.740993');
       await tab('Orders');
-      expect(host.textContent).toContain('Credit add-ons');
+      expect(host.textContent).toContain('Buy extra credits');
       expect(host.textContent).toContain('CNY 1.00');
       expect(host.textContent).toContain('Payment: Paid · Fulfillment: Fulfilled');
     }
@@ -631,8 +636,8 @@ describe('PlatformAccountPage', () => {
   });
   test('shows personal details while a financial account read fails', async () => {
     useI18nStore.getState().setLocale('en'); failed = true; await render(false, 'profile');
-    expect(host.querySelector<HTMLInputElement>('#unihub-profile-username')?.value).toBe('alice');
-    expect(host.querySelector<HTMLInputElement>('#unihub-profile-username')?.readOnly).toBe(true);
+    expect(host.querySelector('#unihub-profile-username')?.textContent).toBe('alice');
+    expect(host.querySelector('input#unihub-profile-username')).toBeNull();
     expect(host.querySelector('#unihub-new-password')).not.toBeNull();
     expect(host.textContent).not.toContain('9007199254.740993');
   });
@@ -641,8 +646,12 @@ describe('PlatformAccountPage', () => {
     await fill('unihub-profile-display-name', 'New display name');
     await submit();
     expect(profileWrites).toEqual([{ displayName: 'New display name' }]);
-    expect(host.querySelector<HTMLInputElement>('#unihub-profile-username')?.value).toBe('alice');
+    expect(host.querySelector('#unihub-profile-username')?.textContent).toBe('alice');
     expect(host.querySelector<HTMLInputElement>('#unihub-profile-display-name')?.value).toBe('New display name');
+    expect(host.querySelector('[data-platform-account-name]')?.textContent).toBe('New display name');
+    await fill('unihub-profile-display-name', '');
+    await submit();
+    expect(host.querySelector('[data-platform-account-name]')?.textContent).toBe('alice');
   });
   test('keeps profile read failure visible without inventing an empty profile', async () => {
     useI18nStore.getState().setLocale('en'); profileFail = true; await render(false, 'profile');
@@ -692,11 +701,17 @@ describe('PlatformAccountPage', () => {
       Object.defineProperty(input, 'files', { value: [new File([new Uint8Array([137, 80, 78, 71])], 'avatar.png', { type: 'image/png' })], configurable: true });
       await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
       expect(avatarWrites).toBe(1);
-      const image = host.querySelector<HTMLImageElement>('img[alt="Avatar"]');
+      const image = host.querySelector<HTMLImageElement>('[data-settings-item="platform-account.avatar"] img[alt="Avatar"]');
       expect(image?.src.startsWith('blob:')).toBe(true);
       const objectURL = image?.src;
-      await tab('Wallet and subscription');
+      await tab('Membership and usage');
       expect(revoke.mock.calls.some(([value]) => value === objectURL)).toBe(true);
+      const portrait = host.querySelector<HTMLImageElement>('aside img[alt="Avatar"]');
+      expect(portrait?.src.startsWith('blob:')).toBe(true);
+      const portraitURL = portrait?.src;
+      expect(revoke.mock.calls.some(([value]) => value === portraitURL)).toBe(false);
+      await act(async () => button('Sign out').click());
+      expect(revoke.mock.calls.some(([value]) => value === portraitURL)).toBe(true);
     } finally { revoke.mockRestore(); }
   });
 
@@ -731,9 +746,10 @@ describe('PlatformAccountPage', () => {
     expect(logout).toBeDefined(); await act(async () => logout?.click());
     expect(logoutCount).toBe(1); expect(host.textContent).not.toContain('9007199254.740993'); expect(host.textContent).toContain('Sign in');
   });
-  test('shows a signed-in identity label when the profile name and email are empty', async () => {
+  test('shows a signed-in identity label when session details are empty and the profile is unavailable', async () => {
     useI18nStore.getState().setLocale('en');
     identityUser = { ...signedIn.user, name: '', email: '' };
+    profileFail = true;
     nextAccountResponse = Promise.resolve(Response.json({ ...signedIn, user: identityUser }));
     await render();
     expect(host.querySelector('[data-settings-item="platform-account.login"]')?.textContent).toContain('Signed in');
@@ -755,7 +771,7 @@ describe('PlatformAccountPage', () => {
   });
   test('formats CREDIT/6 exactly and renders the selected account name and kind', async () => {
     useI18nStore.getState().setLocale('en'); signedIn.credits.available = '2999920'; await render();
-    expect(host.textContent).toContain('2.999920'); expect(host.textContent).toContain('0.000007');
+    expect(host.textContent).toContain('2.99992'); expect(host.textContent).toContain('0.000007');
     const picker = host.querySelector('[aria-label="Billing account"]');
     expect(picker?.textContent).toContain('Team A'); expect(picker?.textContent).toContain('Team'); expect(picker?.textContent).not.toContain('team-a');
   });
@@ -974,22 +990,22 @@ describe('PlatformAccountPage', () => {
     await act(async () => button('Top up model balance').click());
     expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('Model balance');
     expect(host.querySelector('[role="radiogroup"]')).toBeNull();
-    expect(host.textContent).not.toContain('Buy Credit add-ons for CNY 10.00');
+    expect(host.textContent).not.toContain('Buy Buy extra credits for CNY 10.00');
     expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
   });
 
   test('clears a selected offer when the authoritative payer changes', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
     await chooseOffer();
-    expect(button('Buy Credit add-ons for CNY 10.00')).toBeDefined();
+    expect(button('Buy Buy extra credits for CNY 10.00')).toBeDefined();
     try {
       signedIn.accountId = 'team-b'; commerce.accountId = 'team-b';
       signedIn.accounts.push({ id: 'team-b', kind: 'team', name: 'Team B', role: 'member' });
       await act(async () => button('Refresh').click());
-      expect(host.textContent).not.toContain('Buy Credit add-ons for CNY 10.00');
+      expect(host.textContent).not.toContain('Buy Buy extra credits for CNY 10.00');
       expect(host.querySelector('[aria-label="Billing account"]')?.textContent).toContain('Team B');
-      await act(async () => button('Credit add-ons').click());
-      expect(host.querySelector('[role="radio"][aria-label="Credit add-ons"]')?.getAttribute('aria-checked')).toBe('false');
+      await act(async () => button('Buy extra credits').click());
+      expect(host.querySelector('[role="radio"][aria-label="Buy extra credits"]')?.getAttribute('aria-checked')).toBe('false');
       expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
     } finally {
       signedIn.accountId = 'team-a'; commerce.accountId = 'team-a'; signedIn.accounts.pop();
@@ -1003,11 +1019,11 @@ describe('PlatformAccountPage', () => {
     expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('Model balance');
     expect(host.querySelector('[aria-label="Billing account"]')?.textContent).toContain('Team A');
     expect(host.querySelector('[role="radiogroup"]')).toBeNull();
-    expect(host.textContent).not.toContain('Buy Credit add-ons for CNY 10.00');
+    expect(host.textContent).not.toContain('Buy Buy extra credits for CNY 10.00');
     await act(async () => button('Refresh wallets and orders').click());
     expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('Model balance');
-    await act(async () => button('Credit add-ons').click());
-    expect(button('Buy Credit add-ons for CNY 10.00')).toBeDefined();
+    await act(async () => button('Buy extra credits').click());
+    expect(button('Buy Buy extra credits for CNY 10.00')).toBeDefined();
     expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
   });
 
@@ -1024,19 +1040,19 @@ describe('PlatformAccountPage', () => {
     expect(rechargeRequests).toBe(0);
     expect(host.textContent).toContain('CNY 9007199254.740993');
     await chooseOffer();
-    expect(button('Buy Credit add-ons for CNY 10.00').disabled).toBe(true);
+    expect(button('Buy Buy extra credits for CNY 10.00').disabled).toBe(true);
     await act(async () => button('Fill recharge for this offer').click());
     expect(host.querySelector<HTMLInputElement>('#unihub-recharge-amount')?.value).toBe('10.00');
     await submit(); expect(rechargeRequests).toBe(1); expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
     expect(commerce.intents[0]?.productId).toBe('llmrouter');
     await act(async () => button('Simulate settlement').click());
     expect(settlementRequests).toBe(1); expect(purchaseRequests).toBe(0);
-    await act(async () => button('Credit add-ons').click());
-    expect(button('Buy Credit add-ons for CNY 10.00').disabled).toBe(false);
+    await act(async () => button('Buy extra credits').click());
+    expect(button('Buy Buy extra credits for CNY 10.00').disabled).toBe(false);
     await act(async () => button('Refresh wallets and orders').click());
-    expect(button('Buy Credit add-ons for CNY 10.00').disabled).toBe(false);
+    expect(button('Buy Buy extra credits for CNY 10.00').disabled).toBe(false);
     expect(rechargeRequests).toBe(1); expect(settlementRequests).toBe(1);
-    await act(async () => button('Buy Credit add-ons for CNY 10.00').click()); expect(purchaseRequests).toBe(1);
+    await act(async () => button('Buy Buy extra credits for CNY 10.00').click()); expect(purchaseRequests).toBe(1);
   });
   test('recovers a lost recharge response using the same key without starting another request', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; lostRechargeResponse = true; await render();
@@ -1081,40 +1097,40 @@ describe('PlatformAccountPage', () => {
       { id: 'annual-plan', productId: 'superwagie', name: 'Annual plan', accountKind: 'both', kind: 'membership', period: 'year', price: '190000000', monthlyCredit: '7000000', validityMonths: 0, rank: 1, sandbox: true },
     );
     await render();
-    await act(async () => button('Membership subscription').click());
-    const membershipGroup = host.querySelector('[role="radiogroup"][aria-label="Membership subscription"]');
+    await act(async () => button('Manage membership').click());
+    const membershipGroup = host.querySelector('[role="radiogroup"][aria-label="Subscribe"]');
     expect(membershipGroup?.textContent).toContain('CNY 19.00 / month');
-    expect(membershipGroup?.textContent).toContain('7.000000 CREDIT each month');
-    expect(membershipGroup?.textContent).not.toContain('Credit add-ons');
-    expect(host.querySelector('[role="radiogroup"][aria-label="Credit add-ons"]')).toBeNull();
-    expect(host.textContent).toContain('credits are issued monthly');
+    expect(membershipGroup?.textContent).toContain('7 credits each month');
+    expect(membershipGroup?.textContent).not.toContain('Buy extra credits');
+    expect(host.querySelector('[role="radiogroup"][aria-label="Buy extra credits"]')).toBeNull();
+    expect(host.textContent).toContain('issue credits monthly');
     await chooseOffer('Monthly plan');
     await act(async () => button('Annual').click());
-    expect(host.querySelector('[role="radiogroup"][aria-label="Membership subscription"]')?.textContent).toContain('CNY 190.00 / year, paid in full');
+    expect(host.querySelector('[role="radiogroup"][aria-label="Subscribe"]')?.textContent).toContain('CNY 190.00 / year, paid in full');
     expect(host.querySelector('[role="radio"][aria-label="Monthly plan"]')).toBeNull();
     expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Buy Monthly plan for CNY 19.00')).toBe(false);
     await chooseOffer('Annual plan');
-    expect(button('Buy Annual plan for CNY 190.00').disabled).toBe(true);
+    expect(button('Check upgrade price').disabled).toBe(false);
     await chooseOffer();
     expect(host.querySelector('[role="radio"][aria-label="Annual plan"]')).toBeNull();
-    expect(host.querySelector('[role="radio"][aria-label="Credit add-ons"]')?.getAttribute('aria-checked')).toBe('true');
+    expect(host.querySelector('[role="radio"][aria-label="Buy extra credits"]')?.getAttribute('aria-checked')).toBe('true');
     expect(host.textContent).not.toContain('Buy Annual plan');
-    expect(button('Buy Credit add-ons for CNY 10.00')).toBeDefined();
+    expect(button('Buy Buy extra credits for CNY 10.00')).toBeDefined();
     expect(purchaseRequests).toBe(0); expect(rechargeRequests).toBe(0);
     await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
-    expect(host.textContent).toContain('会员订阅'); expect(host.textContent).toContain('加量包');
+    expect(host.textContent).toContain('订阅会员'); expect(host.textContent).toContain('加量包');
     expect(host.textContent).not.toContain('人民币 19.00 元 / 月');
     expect(host.textContent).toContain('有效期 12 个月');
-    expect(host.querySelector('[role="radio"][aria-label="权益加量包"]')?.getAttribute('aria-checked')).toBe('true');
+    expect(host.querySelector('[role="radio"][aria-label="购买加量包"]')?.getAttribute('aria-checked')).toBe('true');
   });
 
-  test('shows an empty selected billing period while keeping addons available', async () => {
+  test('omits an unavailable annual period while keeping addons available', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
-    await act(async () => button('Membership subscription').click());
-    await act(async () => button('Annual').click());
+    await act(async () => button('Manage membership').click());
+    expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Annual')).toBe(false);
     expect(host.textContent).toContain('No membership offers are published for this billing period.');
-    await act(async () => button('Credit add-ons').click());
-    expect(host.querySelector('[role="radiogroup"][aria-label="Credit add-ons"]')?.textContent).toContain('Credit add-ons');
+    await act(async () => button('Buy extra credits').click());
+    expect(host.querySelector('[role="radiogroup"][aria-label="Buy extra credits"]')?.textContent).toContain('Buy extra credits');
     expect(purchaseRequests).toBe(0);
   });
 
@@ -1124,11 +1140,11 @@ describe('PlatformAccountPage', () => {
     commerce.wallets?.push({ productId: '', asset: 'CNY/6', amount: '1230000' });
     commerce.orders?.push({ id: 'order-a', productId: 'superwagie', offerName: 'Annual membership', amount: '100000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' });
     await render();
-    await act(async () => button('Membership subscription').click());
+    await act(async () => button('Manage membership').click());
     await act(async () => button('Annual').click()); await chooseOffer('Annual membership');
-    expect(host.textContent).toContain('Billing period'); expect(host.textContent).toContain('Monthly membership credit grant');
+    expect(host.textContent).toContain('Billing period'); expect(host.textContent).toContain('Monthly credits');
     expect(host.textContent).not.toContain('0 months'); expect(host.textContent).toContain('Account balance');
-    expect(button('Buy Annual membership for CNY 100.00').disabled).toBe(true);
+    expect(button('Check upgrade price').disabled).toBe(false);
     await tab('Orders');
     expect(host.textContent).toContain('Payment: Paid · Fulfillment: Fulfilled · Refund: None');
   });

@@ -7,14 +7,15 @@ import { writeFileAtomic } from '../opencode/atomic-write.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { createPlatformKnowledgeAdapter } from './knowledge.js';
 import { projectPlatformApiKeys } from './api-keys.js';
+import { PlatformUsageActivityError, readPlatformUsageActivity } from './usage-activity.js';
 
 const userSchema = z.object({ id: z.string().min(1), name: z.string(), email: z.string() });
 const runtimeIdentitySchema = z.object({ type: z.enum(['session', 'client']), token: z.string().min(1) });
 const accessScopeSchema = z.string().refine((value) => value.split(/\s+/).includes('openid'));
 const accountSchema = z.object({ id: z.string().min(1), kind: z.enum(['personal', 'team']), name: z.string(), role: z.string() });
 const apiKeysAccountSchema = z.string().regex(/^[A-Za-z0-9_-]{1,200}$/);
-const subscriptionsSchema = z.array(z.object({ id: z.string(), product_id: z.string(), status: z.string(), paid_through: z.string(), offer: z.object({ name: z.string() }) }));
-const creditsSchema = z.array(z.object({ id: z.string(), available: z.string().regex(/^\d+$/), reserved: z.string().regex(/^\d+$/), expires_at: z.string(), starts_at: z.string(), frozen: z.boolean() }));
+const subscriptionsSchema = z.array(z.object({ id: z.string(), product_id: z.string(), status: z.string(), paid_through: z.string(), offer: z.object({ name: z.string(), id: z.string().optional(), rank: z.number().int().nonnegative().optional(), period: z.string().optional(), price: z.string().regex(/^(0|[1-9]\d*)$/).optional(), monthly_credit: z.string().regex(/^(0|[1-9]\d*)$/).optional() }) }));
+const creditsSchema = z.array(z.object({ id: z.string(), available: z.string().regex(/^\d+$/), reserved: z.string().regex(/^\d+$/), expires_at: z.string(), starts_at: z.string(), frozen: z.boolean(), kind: z.enum(['subscription', 'addon', 'other']).optional(), source_scope: z.enum(['product', 'shared']).optional(), product_id: z.string().optional() }));
 const usageCount = z.string().regex(/^(0|[1-9]\d*)$/);
 const usageScopeSchema = z.object({
   account_id: z.string(), origin_product_id: z.enum(['superwagie', 'llmrouter']),
@@ -91,10 +92,10 @@ const retryAfterFromHeader = (value) => {
 const registrationResultSchema = z.object({ registration_id: z.string().min(1), status: z.enum(['CREATED', 'UNKNOWN']), retry_after: z.number().int().nonnegative().optional() });
 const passwordIssuesSchema = z.array(z.enum(['too_short', 'too_long', 'too_many_bytes', 'control_character', 'letter_case_and_digit_required', 'special_character_required', 'repeated_character'])).max(7);
 const tokenSchema = z.object({ access_token: z.string().min(1), id_token: z.string().min(1), refresh_token: z.string().min(1).optional(), token_type: z.string(), expires_in: z.number().int().positive() });
-const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'authorization_result_unknown', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'credit_rates_unavailable', 'payment_not_configured']), password_issues: passwordIssuesSchema.optional().catch(undefined), retry_after: retryAfterSchema.optional().catch(undefined), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
+const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'credit_rates_unavailable', 'quote_invalidated', 'subscription_required', 'payment_not_configured']), password_issues: passwordIssuesSchema.optional().catch(undefined), retry_after: retryAfterSchema.optional().catch(undefined), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
 const allowedApiPaths = new Map([
-  ['GET', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-pool\/)?(?:usage\/summary|calls\?limit=20)$/, /^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|operations|api-keys)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:recharges|operations)\/[A-Za-z0-9_-]+$/]],
-  ['POST', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/api-keys\/[A-Za-z0-9_-]+\/(?:models|scope)$/, /^\/v1\/me\/password$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-credentials|model-discovery|api-keys|recharges|orders)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/recharges\/[A-Za-z0-9_-]+\/sandbox-settle$/]],
+  ['GET', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/calls\?limit=100&from=[A-Za-z0-9%.-]+&to=[A-Za-z0-9%.-]+(?:&cursor=[A-Za-z0-9%._-]+)?$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-pool\/)?(?:usage\/summary|calls\?limit=20)$/, /^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|checkouts|operations|api-keys)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:recharges|operations|checkouts)\/[A-Za-z0-9_-]+$/]],
+  ['POST', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/checkouts\/[A-Za-z0-9_-]+\/(?:reconcile|close|refund)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/api-keys\/[A-Za-z0-9_-]+\/(?:models|scope)$/, /^\/v1\/me\/password$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-credentials|model-discovery|api-keys|recharges|orders|quotes|checkouts)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/quotes\/[A-Za-z0-9_-]+\/accept$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/recharges\/[A-Za-z0-9_-]+\/sandbox-settle$/]],
   ['PATCH', [/^\/v1\/me\/profile$/]],
   ['PUT', [/^\/v1\/me\/avatar$/]],
 ]);
@@ -527,6 +528,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     let membership = [];
     let available = '0';
     let reserved = '0';
+    const batches = [];
     if (account) {
       const [subscriptions, credits] = await Promise.all([
         sessionRequest(key, session, `/v1/accounts/${encodeURIComponent(account.id)}/subscriptions`),
@@ -536,12 +538,16 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       for (const batch of creditsSchema.parse(credits)) {
         if (!batch.frozen && Date.parse(batch.starts_at) <= now() && Date.parse(batch.expires_at) > now()) available = String(BigInt(available) + BigInt(batch.available));
         reserved = String(BigInt(reserved) + BigInt(batch.reserved));
+        const own = batch.source_scope === 'product' && batch.product_id === 'superwagie' && (batch.kind === 'subscription' || batch.kind === 'addon');
+        const summary = { id: batch.id, kind: own ? batch.kind : 'other', sourceScope: own ? 'product' : 'shared', available: batch.available, reserved: batch.reserved, startsAt: batch.starts_at, expiresAt: batch.expires_at, frozen: batch.frozen };
+        if (own) summary.productId = 'superwagie';
+        batches.push(summary);
       }
     }
     const consoleUrl = c.console ? new URL(c.console) : null;
     if (account) consoleUrl?.searchParams.set('account', account.id);
     consoleUrl?.searchParams.set('product', 'superwagie');
-    return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, credits: { available, reserved }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable', modelRecoveryAvailable: isModelHistoryAvailable() };
+    return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, credits: { available, reserved, batches }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable', modelRecoveryAvailable: isModelHistoryAvailable() };
   };
   const readApiKeys = async (identity, accountId) => {
     if (!apiKeysAccountSchema.safeParse(accountId).success) reject('invalid_request', 400);
@@ -574,6 +580,19 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       if (!session.accountId || session.accountId !== accountId || pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
     };
     assertSelection();
+    if (kind === 'activity') {
+      if (product !== 'superwagie') reject('invalid_request', 400);
+      try {
+        return await readPlatformUsageActivity({ accountId, actorId: session.user.id, now: now(), request: async (path) => {
+          assertSelection();
+          try { const result = await apiRequest(session, path); assertSelection(); return result; }
+          catch (error) { assertSelection(); return revokeSessionOnAuthFailure(key, session, () => { throw error; }); }
+        } });
+      } catch (error) {
+        if (error instanceof PlatformUsageActivityError) reject('platform_response_invalid', 502);
+        throw error;
+      }
+    }
     const pool = product === 'llmrouter';
     const summary = kind === 'summary';
     const path = `/v1/accounts/${encodeURIComponent(accountId)}/${pool ? 'model-pool/' : ''}${summary ? 'usage/summary' : 'calls?limit=20'}`;

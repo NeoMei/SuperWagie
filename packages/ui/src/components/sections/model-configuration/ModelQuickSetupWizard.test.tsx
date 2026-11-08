@@ -50,6 +50,30 @@ describe('ModelQuickSetupWizard', () => {
     await click('Discover models'); await click('Build preview'); await click('Apply configuration');
   };
 
+  test('keeps mobile account setup explicitly unavailable', async () => {
+    const scenario = batchScenario(async () => { throw new Error('Unexpected model request'); }, async () => { throw new Error('Unexpected status request'); });
+    const calls: string[] = [];
+    scenario.client.discover = async () => { calls.push('discover'); return { discoveryId: 'd1', source: 'session', models: [] }; };
+    window.history.replaceState({}, '', '/?surface=mobile');
+    try {
+      await act(async () => root.render(<I18nProvider><ModelQuickSetupWizard open {...scenario} onClose={() => {}} onApplied={() => {}} /></I18nProvider>));
+      const discover = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Discover models');
+      expect(discover?.disabled).toBe(true);
+      expect(calls).toEqual([]);
+    } finally { window.history.replaceState({}, '', '/'); }
+  });
+
+  test('an explicit credits choice reaches discovery without issuing a Key', async () => {
+    const scenario = batchScenario(async () => { throw new Error('Unexpected model request'); }, async () => { throw new Error('Unexpected status request'); });
+    const calls: Array<Parameters<ModelBootstrapClient['discover']>[0]> = [];
+    scenario.client.discover = async (input) => { calls.push(input); return { discoveryId: 'd1', source: 'session', fundingMode: 'credits', models: [] }; };
+    await act(async () => root.render(<I18nProvider><ModelQuickSetupWizard open {...scenario} onClose={() => {}} onApplied={() => {}} /></I18nProvider>));
+    await click('Credits');
+    expect(calls).toEqual([]);
+    await click('Discover models');
+    expect(calls).toEqual([{ source: 'session', fundingMode: 'credits', key: undefined }]);
+  });
+
   test('batch tests animate immediately and keep skipped images separate from verified embeddings', async () => {
     let finishStart: (run: ModelBootstrapTestRun) => void = () => {};
     let finishRead: (run: ModelBootstrapTestRun) => void = () => {};

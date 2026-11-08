@@ -59,6 +59,7 @@ const readGatewayRefusal = async (response) => {
 };
 const receiptSchema = z.object({
   call_id: identifier,
+  asset: z.enum(['CREDIT/6', 'CNY/6', 'LR_QUOTA/0']).optional(),
   status: z.enum(['RESERVED', 'RESERVING', 'RESERVE_UNKNOWN', 'UNKNOWN', 'SETTLE_PENDING', 'RELEASE_PENDING', 'SETTLED', 'RELEASED', 'REJECTED']),
   charged: z.union([z.string().regex(/^\d+$/), z.literal('')]).optional(),
 }).refine((value) => value.charged !== '' || value.status === 'REJECTED')
@@ -706,7 +707,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
         if (refusal === 'request-too-large') await store.mutate((state) => { state.calls[callID].requestBytes = Buffer.byteLength(payload); });
         const confirmed = await receipt(task, store.read().calls[callID], identity).catch(() => null);
         if (refusal === 'request-too-large') refuse('platform_gateway_request_too_large', 413);
-        if (refusal === 'funding' && confirmed?.status === 'REJECTED') refuse('platform_model_funding_required', 402);
+        if (refusal === 'funding' && confirmed?.status === 'REJECTED') refuse(confirmed.asset === 'CREDIT/6' ? 'platform_model_credits_required' : 'platform_model_funding_required', 402);
         refuse('platform_gateway_call_incomplete', 502);
       }
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-UniHub-Call-ID': callID });

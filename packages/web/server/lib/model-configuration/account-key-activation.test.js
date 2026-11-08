@@ -78,11 +78,12 @@ const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBinding
       return { ...captured, serviceId: 'fixture-service', request: async (route, init) => {
         if (captured.authSession !== actor.authSession) throw Object.assign(new Error('changed'), { code: 'platform_session_changed', status: 409 });
         if (expired) throw Object.assign(new Error('expired'), { code: 'platform_session_expired', status: 401 });
+        if (route === '/v1/capabilities') return { native_credits: controls.nativeCredits ?? { ready: false } };
         if (route.endsWith('/model-discovery')) {
           counts.discover++;
           controls.discoveryRequests = [...(controls.discoveryRequests ?? []), init.body ? JSON.parse(init.body) : null];
           if (controls.discoveryError) throw controls.discoveryError;
-          return { account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: controls.catalog ?? catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }] };
+          return { account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: controls.catalog ?? catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }], ...controls.discoveryOverrides };
         }
         if (route.endsWith('/api-keys/key-1/scope')) {
           controls.scopeRequests = [...(controls.scopeRequests ?? []), JSON.parse(init.body)];
@@ -153,13 +154,114 @@ const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBinding
     ? createAccountKeyActivation({ dataDir, store, modelRuntime, platformAccount, provider: available ? provider : undefined, readKeyCatalog, readLegacyModels: async () => legacyModels, receiptStore, env, enterpriseOptions })
     : createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, accountKeyProvider: available ? provider : undefined, readKeyCatalog, readLegacyModels: async () => legacyModels, env, enterpriseOptions }).accountKey;
   const createRuntime = () => createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, accountKeyProvider: provider, readKeyCatalog, readLegacyModels: async () => legacyModels, env, enterpriseOptions,
-    uniHubClient: { discover: async () => ({ account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }] }) },
+    uniHubClient: { discover: async () => ({ account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }], ...controls.discoveryOverrides }) },
   });
   return { dataDir, store, modelRuntime, counts, controls, env, create, createRuntime, provider, probeCalls, changeActor: (next) => { actor = { ...actor, ...next }; } };
 };
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('persistent account key activation', () => {
+  it('quick setup carries the selected funding mode through discovery, preview and apply', async () => {
+    const f = await fixture({ catalog: completeCatalog });
+    const conversion = { version: 'fixture-v1', numerator: '3', denominator: '2', rounding: 'lr-cumulative-ceil-v1' };
+    f.controls.nativeCredits = { ready: true, conversion };
+    f.controls.discoveryOverrides = { model_scope: 'llmrouter_available', pricing_source: 'llmrouter_native_credit', native_credit_conversion: conversion };
+    f.controls.issueOverrides = { pricing_source: 'llmrouter_native_credit', funding_mode: 'credits', asset: 'CREDIT/6' };
+    const runtime = f.createRuntime();
+    const discovery = await runtime.discover({ ...input, source: 'session', fundingMode: 'credits' });
+    expect(discovery.fundingMode).toBe('credits');
+    const revision = (await f.modelRuntime.getPublicConfiguration()).revision;
+    const preview = await runtime.preview({ ...input, discoveryId: discovery.discoveryId, revision, mode: 'fill-missing', purposes: ['embedding'] });
+    await runtime.apply({ ...input, discoveryId: discovery.discoveryId, operationId: preview.operationId, revision, mode: 'fill-missing' });
+    expect(f.controls.issuePayload.funding_mode).toBe('credits');
+    expect((await f.create().read({ ...input, fundingMode: 'credits' })).activation.pricingSource).toBe('llmrouter_native_credit');
+  });
+
+  it('issues an explicitly selected credits Key and preserves its receipt through retest', async () => {
+    const f = await fixture({ catalog: completeCatalog });
+    const conversion = { version: 'fixture-v1', numerator: '3', denominator: '2', rounding: 'lr-cumulative-ceil-v1' };
+    f.controls.nativeCredits = { ready: true, conversion };
+    f.controls.discoveryOverrides = { model_scope: 'llmrouter_available', pricing_source: 'llmrouter_native_credit', native_credit_conversion: conversion };
+    f.controls.issueOverrides = { pricing_source: 'llmrouter_native_credit', funding_mode: 'credits', asset: 'CREDIT/6' };
+    const activation = (await f.create().activate({ ...input, action: 'activate', fundingMode: 'credits' })).activation;
+    expect(activation).toMatchObject({ fundingMode: 'credits', pricingSource: 'llmrouter_native_credit', status: 'ready' });
+    expect(f.controls.issuePayload.funding_mode).toBe('credits');
+    expect(f.controls.discoveryRequests[0].funding_mode).toBe('credits');
+    expect((await f.create().activate({ ...input, action: 'retest', fundingMode: 'credits' })).activation.status).toBe('ready');
+    expect(f.counts.issue).toBe(1);
+  });
+
+  it('refuses credits before issuance when readiness is missing and never issues cash', async () => {
+    const f = await fixture();
+    await expect(f.create().activate({ ...input, action: 'activate', fundingMode: 'credits' })).rejects.toMatchObject({ code: 'native_credits_unavailable' });
+    expect(f.counts.issue).toBe(0);
+    expect(f.counts.probe).toBe(0);
+  });
+
+  it.each([
+    { funding_mode: undefined }, { asset: undefined },
+    { funding_mode: 'prepaid_cash' }, { asset: 'CNY/6' },
+  ])('rejects inconsistent native CREDIT issuance without configuration or repeat issuance %#', async (overrides) => {
+    const f = await fixture({ catalog: completeCatalog });
+    const conversion = { version: 'fixture-v1', numerator: '3', denominator: '2', rounding: 'lr-cumulative-ceil-v1' };
+    f.controls.nativeCredits = { ready: true, conversion };
+    f.controls.discoveryOverrides = { model_scope: 'llmrouter_available', pricing_source: 'llmrouter_native_credit', native_credit_conversion: conversion };
+    f.controls.issueOverrides = { pricing_source: 'llmrouter_native_credit', funding_mode: 'credits', asset: 'CREDIT/6', ...overrides };
+    const result = await f.create().activate({ ...input, action: 'activate', fundingMode: 'credits' });
+    expect(result.activation).toMatchObject({ status: 'unknown', stage: 'issue', errorCode: 'account_key_issue_unknown', key: null });
+    expect(f.counts.configure).toBe(0);
+    expect(f.counts.probe).toBe(0);
+    await f.create().activate({ ...input, action: 'activate', fundingMode: 'credits' });
+    expect(f.counts.issue).toBe(1);
+  });
+
+  it.each([
+    {},
+    { pricing_source: 'llmrouter_native' },
+    { native_credit_conversion: { version: 'fixture-v1', numerator: '0', denominator: '2', rounding: 'lr-cumulative-ceil-v1' } },
+    { native_credit_conversion: { version: 'fixture-v1', numerator: '3', denominator: '0', rounding: 'lr-cumulative-ceil-v1' } },
+  ])('rejects a missing or invalid credit discovery contract before issuance %#', async (overrides) => {
+    const f = await fixture();
+    f.controls.nativeCredits = { ready: true };
+    f.controls.discoveryOverrides = overrides;
+    await expect(f.create().activate({ ...input, action: 'activate', fundingMode: 'credits' })).rejects.toMatchObject({ code: 'account_key_catalog_invalid' });
+    expect(f.counts.issue).toBe(0);
+    expect(f.counts.configure).toBe(0);
+  });
+
+  it('keeps the installed cash receipt while credits are selected and rejects a cash issuance response', async () => {
+    const f = await fixture({ catalog: completeCatalog });
+    const cash = await f.create().activate({ ...input, action: 'activate' });
+    expect((await f.create().read({ ...input, fundingMode: 'credits' })).activation).toBeNull();
+    expect((await f.create().read(input)).activation.operationId).toBe(cash.activation.operationId);
+    const conversion = { version: 'fixture-v1', numerator: '3', denominator: '2', rounding: 'lr-cumulative-ceil-v1' };
+    f.controls.nativeCredits = { ready: true, conversion };
+    f.controls.discoveryOverrides = { model_scope: 'llmrouter_available', pricing_source: 'llmrouter_native_credit', native_credit_conversion: conversion };
+    const credit = await f.create().activate({ ...input, action: 'activate', fundingMode: 'credits' });
+    expect(credit.activation).toMatchObject({ status: 'unknown', stage: 'issue', key: null });
+    expect(f.counts.configure).toBe(1);
+    expect((await f.create().read(input)).activation.operationId).toBe(cash.activation.operationId);
+  });
+
+  it('switches funding only on explicit successful setup and can retest the retained cash Key', async () => {
+    const f = await fixture({ catalog: completeCatalog });
+    const cash = (await f.create().activate({ ...input, action: 'activate' })).activation;
+    const before = await f.modelRuntime.getPublicConfiguration();
+    await f.create().read({ ...input, fundingMode: 'credits' });
+    expect(await f.modelRuntime.getPublicConfiguration()).toEqual(before);
+    const conversion = { version: 'fixture-v1', numerator: '3', denominator: '2', rounding: 'lr-cumulative-ceil-v1' };
+    f.controls.nativeCredits = { ready: true, conversion };
+    f.controls.discoveryOverrides = { model_scope: 'llmrouter_available', pricing_source: 'llmrouter_native_credit', native_credit_conversion: conversion };
+    f.controls.issueOverrides = { pricing_source: 'llmrouter_native_credit', funding_mode: 'credits', asset: 'CREDIT/6' };
+    const credits = (await f.create().activate({ ...input, action: 'activate', fundingMode: 'credits' })).activation;
+    expect(credits.status).toBe('ready');
+    expect(credits.connectionId).not.toBe(cash.connectionId);
+    expect((await f.modelRuntime.getPublicConfiguration()).bindings.every((binding) => binding.connectionId === credits.connectionId)).toBe(true);
+    expect((await f.create().activate({ ...input, action: 'retest', fundingMode: 'prepaid_cash' })).activation.operationId).toBe(cash.operationId);
+    expect((await f.modelRuntime.getPublicConfiguration()).bindings.every((binding) => binding.connectionId === cash.connectionId)).toBe(true);
+    expect(f.counts.issue).toBe(2);
+  });
+
   it('keeps native Bailian speech on the same account Key after receipt reload and retest', async () => {
     const speechOperation = { id: 'bailian.audio.speech.create', protocol: 'bailian', endpoint: '/v1/native/bailian/audio/speech', method: 'POST', transports: ['binary'], available: true, executable: true };
     const speech = { id: 'qwen3-tts-flash', name: 'Qwen speech', operations: ['speech'], capability_metadata: { id: 'qwen3-tts-flash', name: 'Qwen speech', capabilities: {}, operations: [speechOperation] } };
@@ -732,7 +834,7 @@ describe('persistent account key activation', () => {
     expect(await runtime.read(input)).toMatchObject({ accountId: 'account-1', enterpriseMode: false, activation: null });
     const result = await runtime.activate({ ...input, action: 'activate' });
     expect(result.activation).toMatchObject({ status: 'ready', stage: 'test', key: { id: 'key-1', last4: '7890' }, modelId: 'chat-pro', test: { status: 'verified' }, actions: ['retest'] });
-    expect(JSON.stringify(result)).not.toMatch(/fixture-account-key|secretRef|actor_id|llmrouter|unihub/i);
+    expect(JSON.stringify(result)).not.toMatch(/fixture-account-key|secretRef|actor_id|unihub/i);
     const configuration = await f.modelRuntime.getPublicConfiguration();
     expect(configuration.bindings.map(({ purpose }) => purpose).sort()).toEqual([...supportedPurposes].sort());
     expect(configuration.connections).toHaveLength(1);

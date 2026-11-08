@@ -2,25 +2,26 @@ import React from 'react';
 import { RiCheckLine, RiCloseLine, RiQuestionLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsFieldRow, SettingsChipGroup, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { ModelTestMotion } from '@/components/sections/model-configuration/ModelTestFeedback';
 import { MODEL_PURPOSE_LABELS, modelTestErrorKey } from '@/components/sections/model-configuration/modelConfigurationView';
 import { useI18n } from '@/lib/i18n';
 import { PlatformAccountError } from '@/lib/platformAccount';
-import { readPlatformAccountKeySetup, runPlatformAccountKeySetup, type PlatformAccountKeySetupAction, type PlatformAccountKeySetupState } from '@/lib/platformApiKeys';
+import { readPlatformAccountKeySetup, runPlatformAccountKeySetup, type PlatformAccountKeySetupAction, type PlatformAccountKeySetupState, type PlatformKeyFundingMode } from '@/lib/platformApiKeys';
 import { captureRuntimeInstance } from '@/lib/runtime-switch';
 
 type SetupStage = NonNullable<PlatformAccountKeySetupState['activation']>['stage'];
 type StepStatus = 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'unconfirmed';
 const stages: SetupStage[] = ['issue', 'configure', 'test'];
-const runtimeGuidanceKey = (code: string | null | undefined) => code === 'model_configuration_account_runtime_required' || code === 'platform_runtime_unsupported'
+const runtimeGuidanceKey = (code: string | null | undefined) => code === 'native_credits_unavailable' ? 'platformAccount.keySetup.creditsUnavailable' : code === 'model_configuration_account_runtime_required' || code === 'platform_runtime_unsupported'
   ? 'platformAccount.keySetup.runtimeRequired'
   : code === 'model_configuration_account_runtime_unavailable' ? 'platformAccount.keySetup.runtimeUnavailable' : null;
 type SetupErrorKey = 'platformAccount.apiKeysDenied' | 'platformAccount.keySetup.readFailed'
-  | 'platformAccount.keySetup.runtimeRequired' | 'platformAccount.keySetup.runtimeUnavailable';
+  | 'platformAccount.keySetup.runtimeRequired' | 'platformAccount.keySetup.runtimeUnavailable' | 'platformAccount.keySetup.creditsUnavailable';
 
 export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?: () => void }> = ({ accountId, onConfigured }) => {
   const { t, locale } = useI18n();
+  const [fundingMode, setFundingMode] = React.useState<PlatformKeyFundingMode>('prepaid_cash');
   const [state, setState] = React.useState<PlatformAccountKeySetupState | null>(null);
   const [error, setError] = React.useState<SetupErrorKey | null>(null);
   const [reading, setReading] = React.useState(true);
@@ -54,7 +55,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     const current = () => owner === generation.current && sequence === readSequence.current && runtimeCurrent();
     setReading(true);
     try {
-      const next = await readPlatformAccountKeySetup(accountId);
+      const next = await readPlatformAccountKeySetup(accountId, fundingMode === 'credits' ? fundingMode : undefined);
       if (current()) publish(next);
     } catch (cause) {
       if (current()) {
@@ -64,7 +65,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
           ?? (denied ? 'platformAccount.apiKeysDenied' : 'platformAccount.keySetup.readFailed'));
       }
     } finally { if (current()) setReading(false); }
-  }, [accountId, publish]);
+  }, [accountId, fundingMode, publish]);
   React.useEffect(() => {
     const owner = generation;
     mutationActive.current = false;
@@ -102,7 +103,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     ++readSequence.current;
     setReading(false); setPendingAction(action); setError(null);
     try {
-      const next = await runPlatformAccountKeySetup(accountId, action);
+      const next = await runPlatformAccountKeySetup(accountId, action, fundingMode === 'credits' ? fundingMode : undefined);
       if (current()) { ++readSequence.current; setReading(false); publish(next, true); }
     } catch (cause) {
       if (current()) {
@@ -118,6 +119,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     }
   };
   const busy = acting || Boolean(working);
+  const creditsUnavailable = fundingMode === 'credits' && state?.nativeCredits?.ready !== true;
   const tests = activation?.stage === 'test' && !awaitingRun ? activation.tests : [];
   const ready = !busy && !error && !awaitingRun && activation?.status === 'ready' && activation.test?.status === 'verified';
   const verified = ready && tests.length > 0 && tests.every((test) => test.status === 'verified' && test.applied);
@@ -143,6 +145,13 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
   };
   const stageLabel = (stage: SetupStage) => t(stage === 'issue' ? 'platformAccount.keySetup.issue' : stage === 'configure' ? 'platformAccount.keySetup.configure' : 'platformAccount.keySetup.test');
   return <SettingsSection description={t('platformAccount.keySetup.description')} divider={false} contentClassName="space-y-4" headerAction={<Button size="sm" variant="outline" disabled={reading || acting} onClick={() => void read()}>{t('platformAccount.refresh')}</Button>}>
+    <SettingsFieldRow label={t('platformAccount.keySetup.fundingMode')} info={t('platformAccount.keySetup.fundingSwitchHint')}>
+      <SettingsChipGroup options={[
+        { value: 'prepaid_cash', label: t('platformAccount.keySetup.cash'), disabled: busy || awaitingRun },
+        { value: 'credits', label: t('platformAccount.keySetup.credits'), disabled: busy || awaitingRun },
+      ]} value={fundingMode} onChange={(value) => { if (value === 'credits' || value === 'prepaid_cash') setFundingMode(value); }} />
+    </SettingsFieldRow>
+    {creditsUnavailable && !reading && <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.creditsUnavailable')}</p>}
     <ModelTestMotion><section role="region" aria-label={t('platformAccount.keySetup.panelTitle')} className="oc-tile min-w-0 space-y-4 rounded-lg p-4">
       <h3 className="typography-ui-label text-foreground">{t('platformAccount.keySetup.panelTitle')}</h3>
       <div className="space-y-2" aria-live="polite">
@@ -172,7 +181,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
       {state && !activation && !error && (!awaitingRun || acting) && <>
         <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.offer')}</p>
         <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.cost')}</p>
-        <Button disabled={busy || reading || state.enterpriseMode} onClick={() => void run('activate')}>{t('platformAccount.keySetup.activate')}</Button>
+        <Button disabled={busy || reading || creditsUnavailable || state.enterpriseMode} onClick={() => void run('activate')}>{t('platformAccount.keySetup.activate')}</Button>
       </>}
       {activation && <>
         {activation.key && <div className="space-y-1">
@@ -225,8 +234,8 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
         {activation.actions.length > 0 && <div className="space-y-2">
           {activation.actions.includes('retest') && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.cost')}</p>}
           <div className="flex flex-wrap gap-2">
-            {activation.actions.includes('resume') && <Button disabled={busy || reading || Boolean(error) || awaitingRun || state?.enterpriseMode} onClick={() => void run('resume')}>{t('platformAccount.keySetup.resume')}</Button>}
-            {activation.actions.includes('retest') && <Button variant="outline" disabled={busy || reading || Boolean(error) || awaitingRun || state?.enterpriseMode} onClick={() => void run('retest')}>{t('platformAccount.keySetup.retest')}</Button>}
+            {activation.actions.includes('resume') && <Button disabled={busy || reading || creditsUnavailable || Boolean(error) || awaitingRun || state?.enterpriseMode} onClick={() => void run('resume')}>{t('platformAccount.keySetup.resume')}</Button>}
+            {activation.actions.includes('retest') && <Button variant="outline" disabled={busy || reading || creditsUnavailable || Boolean(error) || awaitingRun || state?.enterpriseMode} onClick={() => void run('retest')}>{t('platformAccount.keySetup.retest')}</Button>}
           </div>
         </div>}
       </>}

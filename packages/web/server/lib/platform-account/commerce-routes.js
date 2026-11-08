@@ -22,8 +22,13 @@ export const registerPlatformCommerceRoutes = (app, { runtime, resolveIdentity, 
     }
   };
   app.get('/api/platform-account/commerce', route((who) => runtime.overview(who)));
+  app.post('/api/platform-account/commerce/checkouts', route((who, req) => runtime.createCheckout(who, req.body), true));
+  app.get('/api/platform-account/commerce/checkouts/:id', route((who, req) => runtime.checkoutAction(who, req.params.id, 'read', { accountId: req.query.accountId })));
+  for (const action of ['reconcile', 'close', 'refund']) app.post(`/api/platform-account/commerce/checkouts/:id/${action}`, route((who, req) => runtime.checkoutAction(who, req.params.id, action, req.body), true));
   app.post('/api/platform-account/commerce/recharges', route((who, req) => runtime.createRecharge(who, req.body), true));
   app.post('/api/platform-account/commerce/purchases', route((who, req) => runtime.purchase(who, req.body), true));
+  app.post('/api/platform-account/commerce/upgrade-quotes', route((who, req) => runtime.quoteUpgrade(who, req.body), true));
+  app.post('/api/platform-account/commerce/upgrade-purchases', route((who, req) => runtime.acceptUpgrade(who, req.body), true));
   app.post('/api/platform-account/commerce/intents/:key/reconcile', route((who, req) => runtime.reconcile(who, req.params.key, req.body), true));
   app.post('/api/platform-account/commerce/intents/:key/sandbox-settle', route((who, req) => runtime.sandboxSettle(who, req.params.key, req.body), true));
 };

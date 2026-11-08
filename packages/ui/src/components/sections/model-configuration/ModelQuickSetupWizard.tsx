@@ -7,8 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Radio } from '@/components/ui/radio';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { SettingsFieldRow, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsFieldRow, SettingsChipGroup, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import type { ModelConfiguration, ModelPurposeId } from '@/lib/modelConfiguration';
 import { modelTestErrorKey, MODEL_PURPOSE_LABELS } from './modelConfigurationView';
@@ -55,6 +56,7 @@ const toPurposeId = (value: string): ModelPurposeId | null => isPurposeId(value)
 export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ open, configuration, onClose, onApplied, onRolledBack, client = defaultClient }) => {
   const { t } = useI18n();
   const [step, setStep] = React.useState<Step>('source');
+  const [fundingMode, setFundingMode] = React.useState<'credits' | 'prepaid_cash'>('prepaid_cash');
   const [source, setSource] = React.useState<Source>('session');
   const [key, setKey] = React.useState('');
   const [mode, setMode] = React.useState<ModelBootstrapMode>('fill-missing');
@@ -74,6 +76,7 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
   const runningAction = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const unsupported = isVSCodeRuntime();
+  const accountUnsupported = isMobileSurfaceRuntime() && source === 'session';
   const testsRunning = !testError && (testStarting || testStatus === 'queued' || testStatus === 'running');
 
   React.useEffect(() => {
@@ -91,7 +94,7 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
       setError(null);
       return;
     }
-    setStep('source'); setSource('session'); setKey(''); setMode('fill-missing'); setDiscovery(null); setPreview(null); setSelections({});
+    setStep('source'); setSource('session'); setFundingMode('prepaid_cash'); setKey(''); setMode('fill-missing'); setDiscovery(null); setPreview(null); setSelections({});
     setOperationId(null); setTestRunId(null); setTestStatus(null); setTestResults([]); setTestPurposes([]); setBusy(false); setError(null);
   }, [open]);
 
@@ -140,12 +143,13 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
     } finally { setTestStarting(false); }
   };
   const discover = () => run(async () => {
-    const input = { source, key: source === 'imported-key' ? key : undefined };
+    const input: Parameters<ModelBootstrapClient['discover']>[0] = { source, key: source === 'imported-key' ? key : undefined };
+    if (source === 'session' && fundingMode === 'credits') input.fundingMode = fundingMode;
     const result = await client.discover(input);
     setDiscovery(result); setStep('discover');
   });
   const issueKey = () => run(async () => {
-    const result = await client.issueKey({});
+    const result = await client.issueKey(fundingMode === 'credits' ? { fundingMode } : {});
     setDiscovery(result); setStep('discover');
   });
   const makePreview = () => run(async () => {
@@ -182,18 +186,25 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
         {stepKeys.map((keyValue) => <span key={keyValue} className={`typography-meta rounded-md px-2 py-1 ${step === keyValue ? 'bg-interactive-selection text-interactive-selection-foreground' : 'text-muted-foreground'}`}>{stepLabel(keyValue)}</span>)}
       </nav>
       {unsupported ? <p role="alert" className="typography-meta text-[var(--status-warning-text)]">{t('modelConfiguration.quickSetup.unsupported')}</p> : null}
+      {accountUnsupported && <p role="alert" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.unsupported')}</p>}
       {step === 'source' ? <SettingsSection title={t('modelConfiguration.quickSetup.source.title')} divider={false} contentClassName="space-y-3">
         {sourceOptions.map((option) => <div key={option} role="radio" aria-checked={source === option} tabIndex={busy || unsupported ? -1 : 0} className="flex w-full items-start gap-3 rounded-md p-2 text-start hover:bg-interactive-hover" onClick={() => { if (!busy && !unsupported) setSource(option); }} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && !busy && !unsupported) { event.preventDefault(); setSource(option); } }}>
           <Radio checked={source === option} onChange={() => setSource(option)} ariaLabel={t(sourceText[option])} />
           <span><span className="typography-ui-label text-foreground">{t(sourceText[option])}</span><span className={`block ${SETTINGS_HELPER_CLASS}`}>{t(sourceHintText[option])}</span></span>
         </div>)}
+        {source === 'session' && <SettingsFieldRow label={t('platformAccount.keySetup.fundingMode')} info={t('platformAccount.keySetup.fundingSwitchHint')}>
+          <SettingsChipGroup value={fundingMode} onChange={setFundingMode} options={[
+            { value: 'prepaid_cash', label: t('platformAccount.keySetup.cash'), disabled: busy || unsupported || accountUnsupported },
+            { value: 'credits', label: t('platformAccount.keySetup.credits'), disabled: busy || unsupported || accountUnsupported },
+          ]} />
+        </SettingsFieldRow>}
         {source === 'imported-key' ? <SettingsFieldRow label={t('modelConfiguration.quickSetup.key')}><Input type="password" value={key} onChange={(event) => setKey(event.target.value)} aria-label={t('modelConfiguration.quickSetup.key')} className="max-w-[24rem]" /></SettingsFieldRow> : null}
-        <Button onClick={discover} disabled={busy || unsupported || (source === 'imported-key' && !key.trim())}>{t('modelConfiguration.quickSetup.discover')}</Button>
+        <Button onClick={discover} disabled={busy || unsupported || accountUnsupported || (source === 'imported-key' && !key.trim())}>{t('modelConfiguration.quickSetup.discover')}</Button>
         {source === 'session' ? <Collapsible>
           <CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.issueOptions')}</CollapsibleTrigger>
           <CollapsibleContent className="space-y-2 py-2">
             <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.quickSetup.issueHint')}</p>
-            <Button variant="outline" onClick={issueKey} disabled={busy || unsupported}>{t('modelConfiguration.quickSetup.issueKey')}</Button>
+            <Button variant="outline" onClick={issueKey} disabled={busy || unsupported || accountUnsupported}>{t('modelConfiguration.quickSetup.issueKey')}</Button>
           </CollapsibleContent>
         </Collapsible> : null}
       </SettingsSection> : null}
@@ -240,7 +251,7 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
         {!testError && testStatus === 'failed' ? <Button variant="outline" onClick={retryTests} disabled={busy}>{t('modelConfiguration.quickSetup.retry')}</Button> : null}
         {operationId ? <Button variant="ghost" onClick={rollback} disabled={busy}>{t('modelConfiguration.quickSetup.rollback')}</Button> : null}
       </SettingsSection> : null}
-      {error ? <div><p role="alert" className="typography-meta text-[var(--status-error-text)]">{t('modelConfiguration.quickSetup.error')}</p><Collapsible><CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.details')}</CollapsibleTrigger><CollapsibleContent><code className="break-all">{error}</code></CollapsibleContent></Collapsible></div> : null}
+      {error ? <div><p role="alert" className="typography-meta text-[var(--status-error-text)]">{t(error === 'native_credits_unavailable' ? 'platformAccount.keySetup.creditsUnavailable' : 'modelConfiguration.quickSetup.error')}</p><Collapsible><CollapsibleTrigger className="w-auto typography-meta">{t('modelConfiguration.quickSetup.details')}</CollapsibleTrigger><CollapsibleContent><code className="break-all">{error}</code></CollapsibleContent></Collapsible></div> : null}
       <DialogFooter><Button variant="outline" onClick={onClose} disabled={busy}>{t('modelConfiguration.quickSetup.close')}</Button></DialogFooter>
     </DialogContent>
   </Dialog>;

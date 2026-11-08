@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { ModelConfigurationError } from './runtime.js';
 import { PURPOSE_IDS } from './catalog.js';
+import { fundingModeSchema, nativePricingSourceSchema } from './native-credit-contract.js';
 import { accountModelSchema } from './account-key-models.js';
 
 const id = z.string().min(1).max(200);
@@ -18,7 +19,8 @@ const recordSchema = z.object({
   secretRef: id.nullable(), keyFingerprint: z.string().regex(/^[a-f0-9]{64}$/).nullable(), baseUrl: z.string().url(),
   providerId: id, connectionId: id, modelId: id,
   modelScope: z.enum(['selected', 'llmrouter_available']).default('selected'),
-  pricingSource: z.literal('llmrouter_native').optional(), credentialVersion: z.number().int().positive().optional(),
+  fundingMode: fundingModeSchema.default('prepaid_cash'),
+  pricingSource: nativePricingSourceSchema.optional(), credentialVersion: z.number().int().positive().optional(),
   // Bounded catalog snapshots support configuration recovery, not authorization.
   models: z.array(z.object({ id, name: id }).strict()).min(1).max(1000),
   chatModels: z.array(accountModelSchema).min(1).max(1000).optional(),
@@ -28,7 +30,7 @@ const recordSchema = z.object({
   tests: z.array(z.object({ id, purpose: z.enum(PURPOSE_IDS), modelId: z.string().min(1).max(256).nullable(), status: z.enum(['queued', 'testing', 'verified', 'failed', 'unknown', 'skipped']), testedAt: date.nullable(), errorCode: id.nullable(), applied: z.boolean().default(false), applicationError: z.object({ status: z.enum(['failed', 'unknown']), errorCode: id }).strict().optional() }).strict().refine((row) => !row.applicationError || row.status === 'verified' && !row.applied)).max(PURPOSE_IDS.length + 1).default([]),
   test: z.object({ status: z.enum(['verified', 'failed', 'unknown']), testedAt: date.nullable(), errorCode: id.nullable() }).strict().nullable(),
   createdAt: date, updatedAt: date,
-}).strict().refine((record) => record.modelScope !== 'llmrouter_available' || record.pricingSource === 'llmrouter_native' && record.credentialVersion !== undefined);
+}).strict().refine((record) => record.modelScope !== 'llmrouter_available' || record.pricingSource === (record.fundingMode === 'credits' ? 'llmrouter_native_credit' : 'llmrouter_native') && record.credentialVersion !== undefined);
 const fail = (code, status = 500) => { throw new ModelConfigurationError(code, status); };
 
 /** Durable private receipts. Secret values remain in the bootstrap secret store. */

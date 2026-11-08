@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import { SettingsSection, SettingsStackedField, SettingsTwoColumn, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -25,7 +26,7 @@ const fileBase64 = async (file: File): Promise<string> => {
   return btoa(binary);
 };
 
-export const PlatformAccountProfile: React.FC = () => {
+export const PlatformAccountProfile: React.FC<{ onProfileUpdated?: () => void }> = ({ onProfileUpdated }) => {
   const { t } = useI18n();
   const runtimeKey = getRuntimeKey();
   const [profile, setProfile] = React.useState<PlatformProfile | null>(null);
@@ -38,6 +39,7 @@ export const PlatformAccountProfile: React.FC = () => {
   const [newPassword, setNewPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
   const avatarURLRef = React.useRef<string | null>(null);
+  const avatarInputRef = React.useRef<HTMLInputElement>(null);
   const revision = React.useRef(0);
 
   const replaceAvatarURL = React.useCallback((next: string | null) => {
@@ -75,7 +77,7 @@ export const PlatformAccountProfile: React.FC = () => {
     try {
       const next = await updatePlatformProfile({ displayName: displayName.trim() });
       if (current !== revision.current || runtimeKey !== getRuntimeKey()) return;
-      setProfile(next); setDisplayName(next.displayName); reportSettingsSaveState('saved');
+      setProfile(next); setDisplayName(next.displayName); reportSettingsSaveState('saved'); onProfileUpdated?.();
     } catch (cause) { if (current === revision.current && runtimeKey === getRuntimeKey()) { setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.profileFailed')); reportSettingsSaveState('error'); } }
     finally { if (current === revision.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   };
@@ -96,7 +98,7 @@ export const PlatformAccountProfile: React.FC = () => {
       setProfile(next);
       const avatar = await readPlatformAvatar();
       if (current !== revision.current || runtimeKey !== getRuntimeKey()) return;
-      replaceAvatarURL(URL.createObjectURL(avatar)); reportSettingsSaveState('saved');
+      replaceAvatarURL(URL.createObjectURL(avatar)); reportSettingsSaveState('saved'); onProfileUpdated?.();
     } catch (cause) { if (current === revision.current && runtimeKey === getRuntimeKey()) { setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.profileAvatarFailed')); reportSettingsSaveState('error'); } }
     finally { if (current === revision.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   };
@@ -118,36 +120,49 @@ export const PlatformAccountProfile: React.FC = () => {
   if (!profile) return <SettingsSection title={t('platformAccount.profile')} divider={false} contentClassName="space-y-3"><p className="text-[var(--status-error-text)]" role="alert">{error ? t(error) : t('platformAccount.profileFailed')}</p><Button variant="outline" onClick={() => void refresh()}>{t('platformAccount.refresh')}</Button></SettingsSection>;
 
   return <>
-    <SettingsSection title={t('platformAccount.profile')} divider={false} contentClassName="space-y-5" headerAction={<Button variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refresh')}</Button>}>
-      <p className="min-h-5 text-[var(--status-error-text)]" role={error ? 'alert' : 'status'}>{error ? t(error) : null}</p>
-      <SettingsTwoColumn>
-        <div className="space-y-4" data-settings-item="platform-account.avatar">
-          <div className="flex items-center gap-3">
-            {avatarURL ? <img src={avatarURL} alt={t('platformAccount.avatar')} className="size-14 rounded-full object-cover" /> : <div aria-hidden className="oc-tile-inset size-14 rounded-full" />}
-            <div className="min-w-0">
-              <p className="font-medium text-foreground">{t('platformAccount.avatar')}</p>
-              <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.avatarHint')}</p>
-            </div>
-          </div>
-          <SettingsStackedField label={<label htmlFor="unihub-profile-avatar">{t('platformAccount.avatarUpload')}</label>}>
-            <Input id="unihub-profile-avatar" type="file" accept="image/png,image/jpeg" onChange={(event) => void uploadAvatar(event)} disabled={busy} className="max-w-[16rem]" />
-          </SettingsStackedField>
+    <SettingsSection divider={false} className="pb-2" contentClassName="space-y-6">
+      <div className="flex items-center gap-4" data-settings-item="platform-account.avatar">
+        {avatarURL
+          ? <img src={avatarURL} alt={t('platformAccount.avatar')} className="size-16 shrink-0 rounded-full object-cover" />
+          : <div aria-hidden className="oc-tile-inset flex size-16 shrink-0 items-center justify-center rounded-full"><Icon name="user" className="size-7 text-muted-foreground" /></div>}
+        <div className="min-w-0 space-y-2">
+          <Button type="button" variant="outline" disabled={busy} aria-describedby="unihub-profile-avatar-hint" onClick={() => avatarInputRef.current?.click()}>{t('platformAccount.avatarUpload')}</Button>
+          <p id="unihub-profile-avatar-hint" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.avatarHint')}</p>
         </div>
+        <input ref={avatarInputRef} id="unihub-profile-avatar" type="file" accept="image/png,image/jpeg" aria-label={t('platformAccount.avatarUpload')} onChange={(event) => void uploadAvatar(event)} disabled={busy} hidden />
+      </div>
+      <div className="max-w-[36rem] space-y-5">
+        <SettingsTwoColumn className="gap-4 @xl:grid-cols-2">
+          <SettingsStackedField label={t('platformAccount.username')} info={t('platformAccount.usernameFixed')}>
+            <p id="unihub-profile-username" dir="auto" className="break-words typography-ui-label">{profile.username}</p>
+          </SettingsStackedField>
+          <SettingsStackedField label={t('platformAccount.profileEmail')}>
+            <p id="unihub-profile-email" dir="auto" className="break-all typography-ui-label">{profile.email}</p>
+          </SettingsStackedField>
+        </SettingsTwoColumn>
         <form onSubmit={(event) => void saveProfile(event)} className="space-y-4">
-          <SettingsStackedField label={<label htmlFor="unihub-profile-username">{t('platformAccount.username')}</label>} description={t('platformAccount.usernameFixed')}><Input id="unihub-profile-username" value={profile.username} readOnly /></SettingsStackedField>
-          <SettingsStackedField label={<label htmlFor="unihub-profile-display-name">{t('platformAccount.profileName')}</label>} settingsItem="platform-account.profile"><Input id="unihub-profile-display-name" value={displayName} maxLength={160} onChange={(event) => setDisplayName(Array.from(event.target.value).slice(0, 80).join(''))} disabled={busy} /></SettingsStackedField>
-          <SettingsStackedField label={<label htmlFor="unihub-profile-email">{t('platformAccount.profileEmail')}</label>}><Input id="unihub-profile-email" value={profile.email} readOnly /></SettingsStackedField>
-          <Button type="submit" disabled={busy || displayName.trim() === profile.displayName}>{t('platformAccount.saveProfile')}</Button>
+          <SettingsStackedField label={<label htmlFor="unihub-profile-display-name">{t('platformAccount.profileName')}</label>} settingsItem="platform-account.profile">
+            <Input id="unihub-profile-display-name" value={displayName} maxLength={160} onChange={(event) => setDisplayName(Array.from(event.target.value).slice(0, 80).join(''))} disabled={busy} />
+          </SettingsStackedField>
+          <div className="flex items-center gap-2">
+            <Button type="submit" disabled={busy || displayName.trim() === profile.displayName}>{t('platformAccount.saveProfile')}</Button>
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refresh')}</Button>
+          </div>
         </form>
-      </SettingsTwoColumn>
+      </div>
+      <p className="min-h-5 typography-meta text-[var(--status-error-text)]" role={error ? 'alert' : 'status'}>{error ? t(error) : null}</p>
     </SettingsSection>
-    <SettingsSection title={t('platformAccount.security')} contentClassName="space-y-4" settingsItem="platform-account.password">
-      <form onSubmit={(event) => void changePassword(event)} className="max-w-[24rem] space-y-4">
+    <SettingsSection title={t('platformAccount.security')} className="py-6" contentClassName="space-y-4" settingsItem="platform-account.password">
+      <form onSubmit={(event) => void changePassword(event)} className="max-w-[36rem] space-y-4">
         <SettingsStackedField label={<label htmlFor="unihub-current-password">{t('platformAccount.currentPassword')}</label>}><Input id="unihub-current-password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} disabled={busy} required /></SettingsStackedField>
-        <SettingsStackedField label={<label htmlFor="unihub-new-password">{t('platformAccount.newPassword')}</label>}><Input id="unihub-new-password" type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} disabled={busy} minLength={8} maxLength={128} required /></SettingsStackedField>
-        <SettingsStackedField label={<label htmlFor="unihub-confirm-password">{t('platformAccount.confirmPassword')}</label>}><Input id="unihub-confirm-password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={busy} minLength={8} maxLength={128} required /></SettingsStackedField>
-        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.passwordChangeHint')}</p>
-        <Button type="submit" disabled={busy}>{t('platformAccount.changePassword')}</Button>
+        <SettingsTwoColumn className="gap-4 @xl:grid-cols-2">
+          <SettingsStackedField label={<label htmlFor="unihub-new-password">{t('platformAccount.newPassword')}</label>}><Input id="unihub-new-password" type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} disabled={busy} minLength={8} maxLength={128} required /></SettingsStackedField>
+          <SettingsStackedField label={<label htmlFor="unihub-confirm-password">{t('platformAccount.confirmPassword')}</label>}><Input id="unihub-confirm-password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={busy} minLength={8} maxLength={128} required /></SettingsStackedField>
+        </SettingsTwoColumn>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Button type="submit" disabled={busy}>{t('platformAccount.changePassword')}</Button>
+          <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.passwordChangeHint')}</p>
+        </div>
       </form>
     </SettingsSection>
   </>;

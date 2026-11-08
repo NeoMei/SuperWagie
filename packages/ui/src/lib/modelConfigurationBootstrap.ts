@@ -21,6 +21,7 @@ const modelSchema = z.object({
 const discoverySchema = z.object({
   discoveryId: z.string().min(1),
   source: z.enum(['session', 'imported-key']),
+  fundingMode: z.enum(['credits', 'prepaid_cash']).optional(),
   accountId: z.string().nullable().optional(),
   instanceId: z.string().nullable().optional(),
   originProductId: z.string().optional(),
@@ -86,6 +87,7 @@ type ModelBootstrapRollback = { operationId: string; rolledBack: boolean; revisi
 type ModelBootstrapSource = z.infer<typeof discoverySchema>['source'];
 export type ModelBootstrapMode = z.infer<typeof previewSchema>['mode'];
 type BootstrapRequestBody = {
+  fundingMode?: 'credits' | 'prepaid_cash';
   source?: ModelBootstrapSource;
   key?: string;
   models?: string[];
@@ -131,10 +133,10 @@ const postJson = async <T>(path: string, body: BootstrapRequestBody, schema: z.Z
   method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 }), schema);
 
-export const discoverModelBootstrap = (input: { source: ModelBootstrapSource; key?: string }, signal?: AbortSignal): Promise<ModelBootstrapDiscovery> =>
+export const discoverModelBootstrap = (input: { source: ModelBootstrapSource; key?: string; fundingMode?: 'credits' | 'prepaid_cash' }, signal?: AbortSignal): Promise<ModelBootstrapDiscovery> =>
   postJson('/api/model-configuration/bootstrap/discover', input, discoverySchema, signal);
 
-export const issueModelBootstrapKey = (input: { models?: string[]; expiresAt?: string }, signal?: AbortSignal): Promise<ModelBootstrapDiscovery> =>
+export const issueModelBootstrapKey = (input: { models?: string[]; expiresAt?: string; fundingMode?: 'credits' | 'prepaid_cash' }, signal?: AbortSignal): Promise<ModelBootstrapDiscovery> =>
   postJson('/api/model-configuration/bootstrap/issue-key', input, discoverySchema, signal);
 
 export const previewModelBootstrap = (input: { discoveryId: string; revision: number; mode: ModelBootstrapMode; purposes?: ModelPurposeId[]; selections?: Record<string, string> }, signal?: AbortSignal): Promise<ModelBootstrapPreview> =>

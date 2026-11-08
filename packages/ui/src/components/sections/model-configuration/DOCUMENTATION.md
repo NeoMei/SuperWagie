@@ -103,3 +103,11 @@ explicit and do not count as passed. A failed status read stops the running
 presentation and offers read-only result refresh; it never repeats a model
 request. Closing the wizard clears its scheduled status poll. Existing expensive
 probe exclusions, test ordering and billing behavior remain unchanged.
+
+Native account-key setup and quick setup expose an explicit cash or credits
+choice. Changing the choice performs no credential mutation. Credits activation
+requires server-confirmed native-credit readiness; a missing readiness field is
+unavailable. The server preserves separate cash and credits receipts, and applies
+only successful probes from an explicit setup. Neither a failed credit probe nor
+a funding refusal switches to cash. Credit purchase guidance opens membership or
+add-ons; cash guidance retains its previous cash-recharge destination.
