@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.76 for macOS Apple silicon and
+The website targets release 2.7.77 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
@@ -25,6 +25,14 @@ available and supports the required purpose. Each supported function is tested
 with the same key before its connection is applied. Tests appear as they start,
 with up to three running together. A missing compatible model has an explicit
 unavailable result. Models without native prices remain unavailable.
+
+Version 2.7.77 saves daily platform call totals in application data during
+normal authenticated use and retains them across restarts. The first sync fills
+history in background batches; later calendar reads reuse those saved days.
+Counts use full server totals with no 5,000-record scan cap. Missing dates stay
+unknown, while partial observations and counts awaiting verification retain
+their partial status. Dates use UTC, and separately configured keys from other
+providers are outside this calendar.
 
 Version 2.7.76 handles a declined refund without discarding a fulfilled purchase. The order explains that no refund occurred and permits later independent purchases once fulfillment is confirmed. Payment channels and key funding remain subject to server readiness.
 
@@ -69,7 +77,7 @@ Conversation learning is opt-in. Once enabled, completed OpenCode turns are
 distilled in the background and indexed for project retrieval. Existing session
 history requires explicit processing. Methodology candidates require confirmation.
 
-Installer links point to the v2.7.76 GitHub Release assets. The unified release
+Installer links point to the v2.7.77 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 
