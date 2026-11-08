@@ -11,11 +11,15 @@
 <p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable.</p>
 
 <h2>Continue setup with an activated key</h2>
-<p>If the key is activated but model configuration failed, update to 2.7.73 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
+<p>If the key is activated but model configuration failed, update to 2.7.74 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
 
 <h2>Test passed, connection incomplete</h2>
 <p>A passed embedding test means the new connection can return vectors. Applying it to an existing library index also requires a compatibility check. The original configuration and index remain while that check is pending.</p>
 <p>A connection change with the same model and dimensions can preserve existing vectors through a controlled migration after compatibility checks and a backup. Files do not need to be imported again for that migration. Changing the model or dimensions requires assessing migration or regenerating the index. Installing an update does not migrate or rebuild an index automatically.</p>
+
+<h2>Auto model selection</h2>
+<p>Enable Auto in Settings → Routing and choose a fallback from the currently available models. Select the fallback again if its model is removed or its provider changes.</p>
+<p>Version 2.7.74 checks model choices before sending. An unavailable fallback prompts you to choose one in Routing settings. If a category model is unavailable, Auto uses the configured fallback and keeps that category's selected agent. It does not substitute a same-name model from another provider. Installing the update retains existing routing settings.</p>
 
 <h2>Add your own provider</h2>
 <p>You can also open Settings → Model providers, add a provider and API key, and choose a default model. A session can switch models individually; new sessions use the default selection.</p>
