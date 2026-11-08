@@ -79,10 +79,14 @@ const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBinding
       return { ...captured, serviceId: 'fixture-service', request: async (route, init) => {
         if (captured.authSession !== actor.authSession) throw Object.assign(new Error('changed'), { code: 'platform_session_changed', status: 409 });
         if (expired) throw Object.assign(new Error('expired'), { code: 'platform_session_expired', status: 401 });
-        if (route === '/v1/capabilities') return { native_credits: controls.nativeCredits ?? { ready: false } };
+        if (route === '/v1/capabilities') {
+          if (controls.capabilitiesError) throw controls.capabilitiesError;
+          return controls.legacyCapabilities ? {} : { native_credits: controls.nativeCredits ?? { ready: false } };
+        }
         if (route.endsWith('/model-discovery')) {
           counts.discover++;
           controls.discoveryRequests = [...(controls.discoveryRequests ?? []), init.body ? JSON.parse(init.body) : null];
+          if (controls.legacyCapabilities && Object.keys(JSON.parse(init.body)).some((field) => field !== 'model_scope')) throw new ModelConfigurationError('platform_request_invalid', 400);
           if (controls.creditDefaultNoMembership) {
             controls.countsAtDiscovery = { ...counts };
             if ((JSON.parse(init.body).funding_mode ?? 'credits') === 'credits') throw new ModelConfigurationError('subscription_required', 403);
@@ -168,6 +172,7 @@ afterEach(async () => { await Promise.all(directories.splice(0).map((directory) 
 describe('persistent account key activation', () => {
   it.each([undefined, 'prepaid_cash'])('keeps cash discovery independent of a credit-default profile for funding %s', async (fundingMode) => {
     const f = await fixture({ nativeDiscoveryContract: true });
+    f.controls.nativeCredits = { ready: true };
     f.controls.creditDefaultNoMembership = true;
     const runtime = f.createRuntime();
     const discovery = await runtime.discover({ ...input, source: 'session', fundingMode });
@@ -189,6 +194,27 @@ describe('persistent account key activation', () => {
     expect(f.controls.countsAtDiscovery).toEqual({ discover: 1, issue: 0, configure: 0, probe: 0 });
     expect(f.controls.issuePayload.funding_mode).toBe('prepaid_cash');
     expect(f.counts).toEqual({ discover: 1, issue: 1, configure: 0, probe: 0 });
+    expect(f.probeCalls).toEqual([]);
+  });
+
+  it('prepares a legacy cash key with one supported issuance and no provider calls', async () => {
+    const f = await fixture({ nativeDiscoveryContract: true });
+    f.controls.legacyCapabilities = true;
+    const credential = await f.create().prepareCredential(input);
+    expect(credential.funding_mode).toBe('prepaid_cash');
+    expect(f.controls.discoveryRequests).toEqual([{ model_scope: 'llmrouter_available' }]);
+    expect(f.controls.issuePayload.funding_mode).toBe('prepaid_cash');
+    expect(f.counts).toEqual({ discover: 1, issue: 1, configure: 0, probe: 0 });
+    expect(f.probeCalls).toEqual([]);
+    await expect(f.create().prepareCredential({ ...input, fundingMode: 'credits' })).rejects.toMatchObject({ code: 'native_credits_unavailable' });
+    expect(f.counts.issue).toBe(1);
+  });
+
+  it('does not issue a cash key when protocol capabilities cannot be read', async () => {
+    const f = await fixture();
+    f.controls.capabilitiesError = new ModelConfigurationError('platform_unavailable', 502);
+    await expect(f.create().prepareCredential(input)).rejects.toMatchObject({ code: 'platform_unavailable' });
+    expect(f.counts).toEqual({ discover: 0, issue: 0, configure: 0, probe: 0 });
     expect(f.probeCalls).toEqual([]);
   });
 

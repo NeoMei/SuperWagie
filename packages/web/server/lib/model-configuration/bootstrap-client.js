@@ -1,5 +1,5 @@
 import { llmRouterInferenceApiUrl } from './bootstrap-endpoints.js';
-import { fundingModeSchema, nativeCreditDiscoverySchema } from './native-credit-contract.js';
+import { fundingModeSchema, nativeCreditCapabilitiesSchema, nativeCreditDiscoverySchema } from './native-credit-contract.js';
 import { parseAccountKeyCatalog } from './account-key-catalog.js';
 
 const fail = (code, status) => { throw Object.assign(new Error(code), { code, status }); };
@@ -10,7 +10,13 @@ export const createUniHubBootstrapClient = ({ platformAccount, env = process.env
       if (!identity || !accountId) return fail('platform_account_required', 409);
       const mode = fundingModeSchema.safeParse(fundingMode ?? 'prepaid_cash');
       if (!mode.success) return fail('model_configuration_invalid_input', 400);
-      const input = { model_scope: 'llmrouter_available', funding_mode: mode.data };
+      const capabilities = nativeCreditCapabilitiesSchema.safeParse(await platformAccount.request(identity, '/v1/capabilities'));
+      if (!capabilities.success) return fail('account_key_catalog_invalid', 502);
+      if (mode.data === 'credits' && capabilities.data.native_credits?.ready !== true) return fail('native_credits_unavailable', 409);
+      const input = { model_scope: 'llmrouter_available' };
+      // The legacy cash-only discovery DTO rejects funding_mode. Presence of
+      // the native-credit capability identifies the funding-aware protocol.
+      if (capabilities.data.native_credits !== undefined) input.funding_mode = mode.data;
       const catalog = await platformAccount.request(identity, `/v1/accounts/${encodeURIComponent(accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
       if (fundingMode === 'credits' && !nativeCreditDiscoverySchema.safeParse(catalog).success) return fail('account_key_catalog_invalid', 502);
       return { ...catalog, models: parseAccountKeyCatalog({ object: 'list', data: catalog.models }) };

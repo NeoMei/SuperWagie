@@ -121,7 +121,8 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
   const readNativeCredits = async (ctx) => {
     const capabilities = parse(nativeCreditCapabilitiesSchema, await ctx.session.request('/v1/capabilities'), 'account_key_catalog_invalid', 502);
     ctx.assertSession();
-    ctx.nativeCredits = capabilities.native_credits ?? { ready: false };
+    ctx.fundingModeSupported = capabilities.native_credits !== undefined;
+    if (ctx.fundingMode === 'credits') ctx.nativeCredits = capabilities.native_credits ?? { ready: false };
   };
   const requireCredits = async (ctx) => {
     if (ctx.fundingMode !== 'credits') return;
@@ -205,7 +206,9 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       const models = await readKeyCatalog({ apiKey, baseUrl: record.baseUrl, instanceId: record.instanceId, assertCurrent: ctx.assertCurrent, fetchImpl, env, enterpriseOptions });
       payload = { account_id: record.accountId, origin_product_id: 'superwagie', instance_id: record.instanceId, models };
     } else {
-      const input = { model_scope: 'llmrouter_available', funding_mode: ctx.fundingMode };
+      if (ctx.fundingModeSupported === undefined) await readNativeCredits(ctx);
+      const input = { model_scope: 'llmrouter_available' };
+      if (ctx.fundingModeSupported) input.funding_mode = ctx.fundingMode;
       payload = await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
     }
     if (!record && ctx.fundingMode === 'credits') parse(nativeCreditDiscoverySchema, payload, 'account_key_catalog_invalid', 502);

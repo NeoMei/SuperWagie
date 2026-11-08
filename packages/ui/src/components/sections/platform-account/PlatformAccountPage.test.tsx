@@ -771,7 +771,7 @@ describe('PlatformAccountPage', () => {
   });
   test('formats CREDIT/6 exactly and renders the selected account name and kind', async () => {
     useI18nStore.getState().setLocale('en'); signedIn.credits.available = '2999920'; await render();
-    expect(host.textContent).toContain('2.99992'); expect(host.textContent).toContain('0.000007');
+    expect(host.textContent).toContain('2.99992'); expect(host.textContent).not.toContain('0.000007');
     const picker = host.querySelector('[aria-label="Billing account"]');
     expect(picker?.textContent).toContain('Team A'); expect(picker?.textContent).toContain('Team'); expect(picker?.textContent).not.toContain('team-a');
   });
@@ -987,7 +987,7 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).not.toContain('Session expires');
     await chooseOffer();
     expect(host.textContent).toContain('Team A');
-    await act(async () => button('Top up model balance').click());
+    await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
     expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('Model balance');
     expect(host.querySelector('[role="radiogroup"]')).toBeNull();
     expect(host.textContent).not.toContain('Buy Buy extra credits for CNY 10.00');
@@ -1038,7 +1038,7 @@ describe('PlatformAccountPage', () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
     expect(host.querySelector('[data-settings-item="platform-account.recharge"] input')).toBeNull();
     expect(rechargeRequests).toBe(0);
-    expect(host.textContent).toContain('CNY 9007199254.740993');
+    expect(host.textContent).not.toContain('CNY 9007199254.740993');
     await chooseOffer();
     expect(button('Buy Buy extra credits for CNY 10.00').disabled).toBe(true);
     await act(async () => button('Fill recharge for this offer').click());
@@ -1143,7 +1143,7 @@ describe('PlatformAccountPage', () => {
     await act(async () => button('Manage membership').click());
     await act(async () => button('Annual').click()); await chooseOffer('Annual membership');
     expect(host.textContent).toContain('Billing period'); expect(host.textContent).toContain('Monthly credits');
-    expect(host.textContent).not.toContain('0 months'); expect(host.textContent).toContain('Account balance');
+    expect(host.textContent).not.toContain('0 months'); expect(host.textContent).not.toContain('Account balance');
     expect(button('Check upgrade price').disabled).toBe(false);
     await tab('Orders');
     expect(host.textContent).toContain('Payment: Paid · Fulfillment: Fulfilled · Refund: None');

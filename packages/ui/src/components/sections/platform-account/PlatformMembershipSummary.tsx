@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { SettingsSection, SettingsFieldRow, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 import type { PlatformAccountState } from '@/lib/platformAccount';
 import { formatPlatformPoints } from '@/lib/platformCommerce';
@@ -34,33 +34,31 @@ export const PlatformMembershipSummary: React.FC<{
           <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.paidThrough', { date: new Date(membership.paid_through).toLocaleDateString() })}{` · ${membership.status === 'refunded' ? t('platformAccount.membershipStatusRefunded') : membership.status === 'active' && Date.parse(membership.paid_through) > now ? t('platformAccount.membershipStatusActive') : Date.parse(membership.paid_through) <= now ? t('platformAccount.membershipExpired') : t('platformAccount.membershipStatusOther', { status: membership.status })}`}</p>
         </div>)}
       </div>
-      {actions && <Button size="sm" variant="outline" aria-pressed={actions.membershipOpen} onClick={actions.openMembership}>{t(active ? 'platformAccount.manageMembership' : 'platformAccount.membershipPlans')}</Button>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" aria-pressed={actions.membershipOpen} onClick={actions.openMembership}>{t(active ? 'platformAccount.manageMembership' : 'platformAccount.membershipPlans')}</Button>
+        {showPoints && <Button size="sm" aria-pressed={actions.addonOpen} onClick={actions.openAddon}>{t('platformAccount.addonPlans')}</Button>}
+      </div>}
     </div>
-    {showPoints && <><div className="flex flex-wrap items-center justify-between gap-4">
-      <div className="min-w-0 space-y-1">
-        <p className="typography-ui-label">{t('platformAccount.available')}</p>
-        <p dir="auto" className="break-all text-3xl font-medium tabular-nums">{formatPlatformPoints(account.credits.available)}</p>
-        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.pointsUseOrder')}</p>
+    {showPoints && <>
+    <dl className={`grid gap-3 ${availableBatches === undefined ? 'grid-cols-1' : 'grid-cols-2 @3xl:grid-cols-4'}`} aria-label={t('platformAccount.remainingPoints')}>
+      <div className="oc-tile flex min-h-36 min-w-0 flex-col rounded-lg p-4">
+        <dt className="typography-ui-label text-muted-foreground">{t('platformAccount.remainingPoints')}</dt>
+        <dd dir="auto" className="mt-3 break-all text-3xl font-semibold tracking-tight tabular-nums">{formatPlatformPoints(account.credits.available)}</dd>
+        <dd className={`mt-auto pt-3 ${SETTINGS_HELPER_CLASS}`}>{t('platformAccount.pointsUseOrder')}</dd>
       </div>
-      {actions && <Button aria-pressed={actions.addonOpen} onClick={actions.openAddon}>{t('platformAccount.addonPlans')}</Button>}
-    </div>
-    {!active && BigInt(account.credits.available) > 0n && <p role="status" className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]">{t('platformAccount.pointsNeedSubscription')}</p>}
-    <div>
-      {availableBatches === undefined ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.batchDetailsUnavailable')}</p> : kinds.map((kind) => {
+      {availableBatches !== undefined && kinds.map((kind) => {
         const batches = availableBatches.filter((batch) => batch.kind === kind);
         const available = batches.reduce((sum, batch) => sum + BigInt(batch.available), 0n);
-        const nextExpiry = batches.filter((batch) => BigInt(batch.available) > 0n).map((batch) => batch.expiresAt).sort()[0];
-        return <SettingsFieldRow key={kind} label={t(`platformAccount.pointsSource.${kind}`)} description={nextExpiry ? t('platformAccount.pointsExpire', { date: new Date(nextExpiry).toLocaleDateString() }) : undefined}>
-          <span dir="auto" className="tabular-nums">{t('platformAccount.pointsAmount', { points: formatPlatformPoints(available.toString()) })}</span>
-        </SettingsFieldRow>;
+        const nextExpiry = batches.filter((batch) => BigInt(batch.available) > 0n).map((batch) => batch.expiresAt).sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+        return <div key={kind} className="oc-tile flex min-h-36 min-w-0 flex-col rounded-lg p-4">
+          <dt className="typography-ui-label text-muted-foreground">{t(`platformAccount.pointsSource.${kind}`)}</dt>
+          <dd dir="auto" className="mt-3 break-all text-2xl font-medium tracking-tight tabular-nums">{formatPlatformPoints(available.toString())}</dd>
+          {nextExpiry && <dd className={`mt-auto pt-3 ${SETTINGS_HELPER_CLASS}`}>{t('platformAccount.pointsExpire', { date: new Date(nextExpiry).toLocaleDateString() })}</dd>}
+        </div>;
       })}
-      <SettingsFieldRow label={t('platformAccount.reserved')} info={t('platformAccount.creditBenefitHint')}><span dir="auto" className="tabular-nums">{formatPlatformPoints(account.credits.reserved)}</span></SettingsFieldRow>
-    </div>
-    {availableBatches && availableBatches.some((batch) => BigInt(batch.available) > 0n) && <details>
-      <summary className="cursor-pointer typography-ui-label">{t('platformAccount.pointBatches')}</summary>
-      <div className="pt-2">{availableBatches.filter((batch) => BigInt(batch.available) > 0n).map((batch) => <SettingsFieldRow key={batch.id} label={t(`platformAccount.pointsSource.${batch.kind}`)} description={t('platformAccount.pointsExpire', { date: new Date(batch.expiresAt).toLocaleDateString() })}>
-        <span dir="auto" className="tabular-nums">{t('platformAccount.pointsAmount', { points: formatPlatformPoints(batch.available) })}</span>
-      </SettingsFieldRow>)}</div>
-    </details>}</>}
+    </dl>
+    {availableBatches === undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.batchDetailsUnavailable')}</p>}
+    {!active && BigInt(account.credits.available) > 0n && <p role="status" className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]">{t('platformAccount.pointsNeedSubscription')}</p>}
+    </>}
   </SettingsSection>;
 };

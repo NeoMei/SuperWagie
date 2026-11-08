@@ -118,6 +118,8 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
   const discover = async ({ source, key, identity, owner, fundingMode: requestedFundingMode } = {}) => {
     parse(sourceSchema, source);
     if (source === 'imported-key' && requestedFundingMode !== undefined) fail('model_configuration_invalid_input');
+    // Keep the user's mode explicit in local records. The UniHub client owns
+    // capability negotiation for legacy versus funding-aware discovery DTOs.
     const fundingMode = source === 'session' ? parse(fundingModeSchema, requestedFundingMode ?? 'prepaid_cash') : undefined;
     if (source === 'imported-key' && (!key || key.length > 8192)) return fail('model_configuration_invalid_input');
     const baseUrl = source === 'imported-key' ? llmRouterInferenceApiUrl(env) : null;

@@ -215,10 +215,6 @@ export const PlatformAccountCommerce: React.FC<{
     membershipOpen: buyingTask === 'membership',
     addonOpen: buyingTask === 'addon',
   });
-  const openWallet = (product: Product) => {
-    setBuyingTask((task) => task === 'recharge' && productId === product ? null : 'recharge');
-    setProductId(product);
-  };
   const requestUpgrade = async () => {
     if (!currentMembership || !selectedOffer || busy || unresolved) return;
     const version = ++generation.current;
@@ -264,7 +260,6 @@ export const PlatformAccountCommerce: React.FC<{
     </SettingsControlGroup>}
   </SettingsSection></>;
 
-  const wallets = ['', 'superwagie', 'llmrouter'].flatMap((product) => state.wallets?.filter((item) => item.productId === product) ?? []);
   const recoverableIntents = state.intents.filter((intent) => intent.status !== 'APPLIED' && intent.status !== 'FAILED');
   const historyIntents = state.intents.filter((intent) => intent.productId === 'superwagie' || intent.productId === 'llmrouter' || (intent.status !== 'APPLIED' && intent.status !== 'FAILED'));
   const orders = state.orders?.filter((order) => order.productId === 'superwagie' || order.productId === 'llmrouter') ?? [];
@@ -360,19 +355,6 @@ export const PlatformAccountCommerce: React.FC<{
       </SettingsControlGroup>}
       </>}
     </SettingsSection>
-      {view === 'overview' && finance && <details className="min-w-0 @xl:col-span-2" open={buyingTask === 'recharge'}>
-        <summary className="cursor-pointer py-2 typography-ui-label">{t('platformAccount.legacyBalances')}</summary>
-        <SettingsSection divider={false} className="min-w-0 space-y-3 py-2" contentClassName="min-w-0 space-y-3">
-        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.legacyBalancesHint')}</p>
-        {state.wallets === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.walletsUnavailable')}</p> : wallets.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noWallets')}</p> : wallets.map((item) => <div key={item.productId} className="min-w-0 space-y-1">
-            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start gap-3">
-              <span className="min-w-0 break-words typography-ui-label">{walletName(item.productId)}</span>
-              <span dir="auto" className="min-w-0 break-all text-end font-medium tabular-nums">{money(item.amount)}</span>
-            </div>
-            {(item.productId === 'superwagie' || item.productId === 'llmrouter') && <div className="flex min-w-0 justify-end"><Button size="sm" variant="ghost" className="h-auto min-h-8 max-w-full whitespace-normal text-start" disabled={busy || !state.payments.canRecharge} aria-pressed={buyingTask === 'recharge' && productId === item.productId} onClick={() => openWallet(item.productId === 'superwagie' ? 'superwagie' : 'llmrouter')}>{t(item.productId === 'llmrouter' ? 'platformAccount.modelCashTopup' : 'platformAccount.recharge')}</Button></div>}
-          </div>)}
-        {state.wallets !== null && !wallets.some((item) => item.productId === 'llmrouter') && <Button size="sm" className="h-auto min-h-8 max-w-full whitespace-normal text-start" disabled={busy || !state.payments.canRecharge} aria-pressed={buyingTask === 'recharge' && productId === 'llmrouter'} onClick={() => openWallet('llmrouter')}>{t('platformAccount.modelCashTopup')}</Button>}
-      </SettingsSection></details>}
     {finance && view === 'orders' && <SettingsSection description={t('platformAccount.historyScope')} divider={false} className="pt-0" contentClassName="space-y-4">
       {historyIntents.length === 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noIntents')}</p>}
       {historyIntents.map(intentRow)}

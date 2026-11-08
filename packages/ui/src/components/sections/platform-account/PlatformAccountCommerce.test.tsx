@@ -108,12 +108,10 @@ test('overview opens a buying task deliberately and preserves its offer while vi
 
 test('model recharge navigation opens the model wallet without creating a payment', async () => {
   await render('overview');
-  expect(host?.textContent).toContain('Account balance');
-  expect(host?.textContent).toContain('Subscription balance');
-  expect(host?.textContent).toContain('Model balance');
-  expect(host?.textContent).toContain('1.234567');
-  expect(host?.textContent).toContain('30.00');
-  expect(host?.textContent).toContain('86.40');
+  expect(host?.textContent).not.toContain('Existing cash balances');
+  expect(host?.textContent).not.toContain('Account balance');
+  expect(host?.textContent).not.toContain('Subscription balance');
+  expect(host?.textContent).not.toContain('Model balance');
   expect(/unihub|llmrouter|other-service|999999/i.test(host?.textContent ?? '')).toBe(false);
   expect(host?.querySelector('#unihub-recharge-amount')).toBeNull();
   await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
@@ -159,7 +157,7 @@ test('an unsubscribed account opens published plans without inventing candidate 
   expect(host?.textContent).toContain('No membership offers are published');
   expect(host?.querySelectorAll('[role="radio"]')).toHaveLength(0);
   expect(host?.textContent).not.toContain('39.00');
-  expect(host?.querySelector('details')?.open).toBe(false);
+  expect(host?.querySelector('details')).toBeNull();
   expect(writes).toBe(0);
 });
 
@@ -188,7 +186,8 @@ test('point runtime readiness blocks selection while leaving original balance re
   expect(host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Extra 200"]')?.disabled).toBe(true);
   expect(host?.textContent).toContain('not open for purchase yet');
   await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
-  expect(host?.querySelector('details')?.open).toBe(true);
+  expect(host?.querySelector('#unihub-recharge-amount')).not.toBeNull();
+  expect(host?.textContent).not.toContain('Existing cash balances');
   expect(writes).toBe(0);
 });
 
@@ -302,15 +301,31 @@ test('point summary separates authoritative batches and excludes frozen, future 
   useI18nStore.getState().setLocale('en');
   await act(async () => root?.render(<I18nProvider><PlatformMembershipSummary account={account} actions={null} /></I18nProvider>));
   expect(host.textContent).toContain('Subscription credits remaining');
-  expect(host.textContent).toContain('150 credits');
-  expect(host.textContent).toContain('60 credits');
+  const balances = Array.from(host.querySelectorAll('dl > div > dd:first-of-type')).map((element) => element.textContent);
+  expect(balances).toEqual(['220', '150', '60', '10']);
   expect(host.textContent).toContain('Other shared credits');
-  expect(host.textContent).toContain('10 credits');
-  expect(host.textContent).toContain('0.000007');
+  expect(host.textContent).not.toContain('Reserved credits');
+  expect(host.querySelector('details')).toBeNull();
+  expect(host.textContent).not.toContain('0.000007');
   expect(host.textContent).not.toContain('999');
   expect(host.textContent).toContain('Expired');
   expect(host.textContent).toContain('Remaining credits keep their original expiry');
   expect(host.textContent).not.toContain('Next grant');
+  expect(writes).toBe(0);
+});
+
+test('a source-unavailable account keeps its authoritative total without inventing source balances', async () => {
+  const account: Extract<PlatformAccountState, { status: 'signed-in' }> = {
+    status: 'signed-in', user: { id: 'actor-a', name: 'Alice', email: '' }, accounts: [], accountId: 'team-a', expiresAt: '2099-12-01T00:00:00Z',
+    membership: [], credits: { available: '9007199254740993', reserved: '7' }, consoleUrl: null, modelService: 'unavailable',
+  };
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  useI18nStore.getState().setLocale('en');
+  await act(async () => root?.render(<I18nProvider><PlatformMembershipSummary account={account} actions={null} /></I18nProvider>));
+  expect(Array.from(host.querySelectorAll('dl > div > dd:first-of-type')).map((element) => element.textContent)).toEqual(['9007199254.740993']);
+  expect(host.textContent).toContain('This server has not provided credit sources');
+  expect(host.textContent).not.toContain('Subscription credits remaining');
+  expect(host.textContent).not.toContain('Reserved credits');
   expect(writes).toBe(0);
 });
 

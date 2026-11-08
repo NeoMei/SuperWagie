@@ -15,7 +15,7 @@ const cleanup = [];
 const catalog = [{ id: 'fixture-embedding', operations: ['embedding'], dimensions: 2 }];
 afterEach(async () => { await Promise.all(cleanup.splice(0).map((close) => close())); });
 
-const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmbedding = false, beforeEmbedding, scopedKeys = false, prepareBindingChange } = {}) => {
+const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmbedding = false, beforeEmbedding, scopedKeys = false, prepareBindingChange, legacyCapabilities = false } = {}) => {
   const requests = [];
   const server = http.createServer(async (req, res) => {
     const chunks = [];
@@ -31,7 +31,11 @@ const fixture = async ({ models = catalog, knowledgeConsumer = false, invalidEmb
       res.setHeader('x-unihub-account-id', 'account-1');
       res.setHeader('x-unihub-instance-id', 'instance-1');
       res.end(JSON.stringify({ object: 'list', data: scopedKeys ? models.filter((model) => model.operations.includes(key === 'A' ? 'embedding' : 'rerank')) : req.headers.authorization === 'Bearer fixture-issued-private-key' ? [{ id: 'fixture-chat', name: 'Chat', operations: ['chat'] }, ...models] : models, base_url: 'https://untrusted.example.test/v1' }));
-    } else if (req.url === '/v1/accounts/account-1/model-discovery') res.end(JSON.stringify({ models: [{ id: 'fixture-chat', name: 'Chat', operations: ['chat'] }, ...models.map((model) => ({ name: model.id, ...model }))], origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1' }));
+    } else if (req.url === '/v1/capabilities') res.end(JSON.stringify(legacyCapabilities ? {} : { native_credits: { ready: false } }));
+    else if (req.url === '/v1/accounts/account-1/model-discovery') {
+      if (legacyCapabilities && Object.keys(request.body).some((field) => field !== 'model_scope')) { res.statusCode = 400; res.end(JSON.stringify({ error: 'invalid_request' })); return; }
+      res.end(JSON.stringify({ models: [{ id: 'fixture-chat', name: 'Chat', operations: ['chat'] }, ...models.map((model) => ({ name: model.id, ...model }))], origin_product_id: 'superwagie', account_id: 'account-1', instance_id: 'instance-1' }));
+    }
     else if (req.url === '/v1/accounts/account-1/api-keys') res.end(JSON.stringify({ id: 'key-1', token: 'fixture-issued-private-key', credential_kind: 'api_key', actor_id: 'user-1', account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'instance-1', model_scope: 'llmrouter_available', pricing_source: 'llmrouter_native', credential_version: 1, models: [], created_at: '2026-11-06T00:00:00Z', expires_at: null, revoked_at: null }));
     else if (knowledgeConsumer && req.url === '/v1/embeddings') {
       if (scopedKeys && key !== 'A') { res.statusCode = 403; res.end('{}'); return; }
@@ -438,6 +442,7 @@ describe('quick setup service endpoints', () => {
     expect(saved).not.toContain('private-key');
     expect(saved).not.toContain('untrusted.example.test');
     expect(requests).toEqual(source === 'imported' ? [{ method: 'GET', path: '/v1/models', body: null }] : [
+      { method: 'GET', path: '/v1/capabilities', body: null },
       { method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' } },
       { method: 'POST', path: '/v1/accounts/account-1/api-keys', body: { name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: 'instance-1', model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' } },
       { method: 'GET', path: '/v1/models', body: null },
@@ -450,7 +455,7 @@ describe('quick setup service endpoints', () => {
     const owner = { type: 'ui-session', token: 'fixture-owner' };
     const discovery = await runtime.discover({ source: 'session', identity, owner });
     const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'], identity, owner });
-    expect(requests).toEqual([{ method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' } }]);
+    expect(requests).toEqual([{ method: 'GET', path: '/v1/capabilities', body: null }, { method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' } }]);
     const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0, identity, owner });
     expect(applied.configuration.connections[0]).toMatchObject({ protocol: 'openai-compatible', baseUrl: env.OPENCHAMBER_LLMROUTER_API_URL });
     await runtime.issueKey({ identity, owner });
@@ -502,13 +507,59 @@ describe('quick setup service endpoints', () => {
 it('passes explicit credit funding to account discovery and validates conversion without calculating a price', async () => {
   const conversion = { version: 'fixture-credit-v3', numerator: '90071992547409931', denominator: '20000000000000000', rounding: 'lr-cumulative-ceil-v1' };
   const bodies = [];
-  const client = createUniHubBootstrapClient({ platformAccount: { request: async (_identity, _path, init) => {
+  const client = createUniHubBootstrapClient({ platformAccount: { request: async (_identity, pathname, init) => {
+    if (pathname === '/v1/capabilities') return { native_credits: { ready: true } };
     bodies.push(JSON.parse(init.body));
     return { model_scope: 'llmrouter_available', pricing_source: 'llmrouter_native_credit', native_credit_conversion: conversion, models: [{ id: 'chat', name: 'Chat', operations: ['chat'] }] };
   } } });
   const result = await client.discover({ source: 'session', identity: {}, accountId: 'account-1', fundingMode: 'credits' });
   expect(bodies).toEqual([{ model_scope: 'llmrouter_available', funding_mode: 'credits' }]);
   expect(result.native_credit_conversion).toEqual(conversion);
-  const invalid = createUniHubBootstrapClient({ platformAccount: { request: async () => ({ pricing_source: 'llmrouter_native', models: [] }) } });
+  const invalid = createUniHubBootstrapClient({ platformAccount: { request: async (_identity, pathname) => pathname === '/v1/capabilities' ? { native_credits: { ready: true } } : ({ pricing_source: 'llmrouter_native', models: [] }) } });
   await expect(invalid.discover({ source: 'session', identity: {}, accountId: 'account-1', fundingMode: 'credits' })).rejects.toMatchObject({ code: 'account_key_catalog_invalid' });
+});
+
+it('uses the strict legacy cash discovery DTO without issuing or retrying a request', async () => {
+  const { runtime, requests } = await fixture({ legacyCapabilities: true });
+  const result = await runtime.discover({ source: 'session', identity: {}, fundingMode: 'prepaid_cash' });
+  expect(result.fundingMode).toBe('prepaid_cash');
+  expect(requests).toEqual([
+    { method: 'GET', path: '/v1/capabilities', body: null },
+    { method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available' } },
+  ]);
+  await expect(runtime.discover({ source: 'session', identity: {}, fundingMode: 'credits' })).rejects.toMatchObject({ code: 'native_credits_unavailable' });
+  expect(requests.filter((entry) => entry.method === 'POST')).toHaveLength(1);
+});
+
+it('a failed or malformed capability read never guesses the legacy discovery protocol', async () => {
+  const paths = [];
+  const failure = Object.assign(new Error('offline'), { code: 'platform_unavailable' });
+  const client = createUniHubBootstrapClient({ platformAccount: { request: async (_identity, pathname) => { paths.push(pathname); throw failure; } } });
+  await expect(client.discover({ source: 'session', identity: {}, accountId: 'account-1' })).rejects.toBe(failure);
+  expect(paths).toEqual(['/v1/capabilities']);
+  const malformed = createUniHubBootstrapClient({ platformAccount: { request: async (_identity, pathname) => { paths.push(pathname); return { native_credits: null }; } } });
+  await expect(malformed.discover({ source: 'session', identity: {}, accountId: 'account-1' })).rejects.toMatchObject({ code: 'account_key_catalog_invalid' });
+  expect(paths).toEqual(['/v1/capabilities', '/v1/capabilities']);
+});
+
+it.each([{}, { native_credits: { ready: false } }])('blocks credit discovery before dispatch when readiness is absent: %j', async (capabilities) => {
+  const paths = [];
+  const client = createUniHubBootstrapClient({ platformAccount: { request: async (_identity, pathname) => { paths.push(pathname); return capabilities; } } });
+  await expect(client.discover({ source: 'session', identity: {}, accountId: 'account-1', fundingMode: 'credits' })).rejects.toMatchObject({ code: 'native_credits_unavailable' });
+  expect(paths).toEqual(['/v1/capabilities']);
+});
+
+it('does not retry a discovery rejection by removing the selected funding mode', async () => {
+  const calls = [];
+  const rejection = Object.assign(new Error('invalid_request'), { code: 'platform_request_invalid', status: 400 });
+  const client = createUniHubBootstrapClient({ platformAccount: { request: async (_identity, pathname, init) => {
+    calls.push({ pathname, body: init?.body ? JSON.parse(init.body) : null });
+    if (pathname === '/v1/capabilities') return { native_credits: { ready: false } };
+    throw rejection;
+  } } });
+  await expect(client.discover({ source: 'session', identity: {}, accountId: 'account-1', fundingMode: 'prepaid_cash' })).rejects.toBe(rejection);
+  expect(calls).toEqual([
+    { pathname: '/v1/capabilities', body: null },
+    { pathname: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' } },
+  ]);
 });

@@ -431,8 +431,14 @@ Client code validates conversion strings and their rounding version but performs
 no conversion arithmetic. The upstream billing runtime freezes the tariff for
 each admitted call. Quick-setup discoveries persist the selected funding mode
 through preview and apply; imported credentials retain their own authorization.
-Account discovery and native key creation always send the selected
-`funding_mode`, either `prepaid_cash` or `credits`. The owning backend normalizes
-omitted legacy client input to `prepaid_cash`; it never inherits a product's
-credit-default discovery policy for a cash selection. Discovery is read-only:
-no credential issuance, provider configuration or model probe occurs.
+Local discovery records and native key creation retain the selected
+`funding_mode`, either `prepaid_cash` or `credits`. Before account discovery,
+the client reads authoritative capabilities: presence of `native_credits`
+identifies UniHub's funding-aware discovery DTO and sends the selected mode,
+even when credit readiness is false. Legacy servers omit this capability and
+accept only `model_scope`; only cash discovery uses that legacy DTO. Credit
+discovery remains disabled without explicit readiness. A failed or malformed
+capability read is an error, and no HTTP400 retry guesses protocol support.
+The old native key-creation DTO already accepts explicit `prepaid_cash`, so
+creation keeps that field and its original no-retry issuance boundary.
+Discovery issues no credential, provider configuration or model probe.
