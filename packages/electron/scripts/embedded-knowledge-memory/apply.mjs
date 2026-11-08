@@ -6,7 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 const overlayRoot = path.dirname(fileURLToPath(import.meta.url));
 const packageImport = 'github.com/Tencent/WeKnora/internal/memoryindex';
-const goFiles = () => fs.readdirSync(path.join(overlayRoot, 'go')).filter((name) => name.endsWith('.go')).sort();
+const goFiles = (relative = '') => fs.readdirSync(path.join(overlayRoot, 'go', relative), { withFileTypes: true })
+  .flatMap((entry) => {
+    const name = relative ? `${relative}/${entry.name}` : entry.name;
+    return entry.isDirectory() ? goFiles(name) : entry.name.endsWith('.go') ? [name] : [];
+  }).sort();
 
 export function memoryIndexOverlayDigest() {
   const hash = crypto.createHash('sha256');

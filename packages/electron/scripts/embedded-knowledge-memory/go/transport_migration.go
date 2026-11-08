@@ -29,6 +29,8 @@ import (
 // The host owns source-policy eligibility; the frozen raw ledger binds its
 // decision to the exact writer-reserved snapshot used here.
 type TransportRequest struct {
+	LockPath             string                 `json:"lockPath,omitempty"`
+	LockOwner            string                 `json:"lockOwner,omitempty"`
 	Mode                 string                 `json:"mode"`
 	Database             string                 `json:"database"`
 	ConfigDir            string                 `json:"configDir"`
@@ -107,6 +109,7 @@ type TransportPreview struct {
 	LedgerDigest                string            `json:"ledgerDigest"`
 	SourceNodesDigest           string            `json:"sourceNodesDigest"`
 	ModelSpaceDigest            string            `json:"modelSpaceDigest"`
+	FullDatabaseDigest          string            `json:"fullDatabaseDigest"`
 	KnowledgeDigest             string            `json:"knowledgeDigest"`
 	RetainedDigest              string            `json:"retainedDigest"`
 	CatalogDigest               string            `json:"catalogDigest"`
@@ -314,6 +317,10 @@ func RunTransportMigration(ctx context.Context, db *gorm.DB, request TransportRe
 		if e := tx.Exec(`INSERT INTO hy_memory_receipts(tenant_id,kb_id,namespace,idempotency_key,request_hash,revision) VALUES(?,?,?,?,?,?)`, request.TenantID, request.KBID, transportLedgerNamespace, request.OperationID, requestHash+":"+post.Digest, post.LedgerRevision).Error; e != nil {
 			return e
 		}
+		globalAfterReceipt, e := transportFullDatabaseDigest(tx, request)
+		if e != nil || globalAfterReceipt != post.FullDatabaseDigest {
+			return errTransport
+		}
 		response = TransportResponse{Status: "applied", Preview: post, Copied: len(nodes), Revision: post.LedgerRevision}
 		return nil
 	})
@@ -322,6 +329,7 @@ func RunTransportMigration(ctx context.Context, db *gorm.DB, request TransportRe
 
 func transportRequestHash(r TransportRequest) string {
 	r.Mode = "apply"
+	r.LockOwner = "" // Ephemeral process ownership must not change exact crash replay.
 	b, _ := json.Marshal(r)
 	h := hmac.New(sha256.New, utils.GetAESKey())
 	h.Write(b)
@@ -551,6 +559,10 @@ func transportRead(tx *gorm.DB, r TransportRequest) (TransportSnapshot, Transpor
 		return fail()
 	}
 	p.RetainedDigest = hex.EncodeToString(retained.Sum(nil))
+	p.FullDatabaseDigest, e = transportFullDatabaseDigest(tx, r)
+	if e != nil {
+		return fail()
+	}
 	p.Digest = transportDigest(p)
 	snapshot.Model.ID = model.ID
 	snapshot.Model.Name = model.Name

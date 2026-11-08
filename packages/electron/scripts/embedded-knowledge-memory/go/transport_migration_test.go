@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/memoryindex/transportlock"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -222,8 +224,8 @@ func TestTransportRollbackAfterVectorAndLedgerFailure(t *testing.T) {
 			vector[1] = 1
 			_, err = s.Upsert(context.Background(), scope, p.Preview.Current.SpaceID, []Node{{ID: "second", Content: "second", Payload: json.RawMessage(`{}`), Vector: vector, Active: true}})
 			require.NoError(t, err)
-			r = preparedTransport(t, s, r)
 			require.NoError(t, s.db.Exec(trigger).Error)
+			r = preparedTransport(t, s, r)
 			_, err = RunTransportMigration(context.Background(), s.db, r)
 			require.Error(t, err)
 			require.NotContains(t, err.Error(), "private SQL")
@@ -263,6 +265,13 @@ func TestTransportCommandReadsWithoutSideEffectsOrProviderCalls(t *testing.T) {
 	require.NoError(t, err)
 	r.Expected = &p.Preview
 	r.BackupReceipt.BaselineDigest = p.Preview.Digest
+	r.Mode = "apply"
+	_, err = ExecuteTransportRequest(context.Background(), r)
+	require.Error(t, err, "unleased apply must fail before opening SQLite")
+	r.LockPath = filepath.Join(filepath.Dir(filepath.Dir(database)), "model-configuration.json.lock")
+	r.LockOwner = strconv.Itoa(os.Getppid()) + ":command-test"
+	require.NoError(t, transportlock.Acquire(r.LockPath, r.LockOwner))
+	defer transportlock.Release(r.LockPath, r.LockOwner)
 	r.Mode = "apply"
 	applied, err := ExecuteTransportRequest(context.Background(), r)
 	require.NoError(t, err)
@@ -448,5 +457,39 @@ func TestTransportTargetRejectsUnreviewedSpec(t *testing.T) {
 		r.TargetParameters.Spec = spec
 		_, err := RunTransportMigration(context.Background(), s.db, r)
 		require.Error(t, err)
+	}
+}
+
+func TestTransportWholeDatabaseDriftBeforeApplyAndAfterCommit(t *testing.T) {
+	for _, phase := range []string{"before", "after"} {
+		for _, mutation := range []string{
+			`INSERT INTO conversation_events VALUES('new',X'000102')`,
+			`INSERT INTO models SELECT 'other-model',tenant_id,name,type,source,parameters,is_builtin,managed_by,deleted_at FROM models WHERE id='model'`,
+			`CREATE TABLE unrelated_schema_change(id TEXT)`,
+			`PRAGMA user_version=42`,
+			`UPDATE raw_dates SET value='2020-01-01T00:00:00+00:00'`,
+			`INSERT INTO outside_fts(content) VALUES('new unrelated text')`,
+		} {
+			t.Run(phase+mutation, func(t *testing.T) {
+				s, r := transportFixture(t)
+				require.NoError(t, s.db.Exec(`CREATE TABLE conversation_events(id TEXT PRIMARY KEY,payload BLOB) WITHOUT ROWID`).Error)
+				require.NoError(t, s.db.Exec(`CREATE TABLE raw_dates(value DATETIME)`).Error)
+				require.NoError(t, s.db.Exec(`INSERT INTO raw_dates VALUES('2020-01-01T00:00:00Z')`).Error)
+				require.NoError(t, s.db.Exec(`CREATE VIRTUAL TABLE outside_fts USING fts5(content)`).Error)
+				r = preparedTransport(t, s, r)
+				if phase == "after" {
+					_, err := RunTransportMigration(context.Background(), s.db, r)
+					require.NoError(t, err)
+				}
+				require.NoError(t, s.db.Exec(mutation).Error)
+				_, err := RunTransportMigration(context.Background(), s.db, r)
+				require.Error(t, err)
+				if phase == "after" {
+					r.Mode = "verify"
+					_, err = RunTransportMigration(context.Background(), s.db, r)
+					require.Error(t, err)
+				}
+			})
+		}
 	}
 }

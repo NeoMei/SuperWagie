@@ -8,7 +8,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+
+	"github.com/Tencent/WeKnora/internal/memoryindex/transportlock"
 
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	sqlitevec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -24,6 +28,32 @@ var transportVecOnce sync.Once
 // The host attests process shutdown and restored backup before calling apply.
 func ExecuteTransportRequest(ctx context.Context, r TransportRequest) (TransportResponse, error) {
 	rejected := func() (TransportResponse, error) { return TransportResponse{}, errTransport }
+	if r.Mode == "lock-acquire" || r.Mode == "lock-release" {
+		if !strings.HasPrefix(r.LockOwner, strconv.Itoa(os.Getppid())+":") {
+			return rejected()
+		}
+		var err error
+		if r.Mode == "lock-acquire" {
+			err = transportlock.Acquire(r.LockPath, r.LockOwner)
+		} else {
+			err = transportlock.Release(r.LockPath, r.LockOwner)
+		}
+		if err != nil {
+			return rejected()
+		}
+		return TransportResponse{Status: r.Mode}, nil
+	}
+	if r.Mode == "apply" || r.Mode == "verify" {
+		expectedLock := filepath.Join(filepath.Dir(filepath.Dir(r.Database)), "model-configuration.json.lock")
+		if r.LockPath != expectedLock || !strings.HasPrefix(r.LockOwner, strconv.Itoa(os.Getppid())+":") {
+			return rejected()
+		}
+		release, err := transportlock.Hold(r.LockPath, r.LockOwner)
+		if err != nil {
+			return rejected()
+		}
+		defer release()
+	}
 	if !filepath.IsAbs(r.Database) || !filepath.IsAbs(r.ConfigDir) {
 		return rejected()
 	}

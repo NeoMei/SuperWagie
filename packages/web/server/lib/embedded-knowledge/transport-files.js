@@ -31,23 +31,11 @@ export async function atomicTransportWrite(file, bytes, mode = 0o600, expected) 
     await fs.rename(temporary, file); await syncTransportDirectory(path.dirname(file));
   } finally { await handle.close().catch(() => {}); await fs.unlink(temporary).catch((error) => { if (error.code !== 'ENOENT') throw error; }); }
 }
-export async function withTransportLock(file, task) {
-  const token = `${process.pid}:${randomUUID()}`; let handle;
-  try { handle = await fs.open(file, 'wx', 0o600); }
-  catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    let recovery;
-    try { recovery = await fs.open(`${file}.recovery`, 'wx', 0o600); } catch { fail('transport_busy'); }
-    try {
-      const previous = await fs.readFile(file, 'utf8'); const pid = Number(previous.split(':')[0]);
-      if (!Number.isSafeInteger(pid) || pid < 1) fail('transport_busy');
-      try { process.kill(pid, 0); fail('transport_busy'); } catch (cause) { if (cause.code !== 'ESRCH') fail('transport_busy'); }
-      if (await fs.readFile(file, 'utf8') !== previous) fail('transport_busy');
-      await fs.unlink(file); handle = await fs.open(file, 'wx', 0o600);
-    } finally { await recovery.close(); await fs.unlink(`${file}.recovery`); }
-  }
-  try { await handle.writeFile(token); await handle.sync(); return await task(); }
-  finally { await handle.close(); if (await fs.readFile(file, 'utf8').catch(() => '') === token) await fs.unlink(file); }
+export async function withTransportLock(file, task, executeLock) {
+  const owner = `${process.pid}:${randomUUID()}`;
+  await executeLock({ mode: 'lock-acquire', lockPath: file, lockOwner: owner });
+  try { return await task({ lockPath: file, lockOwner: owner }); }
+  finally { await executeLock({ mode: 'lock-release', lockPath: file, lockOwner: owner }); }
 }
 
 /** Maintenance is local and stopped. A caller boolean cannot attest no open database handles. */

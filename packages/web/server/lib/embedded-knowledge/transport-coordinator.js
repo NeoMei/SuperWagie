@@ -27,10 +27,11 @@ const privateDirectory = async (directory) => {
 const syncFile = async (file) => { const handle = await fs.open(file, 'r'); try { await handle.sync(); } finally { await handle.close(); } };
 
 /** Explicit stopped-state maintenance. This module never starts a server or performs inference. */
-export function createTransportCoordinator(input, { native = runTransportNative, checkpoint = async () => {}, guardEntry = () => {} } = {}) {
+export function createTransportCoordinator(input, { native = runTransportNative, checkpoint = async () => {}, guardEntry = () => {}, now = Date.now } = {}) {
   const options = optionsSchema.parse(input); const { dataDir, database, configDir, operationDir } = options;
   if (database !== path.join(dataDir, 'embedded-knowledge', 'embedded-knowledge.db') || operationDir === dataDir || operationDir.startsWith(`${dataDir}${path.sep}`)) fail();
   const configFile = path.join(dataDir, 'model-configuration.json'); const journalFile = path.join(operationDir, 'journal.json');
+  let maintenanceLock;
   const contractDigest = transportHash(JSON.stringify(options));
   const guard = () => { guardTransportEntry(input.enterpriseOptions); guardEntry(); };
   if (!options.stoppedPids.length && !options.isolatedCopy) fail('transport_stop_evidence_required');
@@ -41,7 +42,7 @@ export function createTransportCoordinator(input, { native = runTransportNative,
   };
   const quiescent = (file = database) => assertTransportQuiescent({ database: file, stoppedPids: options.stoppedPids });
   const ownerOptions = { dataDir, ownership: options.ownership, env: input.env, enterpriseOptions: input.enterpriseOptions };
-  const readOwner = () => readTransportOwner(ownerOptions);
+  const readOwner = (allowExpired = false) => readTransportOwner({ ...ownerOptions, now: now(), allowExpired });
   const rawFiles = async (storageId) => {
     const names = [...fixedFiles, `account-key-activation/${storageId}.json`]; const result = [];
     for (const name of names) result.push({ name, ...withoutBytes(await readRawFile(path.join(dataDir, name))) });
@@ -54,13 +55,14 @@ export function createTransportCoordinator(input, { native = runTransportNative,
       if (!rawFileMatches(observed, file)) fail('transport_file_conflict');
     }
   };
-  const execute = async (request, owner) => {
+  const execute = async (request, owner, restoring = false) => {
+    if (restoring && request.mode !== 'verify') fail();
     guard(); await quiescent(request.database);
     // Destination validation happens in readTransportOwner before the secret crosses this pipe.
-    if (owner.binding.apiKey !== (await readOwner()).binding.apiKey) fail('transport_credential_changed');
+    if (owner.binding.apiKey !== (await readOwner(restoring)).binding.apiKey) fail('transport_credential_changed');
     const secrets = JSON.parse((await fs.readFile(path.join(dataDir, 'embedded-knowledge/secrets.json'))).toString('utf8'));
     if (!z.string().length(32).safeParse(secrets.systemAesKey).success) fail();
-    return native({ binary: options.binary, binarySha256: options.binarySha256, configDir, systemAesKey: secrets.systemAesKey, request });
+    return native({ binary: options.binary, binarySha256: options.binarySha256, configDir, systemAesKey: secrets.systemAesKey, request: { ...request, ...maintenanceLock } });
   };
   const scope = { database, configDir, tenantId: options.tenantId, kbId: options.kbId, ownerId: options.ownerId, modelId: options.modelId,
     operationId: options.operationId, catalogDigest: '', backupReceipt: { sha256: '', restored: false, baselineDigest: '' }, stoppedReceipt: { stopped: false, evidenceDigest: '' } };
@@ -90,10 +92,17 @@ export function createTransportCoordinator(input, { native = runTransportNative,
   };
   const locked = async (task) => {
     guard(); await checkIsolation(); await quiescent();
-    return withTransportLock(path.join(operationDir, 'operator.lock'), () => withTransportLock(`${configFile}.lock`, task));
+    const executeLock = async (request) => {
+      const result = await native({ binary: options.binary, binarySha256: options.binarySha256, configDir, request });
+      if (result.status !== request.mode) fail('transport_lock_rejected');
+    };
+    return withTransportLock(path.join(operationDir, 'operator.lock'), () => withTransportLock(`${configFile}.lock`, async (claim) => {
+      maintenanceLock = claim;
+      try { return await task(); } finally { maintenanceLock = undefined; }
+    }, executeLock), executeLock);
   };
-  const requestFor = async (journal) => {
-    const owner = await readOwner();
+  const requestFor = async (journal, restoring = false) => {
+    const owner = await readOwner(restoring);
     if (owner.record.keyFingerprint !== journal.keyFingerprint || owner.storageId !== journal.storageId) fail('transport_credential_changed');
     return { owner, request: { ...journal.request, targetParameters: { ...journal.request.targetParameters, api_key: owner.binding.apiKey } } };
   };
@@ -150,13 +159,19 @@ export function createTransportCoordinator(input, { native = runTransportNative,
         const staged = await checkStaged(journal); await checkFiles(journal.files, journal.stagedHash, journal.phase !== 'prepared');
         const { owner, request } = await requestFor(journal);
         if (journal.phase === 'prepared') {
-          const applied = await execute({ ...request, mode: 'apply' }, owner);
-          if (!['applied', 'already-applied'].includes(applied.status) || applied.copied !== journal.counts.selected || applied.revision !== request.expected.ledgerRevision + 1) fail('transport_native_receipt_invalid');
+          // A changed physical file may be a completed native transaction, but may
+          // also contain unrelated writes. Only the committed global receipt
+          // can admit it; never dispatch apply against an unknown baseline.
+          const mode = await transportFileHash(database) === journal.backup.databaseHash ? 'apply' : 'verify';
+          const applied = await execute({ ...request, mode }, owner);
+          if (!(mode === 'verify' ? applied.status === 'verified' : ['applied', 'already-applied'].includes(applied.status)) || applied.copied !== journal.counts.selected || applied.revision !== request.expected.ledgerRevision + 1) fail('transport_native_receipt_invalid');
+          hex.parse(applied.preview.fullDatabaseDigest);
+          journal.postFullDatabaseDigest = applied.preview.fullDatabaseDigest;
           await checkpoint('after_database_commit');
           await quiescent(); journal.postDatabaseHash = await transportFileHash(database); journal.copied = applied.copied; journal.phase = 'database_committed'; await writeJournal(journal);
         }
         if (await transportFileHash(database) !== journal.postDatabaseHash) fail('transport_database_changed');
-        const verified = await execute({ ...request, mode: 'verify' }, owner); if (verified.status !== 'verified' || verified.copied !== journal.counts.selected) fail('transport_native_receipt_invalid');
+        const verified = await execute({ ...request, mode: 'verify' }, owner); if (verified.status !== 'verified' || verified.copied !== journal.counts.selected || verified.preview.fullDatabaseDigest !== journal.postFullDatabaseDigest) fail('transport_native_receipt_invalid');
         if (journal.phase === 'database_committed') {
           guard(); await quiescent(); await checkFiles(journal.files, journal.stagedHash, true);
           const original = journal.files.find((f) => f.name === 'model-configuration.json');
@@ -175,14 +190,17 @@ export function createTransportCoordinator(input, { native = runTransportNative,
     async rollback() {
       return locked(async () => {
         const journal = await readJournal();
+        await readOwner(true);
         if (journal.phase === 'rolled_back') {
           await checkFiles(journal.files); if (await transportFileHash(database) !== journal.backup.databaseHash) fail('transport_post_state_changed'); return receipt(journal);
         }
         await checkFiles(journal.files, journal.stagedHash, true);
         const actualHash = await transportFileHash(database);
         if (journal.phase !== 'rolling_back' && actualHash !== journal.backup.databaseHash) {
-          const { owner, request } = await requestFor(journal);
-          const verification = await execute({ ...request, mode: 'verify' }, owner); if (verification.status !== 'verified') fail();
+          const { owner, request } = await requestFor(journal, true);
+          const verification = await execute({ ...request, mode: 'verify' }, owner, true);
+          if (verification.status !== 'verified' || journal.postFullDatabaseDigest && verification.preview.fullDatabaseDigest !== journal.postFullDatabaseDigest) fail();
+          hex.parse(verification.preview.fullDatabaseDigest); journal.postFullDatabaseDigest = verification.preview.fullDatabaseDigest;
           if (journal.postDatabaseHash && actualHash !== journal.postDatabaseHash) fail('transport_database_changed');
           journal.postDatabaseHash = actualHash;
         }

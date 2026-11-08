@@ -237,3 +237,24 @@ The raw encrypted parameter patch includes `spec`, and real Gorm reopen tests
 verify its persistence. The pinned native protocol splitter is exercised with
 11, 32 and 100 synthetic inputs against a local recording HTTP server. Partial
 HTTP failure cannot publish a new memory space or advance the ledger.
+
+
+### Why offline receipts bind the whole database
+
+Paired full-file rollback can erase writes outside the migrated KB. The operator
+therefore includes `fullDatabaseDigest` in preview and in the transaction-bound
+post receipt, covering sqlite_schema, persisted header settings and all ordinary
+and shadow table rows. Virtual tables are omitted because their raw shadow
+storage is already included. Row IDs, SQLite storage types and raw text/blob
+values remain distinct; DATETIME strings are not normalized by the driver.
+Only the exact current operation's receipt row is excluded. Its insertion is
+followed by another global digest check before commit. A subsequent unrelated
+conversation, model, FTS or schema write invalidates verify and replay.
+
+The command's apply/verify modes require a current parent-PID/token claim at
+`<data-dir>/model-configuration.json.lock`. They retain a shared kernel lease
+through database close. The lock-acquire/lock-release commands atomically manage
+claims under an exclusive lease without opening SQLite. An orphaned native
+transaction keeps recovery excluded after its parent exits. The command never
+starts an application server. Other platforms return unsupported until their
+kernel lease behavior has equivalent validation.

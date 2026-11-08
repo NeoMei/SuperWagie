@@ -263,7 +263,8 @@ kills processes, starts the backend or repairs a partial live database itself.
 The pinned executable receives JSON on private stdin and AES material in a
 restricted child environment. Output is bounded, captured and decoded once
 from concatenated buffers; errors never include child output. Its deadline is
-240 seconds because full knowledge fingerprints can take tens of seconds.
+480 seconds because full knowledge and whole-database fingerprints can take tens
+of seconds per pass.
 
 Persisted account ownership is read through `createAccountKeyStore.read` and
 `createModelBootstrapStore.getSecret`. Explicit issuer, service, actor, account,
@@ -284,11 +285,15 @@ Activation test history is unchanged. A current authenticated Test & apply in
 the installed app supplies the final session and applied-consumer proof.
 
 The durable journal records prepared, database_committed,
-configuration_committed and verified. An interrupted prepared phase replays the
-identical native request; the native receipt distinguishes a committed database
-from a pending one. Configuration rename is idempotent against the original or
+configuration_committed and verified. A prepared phase compares the physical database hash with its original backup
+before applying. A changed physical file is admitted only through verify of the
+existing transaction receipt. The receipt binds both the expected whole-database
+baseline and the committed whole-database state. Schema, persisted header
+settings and every ordinary or shadow table are covered, including other
+consumers and models. Only this operation's receipt row is excluded. Unrelated
+writes after a commit interrupted before journal persistence refuse recovery. Configuration rename is idempotent against the original or
 exact staged bytes. Every other drift fails closed. Paired rollback requires
-unchanged file hashes and the exact native post-state, then restores only the
+unchanged file hashes and the exact whole-database post-state, then restores only the
 owned database and changed configuration. Its rolling_back phase resumes a
 partial restore. New application writes forbid automatic full-file rollback.
 Do not restart ordinary consumers while a journal is between prepared and
@@ -304,3 +309,24 @@ and unrelated spec fields remain intact. Native protocol batching preserves
 text order, dimensions and input-role semantics. The scoped operator admits
 only the reviewed empty-spec to exact ten-item spec change, or its exact replay.
 This changes target space identity and requires a fresh native preview.
+
+### Why maintenance claims use kernel leases
+
+An initialized PID/token claim is atomically linked into the existing `.lock`
+path. Creation, stale-claim recovery and release use an exclusive kernel lease
+on a permanent `.lease` inode. There is no recovery sentinel whose own crash can
+block later recovery. A live empty lock from the normal configuration writer is
+retained; an empty stale lock requires `lsof` to prove no process holds it.
+
+Each native apply or verify holds a shared lease before opening SQLite and until
+after closing it. Killing the Node parent therefore cannot admit a rollback
+while its native child can still commit. The child checks the current claim and
+live parent before opening the database. Process tokens are ephemeral and do
+not change the durable request HMAC. The expected configuration-lock path stays
+bound to the database's data directory. macOS and Linux implement the lease;
+other operator platforms fail closed. Ordinary application locking is unchanged.
+
+Rollback reads the original owned credential with expiry ignored because it
+performs only local HMAC/decryption checks. Issuer/account, reference, key
+fingerprint, destination and raw owner-file checks remain mandatory. Preview,
+apply and configuration publication still require an unexpired credential.

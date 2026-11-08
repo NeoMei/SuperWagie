@@ -1,10 +1,14 @@
-import { expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { transportLockFixture } from './transport-lock.test-support.js';
+const lockFixturePromise = transportLockFixture();
+afterAll(async () => (await lockFixturePromise).cleanup());
 import { readRawFile, atomicTransportWrite, withTransportLock, assertTransportQuiescent } from './transport-files.js';
 
 test('raw CAS retains modes, absence and opaque bytes; rejects drift and concurrent writer', async () => {
+  const { executeLock } = await lockFixturePromise;
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'transport-files-')); const file = path.join(dir, 'config');
   try {
     const absent = await readRawFile(file); expect(absent.exists).toBe(false);
@@ -13,9 +17,14 @@ test('raw CAS retains modes, absence and opaque bytes; rejects drift and concurr
     await atomicTransportWrite(file, Buffer.from('next\n'), 0o640, before);
     await expect(atomicTransportWrite(file, Buffer.from('stale'), 0o600, before)).rejects.toThrow('transport_file_conflict');
     expect(await fs.readFile(file, 'utf8')).toBe('next\n');
-    await withTransportLock(`${file}.lock`, async () => { await expect(withTransportLock(`${file}.lock`, async () => {})).rejects.toThrow(); });
+    await withTransportLock(`${file}.lock`, async () => { await expect(withTransportLock(`${file}.lock`, async () => {}, executeLock)).rejects.toThrow(); }, executeLock);
     await fs.writeFile(`${file}.lock`, '999999999:dead');
-    await withTransportLock(`${file}.lock`, async () => {});
+    await withTransportLock(`${file}.lock`, async () => {}, executeLock);
+    await fs.writeFile(`${file}.lock`, '');
+    const normalWriter = await fs.open(`${file}.lock`, 'r+');
+    await expect(withTransportLock(`${file}.lock`, async () => {}, executeLock)).rejects.toThrow();
+    await normalWriter.close();
+    await withTransportLock(`${file}.lock`, async () => {}, executeLock);
     await fs.writeFile(`${file}-wal`, 'pending');
     await expect(assertTransportQuiescent({ database: file, stoppedPids: [] })).rejects.toThrow();
     await fs.unlink(`${file}-wal`);

@@ -15,12 +15,12 @@ const fail = () => { throw new Error('transport_owner_rejected'); };
 export const guardTransportEntry = (enterpriseOptions) => { if (isEnterpriseMode(enterpriseOptions)) throw new Error('enterprise_mode'); };
 
 /** Reads persisted ownership only. The installed authenticated activation owns final session proof. */
-export async function readTransportOwner({ dataDir, ownership: input, enterpriseOptions, env = process.env, now = Date.now() }) {
+export async function readTransportOwner({ dataDir, ownership: input, enterpriseOptions, env = process.env, now = Date.now(), allowExpired = false }) {
   guardTransportEntry(enterpriseOptions);
   const ownership = ownershipSchema.parse(input); const storageId = sha(JSON.stringify(ownership));
   const record = await createAccountKeyStore({ dataDir }).read(storageId);
   if (!record || Object.entries(ownership).some(([k, v]) => record[k] !== v) || !record.key || !record.secretRef || !record.keyFingerprint
-    || record.key.expiresAt && Date.parse(record.key.expiresAt) <= now) fail();
+    || !allowExpired && record.key.expiresAt && Date.parse(record.key.expiresAt) <= now) fail();
   const rawConfiguration = await fs.readFile(path.join(dataDir, 'model-configuration.json'));
   // The runtime owns full configuration validation, including duplicates and dangling bindings.
   const store = createModelBootstrapStore({ dataDir });

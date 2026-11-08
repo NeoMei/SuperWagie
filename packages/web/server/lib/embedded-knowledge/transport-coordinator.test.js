@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,16 +7,20 @@ import { createModelBootstrapStore } from '../model-configuration/bootstrap-stor
 import { createAccountKeyStore } from '../model-configuration/account-key-store.js';
 import { planHyTransportRebind } from '../hy-memory/transport-rebind.js';
 import { memoryNamespace } from '../hy-memory/organizer.js';
+import { transportLockFixture } from './transport-lock.test-support.js';
+const lockFixturePromise = transportLockFixture();
+afterAll(async () => (await lockFixturePromise).cleanup());
 import { createTransportCoordinator } from './transport-coordinator.js';
 const sha = (v) => createHash('sha256').update(v).digest('hex');
-const fixture = async () => {
+const fixture = async ({ expiring = false } = {}) => {
+  let clock = Date.now(); const lockFixture = await lockFixturePromise;
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'transport-coordinate-')); const dataDir = path.join(dir, 'data');
   await fs.mkdir(path.join(dataDir, 'embedded-knowledge'), { recursive: true });
   const database = path.join(dataDir, 'embedded-knowledge', 'embedded-knowledge.db'); await fs.writeFile(database, 'before-db');
   await fs.writeFile(path.join(dataDir, 'embedded-knowledge', 'secrets.json'), JSON.stringify({ systemAesKey: '1'.repeat(32), jwtSecret: 'jwt' }));
   const ownership = { issuer: 'issuer', serviceId: 'service', actorId: 'actor', accountId: 'account' };
   const secret = await createModelBootstrapStore({ dataDir }).putSecret('fixture-key-1234'); const now = new Date().toISOString();
-  await createAccountKeyStore({ dataDir }).write(sha(JSON.stringify(ownership)), { version: 1, operationId: '11111111-1111-4111-8111-111111111111', ...ownership, instanceId: 'instance', status: 'failed', stage: 'test', errorCode: null, key: { id: 'key', last4: '1234', createdAt: now, expiresAt: null }, secretRef: secret.ref, keyFingerprint: sha('fixture-key-1234'), baseUrl: 'https://llmrouter.quukk.com/v1', providerId: 'provider', connectionId: 'connection', modelId: 'chat', models: [{ id: 'chat', name: 'Chat' }], test: null, createdAt: now, updatedAt: now });
+  await createAccountKeyStore({ dataDir }).write(sha(JSON.stringify(ownership)), { version: 1, operationId: '11111111-1111-4111-8111-111111111111', ...ownership, instanceId: 'instance', status: 'failed', stage: 'test', errorCode: null, key: { id: 'key', last4: '1234', createdAt: now, expiresAt: expiring ? new Date(clock + 86_400_000).toISOString() : null }, secretRef: secret.ref, keyFingerprint: sha('fixture-key-1234'), baseUrl: 'https://llmrouter.quukk.com/v1', providerId: 'provider', connectionId: 'connection', modelId: 'chat', models: [{ id: 'chat', name: 'Chat' }], test: null, createdAt: now, updatedAt: now });
   const pristine = path.join(dir, 'pristine.db'); await fs.copyFile(database, pristine);
   const configuration = { version: 1, revision: 5, connections: [{ id: 'connection', name: 'Account', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl: 'https://llmrouter.quukk.com/v1', credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: secret.ref } }], bindings: [] };
   const config = path.join(dataDir, 'model-configuration.json'); await fs.writeFile(config, JSON.stringify(configuration));
@@ -27,26 +31,27 @@ const fixture = async () => {
     scopedNodes: [{ namespace: `${memoryNamespace('global')}:manual`, spaceId: 'old', id: 'm', content: 'T\n\nB', payloadRaw: JSON.stringify({ entry_id: 'm', project_id: 'global', scope: 'global', manual_type: 'fact', title: 'T', representation: 'manual', source_hash: sourceHash, verification: 'unverified' }), active: true, dimensions: 1024, vectorFloat32LE: Buffer.alloc(4096).toString('base64') }] };
   const current = { configurationId: 'old-config', spaceId: 'old', dimensions: 1024 }; const target = { configurationId: 'new-config', spaceId: 'new', dimensions: 1024 };
   const plan = planHyTransportRebind({ ...snapshot, tenantId: 1, kbId: 'kb', oldIdentity: current, targetIdentity: target });
-  const preview = { current, target, ledgerRevision: 7, ledgerDigest: plan.expectedLedgerDigest, sourceNodesDigest: plan.expectedSourceNodesDigest, knowledgeDigest: sha('knowledge'), retainedDigest: sha('retained'), modelSpaceDigest: sha('model'), catalogDigest: sha('catalog'), targetCredentialFingerprint: sha('credential'), nodeCount: 1, inactiveCount: 0, recordCount: 3, digest: sha('baseline'), databaseIdentity: sha(database) };
+  const preview = { current, target, ledgerRevision: 7, ledgerDigest: plan.expectedLedgerDigest, sourceNodesDigest: plan.expectedSourceNodesDigest, knowledgeDigest: sha('knowledge'), retainedDigest: sha('retained'), modelSpaceDigest: sha('model'), catalogDigest: sha('catalog'), targetCredentialFingerprint: sha('credential'), nodeCount: 1, inactiveCount: 0, recordCount: 3, fullDatabaseDigest: sha('whole-before'), digest: sha('baseline'), databaseIdentity: sha(database) };
   let committedRequest; let failure; let blocked = false; let phaseAction;
   const native = async ({ request }) => {
-    const body = { ...request }; delete body.mode;
+    if (request.mode.startsWith('lock-')) return lockFixture.executeLock(request);
+    const body = { ...request }; delete body.mode; delete body.lockOwner; delete body.lockPath;
     if (request.mode === 'apply') {
       if (committedRequest && JSON.stringify(body) !== committedRequest) throw new Error('changed replay');
       if (!committedRequest) { committedRequest = JSON.stringify(body); await fs.writeFile(database, 'after-db'); }
-      return { status: 'applied', preview: { ...preview, digest: sha('post') }, copied: 1, revision: 8 };
+      return { status: 'applied', preview: { ...preview, fullDatabaseDigest: sha('whole-after'), digest: sha('post') }, copied: 1, revision: 8 };
     }
     if (request.mode === 'verify') {
       if (JSON.stringify(body) !== committedRequest || await fs.readFile(database, 'utf8') !== 'after-db') throw new Error('native post drift');
-      return { status: 'verified', preview: { ...preview, digest: sha('post') }, copied: 1, revision: 8 };
+      return { status: 'verified', preview: { ...preview, fullDatabaseDigest: sha('whole-after'), digest: sha('post') }, copied: 1, revision: 8 };
     }
     return { status: 'private-snapshot', snapshot, preview: { ...preview, databaseIdentity: sha(request.database), digest: request.database === database ? preview.digest : sha('restore-preview') } };
   };
   const options = { dataDir, database, configDir: dir, operationDir: path.join(dir, 'operation'), binary: path.join(dir, 'operator'), binarySha256: sha('binary'), ownership,
     tenantId: 1, kbId: 'kb', ownerId: 'owner', modelId: 'model', operationId: 'transport-test', compatibilityReceipt: sha('accepted-evidence'), stoppedPids: [], isolatedCopy: { sourceDatabase: pristine, sourceSha256: sha('before-db') }, env: {}, enterpriseOptions: { env: {}, policyFilePaths: [] } };
-  const dependencies = { native, checkpoint: async (phase) => { phaseAction?.(phase); if (phase === failure) { failure = null; throw new Error('interrupted'); } },
+  const dependencies = { native, now: () => clock, checkpoint: async (phase) => { phaseAction?.(phase); if (phase === failure) { failure = null; throw new Error('interrupted'); } },
     guardEntry: () => { if (blocked) throw new Error('enterprise_mode'); } };
-  return { dir, config, database, options, configuration, create: () => createTransportCoordinator(options, dependencies), fail: (phase) => { failure = phase; }, block: () => { blocked = true; }, atPhase: (action) => { phaseAction = action; } };
+  return { dir, config, database, options, configuration, expire: () => { clock += 172_800_000; }, create: () => createTransportCoordinator(options, dependencies), fail: (phase) => { failure = phase; }, block: () => { blocked = true; }, atPhase: (action) => { phaseAction = action; } };
 };
 
 for (const phase of ['after_database_commit', 'before_configuration_rename', 'after_configuration_rename']) test(`resumes ${phase} from durable exact request and keeps original backups`, async () => {
@@ -86,5 +91,39 @@ test('enterprise policy changing after database commit prevents configuration pu
     expect(await fs.readFile(f.database, 'utf8')).toBe('after-db');
     expect(JSON.parse(await fs.readFile(f.config, 'utf8'))).toEqual(f.configuration);
     expect(JSON.parse(await fs.readFile(path.join(f.options.operationDir, 'journal.json'), 'utf8')).phase).toBe('database_committed');
+  } finally { await fs.rm(f.dir, { recursive: true, force: true }); }
+});
+
+test('prepared apply refuses physical database drift without overwriting the new data', async () => {
+  const f = await fixture();
+  try {
+    await f.create().prepare({ expectedDigest: (await f.create().preview()).digest });
+    await fs.appendFile(f.database, 'unrelated-conversation-write');
+    await expect(f.create().resume()).rejects.toThrow();
+    expect(await fs.readFile(f.database, 'utf8')).toBe('before-dbunrelated-conversation-write');
+  } finally { await fs.rm(f.dir, { recursive: true, force: true }); }
+});
+
+test('a post-commit interruption and unrelated write cannot become a new rollback baseline', async () => {
+  const f = await fixture();
+  try {
+    await f.create().prepare({ expectedDigest: (await f.create().preview()).digest }); f.fail('after_database_commit');
+    await expect(f.create().resume()).rejects.toThrow('interrupted');
+    await fs.appendFile(f.database, 'other-model-write');
+    await expect(f.create().rollback()).rejects.toThrow();
+    await expect(f.create().resume()).rejects.toThrow();
+    expect(await fs.readFile(f.database, 'utf8')).toBe('after-dbother-model-write');
+  } finally { await fs.rm(f.dir, { recursive: true, force: true }); }
+});
+
+test('expired credentials still authorize byte-identical paired restore after committed interruption', async () => {
+  const f = await fixture({ expiring: true });
+  try {
+    await f.create().prepare({ expectedDigest: (await f.create().preview()).digest }); f.fail('after_database_commit');
+    await expect(f.create().resume()).rejects.toThrow('interrupted'); f.expire();
+    await expect(f.create().resume()).rejects.toThrow();
+    expect((await f.create().rollback()).phase).toBe('rolled_back');
+    expect(await fs.readFile(f.database, 'utf8')).toBe('before-db');
+    expect(JSON.parse(await fs.readFile(f.config, 'utf8'))).toEqual(f.configuration);
   } finally { await fs.rm(f.dir, { recursive: true, force: true }); }
 });
