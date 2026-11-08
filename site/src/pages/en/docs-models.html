@@ -8,10 +8,14 @@
   <li>The list grows as tests start, with up to 3 running together. Each row shows separate connectivity and configuration results, with a specific reason when either step fails.</li>
   <li>If model calls pass but an existing knowledge index prevents applying the embedding configuration, setup remains pending and the original configuration and index are preserved. Indexes are not automatically rebuilt before compatibility and migration are confirmed.</li>
 </ol>
-<p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable. After an embedding test passes, an existing index that has not been confirmed compatible with the new connection keeps its original configuration and data. Setup remains pending with an explanation, and the app does not automatically rebuild the index.</p>
+<p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable.</p>
 
 <h2>Continue setup with an activated key</h2>
-<p>If the key is activated but model configuration failed, update to 2.7.72 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
+<p>If the key is activated but model configuration failed, update to 2.7.73 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
+
+<h2>Test passed, connection incomplete</h2>
+<p>A passed embedding test means the new connection can return vectors. Applying it to an existing library index also requires a compatibility check. The original configuration and index remain while that check is pending.</p>
+<p>A connection change with the same model and dimensions can preserve existing vectors through a controlled migration after compatibility checks and a backup. Files do not need to be imported again for that migration. Changing the model or dimensions requires assessing migration or regenerating the index. Installing an update does not migrate or rebuild an index automatically.</p>
 
 <h2>Add your own provider</h2>
 <p>You can also open Settings → Model providers, add a provider and API key, and choose a default model. A session can switch models individually; new sessions use the default selection.</p>

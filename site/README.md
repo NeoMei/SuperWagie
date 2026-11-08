@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website's only published release is 2.7.72 for macOS Apple silicon and
+The website targets release 2.7.73 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
@@ -26,11 +26,11 @@ with the same key before its connection is applied. Tests appear as they start,
 with up to three running together. A missing compatible model has an explicit
 unavailable result. Models without native prices remain unavailable.
 
-Version 2.7.72 corrects automatic model selection for unconfigured profiles and
-shows readable model setup, connection and free-usage-limit messages in the
-current UI language. The avatar opens the vertical account panel for wallet,
-subscription, API keys and profile. Settings no longer has a duplicate account
-entry. Low-balance notices still open the account panel's funding form.
+Version 2.7.73 synchronizes saved credentials with the library's embedding,
+image understanding and reranking model connections when model setup updates
+them. Model tests and applied connections remain separate results. The avatar
+opens the account panel for wallet, subscription, API keys and profile.
+Low-balance notices open its funding form.
 
 Existing account keys can finish configuration when the private engine has the
 intended model list but lacks its credential. Historical sessions in the system
@@ -40,14 +40,18 @@ Account Key setup also supports Qwen speech synthesis through the catalog.
 Speech playback and video narration reuse the saved encrypted credential.
 Model connectivity and configuration application have separate results. If all
 model calls pass but an existing index prevents an embedding change, setup stays
-pending and the original connection and index remain. Migration completion is
-not implied, and no automatic index rebuild is performed.
+pending and the original connection and index remain. A controlled migration
+can preserve existing vectors after compatibility checks and a backup when the
+model and dimensions stay the same. Changing the model or dimensions requires
+assessing migration or regenerating the index. Installing an update does not
+run the maintenance migration or rebuild an index automatically. The offline
+maintenance operator supports macOS and Linux; Windows returns unsupported.
 
 Conversation learning is opt-in. Once enabled, completed OpenCode turns are
 distilled in the background and indexed for project retrieval. Existing session
 history requires explicit processing. Methodology candidates require confirmation.
 
-Installer links point to the v2.7.72 GitHub Release assets. The unified release
+Installer links point to the v2.7.73 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 
