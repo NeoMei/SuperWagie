@@ -29,7 +29,7 @@ const intentSchema = z.object({
 });
 const checkoutSchema = z.object({
   id: z.string().min(1), account_id: z.string().min(1), product_id: z.enum(['superwagie', 'llmrouter']), provider: z.enum(['wechat', 'alipay']), offer_name: z.string(), amount: units, currency: z.literal('CNY'),
-  payment_status: z.enum(['CREATED', 'PENDING', 'UNKNOWN', 'PAID', 'CLOSED', 'REVIEW']), fulfillment_status: z.enum(['NOT_STARTED', 'PENDING', 'FULFILLED', 'REVIEW']), refund_status: z.enum(['', 'PENDING', 'SUCCEEDED', 'REVIEW']),
+  payment_status: z.enum(['CREATED', 'PENDING', 'UNKNOWN', 'PAID', 'CLOSED', 'REVIEW']), fulfillment_status: z.enum(['NOT_STARTED', 'PENDING', 'FULFILLED', 'REVIEW']), refund_status: z.enum(['', 'PENDING', 'SUCCEEDED', 'REVIEW', 'REJECTED']),
   expires_at: z.iso.datetime(), created_at: z.iso.datetime(), order_id: z.string().optional(), error_code: z.string().optional(),
   session: z.object({ kind: z.enum(['qr', 'redirect']), url: z.string().min(1).max(16000), expires_at: z.iso.datetime() }).optional(),
 }).refine((checkout) => {

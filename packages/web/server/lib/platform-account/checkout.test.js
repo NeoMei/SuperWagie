@@ -2,6 +2,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import express from 'express';
+import request from 'supertest';
+import { registerPlatformCommerceRoutes } from './commerce-routes.js';
 import { afterEach, expect, it } from 'vitest';
 import { createPlatformCommerceRuntime } from './commerce.js';
 import { PlatformAccountError } from './runtime.js';
@@ -11,7 +14,7 @@ const setup = async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-checkout-'));
   cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
   const offer = { id: 'points', product_id: 'superwagie', name: 'Points', account_kind: 'both', kind: 'membership', period: 'month', price: '1000000', monthly_credit: '2000000', validity_months: 0, rank: 1, sandbox: false, status: 'published', entitlements: { pricing_program: 'superwagie-ai-points-v1' } };
-  const state = { quoteNumber: 0, rejectQuote: false, rejectStatus: 409, failCheckoutRead: false, ready: true, configured: true, lose: true, refundLoss: false, calls: [], checkout: null, url: 'weixin://wxpay/bizpayurl?pr=test' };
+  const state = { refundSubmissions: 0, checkoutSequence: 0, checkoutKey: null, quoteNumber: 0, rejectQuote: false, rejectStatus: 409, failCheckoutRead: false, ready: true, configured: true, lose: true, refundLoss: false, calls: [], checkout: null, url: 'weixin://wxpay/bizpayurl?pr=test' };
   const accountRuntime = { captureCommerceSession: () => ({ billingAccountId: 'acct', actingUserId: 'actor', serviceId: 'service', request: async (route, init) => {
     state.calls.push({ route, init });
     if (route === '/v1/accounts') return [{ id: 'acct', kind: 'personal', role: 'owner' }];
@@ -24,6 +27,8 @@ const setup = async () => {
     if (route.endsWith('/refund')) {
       const saved = JSON.parse(await fs.readFile(path.join(dir, 'unihub-commerce/state.json'), 'utf8'));
       expect(Object.values(saved.intents)[0].refundKey).toBe(init.headers['Idempotency-Key']);
+      if (state.checkout.refund_status === 'REJECTED') return state.checkout;
+      state.refundSubmissions++;
       state.checkout.refund_status = 'PENDING';
       if (state.refundLoss) { state.refundLoss = false; throw new PlatformAccountError('platform_unavailable',502); }
       return state.checkout;
@@ -33,7 +38,9 @@ const setup = async () => {
       const saved = JSON.parse(await fs.readFile(path.join(dir, 'unihub-commerce/state.json'), 'utf8'));
       expect(Object.values(saved.intents).find(item => item.idempotencyKey === init.headers['Idempotency-Key']).status).toBe('UNKNOWN');
       if (state.rejectQuote) throw new PlatformAccountError('quote_invalidated',state.rejectStatus);
-      state.checkout ??= { id: 'check1', account_id: 'acct', product_id: 'superwagie', provider: 'wechat', offer_name: 'Points', amount: '1000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: new Date(Date.now()+60000).toISOString(), created_at: new Date().toISOString(), session: { kind: 'qr', url: state.url, expires_at: new Date(Date.now()+60000).toISOString() } };
+      if (state.checkoutKey !== init.headers['Idempotency-Key']) state.checkout = null;
+      state.checkoutKey = init.headers['Idempotency-Key'];
+      state.checkout ??= { id: `check${++state.checkoutSequence}`, account_id: 'acct', product_id: 'superwagie', provider: 'wechat', offer_name: 'Points', amount: '1000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: new Date(Date.now()+60000).toISOString(), created_at: new Date().toISOString(), session: { kind: 'qr', url: state.url, expires_at: new Date(Date.now()+60000).toISOString() } };
       if (state.lose) { state.lose = false; throw new PlatformAccountError('platform_unavailable',502); }
       return state.checkout;
     }
@@ -134,7 +141,7 @@ it('syncs a matched paid checkout into local recovery before allowing a new purc
   const f=await setup();f.state.lose=false;await f.runtime.createCheckout({},f.body);
   f.state.checkout.payment_status='PAID';f.state.checkout.fulfillment_status='FULFILLED';
   const overview=await f.runtime.overview({});expect(overview.intents[0].status).toBe('APPLIED');
-  const result=await f.runtime.createCheckout({}, {...f.body,idempotencyKey:crypto.randomUUID()});expect(result.status).toBe('APPLIED');
+  const result=await f.runtime.createCheckout({}, {...f.body,idempotencyKey:crypto.randomUUID()});expect(result).toMatchObject({status:'PENDING',resourceId:'check2'});
 });
 it('does not release pending recovery after a failed or mismatched authoritative checkout read', async () => {
   const f=await setup();f.state.lose=false;await f.runtime.createCheckout({},f.body);f.state.checkout.payment_status='PAID';f.state.checkout.fulfillment_status='FULFILLED';f.state.failCheckoutRead=true;
@@ -197,4 +204,57 @@ it('preserves a preexisting invalid refund receipt and refuses guessed repair or
   expect(await runtime.checkoutAction({}, 'check1', 'read', { accountId: 'acct' })).toMatchObject({ id: 'check1' });
   const after = Object.values(JSON.parse(await fs.readFile(file, 'utf8')).intents)[0];
   expect(after).toMatchObject({ refundKey: intent.refundKey, refundReason: intent.refundReason, idempotencyKey: intent.idempotencyKey, resourceId: 'check1' });
+});
+
+it('projects a rejected refund through HTTP and closes only its pending journal operation', async () => {
+  const f = await setup(); f.state.lose = false;
+  await f.runtime.createCheckout({}, f.body);
+  f.state.checkout.payment_status = 'PAID'; f.state.checkout.fulfillment_status = 'FULFILLED';
+  await f.runtime.checkoutAction({}, 'check1', 'refund', { accountId: 'acct', reason: 'Original refund reason' });
+  const file = path.join(f.dir, 'unihub-commerce/state.json');
+  const original = Object.values(JSON.parse(await fs.readFile(file, 'utf8')).intents)[0];
+  await f.runtime.close();
+  const runtime = f.create();
+  const app = express();
+  registerPlatformCommerceRoutes(app, { runtime, resolveIdentity: async () => ({}), isRequestOriginAllowed: async () => true });
+  f.state.checkout.refund_status = 'REJECTED';
+  const read = await request(app).get('/api/platform-account/commerce/checkouts/check1?accountId=acct').expect(200);
+  expect(read.body).toMatchObject({ payment_status: 'PAID', fulfillment_status: 'FULFILLED', refund_status: 'REJECTED' });
+  const replay = await request(app).post('/api/platform-account/commerce/checkouts/check1/refund').send({ accountId: 'acct' }).expect(200);
+  expect(replay.body).toEqual(read.body);
+  expect(f.state.refundSubmissions).toBe(1);
+  const refunds = f.state.calls.filter((call) => call.route.endsWith('/refund'));
+  expect(refunds.map((call) => call.init.headers['Idempotency-Key'])).toEqual([original.refundKey, original.refundKey]);
+  expect(refunds.map((call) => JSON.parse(call.init.body).reason)).toEqual([original.refundReason, original.refundReason]);
+  const overview = await request(app).get('/api/platform-account/commerce').expect(200);
+  expect(overview.body.intents[0]).toMatchObject({ status: 'APPLIED', resourceId: 'check1', idempotencyKey: f.body.idempotencyKey });
+  const saved = Object.values(JSON.parse(await fs.readFile(file, 'utf8')).intents)[0];
+  expect(saved).toMatchObject({ refundKey: original.refundKey, refundReason: original.refundReason });
+  const next = await request(app).post('/api/platform-account/commerce/checkouts').send({ ...f.body, idempotencyKey: crypto.randomUUID() }).expect(200);
+  expect(next.body).toMatchObject({ status: 'PENDING', resourceId: 'check2' });
+  expect(f.state.calls.filter((call) => call.route.endsWith('/checkouts') && call.init?.method === 'POST')).toHaveLength(2);
+});
+
+it('does not infer fulfilled benefits from a rejected refund alone', async () => {
+  const f = await setup(); f.state.lose = false;
+  await f.runtime.createCheckout({}, f.body);
+  f.state.checkout.payment_status = 'PAID'; f.state.checkout.refund_status = 'REJECTED';
+  expect((await f.runtime.overview({})).intents[0].status).toBe('PENDING');
+  await expect(f.runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID() })).rejects.toMatchObject({ code: 'platform_operation_pending' });
+});
+
+it.each([true, false])('never invents a refund key for an already rejected refund with local receipt %s', async (hasLocalReceipt) => {
+  const f = await setup(); f.state.lose = false;
+  await f.runtime.createCheckout({}, f.body);
+  f.state.checkout.payment_status = 'PAID'; f.state.checkout.fulfillment_status = 'FULFILLED'; f.state.checkout.refund_status = 'REJECTED';
+  await f.runtime.close();
+  const file = path.join(f.dir, 'unihub-commerce/state.json');
+  if (!hasLocalReceipt) await fs.writeFile(file, JSON.stringify({ version: 2, intents: {}, quotes: {} }));
+  const runtime = f.create();
+  expect(await runtime.checkoutAction({}, 'check1', 'refund', { accountId: 'acct' })).toMatchObject({ refund_status: 'REJECTED' });
+  expect(f.state.calls.filter((call) => call.route.endsWith('/refund'))).toEqual([]);
+  expect(f.state.refundSubmissions).toBe(0);
+  const saved = Object.values(JSON.parse(await fs.readFile(file, 'utf8')).intents);
+  if (hasLocalReceipt) { expect(saved[0].status).toBe('APPLIED'); expect(saved[0].refundKey).toBeUndefined(); expect(saved[0].refundReason).toBeUndefined(); }
+  else expect(saved).toEqual([]);
 });

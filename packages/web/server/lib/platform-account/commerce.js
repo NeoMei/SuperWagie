@@ -44,7 +44,7 @@ const quoteSchema = z.object({
 const rechargeSchema = z.object({ id, account_id: id, product_id: product, amount: units, currency: z.literal('CNY'), operation_id: id.nullish() });
 const checkoutSchema = z.object({
   id, account_id: id, product_id: product, provider: z.enum(['wechat', 'alipay']), offer_name: z.string(), amount: units, currency: z.literal('CNY'),
-  payment_status: z.enum(['CREATED', 'PENDING', 'UNKNOWN', 'PAID', 'CLOSED', 'REVIEW']), fulfillment_status: z.enum(['NOT_STARTED', 'PENDING', 'FULFILLED', 'REVIEW']), refund_status: z.enum(['', 'PENDING', 'SUCCEEDED', 'REVIEW']).default(''),
+  payment_status: z.enum(['CREATED', 'PENDING', 'UNKNOWN', 'PAID', 'CLOSED', 'REVIEW']), fulfillment_status: z.enum(['NOT_STARTED', 'PENDING', 'FULFILLED', 'REVIEW']), refund_status: z.enum(['', 'PENDING', 'SUCCEEDED', 'REVIEW', 'REJECTED']).default(''),
   expires_at: z.string().datetime(), created_at: z.string().datetime(), order_id: id.optional(), error_code: z.string().optional(),
   session: z.object({ kind: z.enum(['qr', 'redirect']), url: z.string().min(1).max(16000), expires_at: z.string().datetime() }).optional(),
 }).superRefine((value, ctx) => {
@@ -115,7 +115,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
   };
   const checkoutValues = (intent, checkout) => {
     if (checkout.account_id !== intent.accountId || checkout.product_id !== intent.productId || checkout.provider !== intent.provider || checkout.amount !== intent.amount) fail('platform_response_invalid', 502);
-    return { resourceId: checkout.id, status: checkout.refund_status === 'SUCCEEDED' || checkout.payment_status === 'CLOSED' ? 'FAILED' : checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'FULFILLED' && !checkout.refund_status ? 'APPLIED' : 'PENDING', errorCode: checkout.error_code };
+    return { resourceId: checkout.id, status: checkout.refund_status === 'SUCCEEDED' || checkout.payment_status === 'CLOSED' ? 'FAILED' : checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'FULFILLED' && ['', 'REJECTED'].includes(checkout.refund_status) ? 'APPLIED' : 'PENDING', errorCode: checkout.error_code };
   };
   const mutateIntent = async (journal, storageId, values) => journal.mutate((intents) => {
     const intent = intents[storageId];
@@ -317,14 +317,22 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
           // A legacy invalid reason may already have been dispatched. No local
           // evidence proves whether upstream admitted it, so preserve its key.
           if (intent?.refundKey && !refundReasonSchema.safeParse(intent.refundReason).success) fail('platform_refund_repair_required', 409);
-          if (!intent) {
+          if (!intent?.refundKey) {
             const original = await readCheckout(ctx, checkoutId);
-            const recoveryKey = crypto.randomUUID();
-            storageId = intentId(ctx.session, ctx.account.id, recoveryKey);
-            intent = { serviceId: ctx.session.serviceId, actorId: ctx.session.actingUserId, accountId: ctx.account.id, idempotencyKey: recoveryKey, kind: 'checkout', provider: original.provider, productId: original.product_id, amount: original.amount, paymentSource: 'external', resourceId: original.id, status: 'PENDING', createdAt: new Date(now()).toISOString(), updatedAt: new Date(now()).toISOString() };
-            await journal.mutate((intents) => { intents[storageId] = intent; });
+            // A refund rejected on another instance has no local replay key.
+            // Return its authoritative receipt instead of inventing a new request.
+            if (original.refund_status === 'REJECTED') {
+              if (intent) await mutateIntent(journal, storageId, checkoutValues(intent, original));
+              return original;
+            }
+            if (!intent) {
+              const recoveryKey = crypto.randomUUID();
+              storageId = intentId(ctx.session, ctx.account.id, recoveryKey);
+              intent = { serviceId: ctx.session.serviceId, actorId: ctx.session.actingUserId, accountId: ctx.account.id, idempotencyKey: recoveryKey, kind: 'checkout', provider: original.provider, productId: original.product_id, amount: original.amount, paymentSource: 'external', resourceId: original.id, status: 'PENDING', createdAt: new Date(now()).toISOString(), updatedAt: new Date(now()).toISOString() };
+              await journal.mutate((intents) => { intents[storageId] = intent; });
+            }
+            intent = await mutateIntent(journal, storageId, { refundKey: crypto.randomUUID(), refundReason: body.reason ?? 'Customer requested refund' });
           }
-          if (!intent.refundKey) intent = await mutateIntent(journal, storageId, { refundKey: crypto.randomUUID(), refundReason: body.reason ?? 'Customer requested refund' });
         }
         const headers = { 'Content-Type': 'application/json' };
         if (intent?.refundKey && action === 'refund') headers['Idempotency-Key'] = intent.refundKey;

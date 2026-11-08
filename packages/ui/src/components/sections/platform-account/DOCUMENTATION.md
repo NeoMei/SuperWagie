@@ -141,6 +141,13 @@ from the browser cannot prove payment. Status, close and refund controls act on
 the original checkout; refund requires a separate visible confirmation. Read
 failure preserves the last checkout state with an error and recovery action.
 Verified fulfillment refreshes account benefits and never replays a model task.
+A `REJECTED` manual refund preserves the confirmed purchase status and shows
+that the request was declined without a refund. A paid, fulfilled purchase
+remains active. The refund button and any open refund confirmation disappear
+on rejection; passive refresh and remount never submit another refund. Other
+pending and review refund receipts keep their original explicit recovery.
+The server's completed purchase intent permits a later independent purchase;
+no wallet balance, credential or original refund identity is changed.
 
 Customer-facing Chinese calls CREDIT benefits 积分; English calls them credits.
 Asset identifiers, units, payload fields and legacy cash values are unchanged.

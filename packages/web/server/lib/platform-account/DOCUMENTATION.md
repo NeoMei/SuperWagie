@@ -318,6 +318,18 @@ No adapter rounds an ordinary wallet quote for checkout.
 
 Checkout reads preserve separate payment, fulfillment and refund states.
 Closing, reconciliation and refund always target the original checkout.
+A centrally reviewed refund can return `REJECTED`. When payment remains `PAID`
+and fulfillment remains `FULFILLED`, this is an active purchase: its local
+checkout intent becomes `APPLIED` and no longer blocks a new purchase. Other
+unfulfilled or uncertain states remain pending. Rejection never means money
+was refunded or the original purchase failed. Original checkout reads and
+explicit refund replay retain the saved refund key and reason; the upstream
+returns its original rejected refund without admitting a new one. No local
+key rotation, automatic refund replay, wallet change or benefit mutation is
+performed. If this instance has no saved refund key, an authoritative original
+checkout read precedes creating one. A rejected result is returned without a
+new key, refund POST or synthetic local refund receipt. UniHub owns its refund
+ID and the release of reviewed batch holds.
 Refund recovery persists its original refund key before network IO, including
 for a server-listed checkout first recovered on this instance. Expiration is
 only display metadata; it never proves closure. Capability loss does not hide
