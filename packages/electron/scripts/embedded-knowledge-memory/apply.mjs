@@ -10,7 +10,7 @@ const goFiles = () => fs.readdirSync(path.join(overlayRoot, 'go')).filter((name)
 
 export function memoryIndexOverlayDigest() {
   const hash = crypto.createHash('sha256');
-  for (const file of ['apply.mjs', ...goFiles().map((name) => `go/${name}`)]) {
+  for (const file of ['apply.mjs', 'cmd/main.go', ...goFiles().map((name) => `go/${name}`)]) {
     hash.update(file);
     hash.update('\0');
     hash.update(fs.readFileSync(path.join(overlayRoot, file)));
@@ -58,7 +58,8 @@ export function applyMemoryIndexOverlay(sourceDirectory) {
     '$&\n$1must(container.Provide(memoryindex.NewHandler))', 'handler injection');
 
   // Validate all upstream anchors before changing any source in the build copy.
-  const writes = [[routerFile, router], [containerFile, container]];
+  const writes = [[routerFile, router], [containerFile, container],
+    [path.join(root, 'cmd/sw-embedding-transport/main.go'), fs.readFileSync(path.join(overlayRoot, 'cmd/main.go'))]];
   for (const name of goFiles()) {
     const folder = name.startsWith('routes_memory_index') ? 'router' : 'memoryindex';
     writes.push([path.join(root, 'internal', folder, name), fs.readFileSync(path.join(overlayRoot, 'go', name))]);

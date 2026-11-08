@@ -42,6 +42,7 @@ test('applies source and routing once, and records a reproducible digest', (t) =
   assert.equal(first.sha256, memoryIndexOverlayDigest());
   assert.equal(fs.readFileSync(path.join(root, 'internal/router/router.go'), 'utf8'), applied);
   assert.ok(fs.statSync(path.join(root, 'internal/memoryindex/store.go')).size > 1000);
+  assert.ok(fs.statSync(path.join(root, 'cmd/sw-embedding-transport/main.go')).size > 100);
   assert.ok(fs.statSync(path.join(root, 'internal/router/routes_memory_index.go')).size > 1000);
   assert.equal(matchesMemoryIndexOverlay({ memoryIndexOverlay: first }), true);
   assert.equal(matchesMemoryIndexOverlay({}), false);

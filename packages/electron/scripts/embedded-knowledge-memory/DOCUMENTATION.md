@@ -136,3 +136,96 @@ node --test packages/electron/scripts/embedded-knowledge-memory/apply.test.mjs
 These tests exercise actual SQLite, sqlite-vec and FTS5. They do not prove packaged
 Windows behavior or a real external provider call. Native packaging validation
 belongs to the coordinator's final combined build.
+
+## Offline embedding transport operator
+
+The overlay also supplies `cmd/sw-embedding-transport`. Build it in the isolated
+upstream source copy with `go build -tags sqlite_fts5 ./cmd/sw-embedding-transport`.
+The normal application never launches this command. It adds no route, listener,
+renderer capability or automatic migration. Web, mobile and VS Code retain their
+existing behavior. The existing indexed-model guard stays active.
+
+The command takes no arguments. One private stdin JSON request selects `snapshot`,
+`preview`, `apply` or `verify`. Standard output contains one JSON response; errors
+contain only `transport_migration_rejected` and exit nonzero. Keep snapshot output
+in a private inherited pipe or a protected rehearsal artifact. It includes raw
+memory content, payloads and base64 float32 vector bytes. Public preview contains
+only native identities, counts, keyed credential fingerprints and state hashes.
+Do not log requests, snapshots, SQL errors or target parameters.
+
+`TransportRequest`, `TransportPreview` and `TransportSnapshot` in
+`go/transport_migration.go` define the JSON contract. Requests identify an existing
+absolute database path, runtime config directory, tenant, KB, creator and model.
+`SYSTEM_AES_KEY` must contain exactly 32 bytes. Snapshot may omit target parameters
+so the host can derive them with its owning model-parameter builder. Snapshot
+redacts API key and app secret. Arbitrary custom headers and non-routing extra
+settings are refused because they may contain unclassified credentials.
+
+The operator supports the existing remote `text-embedding-v4` model at 1024
+dimensions. It changes only `base_url`, `provider` and `api_key`, requiring an
+HTTPS endpoint and provider `openai`. Every other parameter remains equal, and
+unknown fields in the original stored JSON survive. Parameters are written as
+a BLOB, matching the native serializer and its byte-only scanner. The raw CAS
+compares bytes for both legacy TEXT and native BLOB rows; the frozen model digest
+also records the original SQLite storage class. The model ID, name, source,
+KB and tenant remain fixed. Builtin or managed models, a different creator,
+inactive owner or another KB/document consumer of the model are refused.
+
+`preview` returns both identities from the native `modelSpace` implementation.
+The configuration ID is its second result at dimension 0. The vector space is
+its first result at dimension 1024. The command pins the exact bytes consumed by
+`ReadDeploymentOverlay`, including a configured `MODELS_CONFIG` override, and
+loads those bytes directly. A DB catalog override is accepted only as the
+initial singleton with version 0 and `{ "providers": {} }`; all its stored bytes
+enter the state hashes. The coordinator pins the executable and built-in catalog
+through its build receipt.
+
+Read-only modes require an absent or empty WAL and use immutable SQLite reads.
+A nonempty WAL is refused. Stop the owned processes and checkpoint before
+preview/verify, or use a consistent SQLite backup. `mode=ro` alone can create
+WAL/SHM sidecars. The immutable mode keeps database and directory bytes unchanged.
+Apply opens an existing database in read/write mode and reserves the writer
+before reading. It never calls `NewStore`, migrates schema or starts a container.
+The host owns process detection, checkpointing and restoration. Native apply
+requires the host's stopped-process evidence hash, restored-backup hash bound to
+the exact preview digest, and accepted compatibility receipt hash.
+
+The host evaluates source eligibility against one private raw snapshot and
+supplies at most 256 exact selected node keys and raw marker mutations. Native
+apply recomputes the complete ledger, old-space node set, model/KB/space state,
+old Hy vectors/FTS and logical knowledge fingerprints under the writer lock.
+This binds the host's eligibility decision to the same records and vectors used
+for the write. A selection cannot supply replacement content or vector bytes.
+The backend fetches those bytes from its own snapshot.
+
+Only existing raw `entry/hy:*` engine rows for `model-space/current` and ready
+`manual-index` markers can change. Only their nested `configurationId` and
+`spaceId` fields may change. Existing optional dimensions remain absent when
+absent; source hashes, unknown fields and all other values remain intact. Node
+namespaces derive from the exact selected marker's project hash, with separate
+core, cards and manual suffixes. Global manual markers do not require or create
+a model-space binding. Any model-space migration journal is refused.
+
+One transaction updates the encrypted model parameters, binds the target space,
+copies vectors with the transaction-bound Store, publishes markers with ledger
+revision CAS and writes the receipt. All old nodes and spaces remain, including
+inactive nodes. Verification checks copied vector bytes, content, payloads,
+activity, keyword rows and target binding. The complete knowledge fingerprint
+streams the five metadata tables and actual vec0 rows, without accumulating the
+corpus in memory or writing vector shadow tables. The coordinator separately
+verifies the complete restored backup and physical knowledge-table fingerprints.
+
+The receipt uses the existing `hy_memory_receipts` table and contains an
+AES-keyed request HMAC, post-state digest and revision. An exact replay returns
+`already-applied`; read-only `verify` returns `verified`. A changed request with
+the same key or any post-state drift is rejected. No portable equivalence
+certificate is created. The compatibility receipt records the operator's
+explicit decision based on the accepted limited evidence.
+
+### Why maintenance uses a separate command
+
+Normal initialization creates tables and purges orphan memory rows. An offline
+command can open a frozen database without initialization or provider calls,
+while reusing the actual model identity, encrypted serializer and vector Store.
+The host still owns source eligibility, backup/stop evidence, cross-store config
+publication and recovery. This command commits only the SQLite part.
