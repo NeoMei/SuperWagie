@@ -125,6 +125,19 @@ first-run provisioning path has already completed. Model service resolution
 runs before every indexing pass and semantic search, so enterprise policy and
 new connection revisions apply without a cached credential crossing.
 
+### Why model updates split metadata and credentials
+
+The pinned backend preserves stored `api_key` and `app_secret` during model
+metadata PUT. `updateModel` removes both fields from that body and sends nonempty
+values to the flat `/models/:id/credentials` PUT. Missing, null and empty values
+keep existing credentials. The input model is unchanged and the method returns
+the metadata response only after both writes succeed.
+
+A credential failure leaves successfully written metadata in place and rejects
+with the normal typed client error. Binding synchronization records its applied
+identity only after this method succeeds, so the same saved binding retries on
+the next invocation. These local backend writes perform no provider probe.
+
 ### Why indexed embedding replacement is refused before saving
 
 An existing embedding's name, endpoint and dimensions define its index. Both the

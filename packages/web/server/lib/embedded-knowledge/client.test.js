@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 
 import { createEmbeddedKnowledgeClient, EmbeddedKnowledgeError } from './client.js';
+import { createKnowledgeModelBindings } from './model-bindings.js';
 
 let server;
 let baseUrl;
@@ -150,4 +151,141 @@ it('reports a timed-out signed response body as a typed timeout without repeatin
     await expect(client.managedRequest({ path: '/api/v1/knowledge-bases/kb1/knowledge/managed-status', body: '{"capability":"signed"}', proof: 'proof' })).rejects.toMatchObject({ code: 'timeout' });
     expect(requests).toBe(1);
   } finally { slow.closeAllConnections(); await new Promise((resolve) => slow.close(resolve)); }
+});
+
+
+describe('model updates against the credentials subresource contract', () => {
+  let backend;
+  let endpoint;
+  let stored;
+  let calls;
+  let metadataStatus;
+  let credentialStatus;
+
+  const modelResponse = () => {
+    const parameters = { ...stored.parameters };
+    delete parameters.api_key;
+    delete parameters.app_secret;
+    return { ...stored, parameters };
+  };
+
+  beforeEach(() => {
+    stored = { id: 'model/1', name: 'previous-model', type: 'Rerank', source: 'remote', parameters: { provider: 'generic', base_url: 'https://provider.example/v1', api_key: 'old-key', app_secret: 'old-secret', extra_config: { retained: 'value' } } };
+    calls = [];
+    metadataStatus = 200;
+    credentialStatus = 200;
+  });
+
+  beforeAll(async () => {
+    backend = http.createServer((req, res) => {
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => {
+        const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined;
+        calls.push({ method: req.method, url: req.url, headers: req.headers, body });
+        res.setHeader('content-type', 'application/json');
+        if (req.url === '/api/v1/auth/login') {
+          res.end(JSON.stringify({ success: true, token: 'session-token', user: { id: 'u1' } }));
+          return;
+        }
+        if (req.method === 'GET' && req.url === '/api/v1/models') {
+          res.end(JSON.stringify({ success: true, data: [modelResponse()] }));
+          return;
+        }
+        if (req.method === 'GET' && req.url === '/api/v1/knowledge-bases/kb1') {
+          res.end(JSON.stringify({ success: true, data: { id: 'kb1', name: 'Library' } }));
+          return;
+        }
+        if (req.method === 'PUT' && req.url === '/api/v1/models/model%2F1') {
+          res.statusCode = metadataStatus;
+          if (metadataStatus === 200) {
+            // The pinned backend ignores credentials in the metadata body.
+            stored = { ...stored, ...body, parameters: { ...body.parameters, api_key: stored.parameters.api_key, app_secret: stored.parameters.app_secret } };
+          }
+          res.end(JSON.stringify({ success: metadataStatus === 200, data: modelResponse() }));
+          return;
+        }
+        if (req.method === 'PUT' && req.url === '/api/v1/models/model%2F1/credentials') {
+          res.statusCode = credentialStatus;
+          if (credentialStatus !== 200) {
+            res.end(JSON.stringify({ error: { code: 'credential_write_failed', message: 'private backend detail' } }));
+            return;
+          }
+          for (const field of ['api_key', 'app_secret']) {
+            if (body[field]) stored.parameters[field] = body[field];
+          }
+          res.end(JSON.stringify({ success: true, data: { fields: { api_key: { configured: Boolean(stored.parameters.api_key) }, app_secret: { configured: Boolean(stored.parameters.app_secret) } } } }));
+          return;
+        }
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: 'not found' }));
+      });
+    });
+    await new Promise((resolve) => backend.listen(0, '127.0.0.1', resolve));
+    endpoint = `http://127.0.0.1:${backend.address().port}`;
+  });
+
+  afterAll(() => new Promise((resolve) => backend.close(resolve)));
+
+  it('rotates credentials on the existing record and keeps secrets out of metadata', async () => {
+    const client = createEmbeddedKnowledgeClient({ baseUrl: endpoint, sessionToken: 'session', apiKey: 'unused' });
+    const update = { name: 'selected-model', type: 'Rerank', parameters: { ...stored.parameters, api_key: 'selected-key', app_secret: 'selected-secret' } };
+    const original = structuredClone(update);
+    const result = await client.updateModel('model/1', update);
+    expect(stored).toMatchObject({ id: 'model/1', name: 'selected-model', parameters: { api_key: 'selected-key', app_secret: 'selected-secret', extra_config: { retained: 'value' } } });
+    expect(calls.map(({ url }) => url)).toEqual(['/api/v1/models/model%2F1', '/api/v1/models/model%2F1/credentials']);
+    expect(calls[0].body.parameters).toEqual({ provider: 'generic', base_url: 'https://provider.example/v1', extra_config: { retained: 'value' } });
+    expect(calls[1].body).toEqual({ api_key: 'selected-key', app_secret: 'selected-secret' });
+    for (const call of calls) {
+      expect(call.headers.authorization).toBe('Bearer session');
+      expect(call.headers['x-api-key']).toBeUndefined();
+    }
+    expect(result).toEqual(modelResponse());
+    expect(update).toEqual(original);
+  });
+
+  it.each([undefined, {}, { api_key: '', app_secret: '' }, { api_key: null, app_secret: null }])('preserves existing credentials for absent or empty parameters %j', async (parameters) => {
+    const client = createEmbeddedKnowledgeClient({ baseUrl: endpoint, apiKey: 'tenant-key', tenantId: 7 });
+    await client.updateModel('model/1', { name: 'renamed', parameters });
+    expect(stored.parameters).toMatchObject({ api_key: 'old-key', app_secret: 'old-secret' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body.parameters ?? {}).not.toHaveProperty('api_key');
+    expect(calls[0].body.parameters ?? {}).not.toHaveProperty('app_secret');
+    expect(calls[0].headers['x-api-key']).toBe('tenant-key');
+    expect(calls[0].headers['x-tenant-id']).toBe('7');
+  });
+
+  it('leaves an omitted credential unchanged when another credential rotates', async () => {
+    const client = createEmbeddedKnowledgeClient({ baseUrl: endpoint });
+    await client.updateModel('model/1', { parameters: { api_key: 'selected-key', app_secret: '' } });
+    expect(stored.parameters).toMatchObject({ api_key: 'selected-key', app_secret: 'old-secret' });
+    expect(calls[1].body).toEqual({ api_key: 'selected-key' });
+  });
+
+  it('does not rotate credentials after a failed metadata update', async () => {
+    metadataStatus = 409;
+    const client = createEmbeddedKnowledgeClient({ baseUrl: endpoint });
+    await expect(client.updateModel('model/1', { parameters: { api_key: 'selected-key' } })).rejects.toMatchObject({ code: 'conflict', status: 409 });
+    expect(stored.parameters.api_key).toBe('old-key');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('rejects partial synchronization and retries the same binding after credential failure', async () => {
+    credentialStatus = 500;
+    const runtime = createKnowledgeModelBindings({
+      createClient: (options) => createEmbeddedKnowledgeClient({ baseUrl: endpoint, ...options }),
+      getState: () => ({ email: 'local@example.invalid', password: 'fixture-password', knowledgeBaseId: 'kb1' }),
+      readDocuments: async () => ({}),
+      resolveModelBinding: async (purpose) => purpose === 'rerank' ? { purpose, protocol: 'openai-compatible', baseUrl: 'https://provider.example/v1', model: 'selected-model', apiKey: 'selected-key', parameters: {} } : null,
+    });
+    await expect(runtime.syncModelBindings()).rejects.toMatchObject({ name: 'EmbeddedKnowledgeError', code: 'credential_write_failed', status: 500, message: 'The knowledge backend failed to handle the request' });
+    expect(stored).toMatchObject({ name: 'selected-model', parameters: { api_key: 'old-key' } });
+    credentialStatus = 200;
+    await runtime.syncModelBindings();
+    expect(stored.parameters.api_key).toBe('selected-key');
+    expect(calls.filter(({ url }) => url.endsWith('/credentials'))).toHaveLength(2);
+    const completedCalls = calls.length;
+    await runtime.syncModelBindings();
+    expect(calls).toHaveLength(completedCalls);
+  });
 });

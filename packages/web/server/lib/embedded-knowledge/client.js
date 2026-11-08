@@ -186,7 +186,13 @@ export function createEmbeddedKnowledgeClient({
     },
 
     async updateModel(id, model) {
-      return unwrap(await request(`/api/v1/models/${encodeURIComponent(id)}`, { method: 'PUT', body: model }));
+      const { api_key, app_secret, ...parameters } = model.parameters ?? {};
+      const path = `/api/v1/models/${encodeURIComponent(id)}`;
+      const updated = unwrap(await request(path, { method: 'PUT', body: model.parameters ? { ...model, parameters } : model }));
+      if (api_key || app_secret) {
+        await request(`${path}/credentials`, { method: 'PUT', body: { api_key: api_key || undefined, app_secret: app_secret || undefined } });
+      }
+      return updated;
     },
 
     async getKnowledgeBase(id) {
