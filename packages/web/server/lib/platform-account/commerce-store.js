@@ -4,6 +4,10 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 
 const identifier = z.string().min(1).max(200);
+export const refundReasonSchema = z.string().min(1).refine((reason) => Buffer.byteLength(reason, 'utf8') <= 80);
+// Older journals accepted 200 UTF-16 code units. Read them without discarding
+// their original refund identity; only unchanged invalid receipts may survive a write.
+const refundIdentity = (intent) => [intent.serviceId, intent.actorId, intent.accountId, intent.idempotencyKey, intent.kind, intent.productId, intent.provider, intent.resourceId, intent.refundKey, intent.refundReason];
 const intentSchema = z.object({
   serviceId: identifier, actorId: identifier, accountId: identifier,
   idempotencyKey: z.string().uuid(), kind: z.enum(['recharge', 'purchase', 'upgrade', 'checkout']),
@@ -56,6 +60,15 @@ export const openCommerceStore = async (dataDir) => {
       candidate.version = 2;
       const result = operation(candidate.intents, candidate.quotes);
       documentSchema.parse(candidate);
+      for (const id of new Set([...Object.keys(state.intents), ...Object.keys(candidate.intents)])) {
+        const intent = candidate.intents[id];
+        const original = state.intents[id];
+        const invalid = intent?.refundReason !== undefined && !refundReasonSchema.safeParse(intent.refundReason).success;
+        const invalidOriginal = original?.refundReason !== undefined && !refundReasonSchema.safeParse(original.refundReason).success;
+        if ((invalid || invalidOriginal) && (!original || !intent || JSON.stringify(refundIdentity(original)) !== JSON.stringify(refundIdentity(intent)))) {
+          throw new Error('platform_refund_reason_invalid');
+        }
+      }
       const serialized = JSON.stringify(candidate);
       if (Buffer.byteLength(serialized) > sizeLimit) throw new Error('platform_commerce_store_capacity');
       const temporary = `${filename}.${crypto.randomUUID()}.tmp`;

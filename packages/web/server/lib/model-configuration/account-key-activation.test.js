@@ -11,6 +11,7 @@ import { createModelConfigurationRuntime, ModelConfigurationError } from './runt
 import { registerModelBootstrapRoutes } from './bootstrap-routes.js';
 import { createAccountKeyStore } from './account-key-store.js';
 import { createAccountKeyActivation } from './account-key-activation.js';
+import { createUniHubBootstrapClient } from './bootstrap-client.js';
 
 const directories = [];
 const issuedKey = 'fixture-account-key-7890';
@@ -29,7 +30,7 @@ const completeCatalog = [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'
 const verifiedPurposeRows = () => supportedPurposes.map((purpose, index) => expect.objectContaining({ purpose, modelId: purposeCatalog[index].id, status: 'verified', applied: true, errorCode: null }));
 const unavailablePurposeRows = () => supportedPurposes.map((purpose) => ({ id: `purpose:${purpose}`, purpose, modelId: null, status: 'skipped', testedAt: null, applied: false, errorCode: 'account_key_model_unavailable' }));
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
-const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBindingChange } = {}) => {
+const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBindingChange, nativeDiscoveryContract = false } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'account-key-activation-'));
   directories.push(dataDir);
   const env = {};
@@ -82,6 +83,10 @@ const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBinding
         if (route.endsWith('/model-discovery')) {
           counts.discover++;
           controls.discoveryRequests = [...(controls.discoveryRequests ?? []), init.body ? JSON.parse(init.body) : null];
+          if (controls.creditDefaultNoMembership) {
+            controls.countsAtDiscovery = { ...counts };
+            if ((JSON.parse(init.body).funding_mode ?? 'credits') === 'credits') throw new ModelConfigurationError('subscription_required', 403);
+          }
           if (controls.discoveryError) throw controls.discoveryError;
           return { account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: controls.catalog ?? catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }], ...controls.discoveryOverrides };
         }
@@ -154,13 +159,39 @@ const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBinding
     ? createAccountKeyActivation({ dataDir, store, modelRuntime, platformAccount, provider: available ? provider : undefined, readKeyCatalog, readLegacyModels: async () => legacyModels, receiptStore, env, enterpriseOptions })
     : createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, accountKeyProvider: available ? provider : undefined, readKeyCatalog, readLegacyModels: async () => legacyModels, env, enterpriseOptions }).accountKey;
   const createRuntime = () => createModelBootstrapRuntime({ dataDir, store, modelRuntime, platformAccount, accountKeyProvider: provider, readKeyCatalog, readLegacyModels: async () => legacyModels, env, enterpriseOptions,
-    uniHubClient: { discover: async () => ({ account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }], ...controls.discoveryOverrides }) },
+    uniHubClient: nativeDiscoveryContract ? createUniHubBootstrapClient({ platformAccount: { request: async (_identity, route, init) => platformAccount.captureCommerceSession().request(route, init) } }) : { discover: async () => ({ account_id: 'account-1', origin_product_id: 'superwagie', instance_id: 'fixture-instance', models: catalog ?? [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }], ...controls.discoveryOverrides }) },
   });
   return { dataDir, store, modelRuntime, counts, controls, env, create, createRuntime, provider, probeCalls, changeActor: (next) => { actor = { ...actor, ...next }; } };
 };
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('persistent account key activation', () => {
+  it.each([undefined, 'prepaid_cash'])('keeps cash discovery independent of a credit-default profile for funding %s', async (fundingMode) => {
+    const f = await fixture({ nativeDiscoveryContract: true });
+    f.controls.creditDefaultNoMembership = true;
+    const runtime = f.createRuntime();
+    const discovery = await runtime.discover({ ...input, source: 'session', fundingMode });
+    expect(discovery.fundingMode).toBe('prepaid_cash');
+    expect(discovery.models.map((model) => model.id)).toEqual(['chat-pro']);
+    expect(f.controls.discoveryRequests).toEqual([{ model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' }]);
+    expect(f.counts).toEqual({ discover: 1, issue: 0, configure: 0, probe: 0 });
+    expect(f.probeCalls).toEqual([]);
+    await expect(runtime.discover({ ...input, source: 'session', fundingMode: 'credits' })).rejects.toMatchObject({ code: 'subscription_required' });
+    expect(f.counts.issue).toBe(0);
+  });
+
+  it.each([undefined, 'prepaid_cash'])('keeps direct cash key preparation on cash under a credit-default profile for funding %s', async (fundingMode) => {
+    const f = await fixture({ nativeDiscoveryContract: true });
+    f.controls.creditDefaultNoMembership = true;
+    const credential = await f.create().prepareCredential({ ...input, fundingMode });
+    expect(credential.funding_mode).toBe('prepaid_cash');
+    expect(f.controls.discoveryRequests).toEqual([{ model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' }]);
+    expect(f.controls.countsAtDiscovery).toEqual({ discover: 1, issue: 0, configure: 0, probe: 0 });
+    expect(f.controls.issuePayload.funding_mode).toBe('prepaid_cash');
+    expect(f.counts).toEqual({ discover: 1, issue: 1, configure: 0, probe: 0 });
+    expect(f.probeCalls).toEqual([]);
+  });
+
   it('quick setup carries the selected funding mode through discovery, preview and apply', async () => {
     const f = await fixture({ catalog: completeCatalog });
     const conversion = { version: 'fixture-v1', numerator: '3', denominator: '2', rounding: 'lr-cumulative-ceil-v1' };
@@ -391,8 +422,8 @@ describe('persistent account key activation', () => {
     const f = await fixture({ catalog });
     const result = (await f.create().activate({ ...input, action: 'activate' })).activation;
     expect(result.status).toBe('ready');
-    expect(f.controls.issuePayload).toEqual({ name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: 'fixture-instance', model_scope: 'llmrouter_available' });
-    expect(f.controls.discoveryRequests[0]).toEqual({ model_scope: 'llmrouter_available' });
+    expect(f.controls.issuePayload).toEqual({ name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: 'fixture-instance', model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' });
+    expect(f.controls.discoveryRequests[0]).toEqual({ model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' });
     expect(f.controls.configuredModels).toHaveLength(105);
     expect(f.counts.issue).toBe(1);
     expect(f.counts.probe).toBe(1);

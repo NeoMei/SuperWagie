@@ -73,3 +73,23 @@ it('round-trips external quote funding, checkout provider and original refund re
   const reopened=await openCommerceStore(f.directory);cleanups.push(()=>reopened.close());
   expect(reopened.read().checkout).toEqual(checkout);expect(reopened.readQuotes().quote).toEqual(quote);
 });
+
+it('enforces the UTF-8 refund contract for new writes but preserves unchanged legacy receipts', async () => {
+  const f = await fixture();
+  const checkout = { ...f.intent, kind: 'checkout', provider: 'wechat', paymentSource: 'external', resourceId: 'checkout1', refundKey: crypto.randomUUID(), refundReason: '退'.repeat(27) };
+  await expect(f.store.mutate((intents) => { intents.invalid = checkout; })).rejects.toThrow();
+  expect(f.store.read()).toEqual({});
+  await f.store.close();
+  const file = path.join(f.directory, 'unihub-commerce/state.json');
+  await fs.writeFile(file, JSON.stringify({ version: 2, intents: { legacy: checkout }, quotes: {} }));
+  const reopened = await openCommerceStore(f.directory); cleanups.push(() => reopened.close());
+  await reopened.mutate((intents) => { intents.other = f.intent; });
+  expect(reopened.read().legacy).toEqual(checkout);
+  await expect(reopened.mutate((intents) => { intents.legacy.refundReason = 'x'.repeat(81); })).rejects.toThrow();
+  await expect(reopened.mutate((intents) => { intents.legacy.refundKey = crypto.randomUUID(); })).rejects.toThrow();
+  await expect(reopened.mutate((intents) => { intents.legacy.refundReason = 'A valid but unproven replacement'; })).rejects.toThrow();
+  await expect(reopened.mutate((intents) => { delete intents.legacy; })).rejects.toThrow();
+  expect(reopened.read().legacy).toEqual(checkout);
+  await reopened.mutate((intents) => { intents.valid = { ...checkout, refundKey: crypto.randomUUID(), refundReason: '退'.repeat(26) + 'ab' }; });
+  expect(reopened.read().valid.refundReason).toBe('退'.repeat(26) + 'ab');
+});

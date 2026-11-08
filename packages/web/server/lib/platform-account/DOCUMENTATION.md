@@ -131,15 +131,16 @@ uses a redirect or HTTP success as evidence of funds arriving.
 - Published SuperWagie memberships and addons, plus legacy llmrouter addons,
   remain visible. Existing authorized cash can purchase legacy formal offers.
   `payments.mode` describes external funding, while `canPurchase` describes
-  financial authorization. Real external collection remains unconfigured.
+  financial authorization. External collection is available only when UniHub
+  reports configured payment providers; missing configuration stays unavailable.
   Sandbox recharge and settlement require separate explicit actions and the
   authoritative sandbox capability; refresh never advances those actions.
 - Formal offers marked `entitlements.pricing_program=superwagie-ai-points-v1`
-  expose `purchaseReadiness` with `points_runtime_unavailable`. New purchases,
-  quotes and first acceptance are refused even with cash. The current native
-  model key consumes cash, so CREDIT rates alone do not establish usable point
-  benefits. Sandbox offers remain testable; the marker does not block recovery
-  of an already admitted original intent.
+  expose `purchaseReadiness`. New purchases, quotes and first acceptance require
+  authoritative `native_credits.ready: true`, even when paid from cash. Missing
+  or false readiness returns `points_runtime_unavailable`. CREDIT rates alone
+  do not establish usable point benefits. Sandbox offers remain testable; the
+  marker does not block recovery of an already admitted original intent.
 - Cash values remain canonical decimal integer strings in CNY/6. External
   recharge amounts must be positive whole cents. UniHub chooses the offer's own
   product wallet and any explicitly authorized unified-wallet funding. The
@@ -196,15 +197,19 @@ mounts, refreshes and account switches from initiating payments.
 
 Creating a recharge, confirming sandbox funds and purchasing an offer have
 separate idempotency and authorization boundaries. A combined checkout would
-need a durable parent operation to bind and recover those steps. This adapter
-keeps each step explicit and does not report a completed direct-payment flow.
+need a durable parent operation to bind and recover those steps. Sandbox
+recharge keeps each step explicit. Configured external checkout instead uses
+its own durable original-provider receipt and separate fulfillment state.
 
 ### Why points have a separate runtime readiness gate
 
 Published model CREDIT rates describe pricing. They do not prove that the
-activated native API key consumes CREDIT. The formal points program stays
-blocked until its execution and settlement path is verified. Cash funding
-guidance continues to target the cash wallet for current native calls.
+activated native API key consumes CREDIT. The formal points program is enabled
+only by authoritative native-credit readiness. A missing or false capability
+blocks new formal points admissions. Explicit cash keys retain cash funding;
+explicit credit keys require their own native readiness and account access.
+These source gates do not establish deployed provider, merchant or settlement
+acceptance; those require separate runtime verification.
 
 ### Why credit batches preserve their declared scope
 
@@ -247,8 +252,9 @@ availability. Published sandbox SuperWagie memberships and llmrouter addons
 populate the catalog. Missing scopes are shown in the account page. Financial
 actions require the account's current owner or billing administrator role.
 
-Register and sign in at the app's login screen. Open Settings > User center to
-edit the profile or password. Open its membership and recharge tab to select an offer.
+Register and sign in at the app's login screen. Open User center to edit the
+profile or password, then open membership and recharge to select an offer.
+When the backend reports sandbox funding, use the following sandbox sequence.
 Fill its recharge amount, create the sandbox recharge, and select Simulate
 settlement in the request history. Check the original request until UniHub
 reports the ledger operation as applied. Confirm the purchase separately and
@@ -257,8 +263,9 @@ session from the encrypted local store; an expired access token requires sign-in
 again. The journal and UniHub orders remain available.
 
 The browser OIDC client and optional console link retain their separate
-configuration. Enabling a real merchant in UniHub does not enable real payment
-commands in this sandbox-only adapter.
+configuration. External checkout requires UniHub to advertise configured
+providers and the selected offer to pass native-credit readiness. Merchant
+configuration alone does not prove payment, fulfillment or refund acceptance.
 
 ## Optional instance-owner HTTP access policy
 
@@ -316,6 +323,28 @@ for a server-listed checkout first recovered on this instance. Expiration is
 only display metadata; it never proves closure. Capability loss does not hide
 existing checkout records. Old servers lacking the checkout capability retain
 their existing wallet path.
+
+Refund reasons must be nonempty and at most 80 UTF-8 bytes. The HTTP action and
+new journal writes share that contract before a refund key or reason is saved.
+A retry retains the original reason and key, including after response loss.
+Older journals may contain a reason accepted by the former 200-character
+limit. Such receipts remain readable, and unrelated intents can still be
+written, but an invalid refund identity cannot be changed or newly copied by
+normal journal writes. Refund dispatch returns `platform_refund_repair_required`
+without replacing the reason, rotating a key or issuing another refund.
+
+There is no automatic repair because the legacy journal contains no conclusive
+upstream pre-admission rejection evidence. To repair one, an operator must stop
+all processes using that data directory and back up `unihub-commerce/state.json`.
+Verify the exact original checkout and refund key against authoritative UniHub
+records or a conclusive validation rejection showing no refund was admitted.
+Only with that evidence may the operator replace the invalid `refundReason`
+with an agreed reason of at most 80 UTF-8 bytes, preserving the original
+checkout, actor/account/service, refund key and all other receipt fields, then
+restart and retry explicitly. A timeout, missing response or absent item in a
+partial listing is not rejection evidence. If admission is unknown or a refund
+was admitted, leave the journal unchanged and recover the original upstream
+refund; never infer permission to replace its request.
 
 Payment sessions are parsed at both HTTP boundaries. WeChat `weixin:` data only
 becomes a locally encoded QR image. Alipay redirects require HTTPS, the exact

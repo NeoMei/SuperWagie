@@ -431,3 +431,8 @@ Client code validates conversion strings and their rounding version but performs
 no conversion arithmetic. The upstream billing runtime freezes the tariff for
 each admitted call. Quick-setup discoveries persist the selected funding mode
 through preview and apply; imported credentials retain their own authorization.
+Account discovery and native key creation always send the selected
+`funding_mode`, either `prepaid_cash` or `credits`. The owning backend normalizes
+omitted legacy client input to `prepaid_cash`; it never inherits a product's
+credit-default discovery policy for a cash selection. Discovery is read-only:
+no credential issuance, provider configuration or model probe occurs.

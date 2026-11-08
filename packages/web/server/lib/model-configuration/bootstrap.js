@@ -115,10 +115,10 @@ export const createModelBootstrapRuntime = (dependencies = {}) => {
     if (!normalizedCatalog(payload).length) return fail('model_configuration_bootstrap_empty_catalog', 404);
     return { originProductId, instanceId: instanceId ?? expectedInstance ?? null, accountId: accountId ?? expectedAccount ?? null };
   };
-  const discover = async ({ source, key, identity, owner, fundingMode } = {}) => {
+  const discover = async ({ source, key, identity, owner, fundingMode: requestedFundingMode } = {}) => {
     parse(sourceSchema, source);
-    if (fundingMode !== undefined) parse(fundingModeSchema, fundingMode);
-    if (source === 'imported-key' && fundingMode !== undefined) fail('model_configuration_invalid_input');
+    if (source === 'imported-key' && requestedFundingMode !== undefined) fail('model_configuration_invalid_input');
+    const fundingMode = source === 'session' ? parse(fundingModeSchema, requestedFundingMode ?? 'prepaid_cash') : undefined;
     if (source === 'imported-key' && (!key || key.length > 8192)) return fail('model_configuration_invalid_input');
     const baseUrl = source === 'imported-key' ? llmRouterInferenceApiUrl(env) : null;
     const payload = await callClient(uniHubClient, ['discover', 'discoverModels', 'modelDiscovery'], { source, key, identity, fundingMode, accountId: accountValue('accountId', identity), instanceId: accountValue('instanceId', identity), originProductId: 'superwagie', fetchImpl });

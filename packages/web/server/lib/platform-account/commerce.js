@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { PlatformAccountError } from './runtime.js';
-import { openCommerceStore } from './commerce-store.js';
+import { openCommerceStore, refundReasonSchema } from './commerce-store.js';
 
 const id = z.string().min(1).max(200);
 const units = z.string().regex(/^(0|[1-9]\d*)$/);
@@ -301,7 +301,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     },
     checkoutAction: async (identity, checkoutId, action, rawBody) => {
       parse(id, checkoutId, 'platform_request_invalid');
-      const body = parse(accountInput.extend({ reason: z.string().min(1).max(200).optional() }), rawBody, 'platform_request_invalid');
+      const body = parse(accountInput.extend({ reason: refundReasonSchema.optional() }), rawBody, 'platform_request_invalid');
       const ctx = await context(identity, body.accountId);
       requireFinance(ctx, action === 'read' ? ['orders:read'] : ['orders:read', 'orders:write']);
       if (!['read', 'reconcile', 'close', 'refund'].includes(action)) fail('platform_request_invalid');
@@ -314,6 +314,9 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       const run = async () => {
         let intent = storageId ? journal.read()[storageId] : null;
         if (action === 'refund') {
+          // A legacy invalid reason may already have been dispatched. No local
+          // evidence proves whether upstream admitted it, so preserve its key.
+          if (intent?.refundKey && !refundReasonSchema.safeParse(intent.refundReason).success) fail('platform_refund_repair_required', 409);
           if (!intent) {
             const original = await readCheckout(ctx, checkoutId);
             const recoveryKey = crypto.randomUUID();

@@ -12,7 +12,7 @@ const setup = async () => {
   cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
   const offer = { id: 'points', product_id: 'superwagie', name: 'Points', account_kind: 'both', kind: 'membership', period: 'month', price: '1000000', monthly_credit: '2000000', validity_months: 0, rank: 1, sandbox: false, status: 'published', entitlements: { pricing_program: 'superwagie-ai-points-v1' } };
   const state = { quoteNumber: 0, rejectQuote: false, rejectStatus: 409, failCheckoutRead: false, ready: true, configured: true, lose: true, refundLoss: false, calls: [], checkout: null, url: 'weixin://wxpay/bizpayurl?pr=test' };
-  const runtime = createPlatformCommerceRuntime({ dataDir: dir, accountRuntime: { captureCommerceSession: () => ({ billingAccountId: 'acct', actingUserId: 'actor', serviceId: 'service', request: async (route, init) => {
+  const accountRuntime = { captureCommerceSession: () => ({ billingAccountId: 'acct', actingUserId: 'actor', serviceId: 'service', request: async (route, init) => {
     state.calls.push({ route, init });
     if (route === '/v1/accounts') return [{ id: 'acct', kind: 'personal', role: 'owner' }];
     if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: ['catalog:read','subscriptions:read','orders:read','orders:write'], sandbox: false, product_wallet_recharge: false, real_payments_configured: state.configured, payment_providers: ['wechat','alipay'], native_credits: { ready: state.ready } };
@@ -41,9 +41,10 @@ const setup = async () => {
     if (route.includes('/checkouts/check1')) return state.checkout;
     if (route.endsWith('/orders')) return [];
     throw new Error(route);
-  } }) } });
-  cleanup.push(() => runtime.close());
-  return { runtime, state, body: { accountId:'acct', offerId:'points', provider:'wechat', idempotencyKey:crypto.randomUUID() } };
+  } }) };
+  const create = () => { const runtime = createPlatformCommerceRuntime({ dataDir: dir, accountRuntime }); cleanup.push(() => runtime.close()); return runtime; };
+  const runtime = create();
+  return { runtime, create, dir, state, body: { accountId:'acct', offerId:'points', provider:'wechat', idempotencyKey:crypto.randomUUID() } };
 };
 it('persists checkout before dispatch and recovers the original key after response loss', async () => {
   const f = await setup();
@@ -157,4 +158,43 @@ it('does not infer the resource of an unknown create from a completed checkout l
   const f=await setup();expect((await f.runtime.createCheckout({},f.body)).status).toBe('UNKNOWN');f.state.checkout.payment_status='PAID';f.state.checkout.fulfillment_status='FULFILLED';
   expect((await f.runtime.overview({})).intents[0].status).toBe('UNKNOWN');
   await expect(f.runtime.createCheckout({}, {...f.body,idempotencyKey:crypto.randomUUID()})).rejects.toMatchObject({code:'platform_operation_pending'});
+});
+
+it.each(['x'.repeat(81), '退'.repeat(27)])('rejects a refund reason above 80 UTF-8 bytes before journaling: %s', async (reason) => {
+  const f = await setup(); f.state.lose = false;
+  await f.runtime.createCheckout({}, f.body);
+  const file = path.join(f.dir, 'unihub-commerce/state.json');
+  const before = await fs.readFile(file, 'utf8');
+  const calls = f.state.calls.length;
+  await expect(f.runtime.checkoutAction({}, 'check1', 'refund', { accountId: 'acct', reason })).rejects.toMatchObject({ code: 'platform_request_invalid' });
+  expect(await fs.readFile(file, 'utf8')).toBe(before);
+  expect(f.state.calls).toHaveLength(calls);
+});
+
+it.each(['x'.repeat(80), '退'.repeat(26) + 'ab'])('accepts an exact 80-byte refund reason and preserves it on response loss', async (reason) => {
+  const f = await setup(); f.state.lose = false;
+  await f.runtime.createCheckout({}, f.body); f.state.checkout.payment_status = 'PAID'; f.state.refundLoss = true;
+  await expect(f.runtime.checkoutAction({}, 'check1', 'refund', { accountId: 'acct', reason })).rejects.toMatchObject({ code: 'platform_unavailable' });
+  await f.runtime.checkoutAction({}, 'check1', 'refund', { accountId: 'acct', reason: 'New reason must not replace the original' });
+  const requests = f.state.calls.filter((call) => call.route.endsWith('/refund'));
+  expect(requests).toHaveLength(2);
+  expect(requests.map((call) => JSON.parse(call.init.body).reason)).toEqual([reason, reason]);
+  expect(requests[0].init.headers['Idempotency-Key']).toBe(requests[1].init.headers['Idempotency-Key']);
+});
+
+it('preserves a preexisting invalid refund receipt and refuses guessed repair or dispatch', async () => {
+  const f = await setup(); f.state.lose = false;
+  await f.runtime.createCheckout({}, f.body); await f.runtime.close();
+  const file = path.join(f.dir, 'unihub-commerce/state.json');
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  const intent = Object.values(saved.intents)[0];
+  intent.refundKey = crypto.randomUUID(); intent.refundReason = '退'.repeat(27);
+  await fs.writeFile(file, JSON.stringify(saved));
+  const runtime = f.create();
+  await expect(runtime.checkoutAction({}, 'check1', 'refund', { accountId: 'acct', reason: 'Corrected reason' })).rejects.toMatchObject({ code: 'platform_refund_repair_required' });
+  expect(f.state.calls.filter((call) => call.route.endsWith('/refund'))).toEqual([]);
+  expect(JSON.parse(await fs.readFile(file, 'utf8')).intents).toEqual(saved.intents);
+  expect(await runtime.checkoutAction({}, 'check1', 'read', { accountId: 'acct' })).toMatchObject({ id: 'check1' });
+  const after = Object.values(JSON.parse(await fs.readFile(file, 'utf8')).intents)[0];
+  expect(after).toMatchObject({ refundKey: intent.refundKey, refundReason: intent.refundReason, idempotencyKey: intent.idempotencyKey, resourceId: 'check1' });
 });

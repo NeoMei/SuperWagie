@@ -74,6 +74,25 @@ describe('ModelQuickSetupWizard', () => {
     expect(calls).toEqual([{ source: 'session', fundingMode: 'credits', key: undefined }]);
   });
 
+  test('the cash choice stays explicit for a credit-default account without membership', async () => {
+    const writes: string[] = [];
+    const scenario = batchScenario(async () => { writes.push('probe'); throw new Error('Unexpected model request'); }, async () => { throw new Error('Unexpected status request'); });
+    scenario.client.issueKey = async () => { writes.push('issue'); throw new Error('Unexpected key issuance'); };
+    const calls: Array<Parameters<ModelBootstrapClient['discover']>[0]> = [];
+    scenario.client.discover = async (input) => {
+      calls.push(input);
+      if ((input.fundingMode ?? 'credits') === 'credits') throw new Error('subscription_required');
+      return { discoveryId: 'cash', source: 'session', fundingMode: 'prepaid_cash', models: [{ id: 'cash-chat', operations: ['chat'], inputModalities: ['text'], outputModalities: ['text'], probe: true }] };
+    };
+    await act(async () => root.render(<I18nProvider><ModelQuickSetupWizard open {...scenario} onClose={() => {}} onApplied={() => {}} /></I18nProvider>));
+    await click('Credits'); await click('Cash balance');
+    expect(calls).toEqual([]);
+    await click('Discover models');
+    expect(calls).toEqual([{ source: 'session', fundingMode: 'prepaid_cash', key: undefined }]);
+    expect(document.body.textContent).not.toContain('subscription_required');
+    expect(writes).toEqual([]);
+  });
+
   test('batch tests animate immediately and keep skipped images separate from verified embeddings', async () => {
     let finishStart: (run: ModelBootstrapTestRun) => void = () => {};
     let finishRead: (run: ModelBootstrapTestRun) => void = () => {};

@@ -205,8 +205,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
       const models = await readKeyCatalog({ apiKey, baseUrl: record.baseUrl, instanceId: record.instanceId, assertCurrent: ctx.assertCurrent, fetchImpl, env, enterpriseOptions });
       payload = { account_id: record.accountId, origin_product_id: 'superwagie', instance_id: record.instanceId, models };
     } else {
-      const input = { model_scope: 'llmrouter_available' };
-      if (ctx.fundingMode === 'credits') input.funding_mode = 'credits';
+      const input = { model_scope: 'llmrouter_available', funding_mode: ctx.fundingMode };
       payload = await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/model-discovery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
     }
     if (!record && ctx.fundingMode === 'credits') parse(nativeCreditDiscoverySchema, payload, 'account_key_catalog_invalid', 502);
@@ -237,8 +236,7 @@ export const createAccountKeyActivation = ({ dataDir, store, modelRuntime, platf
     // unknown and retains this receipt; it must never issue another key.
     try {
       ctx.assertCurrent();
-      const input = { name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: record.instanceId, model_scope: 'llmrouter_available' };
-      if (ctx.fundingMode === 'credits') input.funding_mode = 'credits';
+      const input = { name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: record.instanceId, model_scope: 'llmrouter_available', funding_mode: ctx.fundingMode };
       const raw = await ctx.session.request(`/v1/accounts/${encodeURIComponent(ctx.ownership.accountId)}/api-keys`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),

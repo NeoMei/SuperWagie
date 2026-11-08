@@ -438,8 +438,8 @@ describe('quick setup service endpoints', () => {
     expect(saved).not.toContain('private-key');
     expect(saved).not.toContain('untrusted.example.test');
     expect(requests).toEqual(source === 'imported' ? [{ method: 'GET', path: '/v1/models', body: null }] : [
-      { method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available' } },
-      { method: 'POST', path: '/v1/accounts/account-1/api-keys', body: { name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: 'instance-1', model_scope: 'llmrouter_available' } },
+      { method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' } },
+      { method: 'POST', path: '/v1/accounts/account-1/api-keys', body: { name: 'SuperWagie', origin_product_id: 'superwagie', instance_id: 'instance-1', model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' } },
       { method: 'GET', path: '/v1/models', body: null },
     ]);
   });
@@ -450,7 +450,7 @@ describe('quick setup service endpoints', () => {
     const owner = { type: 'ui-session', token: 'fixture-owner' };
     const discovery = await runtime.discover({ source: 'session', identity, owner });
     const preview = await runtime.preview({ discoveryId: discovery.discoveryId, revision: 0, purposes: ['embedding'], identity, owner });
-    expect(requests).toEqual([{ method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available' } }]);
+    expect(requests).toEqual([{ method: 'POST', path: '/v1/accounts/account-1/model-discovery', body: { model_scope: 'llmrouter_available', funding_mode: 'prepaid_cash' } }]);
     const applied = await runtime.apply({ operationId: preview.operationId, discoveryId: discovery.discoveryId, revision: 0, identity, owner });
     expect(applied.configuration.connections[0]).toMatchObject({ protocol: 'openai-compatible', baseUrl: env.OPENCHAMBER_LLMROUTER_API_URL });
     await runtime.issueKey({ identity, owner });

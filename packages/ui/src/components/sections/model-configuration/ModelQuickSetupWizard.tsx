@@ -144,12 +144,12 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
   };
   const discover = () => run(async () => {
     const input: Parameters<ModelBootstrapClient['discover']>[0] = { source, key: source === 'imported-key' ? key : undefined };
-    if (source === 'session' && fundingMode === 'credits') input.fundingMode = fundingMode;
+    if (source === 'session') input.fundingMode = fundingMode;
     const result = await client.discover(input);
     setDiscovery(result); setStep('discover');
   });
   const issueKey = () => run(async () => {
-    const result = await client.issueKey(fundingMode === 'credits' ? { fundingMode } : {});
+    const result = await client.issueKey({ fundingMode });
     setDiscovery(result); setStep('discover');
   });
   const makePreview = () => run(async () => {
