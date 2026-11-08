@@ -178,3 +178,5 @@ export function createHySpaceMaintenance({ store, backend, canProcess = () => tr
   };
   return { ensure(input) { const work = queue.then(() => ensure(input)); queue = work.catch(() => {}); return work; } };
 }
+
+export const hySpaceCopyEligible = copyEligible;

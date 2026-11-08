@@ -229,3 +229,11 @@ command can open a frozen database without initialization or provider calls,
 while reusing the actual model identity, encrypted serializer and vector Store.
 The host still owns source eligibility, backup/stop evidence, cross-store config
 publication and recovery. This command commits only the SQLite part.
+
+The reviewed account transport also persists the exact row override
+`spec: { compat: { max_batch_size: 10 } }`. Only a nil prior spec or the same
+post-migration spec is admitted by this operator. Any other override fails.
+The raw encrypted parameter patch includes `spec`, and real Gorm reopen tests
+verify its persistence. The pinned native protocol splitter is exercised with
+11, 32 and 100 synthetic inputs against a local recording HTTP server. Partial
+HTTP failure cannot publish a new memory space or advance the ledger.

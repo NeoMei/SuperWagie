@@ -136,3 +136,7 @@ export function createManualMemoryIndex({ store, backend }) {
     },
   };
 }
+
+export const eligibleManualMemory = eligible;
+
+export const manualIndexMarkers = markers;

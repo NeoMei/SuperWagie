@@ -60,6 +60,11 @@ export function knowledgeModelParameters(purpose, binding, existing = {}) {
   if (purpose === 'embedding' && binding.parameters.dimensions !== undefined) {
     parameters.embedding_parameters = { ...existing.embedding_parameters, dimension: binding.parameters.dimensions };
   }
+  if (purpose === 'embedding' && binding.providerId === 'llmrouter' && binding.protocol === 'openai-compatible' && binding.model === 'text-embedding-v4') {
+    const bound = existing.spec?.compat?.max_batch_size;
+    const maxBatchSize = Number.isInteger(bound) && bound > 0 ? Math.min(bound, 10) : 10;
+    parameters.spec = { ...existing.spec, compat: { ...existing.spec?.compat, max_batch_size: maxBatchSize } };
+  }
   return parameters;
 }
 

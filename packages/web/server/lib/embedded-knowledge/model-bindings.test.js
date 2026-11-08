@@ -262,3 +262,15 @@ describe('knowledge model binding consumption', () => {
     expect(writes).toHaveLength(1);
   });
 });
+
+describe('account text-embedding-v4 batch compatibility', () => {
+  it('pins the native supplier ceiling while retaining stricter bounds and unrelated spec fields', () => {
+    const binding = { providerId: 'llmrouter', protocol: 'openai-compatible', model: 'text-embedding-v4', baseUrl: 'https://llmrouter.quukk.com/v1', apiKey: 'key', parameters: { dimensions: 1024 } };
+    expect(knowledgeModelParameters('embedding', binding).spec).toEqual({ compat: { max_batch_size: 10 } });
+    const previous = { spec: { api: 'openai-embeddings', compat: { max_batch_size: 4, send_encoding_format: false } } };
+    expect(knowledgeModelParameters('embedding', binding, previous).spec).toEqual(previous.spec);
+    expect(knowledgeModelParameters('embedding', binding, { spec: { compat: { max_batch_size: 2048 } } }).spec.compat.max_batch_size).toBe(10);
+    expect(knowledgeModelParameters('embedding', { ...binding, providerId: 'custom' }).spec).toBeUndefined();
+    expect(knowledgeModelParameters('embedding', { ...binding, model: 'other' }).spec).toBeUndefined();
+  });
+});

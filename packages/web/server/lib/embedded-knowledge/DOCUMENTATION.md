@@ -244,3 +244,63 @@ automatically. A repeated request after reopening uses that same upstream reques
 and receives a duplicate conflict if the gateway already admitted it. Recovery
 then requires the existing call receipt; no second paid call is created. The adapter performs no
 provider probes during setup or binding synchronization.
+
+### Why transport repair is an offline operator
+
+`scripts/embedding-transport.mjs` is an explicit JSON-stdin maintenance command.
+The owning coordinator offers preview, prepare, resume and paired rollback for
+the existing account's text-embedding-v4 1024-dimensional index. It has no HTTP
+route, UI control, startup hook or provider client. Web, desktop and mobile
+consumers retain ordinary binding guards; VS Code has no operator entry.
+Enterprise provider-entry policy is checked before native writes and immediately
+before configuration publication, including policy changes during maintenance.
+
+Preview creates no files. Every native invocation requires a checkpointed
+SQLite file, no open handles according to `lsof`, and captured owned PIDs that
+are no longer alive, or an explicit isolated-copy source path and SHA-256.
+The operator refuses a nonempty WAL or rollback journal. It never checkpoints,
+kills processes, starts the backend or repairs a partial live database itself.
+The pinned executable receives JSON on private stdin and AES material in a
+restricted child environment. Output is bounded, captured and decoded once
+from concatenated buffers; errors never include child output. Its deadline is
+240 seconds because full knowledge fingerprints can take tens of seconds.
+
+Persisted account ownership is read through `createAccountKeyStore.read` and
+`createModelBootstrapStore.getSecret`. Explicit issuer, service, actor, account,
+connection, reference, endpoint, expiry, key SHA-256 and last four characters
+must agree. Bootstrap discovery cleanup and credential issuance never run.
+Raw configuration, activation, bootstrap secret/master key, native AES/JWT,
+account sessions, settings, preferences and retained knowledge/memory JSON files
+are frozen with modes and existence. These private files and the stopped database
+are backed up byte-for-byte. Preparation restores separate copies and compares
+raw hashes plus stable native preview fields across paths before admitting the
+backup receipt. Database path identity and full preview digest are path-specific.
+
+The normal model runtime stages `saveBinding` on a private copy with a throwing
+network dependency and exact target preparation assertion. The coordinator reads
+the resulting file bytes, retains `untested`, and publishes only after native
+receipt verification, original raw-file CAS and the owning configuration lock.
+Activation test history is unchanged. A current authenticated Test & apply in
+the installed app supplies the final session and applied-consumer proof.
+
+The durable journal records prepared, database_committed,
+configuration_committed and verified. An interrupted prepared phase replays the
+identical native request; the native receipt distinguishes a committed database
+from a pending one. Configuration rename is idempotent against the original or
+exact staged bytes. Every other drift fails closed. Paired rollback requires
+unchanged file hashes and the exact native post-state, then restores only the
+owned database and changed configuration. Its rolling_back phase resumes a
+partial restore. New application writes forbid automatic full-file rollback.
+Do not restart ordinary consumers while a journal is between prepared and
+verified, or while rollback is incomplete.
+
+### Why account text-embedding-v4 retains a ten-item request ceiling
+
+The OpenAI adapter's generic catalog default permits 2048 texts, while this
+native account route forwards to Aliyun's ten-item v4 endpoint. The owning
+parameter builder pins `spec.compat.max_batch_size` to 10 only for llmrouter,
+OpenAI-compatible text-embedding-v4. An existing stricter positive integer bound
+and unrelated spec fields remain intact. Native protocol batching preserves
+text order, dimensions and input-role semantics. The scoped operator admits
+only the reviewed empty-spec to exact ten-item spec change, or its exact replay.
+This changes target space identity and requires a fresh native preview.

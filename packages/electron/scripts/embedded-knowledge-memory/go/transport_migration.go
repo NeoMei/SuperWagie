@@ -567,6 +567,13 @@ func transportTarget(old, target types.ModelParameters) error {
 	if e != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || target.Provider != "openai" || strings.TrimSpace(target.APIKey) == "" || target.EmbeddingParameters.Dimension != 1024 {
 		return errTransport
 	}
+	// Preserve the Aliyun v4 request ceiling after selecting the OpenAI adapter.
+	// This operator admits only the reviewed nil-spec transition and exact replay.
+	reviewed := &types.ModelSpecOverride{Compat: map[string]any{"max_batch_size": float64(10)}}
+	if !reflect.DeepEqual(target.Spec, reviewed) || old.Spec != nil && !reflect.DeepEqual(old.Spec, reviewed) {
+		return errTransport
+	}
+	old.Spec = reviewed
 	old.BaseURL = target.BaseURL
 	old.Provider = target.Provider
 	old.APIKey = target.APIKey
@@ -596,7 +603,7 @@ func transportEncryptedParameters(raw string, target types.ModelParameters) (str
 	if json.Unmarshal(updated["api_key"], &key) != nil || !strings.HasPrefix(key, "enc:v1:") || key == target.APIKey {
 		return "", errTransport
 	}
-	for _, field := range []string{"base_url", "provider", "api_key"} {
+	for _, field := range []string{"base_url", "provider", "api_key", "spec"} {
 		original[field] = updated[field]
 	}
 	result, e := json.Marshal(original)

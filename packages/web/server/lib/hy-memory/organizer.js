@@ -213,3 +213,5 @@ export function createHyMemoryOrganizer({ backend, generate, readState, isBlocke
     stop: async () => { stopped = true; await worker.stop(); await queue; },
   };
 }
+
+export const hySourceAuthority = sourceAuthority;

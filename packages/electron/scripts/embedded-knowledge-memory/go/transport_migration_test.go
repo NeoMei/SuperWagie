@@ -70,6 +70,7 @@ func transportFixture(t *testing.T) (*Store, TransportRequest) {
 	params.BaseURL = "https://gateway.example/v1"
 	params.Provider = "openai"
 	params.APIKey = "new-secret"
+	params.Spec = &types.ModelSpecOverride{Compat: map[string]any{"max_batch_size": float64(10)}}
 	return s, TransportRequest{Mode: "preview", TenantID: 1, KBID: "kb", OwnerID: "owner", ModelID: "model", TargetParameters: &params}
 }
 
@@ -161,6 +162,7 @@ func TestTransportPreviewPrivateSnapshotAndAtomicApply(t *testing.T) {
 	require.NoError(t, reopened.Where("id=?", "model").Take(&native).Error)
 	require.Equal(t, "new-secret", native.Parameters.APIKey)
 	require.Equal(t, "openai", native.Parameters.Provider)
+	require.Equal(t, &types.ModelSpecOverride{Compat: map[string]any{"max_batch_size": float64(10)}}, native.Parameters.Spec)
 	require.Equal(t, "https://gateway.example/v1", native.Parameters.BaseURL)
 	var storage string
 	require.NoError(t, reopened.Raw(`SELECT typeof(parameters) FROM models WHERE id='model'`).Scan(&storage).Error)
@@ -433,4 +435,18 @@ func TestTransportLegacyTextParametersBecomeNativeReadableBlob(t *testing.T) {
 	require.NoError(t, s.db.Where("id=?", "model").Take(&native).Error)
 	require.Equal(t, "new-secret", native.Parameters.APIKey)
 	require.Equal(t, "https://gateway.example/v1", native.Parameters.BaseURL)
+}
+
+func TestTransportTargetRejectsUnreviewedSpec(t *testing.T) {
+	for _, spec := range []*types.ModelSpecOverride{
+		nil,
+		{Compat: map[string]any{"max_batch_size": float64(11)}},
+		{Compat: map[string]any{"max_batch_size": float64(10), "input_type": "query"}},
+		{API: "other", Compat: map[string]any{"max_batch_size": float64(10)}},
+	} {
+		s, r := transportFixture(t)
+		r.TargetParameters.Spec = spec
+		_, err := RunTransportMigration(context.Background(), s.db, r)
+		require.Error(t, err)
+	}
 }

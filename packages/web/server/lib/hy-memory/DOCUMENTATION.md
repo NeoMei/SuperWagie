@@ -156,3 +156,19 @@ extraction as a Hy inference. A source change still withdraws their eligibility.
 Restarts must preserve the attempt limit and next attempt time. Keeping recovery
 metadata in the shared ledger prevents repeated backend outages from creating an
 unbounded retry loop or repeating a paid generation call.
+
+### Why transport maintenance plans from raw ledger rows
+
+The offline `transport-rebind.js` planner reuses the ledger decoder, space
+eligibility, source authority and manual-index predicates. It verifies framed
+ledger and node digests against the native snapshot. Canonical card bodies and
+payload identities must match; manual copies require current hashes, ready
+markers, scope and threat checks. Source-authorized inactive core rows retain
+their activity flag. Global manual memory requires no project binding.
+
+The planner patches only the original model-space and eligible manual-index
+engine rows. Unknown raw fields and absent optional dimensions survive. Full
+ledger encoding would insert schema defaults and strip unknown fields. The
+manifest supplies source keys, digests and authority IDs; the native transaction
+reads content, payload and vector bytes itself. No runtime maintenance guard is
+bypassed and ordinary `ensure` and manual synchronization remain unchanged.

@@ -78,3 +78,5 @@ export function createSharedMemoryStore({ dataDir, backend, namespace = 'superwa
     },
   };
 }
+
+export const decodeMemoryLedgerRecords = decode;
