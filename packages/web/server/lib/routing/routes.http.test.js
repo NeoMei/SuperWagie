@@ -3,6 +3,8 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from './routes.js';
+import { createRoutingRuntime } from './runtime.js';
+import { resolveEffectiveConfig } from './store.js';
 
 /**
  * The send rewrite sits in front of the generic OpenCode proxy, which replays
@@ -159,6 +161,25 @@ describe('routing send rewrite', () => {
     const response = await request(app).post('/api/session/s1/prompt').send({ text: 'hi' });
     expect(response.status).toBe(400);
     expect(response.body).toEqual({ error: 'no fallback' });
+    expect(forwarded).toEqual([]);
+  });
+
+  it('refuses a stale Auto fallback before switching the kernel or forwarding the prompt', async () => {
+    const config = resolveEffectiveConfig(null);
+    config.enabled = true;
+    config.fallback = { model: { providerID: 'deepseek', modelID: 'deepseek-flash' }, variant: null };
+    const buildOpenCodeUrl = vi.fn(() => { throw new Error('unexpected kernel request'); });
+    const runtime = createRoutingRuntime({
+      dataDir: '/unused', buildOpenCodeUrl, getOpenCodeAuthHeaders: () => ({}),
+      store: { readConfig: async () => config, readToken: async () => null, readClassifierSource: async () => 'off', readCustomEndpoint: async () => null },
+      readProviderKeys: async () => ({}), enterpriseMode: () => false, readPinnedEndpoint: () => null,
+      listCatalogModels: async () => [{ providerID: 'superwagie-account-test', modelID: 'deepseek-flash', variants: [] }],
+    });
+    const { app, forwarded } = createApp({ autoSessions: new Set(['s1']), routeSend: runtime.routeSend });
+    const response = await request(app).post('/api/session/s1/prompt?directory=%2Frepo').send({ text: 'hello' });
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({ error: 'Auto routing fallback model is unavailable. Choose an available fallback model in Settings > Routing.' });
+    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
     expect(forwarded).toEqual([]);
   });
 });

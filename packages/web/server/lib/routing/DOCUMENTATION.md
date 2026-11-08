@@ -82,6 +82,16 @@ Auto. There is no env gate — the feature shipped dark behind
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown
   category or low confidence routes to the fallback model, and the decision
   carries the reason.
+- Each scoped Auto send reads the active directory's `model.list` catalog once
+  before classification and model switching. A successful nonempty catalog
+  must contain the configured fallback's exact provider and model IDs; an
+  unavailable fallback returns HTTP 409 with guidance to choose one in
+  Settings > Routing. An unavailable category model uses that configured
+  fallback model and variant, retains the selected category agent, and records
+  an error decision. A matching model ID under another provider does not
+  authorize changing the provider. A failed or empty catalog remains unknown,
+  retaining the configured selection; an unscoped send does not start a default
+  OpenCode location just to read the catalog.
 - The routing question sends `ROUTING_INSTRUCTIONS` as one string, the same
   form as the Test probe. TypeSafe also accepts a list there, but a
   self-hosted System One server may not: Kev answers a list with 400, so Auto
@@ -100,7 +110,8 @@ Auto. There is no env gate — the feature shipped dark behind
 - A variant the model's catalog entry does not list is dropped before the
   switch, so the reply runs on the model's default thinking instead of OpenCode
   refusing it (Settings from before #4133 saved list positions like `"2"`).
-  An unreadable catalog, or one that does not know the model yet, keeps it.
+  The same per-send catalog validates the model and variant. An unreadable or
+  empty catalog keeps the saved variant while model availability is unknown.
 - A provider's prompt cache belongs to one model, so a model switch makes the
   new model read the whole context uncached. With `preserveCache` on (the
   default; a config without the key reads as on), a send Jev routes to a
@@ -223,6 +234,21 @@ versioned ids are sent.
 
 Never make the free tier the only path: the zen docs call it "available for a
 limited time", and the keys are what users fall back to when it ends.
+
+## Decisions
+
+### Why model availability keeps the provider identity
+
+Provider IDs select credentials and billing as well as a model catalog. Auto
+validates the saved provider/model pair and uses only its configured fallback,
+so a provider removed after setup cannot redirect a send to another account.
+
+### Why unknown catalog reads retain the configured target
+
+OpenCode waits for location plugins during `model.list`, but an empty cold
+catalog or a failed read still cannot establish that a saved target was removed.
+The guard acts on a successful nonempty catalog and preserves existing send
+behavior while that read remains unknown.
 
 ## Events
 

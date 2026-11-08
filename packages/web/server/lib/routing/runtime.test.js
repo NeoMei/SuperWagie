@@ -43,6 +43,10 @@ const makeRuntime = ({
     if (configEntries instanceof Error) throw configEntries;
     return configEntries;
   });
+  const listCatalogModels = vi.fn(async () => {
+    if (catalog instanceof Error) throw catalog;
+    return catalog;
+  });
   const runtime = createRoutingRuntime({
     dataDir: '/unused',
     buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
@@ -55,16 +59,13 @@ const makeRuntime = ({
     enterpriseMode: () => enterprise,
     readPinnedEndpoint: () => pinned,
     resolveModelBinding,
-    listCatalogModels: async () => {
-      if (catalog instanceof Error) throw catalog;
-      return catalog;
-    },
+    listCatalogModels,
     readSessionHistory: async () => ({ history: [], lastAnswer }),
     readConfigEntries,
     isSessionWarm: (sessionId) => warmSessions.includes(sessionId),
     now: () => nowMs,
   });
-  return { runtime, store, jev, events, readConfigEntries };
+  return { runtime, store, jev, events, readConfigEntries, listCatalogModels };
 };
 
 describe('unified classifier binding', () => {
@@ -180,7 +181,7 @@ describe('decisions', () => {
 });
 
 describe('resolveAutoSelection', () => {
-  const send = (extra = {}) => ({ sessionId: 's1', model: AUTO, requestText: 'find the root cause', ...extra });
+  const send = (extra = {}) => ({ sessionId: 's1', directory: '/repo', model: AUTO, requestText: 'find the root cause', ...extra });
 
   it('leaves a real model untouched and does not consult Jev', async () => {
     const { runtime, jev } = makeRuntime({ answers: {} });
@@ -262,6 +263,65 @@ describe('resolveAutoSelection', () => {
 
     const unreachable = makeRuntime({ catalog: new Error('OpenCode down'), answers: { category: { choice: 'trivial', confidence: 0.99 } } });
     expect((await unreachable.runtime.resolveAutoSelection(send())).model.variant).toBe('medium');
+  });
+
+  it('refuses an unavailable fallback instead of adopting the same model from another provider', async () => {
+    const config = readyConfig();
+    config.fallback = { model: { providerID: 'deepseek', modelID: 'deepseek-flash' }, variant: null };
+    const { runtime, jev } = makeRuntime({
+      config,
+      catalog: [{ providerID: 'superwagie-account-test', modelID: 'deepseek-flash', variants: [] }],
+      answers: { category: { choice: 'trivial', confidence: 0.99 } },
+    });
+    await expect(runtime.resolveAutoSelection(send())).rejects.toMatchObject({
+      status: 409,
+      message: 'Auto routing fallback model is unavailable. Choose an available fallback model in Settings > Routing.',
+    });
+    expect(jev.ask).not.toHaveBeenCalled();
+  });
+
+  it('uses only the configured fallback when a routed category model is unavailable', async () => {
+    const { runtime, events, listCatalogModels } = makeRuntime({
+      catalog: [
+        { providerID: 'anthropic', modelID: 'claude-sonnet-5', variants: [{ id: 'medium' }] },
+        { providerID: 'other-provider', modelID: 'gpt-6-astra', variants: [{ id: 'high' }] },
+      ],
+      answers: { category: { choice: 'hard', confidence: 0.99 } },
+    });
+    const resolved = await runtime.resolveAutoSelection(send({ agent: 'build' }));
+    expect(resolved.model).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'medium' });
+    expect(resolved.agent).toBe('plan');
+    expect(resolved.decision).toMatchObject({ category: null, reason: 'error', error: 'Configured category model is unavailable', providerID: 'anthropic', modelID: 'claude-sonnet-5', agent: 'plan' });
+    expect(events.at(-1).properties.reason).toBe('error');
+    expect(listCatalogModels).toHaveBeenCalledExactlyOnceWith('/repo');
+  });
+
+  it('keeps an available category model and validates its variant in the same scoped catalog read', async () => {
+    const { runtime, listCatalogModels } = makeRuntime({
+      catalog: [
+        { providerID: 'anthropic', modelID: 'claude-sonnet-5', variants: [] },
+        { providerID: 'openai', modelID: 'gpt-6-astra', variants: [{ id: 'high' }] },
+      ],
+      answers: { category: { choice: 'hard', confidence: 0.99 } },
+    });
+    expect((await runtime.resolveAutoSelection(send())).model).toEqual({ providerID: 'openai', id: 'gpt-6-astra', variant: 'high' });
+    expect(listCatalogModels).toHaveBeenCalledExactlyOnceWith('/repo');
+  });
+
+  it.each([[], new Error('catalog read failed')])('keeps the explicit target when catalog availability is unknown (%j)', async (catalog) => {
+    const config = readyConfig();
+    config.fallback = { model: { providerID: 'deepseek', modelID: 'deepseek-flash' }, variant: null };
+    const { runtime } = makeRuntime({ config, catalog, answers: { category: { choice: 'trivial', confidence: 0.99 } } });
+    expect((await runtime.resolveAutoSelection(send())).model).toEqual({ providerID: 'deepseek', id: 'deepseek-flash' });
+  });
+
+  it('does not start a default OpenCode location when the send has no directory', async () => {
+    const { runtime, listCatalogModels } = makeRuntime({
+      catalog: [{ providerID: 'anthropic', modelID: 'claude-sonnet-5', variants: [{ id: 'medium' }] }],
+      answers: { category: { choice: 'trivial', confidence: 0.99 } },
+    });
+    expect((await runtime.resolveAutoSelection(send({ directory: undefined }))).model).toEqual({ providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'medium' });
+    expect(listCatalogModels).not.toHaveBeenCalled();
   });
 });
 

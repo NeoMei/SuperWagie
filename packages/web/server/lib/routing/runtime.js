@@ -327,16 +327,9 @@ export function createRoutingRuntime({
    * before #4133 saved list positions ("0", "1", "2") as variants. A catalog
    * that cannot be read, or does not know the model yet, keeps the variant.
    */
-  const withKnownVariant = async (selection, directory) => {
+  const withKnownVariant = (selection, models) => {
     const variant = selection.model.variant;
-    if (!variant) return selection;
-    let models;
-    try {
-      models = await readCatalog(directory);
-    } catch (error) {
-      console.warn('[routing] model catalog unavailable, keeping the saved variant:', errorMessage(error));
-      return selection;
-    }
+    if (!variant || !models) return selection;
     const { providerID, id } = selection.model;
     const entry = models.find((model) => model.providerID === providerID && model.modelID === id);
     if (!entry || entry.variants.some((known) => known.id === variant)) return selection;
@@ -357,8 +350,8 @@ export function createRoutingRuntime({
    * (`applySessionSelection`, or its own switch calls) instead of the runtime
    * rewriting a body in place the way v1 allowed.
    *
-   * Throws only when Auto cannot be honoured at all (no fallback configured):
-   * the sentinel must never reach OpenCode.
+   * An unavailable configured fallback is refused before a session switch.
+   * The sentinel must never reach OpenCode.
    */
   const resolveAutoSelection = async ({ sessionId, directory, model, agent, requestText }) => {
     if (!isAutoModel(model)) return null;
@@ -366,6 +359,23 @@ export function createRoutingRuntime({
     const config = state.config;
     if (!config?.fallback) {
       throw Object.assign(new Error('Auto routing is selected but no fallback model is configured'), { status: 400 });
+    }
+    // model.list waits for this location's plugins. Empty or failed reads
+    // cannot establish absence while a location is cold. Never start a default
+    // location merely to validate an unscoped send.
+    let models = null;
+    const scope = z.string().trim().min(1).safeParse(directory);
+    if (scope.success) {
+      try {
+        const catalog = await readCatalog(scope.data);
+        if (catalog.length > 0) models = catalog;
+      } catch (error) {
+        console.warn('[routing] model catalog unavailable, keeping the saved selection:', errorMessage(error));
+      }
+    }
+    const fallback = chooseSelection(config, null, agent);
+    if (models && !models.some((entry) => entry.providerID === fallback.model.providerID && entry.modelID === fallback.model.id)) {
+      throw Object.assign(new Error('Auto routing fallback model is unavailable. Choose an available fallback model in Settings > Routing.'), { status: 409 });
     }
     const decision = { sessionId, at: now(), category: null, confidence: 0, reason: 'not-ready', ms: 0 };
     let selection;
@@ -403,7 +413,14 @@ export function createRoutingRuntime({
     } else {
       selection = chooseSelection(config, null, agent);
     }
-    selection = await withKnownVariant(selection, directory);
+    if (models && !models.some((entry) => entry.providerID === selection.model.providerID && entry.modelID === selection.model.id)) {
+      selection = { ...selection, model: fallback.model, decision: { ...selection.decision, ...fallback.decision, agent: selection.decision.agent } };
+      decision.category = null;
+      decision.reason = 'error';
+      decision.error = 'Configured category model is unavailable';
+      delete decision.cacheHold;
+    }
+    selection = withKnownVariant(selection, models);
     Object.assign(decision, selection.decision);
     broadcast('openchamber:routing.decision', decision);
     return { model: selection.model, agent: selection.agent, decision };
