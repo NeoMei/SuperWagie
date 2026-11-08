@@ -7,7 +7,7 @@ import { writeFileAtomic } from '../opencode/atomic-write.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { createPlatformKnowledgeAdapter } from './knowledge.js';
 import { projectPlatformApiKeys } from './api-keys.js';
-import { PlatformUsageActivityError, readPlatformUsageActivity } from './usage-activity.js';
+import { PlatformUsageActivityError, createUsageActivityRuntime } from './usage-activity.js';
 
 const userSchema = z.object({ id: z.string().min(1), name: z.string(), email: z.string() });
 const runtimeIdentitySchema = z.object({ type: z.enum(['session', 'client']), token: z.string().min(1) });
@@ -94,7 +94,7 @@ const passwordIssuesSchema = z.array(z.enum(['too_short', 'too_long', 'too_many_
 const tokenSchema = z.object({ access_token: z.string().min(1), id_token: z.string().min(1), refresh_token: z.string().min(1).optional(), token_type: z.string(), expires_in: z.number().int().positive() });
 const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'credit_rates_unavailable', 'quote_invalidated', 'subscription_required', 'payment_not_configured']), password_issues: passwordIssuesSchema.optional().catch(undefined), retry_after: retryAfterSchema.optional().catch(undefined), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
 const allowedApiPaths = new Map([
-  ['GET', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/calls\?limit=100&from=[A-Za-z0-9%.-]+&to=[A-Za-z0-9%.-]+(?:&cursor=[A-Za-z0-9%._-]+)?$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-pool\/)?(?:usage\/summary|calls\?limit=20)$/, /^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|checkouts|operations|api-keys)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:recharges|operations|checkouts)\/[A-Za-z0-9_-]+$/]],
+  ['GET', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/calls\?limit=1&from=[A-Za-z0-9%.-]+&to=[A-Za-z0-9%.-]+$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-pool\/)?(?:usage\/summary|calls\?limit=20)$/, /^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|checkouts|operations|api-keys)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:recharges|operations|checkouts)\/[A-Za-z0-9_-]+$/]],
   ['POST', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/checkouts\/[A-Za-z0-9_-]+\/(?:reconcile|close|refund)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/api-keys\/[A-Za-z0-9_-]+\/(?:models|scope)$/, /^\/v1\/me\/password$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-credentials|model-discovery|api-keys|recharges|orders|quotes|checkouts)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/quotes\/[A-Za-z0-9_-]+\/accept$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/recharges\/[A-Za-z0-9_-]+\/sandbox-settle$/]],
   ['PATCH', [/^\/v1\/me\/profile$/]],
   ['PUT', [/^\/v1\/me\/avatar$/]],
@@ -154,7 +154,8 @@ const serviceUrl = (value) => {
 };
 
 /** Identity is a validated runtime auth context. Session credentials stay encrypted in the managed data directory. */
-export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false, isModelHistoryAvailable = () => false, dataDir = null, usePublicDefaults = env === process.env, enterprise = isEnterpriseMode } = {}) => {
+export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false, isModelHistoryAvailable = () => false, dataDir = null, usePublicDefaults = env === process.env, enterprise = isEnterpriseMode, usageActivityFactory = createUsageActivityRuntime, usageActivityRetryMs = 60_000 } = {}) => {
+  if (!Number.isFinite(usageActivityRetryMs) || usageActivityRetryMs < 1) throw new TypeError('Activity retry interval must be positive');
   const salt = random();
   const sessions = new Map();
   const sessionPersistenceKeys = new Map();
@@ -169,6 +170,10 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const starts = new Map();
   const activeLogins = new Map();
   const refreshingSessions = new Map();
+  const activityRegistrations = new Map();
+  let activityRuntimePromise;
+  let activityClosed = false;
+  let activityClosePromise;
   if (sessionStorePath) {
     try {
       if (fs.statSync(sessionStorePath).size > maxPlatformSessionStoreBytes) throw new Error('session store too large');
@@ -268,6 +273,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     return false;
   };
   const removeSessionByKey = (key) => {
+    stopUsageActivity(key);
     refreshingSessions.delete(key);
     const persistedKey = sessionPersistenceKeys.get(key);
     invalidatedSessionKeys.add(key);
@@ -286,6 +292,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   };
   const removeSession = (identity) => {
     const key = namespace(identity);
+    stopUsageActivity(key);
     refreshingSessions.delete(key);
     const persistedKey = persistenceKey(identity);
     let persistenceError = null;
@@ -326,6 +333,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
         failPersistence();
       }
     }
+    if (previousSession && (!sameLoginSession(session, previousSession) || session.accountVersion !== previousSession.accountVersion)) stopUsageActivity(key);
     invalidatedSessionKeys.delete(key);
     invalidatedPersistedKeys.delete(persistedKey);
   };
@@ -355,7 +363,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const supported = () => { if (!isManaged()) reject('platform_runtime_unsupported', 409); };
   const readJson = async (url, init, uncertainCode) => {
     let response;
-    try { response = await fetchImpl(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000) }); }
+    try { response = await fetchImpl(url, { ...init, redirect: 'error', signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) }); }
     catch { reject(uncertainCode || 'platform_unavailable', 502); }
     if (response.status === 204) return null;
     let body;
@@ -505,6 +513,91 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (current.accountVersion !== accountVersion || current.accountId !== session.accountId) reject('platform_session_changed', 409);
     return current;
   };
+  const stopUsageActivity = (key) => {
+    const registration = activityRegistrations.get(key);
+    if (!registration) return;
+    activityRegistrations.delete(key);
+    clearTimeout(registration.retryTimer);
+    registration.abort.abort();
+    void activityRuntimePromise?.then((runtime) => {
+      if (!activityRegistrations.has(key)) runtime.stop(key);
+    }).catch(() => {});
+  };
+  const getUsageActivityRuntime = () => {
+    if (activityRuntimePromise) return activityRuntimePromise;
+    const pending = Promise.resolve().then(() => usageActivityFactory({ dataDir, now }));
+    activityRuntimePromise = pending;
+    void pending.catch(() => { if (activityRuntimePromise === pending) activityRuntimePromise = null; });
+    return pending;
+  };
+  const startUsageActivity = async (identity) => {
+    if (!sessionStorePath || activityClosed || !isManaged()) return null;
+    const session = await ensureFreshSession(identity);
+    if (activityClosed) reject('platform_session_changed', 409);
+    const key = namespace(identity);
+    const mutationVersion = accountMutationVersions.get(key) ?? 0;
+    const previous = activityRegistrations.get(key);
+    if (previous && !previous.failed && sameLoginSession(session, previous.session) && session.accountVersion === previous.session.accountVersion && mutationVersion === previous.mutationVersion) return previous.ready;
+    stopUsageActivity(key);
+    const registration = { session, mutationVersion, abort: new AbortController(), ready: null, failed: false, retryTimer: null };
+    activityRegistrations.set(key, registration);
+    const assertCurrent = () => {
+      if (activityClosed || activityRegistrations.get(key) !== registration || pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
+      assertCurrentSession(key, session, session.accountVersion);
+      assertAccountMutation(key, mutationVersion);
+    };
+    registration.ready = (async () => {
+      try {
+        assertCurrent();
+        const accounts = z.array(accountSchema).parse(await sessionRequest(key, session, '/v1/accounts', { signal: registration.abort.signal }));
+        assertCurrent();
+        const accountId = session.selectedOnce
+          ? accounts.find((account) => account.id === session.accountId)?.id
+          : accounts.find((account) => account.kind === 'personal')?.id ?? accounts[0]?.id;
+        if (!accountId) reject('platform_account_required', 409);
+        const runtime = await getUsageActivityRuntime();
+        assertCurrent();
+        runtime.track(key, {
+          ownerBase: { issuer: session.issuer, api: session.api, clientId: session.clientId, userId: session.user.id, accountId },
+          assertCurrent,
+          request: async (target, init) => {
+            assertCurrent();
+            if (!target.startsWith(`/v1/accounts/${encodeURIComponent(accountId)}/calls?`)) reject('platform_request_forbidden', 403);
+            const current = await ensureFreshSession(identity);
+            assertCurrent();
+            const signal = init?.signal ? AbortSignal.any([registration.abort.signal, init.signal]) : registration.abort.signal;
+            try {
+              const result = await sessionRequest(key, current, target, { ...init, signal });
+              assertCurrent();
+              return result;
+            } catch (error) { assertCurrent(); throw error; }
+          },
+        });
+        return runtime;
+      } catch (error) { assertCurrent(); throw error; }
+    })();
+    void registration.ready.catch((error) => {
+      if (activityRegistrations.get(key) !== registration) return;
+      registration.failed = true;
+      registration.abort.abort();
+      if (error?.status === 401 || error?.code === 'platform_session_changed' || error?.code === 'platform_session_expired') { stopUsageActivity(key); return; }
+      registration.retryTimer = setTimeout(() => {
+        if (activityRegistrations.get(key) === registration) void startUsageActivity(identity).catch(() => {});
+      }, usageActivityRetryMs);
+      registration.retryTimer.unref?.();
+    });
+    return registration.ready;
+  };
+  const close = () => {
+    activityClosePromise ??= (async () => {
+      activityClosed = true;
+      const registrations = [...activityRegistrations.values()];
+      for (const key of activityRegistrations.keys()) stopUsageActivity(key);
+      await Promise.allSettled(registrations.map((registration) => registration.ready));
+      if (activityRuntimePromise) await (await activityRuntimePromise).close();
+    })();
+    return activityClosePromise;
+  };
   const knowledgeAdapter = createPlatformKnowledgeAdapter({
     env, fetchImpl, now, enterprise, usePublicDefaults,
     captureSession: (identity) => {
@@ -583,13 +676,13 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     if (kind === 'activity') {
       if (product !== 'superwagie') reject('invalid_request', 400);
       try {
-        return await readPlatformUsageActivity({ accountId, actorId: session.user.id, now: now(), request: async (path) => {
-          assertSelection();
-          try { const result = await apiRequest(session, path); assertSelection(); return result; }
-          catch (error) { assertSelection(); return revokeSessionOnAuthFailure(key, session, () => { throw error; }); }
-        } });
+        const activity = await startUsageActivity(identity);
+        if (!activity) reject('platform_usage_unavailable', 503);
+        const result = await activity.read(key);
+        assertSelection();
+        return result;
       } catch (error) {
-        if (error instanceof PlatformUsageActivityError) reject('platform_response_invalid', 502);
+        if (error instanceof PlatformUsageActivityError) reject(error.code, error.status);
         throw error;
       }
     }
@@ -715,6 +808,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
         const persistedOwnerKey = ownerKey(session);
         const removedPersistedEntries = [];
         for (const [sessionKey, candidate] of sessions) if (candidate.user.id === session.user.id && candidate.issuer === session.issuer) {
+          stopUsageActivity(sessionKey);
           sessions.delete(sessionKey);
           sessionPersistenceKeys.delete(sessionKey);
           accountMutationVersions.delete(sessionKey);
@@ -1022,7 +1116,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
     logout: (identity) => { const session = restoreSession(identity); const key = namespace(identity); revokePlatformSession(session); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: async (identity, path, init) => { const session = await ensureFreshSession(identity); const key = namespace(identity); return sessionRequest(key, session, path, init); },
-    readUsage, readApiKeys,
+    readUsage, readApiKeys, startUsageActivity, wakeUsageActivity: () => { if (!activityClosed) void activityRuntimePromise?.then((runtime) => runtime.wake()).catch(() => {}); }, close,
     refreshSession: async (identity) => { const session = await ensureFreshSession(identity); return { ...actor(identity), expiresAt: session.expiresAt }; },
     instancePrincipal: (identity) => { const session = getSession(identity); return { issuer: session.issuer, userId: session.user.id }; },
     actor,

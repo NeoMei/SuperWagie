@@ -406,6 +406,7 @@ let agentToolRuntime = null;
 let limitFailoverRuntime = null;
 let managedConfigRuntime = null;
 let platformModelRuntime = null;
+let platformAccountRuntime = null;
 let platformCommerceRuntime = null;
 let platformProfileRuntime = null;
 
@@ -1510,6 +1511,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   // Turns already running when the stream (re)connects sent no start this
   // server saw; OpenCode's running list names them.
   onConnect: async () => {
+    platformAccountRuntime?.wakeUsageActivity();
     void sessionGoalRuntime.recoverActiveGoals().catch((error) => {
       console.warn('[session-goal] recovery after connect failed:', error?.message || error);
     });
@@ -1529,6 +1531,10 @@ globalMessageStreamHub.subscribeEvent((event) => {
   // The hub translates v2 wire events into the server's vocabulary once; these
   // consumers were written against it and stay unaware of the wire shape.
   for (const payload of event?.translated?.() ?? []) {
+    if (payload.type === 'session.idle' || payload.type === 'session.error'
+      || payload.type === 'message.updated' && payload.properties?.info?.time?.completed) {
+      platformAccountRuntime?.wakeUsageActivity();
+    }
     // The user cancelled the turn: stop the OpenChamber tool actions that
     // turn still has running (a browser action, a memory write). OpenCode 2
     // gives the plugin no abort signal, so this is where the cancel lands.
@@ -2380,6 +2386,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getSpacesHost: () => spacesHost,
   getPlatformModelRuntime: () => platformModelRuntime,
   getPlatformCommerceRuntime: () => platformCommerceRuntime,
+  getPlatformAccountRuntime: () => platformAccountRuntime,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -2442,7 +2449,7 @@ async function main(options = {}) {
     authorizeRequest: (req) => agentToolRuntime.authorizeRequest(req),
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
   });
-  const platformAccountRuntime = createPlatformAccountRuntime({
+  platformAccountRuntime = createPlatformAccountRuntime({
     dataDir: OPENCHAMBER_DATA_DIR,
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     isModelAvailable: () => platformModelRuntime?.enabled() === true,

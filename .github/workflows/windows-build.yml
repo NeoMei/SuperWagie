@@ -89,6 +89,8 @@ jobs:
         run: |
           bunx vitest run server/lib/platform-model/store.test.js server/lib/platform-model/runtime.test.js server/lib/platform-model/routes.test.js server/lib/opencode/managed-config-file.test.js
           if ($LASTEXITCODE -ne 0) { throw 'Platform journal recovery and provider isolation failed' }
+          bunx vitest run server/lib/platform-account/usage-activity-journal.test.js server/lib/platform-account/usage-activity.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Daily usage persistence and collection failed' }
 
       - name: Test diagnostics with Windows PowerShell 5.1
         shell: powershell

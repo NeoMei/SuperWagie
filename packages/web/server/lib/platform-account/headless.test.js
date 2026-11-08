@@ -1,11 +1,15 @@
 import crypto from 'node:crypto';
 import nativeRequestSummary from './fixtures/native-request-summary.json' with { type: 'json' };
 import http from 'node:http';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPlatformAccountRuntime } from './runtime.js';
+import { createUsageActivityRuntime } from './usage-activity.js';
 import { registerPlatformAccountRoutes } from './routes.js';
 import { createPlatformProfileRuntime } from './profile.js';
 import { registerPlatformProfileRoutes } from './profile-routes.js';
@@ -21,7 +25,7 @@ afterEach(async () => {
 });
 const identity = { type: 'client', token: 'headless-device' };
 const password = 'SyntheticPassword9!';
-const fixture = async ({ refreshTokens = false } = {}) => {
+const fixture = async ({ refreshTokens = false, ...runtimeOptions } = {}) => {
   const { privateKey, publicKey } = await generateKeyPair('RS256');
   const jwk = { ...await exportJWK(publicKey), kid: 'headless', alg: 'RS256' };
   const app = express(); app.use(express.json());
@@ -75,7 +79,7 @@ const fixture = async ({ refreshTokens = false } = {}) => {
   app.get('/v1/accounts/:id/credits', (_req, res) => res.json([]));
   app.get('/v1/capabilities', (_req, res) => res.json({ sandbox: true }));
   const env = { OPENCHAMBER_UNIHUB_ISSUER: origin, OPENCHAMBER_UNIHUB_API_URL: origin, OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID: 'superwagie-headless-fixture', OPENCHAMBER_UNIHUB_REDIRECT_URI: `${origin}/api/platform-account/callback` };
-  const runtime = createPlatformAccountRuntime({ env });
+  const runtime = createPlatformAccountRuntime({ env, ...runtimeOptions });
   return { runtime, env, origin, requests, app, renameUser: (value) => { profileName=value; }, badNonce: () => { nonceOverride = 'wrong'; }, badAudience: () => { audienceOverride = 'legacy-client'; }, badState: () => { stateOverride = 'wrong'; }, authError: (status, body) => { authError = { status, body }; }, tokenError: () => { tokenError = true; }, unknownRegistration: () => { registrationState = 'UNKNOWN'; }, registrationError: (error) => { registrationError = error; } };
 };
 
@@ -220,35 +224,74 @@ describe('headless platform identity', () => {
     await request(local).get('/api/platform-account/usage/personal-a/summary').expect(403, { error: 'forbidden' });
   });
 
-  it('reads scoped paginated usage activity and rejects an account change between pages', async () => {
-    const f = await fixture();
+  it('collects daily history without the chart, preserves it after restart and rejects a changed payer', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'headless-daily-activity-'));
+    const clock = Date.now();
+    const usageActivityFactory = (options) => createUsageActivityRuntime({ ...options, backfillDelayMs: 1 });
+    const f = await fixture({ dataDir, now: () => clock, usageActivityFactory });
+    let activeRuntime = f.runtime;
     const queries = [];
     let changeAccount = false;
+    let forbidden = false;
+    let memberView = false;
     f.app.get('/v1/accounts/personal-a/calls', async (req, res) => {
       const query = req.query;
       queries.push(query);
-      const second = Boolean(query.cursor);
-      if (second && changeAccount) await f.runtime.selectAccount(identity, 'team-a');
-      const scope = { account_id: 'personal-a', origin_product_id: 'superwagie', instance_id: 'fixture', visibility: 'account' };
-      res.json({ scope, financial_details: true, total: '2', unknown_time: '0', has_more: !second,
-        next_cursor: second ? undefined : `fixture.${Date.parse(query.from)}`,
-        items: [{ account_id: 'personal-a', origin_product_id: 'superwagie', actor_id: 'actor-a', instance_id: 'fixture',
-          call_id: `${Date.parse(query.from)}-${second ? 'older' : 'newer'}`, created_at: new Date(Date.parse(query.to) - (second ? 120_000 : 60_000)).toISOString() }] });
+      if (forbidden) return res.status(403).json({ error: 'forbidden' });
+      if (changeAccount) { changeAccount = false; await activeRuntime.selectAccount(identity, 'team-a'); }
+      const scope = { account_id: 'personal-a', origin_product_id: 'superwagie', instance_id: 'fixture', visibility: memberView ? 'actor' : 'account' };
+      if (memberView) scope.actor_id = 'actor-a';
+      const total = String(query.from).slice(0, 10) === new Date(clock).toISOString().slice(0, 10) ? memberView ? '3' : '7001' : '0';
+      res.json({ scope, filter: { from: query.from, to: query.to, instance_id: 'fixture', origin_product_id: 'superwagie' },
+        financial_details: !memberView, total, unknown_time: '0', has_more: total !== '0', as_of: new Date(clock).toISOString(), accuracy: 'exact_for_query_snapshot', consistency: 'live',
+        items: total === '0' ? [] : [{ call_id: 'not-persisted', created_at: new Date(clock - 1).toISOString() }] });
     });
     const local = express();
     registerPlatformAccountRoutes(local, { runtime: f.runtime, resolveIdentity: () => identity });
-    await f.runtime.passwordLogin(identity, { username: 'alice', password });
-    await f.runtime.selectAccount(identity, 'personal-a');
-    const activity = await request(local).get('/api/platform-account/usage/personal-a/activity').expect(200);
-    expect(activity.body).toMatchObject({ total: '10', complete: true, visibility: 'account' });
-    expect(activity.body.days).toHaveLength(365);
-    expect(queries).toHaveLength(10);
-    expect(queries[0]).toMatchObject({ limit: '100' });
-    expect(queries[1]).toEqual({ ...queries[0], cursor: `fixture.${Date.parse(queries[0].from)}` });
-    expect(JSON.stringify(activity.body)).not.toContain('actor-a');
-    changeAccount = true;
-    await request(local).get('/api/platform-account/usage/personal-a/activity').expect(409, { error: 'platform_session_changed' });
-  });
+    let restored;
+    try {
+      await f.runtime.passwordLogin(identity, { username: 'alice', password });
+      await request(local).get('/api/platform-account/session').expect(200);
+      await expect.poll(() => queries.length).toBeGreaterThan(0);
+      await f.runtime.selectAccount(identity, 'personal-a');
+      let snapshot;
+      await expect.poll(async () => {
+        snapshot = await request(local).get('/api/platform-account/usage/personal-a/activity').expect(200);
+        return snapshot.body.complete;
+      }, { timeout: 12_000, interval: 100 }).toBe(true);
+      expect(snapshot.body).toMatchObject({ total: '7001', visibility: 'account', sync: { status: 'synced' } });
+      expect(snapshot.body.days).toHaveLength(365);
+      expect(queries.every(query => query.limit === '1' && query.cursor === undefined)).toBe(true);
+      expect(JSON.stringify(snapshot.body)).not.toMatch(/actor-a|not-persisted/);
+      const count = queries.length;
+      await request(local).get('/api/platform-account/usage/personal-a/activity').expect(200);
+      expect(queries.length).toBe(count + 1);
+      await f.runtime.close();
+      restored = createPlatformAccountRuntime({ env: f.env, dataDir, now: () => clock, usageActivityFactory });
+      const reopened = express();
+      registerPlatformAccountRoutes(reopened, { runtime: restored, resolveIdentity: () => identity });
+      activeRuntime = restored;
+      const restoredSnapshot = await request(reopened).get('/api/platform-account/usage/personal-a/activity').expect(200);
+      expect(restoredSnapshot.body).toMatchObject({ total: '7001', complete: true });
+      const restoredCount = queries.length;
+      expect(restoredCount - count).toBeLessThanOrEqual(5);
+      forbidden = true;
+      await request(reopened).get('/api/platform-account/usage/personal-a/activity').expect(403);
+      forbidden = false;
+      memberView = true;
+      const memberSnapshot = await request(reopened).get('/api/platform-account/usage/personal-a/activity').expect(200);
+      expect(memberSnapshot.body).toMatchObject({ total: '3', complete: false, visibility: 'actor', sync: { status: 'syncing' } });
+      memberView = false;
+      const ownerSnapshot = await request(reopened).get('/api/platform-account/usage/personal-a/activity').expect(200);
+      expect(ownerSnapshot.body).toMatchObject({ total: '7001', complete: true, visibility: 'account' });
+      changeAccount = true;
+      await request(reopened).get('/api/platform-account/usage/personal-a/activity').expect(409, { error: 'platform_session_changed' });
+    } finally {
+      await restored?.close();
+      await f.runtime.close();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  }, 15_000);
 
   it.each(['superwagie', 'llmrouter'])('preserves confirmed %s charges during an unknown refund without settling the call', async (product) => {
     const f = await fixture();

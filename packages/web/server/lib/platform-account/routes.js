@@ -32,6 +32,10 @@ export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, o
   const sessionRoute = (read) => route(async (req, res) => {
     const who = await identity(req, res);
     const result = await read(who);
+    if (result.status === 'signed-in') {
+      // Daily history is collected during normal use, independently of the chart.
+      void Promise.resolve().then(() => runtime.startUsageActivity?.(who)).catch(() => {});
+    }
     if (result.status === 'signed-in' && onSessionRead) {
       const session = runtime.captureIdentitySession(who);
       const owner = result.accountId ? runtime.actor(who) : null;
@@ -64,7 +68,12 @@ export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, o
     await runtime.callback({ state: get('state'), code: get('code'), browser });
     res.type('html').send('<!doctype html><html lang="en"><meta charset="utf-8"><title>SuperWagie</title><p>登录完成，请返回 SuperWagie。 / Signed in. Return to SuperWagie.</p></html>');
   }));
-  app.put('/api/platform-account/account', express.json({ limit: '4kb' }), route(async (req, res) => res.json(await runtime.selectAccount(await identity(req, res), req.body?.accountId))));
+  app.put('/api/platform-account/account', express.json({ limit: '4kb' }), route(async (req, res) => {
+    const who = await identity(req, res);
+    const result = await runtime.selectAccount(who, req.body?.accountId);
+    void Promise.resolve().then(() => runtime.startUsageActivity?.(who)).catch(() => {});
+    res.json(result);
+  }));
   for (const [product, prefix] of [['superwagie', ''], ['llmrouter', '/llmrouter']]) {
     for (const kind of product === 'superwagie' ? ['summary', 'calls', 'activity'] : ['summary', 'calls']) {
       app.get(`/api/platform-account/usage/:accountId${prefix}/${kind}`, route(async (req, res) => {

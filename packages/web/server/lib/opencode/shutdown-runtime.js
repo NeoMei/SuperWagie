@@ -48,6 +48,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getSpacesHost = () => null,
     getPlatformModelRuntime = () => null,
     getPlatformCommerceRuntime = () => null,
+    getPlatformAccountRuntime = () => null,
     stopOpenCodeRuntimeUpdater = () => {},
   } = dependencies;
 
@@ -84,6 +85,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     const cleanupOperations = [
       () => stopOpenCodeRuntimeUpdater(),
       () => clearInterval(getRelayReconcileTimer()),
+      () => getPlatformAccountRuntime()?.close(),
       () => getPlatformCommerceRuntime()?.close(),
       () => getPlatformModelRuntime()?.close(),
       () => getGuestSurfaceRuntime()?.stop(),

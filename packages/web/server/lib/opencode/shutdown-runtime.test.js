@@ -53,6 +53,23 @@ describe('graceful shutdown runtime', () => {
     vi.restoreAllMocks();
   });
 
+  it('stops and drains daily activity before closing model services or exiting', async () => {
+    const started = Promise.withResolvers(); const finished = Promise.withResolvers();
+    const order = [];
+    const process = { exit: vi.fn(() => order.push('exit')) };
+    const runtime = createRuntime(null, {
+      process,
+      getPlatformAccountRuntime: () => ({ close: async () => { order.push('activity'); started.resolve(); await finished.promise; } }),
+      getPlatformModelRuntime: () => ({ close: async () => { order.push('model'); } }),
+    });
+    const closing = runtime.gracefulShutdown({ exitProcess: true });
+    await started.promise;
+    expect(order).toEqual(['activity']);
+    finished.resolve();
+    await closing;
+    expect(order).toEqual(['activity', 'model', 'exit']);
+  });
+
   it('awaits the model journal close before exiting the host', async () => {
     const started = Promise.withResolvers(); const finished = Promise.withResolvers();
     const process = { exit: vi.fn() };

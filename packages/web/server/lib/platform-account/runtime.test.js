@@ -663,3 +663,115 @@ describe('platform account managed knowledge authority', () => {
     expect(grants).toHaveLength(0);
   });
 });
+
+describe('daily activity collector lifecycle', () => {
+  const dailyFixture = async (options = {}) => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'platform-daily-activity-'));
+    const tracked = []; const stopped = []; let closed = 0; let wakes = 0;
+    const collector = {
+      track: (key, context) => tracked.push({ key, context }),
+      stop: (key) => stopped.push(key),
+      wake: () => { wakes += 1; },
+      read: async () => ({ localSnapshot: true }),
+      close: async () => { closed += 1; },
+    };
+    const f = await fixture({ dataDir, usageActivityFactory: async () => collector, ...options });
+    return { ...f, collector, tracked, stopped, closed: () => closed, wakes: () => wakes, dispose: async () => { await f.runtime.close?.(); await fs.rm(dataDir, { recursive: true, force: true }); } };
+  };
+
+  it('starts collection on verified identity reads without opening the graph or selecting a payer', async () => {
+    const f = await dailyFixture();
+    try {
+      await f.runtime.callback(await f.begin());
+      const app = express();
+      registerPlatformAccountRoutes(app, { runtime: f.runtime, resolveIdentity: async () => identity });
+      await request(app).get('/api/platform-account/session').expect(200);
+      await expect.poll(() => f.tracked.length).toBe(1);
+      expect(f.tracked[0].context.ownerBase).toMatchObject({ issuer: f.env.OPENCHAMBER_UNIHUB_ISSUER, userId: 'actor-a', accountId: 'personal-a' });
+      expect(() => f.runtime.captureCommerceSession(identity)).toThrow('platform_account_required');
+      await f.runtime.startUsageActivity(identity);
+      expect(f.tracked).toHaveLength(1);
+      await f.runtime.wakeUsageActivity();
+      expect(f.wakes()).toBe(1);
+    } finally { await f.dispose(); }
+    expect(f.closed()).toBe(1);
+  });
+
+  it('replaces the collector on payer changes and revokes old closures on logout', async () => {
+    const f = await dailyFixture();
+    try {
+      await f.runtime.callback(await f.begin());
+      await Promise.all([f.runtime.startUsageActivity(identity), f.runtime.startUsageActivity(identity)]);
+      expect(f.tracked).toHaveLength(1);
+      const first = f.tracked[0].context;
+      await f.runtime.selectAccount(identity, 'team-a');
+      await f.runtime.startUsageActivity(identity);
+      expect(f.tracked).toHaveLength(2);
+      expect(f.tracked[1].context.ownerBase.accountId).toBe('team-a');
+      expect(() => first.assertCurrent()).toThrow('platform_session_changed');
+      const current = f.tracked[1].context;
+      f.runtime.logout(identity);
+      expect(() => current.assertCurrent()).toThrow('platform_session_changed');
+      await expect(current.request('/v1/accounts/team-a/calls?limit=1&from=2026-11-08T00%3A00%3A00.000Z&to=2026-11-09T00%3A00%3A00.000Z')).rejects.toMatchObject({ code: 'platform_session_changed' });
+      expect(f.stopped.length).toBeGreaterThan(0);
+    } finally { await f.dispose(); }
+  });
+
+  it('cannot register a late account lookup after logout', async () => {
+    const accountsRead = Promise.withResolvers(); const accountResponse = Promise.withResolvers();
+    const f = await dailyFixture({ fetchImpl: (url, init) => {
+      if (new URL(url).pathname === '/v1/accounts') { accountsRead.resolve(); return accountResponse.promise; }
+      return fetch(url, init);
+    } });
+    try {
+      await f.runtime.callback(await f.begin());
+      const starting = f.runtime.startUsageActivity(identity);
+      await accountsRead.promise;
+      f.runtime.logout(identity);
+      accountResponse.resolve(Response.json([{ id: 'personal-a', name: 'Alice', kind: 'personal', role: 'owner' }]));
+      await expect(starting).rejects.toMatchObject({ code: 'platform_session_changed' });
+      expect(f.tracked).toHaveLength(0);
+    } finally { await f.dispose(); }
+  });
+
+  it('recovers a transient startup account lookup without opening the chart', async () => {
+    let accountReads = 0;
+    const f = await dailyFixture({ usageActivityRetryMs: 5, fetchImpl: (url, init) => {
+      if (new URL(url).pathname === '/v1/accounts' && ++accountReads === 1) return Response.json({ error: 'unavailable' }, { status: 503 });
+      return fetch(url, init);
+    } });
+    try {
+      await f.runtime.callback(await f.begin());
+      await expect(f.runtime.startUsageActivity(identity)).rejects.toMatchObject({ status: 502 });
+      await expect.poll(() => f.tracked.length).toBe(1);
+      expect(accountReads).toBe(2);
+    } finally { await f.dispose(); }
+  });
+
+  it('retries a failed local history initialization and cancels startup retries on logout', async () => {
+    let attempts = 0; let f;
+    f = await dailyFixture({ usageActivityRetryMs: 5, usageActivityFactory: async () => {
+      if (++attempts === 1) throw new Error('fixture storage unavailable');
+      return f.collector;
+    } });
+    try {
+      await f.runtime.callback(await f.begin());
+      await expect(f.runtime.startUsageActivity(identity)).rejects.toThrow('fixture storage unavailable');
+      await expect.poll(() => f.tracked.length).toBe(1);
+      expect(attempts).toBe(2);
+    } finally { await f.dispose(); }
+    let lookups = 0;
+    const denied = await dailyFixture({ usageActivityRetryMs: 25, fetchImpl: (url, init) => {
+      if (new URL(url).pathname === '/v1/accounts') { lookups += 1; return Response.json({ error: 'unavailable' }, { status: 503 }); }
+      return fetch(url, init);
+    } });
+    try {
+      await denied.runtime.callback(await denied.begin());
+      await expect(denied.runtime.startUsageActivity(identity)).rejects.toMatchObject({ status: 502 });
+      denied.runtime.logout(identity);
+      await new Promise(resolve => setTimeout(resolve, 40));
+      expect(lookups).toBe(1);
+      expect(denied.tracked).toHaveLength(0);
+    } finally { await denied.dispose(); }
+  });
+});
