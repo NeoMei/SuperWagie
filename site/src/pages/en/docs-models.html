@@ -11,7 +11,7 @@
 <p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable.</p>
 
 <h2>Continue setup with an activated key</h2>
-<p>If the key is activated but model configuration failed, update to 2.7.74 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
+<p>If the key is activated but model configuration failed, update to 2.7.75 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
 
 <h2>Test passed, connection incomplete</h2>
 <p>A passed embedding test means the new connection can return vectors. Applying it to an existing library index also requires a compatibility check. The original configuration and index remain while that check is pending.</p>
@@ -31,8 +31,10 @@
 <h2>Library models</h2>
 <p>The library uses models configured in SuperWagie. A SuperWagie Key can configure available embedding, image understanding and document parsing capabilities. Each capability depends on its test and setup result. You can also configure another provider when needed.</p>
 
-<h2>Cost</h2>
-<p>Click your avatar to view your wallet, subscription, API keys, usage and profile. A low-balance notice opens the account panel's funding form; confirm the amount before submitting. SuperWagie Key calls consume account balance or quota. A separately configured provider key follows that provider's billing rules. Connectivity tests, document parsing and embedding also call models.</p>
+<h2>User center and cost</h2>
+<p>Click your avatar to open the user center. The sidebar shows your portrait and identity and opens profile editing. Top navigation switches between membership and usage, API keys, consumption records, orders and personal details.</p>
+<p>Numeric cards separate total, subscription, add-on and other remaining credits. A seven-row activity calendar shows daily call counts across the past 365 days, using UTC dates. Hover over a day or focus it with the keyboard to inspect its count. Incomplete reads label observed counts as lower bounds and unfilled dates as unknown.</p>
+<p>Membership and add-ons have separate selection and confirmation. Available offers and payment methods come from the server; check the account, offer and amount before submitting. API Key setup offers credits or cash when supported by the server. A separately configured provider key follows that provider's billing rules. Connectivity tests, document parsing and embedding also call models.</p>
 
 <h2>Common errors</h2>
 <p>Messages follow the current interface language. Expand the details to inspect the response.</p>
