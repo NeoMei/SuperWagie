@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.78 for macOS Apple silicon and
+The website targets release 2.7.79 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
@@ -25,6 +25,15 @@ available and supports the required purpose. Each supported function is tested
 with the same key before its connection is applied. Tests appear as they start,
 with up to three running together. A missing compatible model has an explicit
 unavailable result. Models without native prices remain unavailable.
+
+Version 2.7.79 leads usage summaries with settled credit charges, total calls
+and settled calls. Credit display preserves micro-unit precision and trims
+insignificant trailing zeros. Cash and quota retain their own assets. Nonzero
+refunds and cash/quota totals stay under collapsed Billing details on
+Consumption records; call rows omit zero refunds. The primary credit amount is
+the gross settled charge total, with refunds kept separate. Unavailable or
+unauthorized credit amounts stay unavailable. No financial amount is converted
+between cash, quota and credits.
 
 Version 2.7.78 lets conversation learning recover after a startup failure and
 reports unavailable until startup succeeds. Memory queries work when no filter
@@ -83,7 +92,7 @@ Conversation learning is opt-in. Once enabled, completed OpenCode turns are
 distilled in the background and indexed for project retrieval. Existing session
 history requires explicit processing. Methodology candidates require confirmation.
 
-Installer links point to the v2.7.78 GitHub Release assets. The unified release
+Installer links point to the v2.7.79 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 
