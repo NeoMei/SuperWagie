@@ -54,6 +54,7 @@ jobs:
           bun run bundle:main
           bun run rebuild:native
           bun run prepare:macos-speech
+          bun run prepare:hy-memory
           bun run prepare:superweb
           bun run prepare:presentation
           node ./scripts/package.mjs --mac --arm64 --publish=never
