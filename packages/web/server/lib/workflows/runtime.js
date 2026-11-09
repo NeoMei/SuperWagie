@@ -276,7 +276,7 @@ export const createWorkflowRuntime = ({
   };
 
   const assertEnabled = async () => {
-    if (!await isEnabled()) throw new OpenChamberControlError('Workflows are turned off in OpenChamber settings', 403);
+    if (!await isEnabled()) throw new OpenChamberControlError('Workflows are turned off in SuperWagie settings', 403);
   };
 
   const requireRun = async (runId, parentSessionId) => {
@@ -971,9 +971,9 @@ export const createWorkflowRuntime = ({
             }
           }
           for (const agent of run.agents) {
-            if (agent.state === 'running' || agent.state === 'queued') Object.assign(agent, { state: 'stopped', error: 'OpenChamber restarted' });
+            if (agent.state === 'running' || agent.state === 'queued') Object.assign(agent, { state: 'stopped', error: 'SuperWagie restarted' });
           }
-          Object.assign(run, { state: 'stopped', endedAt: now(), error: 'OpenChamber restarted while the workflow ran.' });
+          Object.assign(run, { state: 'stopped', endedAt: now(), error: 'SuperWagie restarted while the workflow ran.' });
           run.report = { messageId: createMessageId(now()), delivered: false, resume: false };
           await persist(run, { immediate: true });
         } catch (error) {
@@ -990,7 +990,7 @@ export const createWorkflowRuntime = ({
     shutdownDeadline = Date.now() + Math.max(0, shutdownNetworkTimeoutMs);
     shutdownSignal.abort();
     for (const execution of active.values()) {
-      execution.stopReason ??= 'OpenChamber shut down while the workflow ran.';
+      execution.stopReason ??= 'SuperWagie shut down while the workflow ran.';
       execution.controller.abort();
       execution.sandbox?.terminate();
     }

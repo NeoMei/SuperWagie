@@ -325,7 +325,7 @@ export function createDispatchResultsRuntime({
     const response = await fetchImpl(search ? `${base}?${search}` : base, init);
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
+      throw httpError(`Kernel ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
     }
     return unwrapOpenCodeResponse(await response.json().catch(() => null));
   };

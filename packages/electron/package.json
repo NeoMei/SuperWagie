@@ -205,15 +205,15 @@
       ],
       "category": "Development",
       "maintainer": "OpenChamber <security@openchamber.dev>",
-      "vendor": "OpenChamber",
-      "synopsis": "Desktop runtime for OpenChamber",
+      "vendor": "SuperWagie",
+      "synopsis": "Desktop runtime for SuperWagie",
       "icon": "resources/icons/app-icon.png",
       "executableName": "openchamber",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {
         "entry": {
-          "Name": "OpenChamber",
-          "Comment": "Desktop runtime for OpenChamber",
+          "Name": "SuperWagie",
+          "Comment": "Desktop runtime for SuperWagie",
           "Icon": "openchamber",
           "StartupWMClass": "openchamber"
         }

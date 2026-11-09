@@ -92,7 +92,7 @@ export const createWorkflowAgentSessions = ({
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw Object.assign(new Error(`OpenCode refused the workflow report with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`), { status: response.status });
+      throw Object.assign(new Error(`Kernel refused the workflow report with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`), { status: response.status });
     }
   };
 

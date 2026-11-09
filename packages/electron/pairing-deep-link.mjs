@@ -82,7 +82,7 @@ export const parsePairingDeepLink = (raw, { protocol = 'lingxi', now = Date.now(
   if (candidates.length === 0) return null;
   const preferred = candidates.find((candidate) => candidate.direct) || candidates[0];
   return {
-    label: readText(payload.label) || 'OpenChamber',
+    label: readText(payload.label) || 'SuperWagie',
     fingerprint: readText(payload.fingerprint),
     target: preferred.target,
   };

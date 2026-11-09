@@ -9,6 +9,10 @@ the normalized language sent by `I18nProvider`.
 ## Invariants
 
 - The application offers English and Simplified Chinese through `LOCALES`.
+- App-owned product labels use SuperWagie. Engine labels use Kernel in English
+  and 内核 in Simplified Chinese. Translation keys, commands, paths, URLs,
+  protocol identifiers, third-party service names and license attribution keep
+  their original spelling.
 - English platform tags resolve to `en`. Chinese tags resolve to `zh-CN`.
   Retired and unknown language tags resolve to the existing `zh-CN` default.
 - Initial storage, host language, store updates, and bootstrap messages use the

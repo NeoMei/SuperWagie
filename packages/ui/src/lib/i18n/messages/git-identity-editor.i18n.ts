@@ -12,7 +12,7 @@ export const gitIdentityEditorI18n = {
     'settings.gitIdentities.editor.icon.personal': 'Personal',
     'settings.gitIdentities.editor.icon.school': 'School',
     'settings.gitIdentities.editor.icon.code': 'Code',
-    'settings.gitIdentities.editor.auth.sshHint': 'Pushes and pulls over SSH with a key OpenChamber keeps for this identity.',
+    'settings.gitIdentities.editor.auth.sshHint': 'Pushes and pulls over SSH with a key SuperWagie keeps for this identity.',
     'settings.gitIdentities.editor.field.sshKey': 'SSH key',
   },
   'zh-CN': {
@@ -27,7 +27,7 @@ export const gitIdentityEditorI18n = {
     'settings.gitIdentities.editor.icon.personal': '个人',
     'settings.gitIdentities.editor.icon.school': '学校',
     'settings.gitIdentities.editor.icon.code': '代码',
-    'settings.gitIdentities.editor.auth.sshHint': '通过 SSH 推送和拉取，使用 OpenChamber 为此身份保存的密钥。',
+    'settings.gitIdentities.editor.auth.sshHint': '通过 SSH 推送和拉取，使用 SuperWagie 为此身份保存的密钥。',
     'settings.gitIdentities.editor.field.sshKey': 'SSH 密钥',
   },
 } as const;

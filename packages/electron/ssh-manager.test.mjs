@@ -591,7 +591,7 @@ printf '4321\\n'`);
       { id: 'ssh-1', auth: {}, remoteOpenchamber: { mode: 'managed' } },
       4321,
       '/home/pi/.bun/bin/openchamber',
-    )).rejects.toThrow(/opencode CLI is not installed/);
+    )).rejects.toThrow(/Kernel CLI is not installed/);
   });
   test('prefers a bun that only exists in the home directory over npm', async () => {
     const commands = [];
@@ -909,7 +909,7 @@ printf '4321\\n'`);
       const result = await manager.ensureRemoteServer(managed(), parsed, '/unused.sock');
 
       expect(result.startedByUs).toBe(true);
-      expect(manager.logsForInstance('ssh-reuse', 50).join('\n')).toContain('Could not list OpenChamber servers');
+      expect(manager.logsForInstance('ssh-reuse', 50).join('\n')).toContain('Could not list SuperWagie servers');
     });
   });
 });

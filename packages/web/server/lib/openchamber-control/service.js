@@ -868,7 +868,7 @@ export const createOpenChamberControlService = (dependencies) => {
   const execute = async (action, input = {}, contextDirectory, options = {}) => {
     try {
       if (!CONTROL_ACTIONS.has(action)) {
-        throw new OpenChamberControlError(`Unsupported OpenChamber action: ${action || 'missing'}`, 400);
+        throw new OpenChamberControlError(`Unsupported SuperWagie action: ${action || 'missing'}`, 400);
       }
       if (OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action)) {
         return await knowledgeActions.execute(action, input, contextDirectory, options.contextSessionId);
@@ -1102,7 +1102,7 @@ export const createOpenChamberControlService = (dependencies) => {
           return { sessionId: sessionID, directory, role, sessionStatus: currentStatus, messages: await sessionMessages(client, sessionID, role, limit) };
         }
       }
-      throw new OpenChamberControlError(`Unsupported OpenChamber action: ${action || 'missing'}`, 400);
+      throw new OpenChamberControlError(`Unsupported SuperWagie action: ${action || 'missing'}`, 400);
     } catch (error) {
       throw asControlError(error, `Failed to execute ${action || 'OpenChamber action'}`);
     }

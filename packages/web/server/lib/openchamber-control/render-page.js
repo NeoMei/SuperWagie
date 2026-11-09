@@ -213,7 +213,7 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
  */
 export const createRenderPageAction = ({ isEnabled, pageAnswers }) => async (input, { sessionId, callId, directory, signal } = {}) => {
   if (!await isEnabled()) {
-    throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
+    throw new OpenChamberControlError('The render tool is turned off in SuperWagie settings', 403);
   }
   const html = isString(input.html) ? input.html : '';
   if (!html.trim()) {

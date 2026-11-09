@@ -195,9 +195,9 @@ const errorRemedy = (detail?: string): ErrorRemedy => {
   if (text.includes('ui authentication') || text.includes('ui password')) return 'uiPassword';
   if (text.includes('already in use') || text.includes('eaddrinuse')) return 'localPort';
   if (text.includes('neither bun nor npm')) return 'noRuntime';
-  if (text.includes('opencode cli is not installed')) return 'noOpencode';
+  if (text.includes('opencode cli is not installed') || text.includes('kernel cli is not installed')) return 'noOpencode';
   if (text.includes('requires a ui password')) return 'uiPassword';
-  if (text.includes('preferred remote openchamber port')) return 'externalPort';
+  if (text.includes('preferred remote openchamber port') || text.includes('preferred remote superwagie port')) return 'externalPort';
   return null;
 };
 

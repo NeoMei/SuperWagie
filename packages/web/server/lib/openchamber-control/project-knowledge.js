@@ -254,7 +254,7 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
       directory,
       sessionId: asNonEmptyString(contextSessionId) ?? null,
     });
-    if (delivered === 0) throw new OpenChamberControlError('No OpenChamber window is connected to show the plan', 503);
+    if (delivered === 0) throw new OpenChamberControlError('No SuperWagie window is connected to show the plan', 503);
     return { projectId, planId: plan.id, shown: true };
   };
 
@@ -263,7 +263,7 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
       throw new OpenChamberControlError('Project knowledge is not available on this server', 503);
     }
     if (!await isEnabled()) {
-      throw new OpenChamberControlError('The project knowledge tool is turned off in OpenChamber settings', 403);
+      throw new OpenChamberControlError('The project knowledge tool is turned off in SuperWagie settings', 403);
     }
     const { projectId, directory } = await ownerOf(input, contextDirectory);
     switch (action) {

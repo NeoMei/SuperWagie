@@ -67,7 +67,7 @@ export const createPluginNotificationEmitter = (dependencies) => {
     }
 
     const payload = {
-      title: parsed.data.title ?? 'OpenChamber',
+      title: parsed.data.title ?? 'SuperWagie',
       body: parsed.data.body,
       tag: parsed.data.tag,
       kind: 'plugin',

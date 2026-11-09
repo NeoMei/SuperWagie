@@ -22,6 +22,7 @@ const PINS_METADATA_KEY = 'project_context_pins';
  * index and nothing else. OpenCode orders entries by key.
  */
 export const KNOWLEDGE_ENTRY_KEYS = {
+  product: 'openchamber.product',
   checkout: 'openchamber.checkout',
   pinned: 'openchamber.pinned',
   memory: 'openchamber.memory',
@@ -30,6 +31,11 @@ export const KNOWLEDGE_ENTRY_KEYS = {
 
 /** Budget for each entry; anything past it is cut, loudly. */
 const KNOWLEDGE_MAX_LENGTH = 8000;
+
+const PRODUCT_TERMINOLOGY = 'This application is SuperWagie. In user-facing prose, call the application SuperWagie'
+  + ' wherever its upstream name OpenChamber would appear. Refer to its OpenCode execution engine as 内核 in Chinese'
+  + ' and Kernel in English. Follow the language of your reply. Preserve literal commands, tool identifiers, API fields,'
+  + ' file paths, URLs, code, quoted source text, upstream attribution, license notices and third-party provider or model names.';
 
 const truncate = (value) => (
   value.length <= KNOWLEDGE_MAX_LENGTH
@@ -58,7 +64,7 @@ const describeCheckout = ({ directory, branch, placeholder = false }) => {
  * without it, so the two cannot drift apart; a separate `git branch -m` step
  * was the one weaker models dropped.
  */
-const placeholderBranchGuidance = (branch) => `Its name \`${branch}\` is a placeholder OpenChamber generated, not one the user chose,`
+const placeholderBranchGuidance = (branch) => `Its name \`${branch}\` is a placeholder SuperWagie generated, not one the user chose,`
   + ' and it is not pushed yet. Name the task with work.name, passing branch too: work.name renames the branch to it.'
   + " Follow the naming the repository's other branches use (`git branch -a`); with none, `<type>/<short-kebab-case>`"
   + ' with the conventional commit types, such as `fix/login-timeout`. No tool or app prefix.'
@@ -132,7 +138,7 @@ export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws a chart, 
   + " or how something looks: a proposed interface change, before and after, layout options."
   + " Skip it for a few numbers, a short list, code, or when the user asked for plain text."
   + " At most one page per answer."
-  + " A mockup of the user's own project takes its look from that project's code (theme tokens, CSS variables, styles), not from OpenChamber's theme."
+  + " A mockup of the user's own project takes its look from that project's code (theme tokens, CSS variables, styles), not from SuperWagie's theme."
   + " Draw a page that only shows right before your final reply, and keep the reply to what the page does not show."
   + " For a choice a page shows better than text, such as layouts or designs, ask on a page with awaitAnswer and continue from the answer.";
 
@@ -246,6 +252,7 @@ const buildGuidance = ({ linking, rendering, workflows, directTools }) => [
  */
 export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, workflows = false, directTools = true, checkout = null }) => {
   const entries = {
+    [KNOWLEDGE_ENTRY_KEYS.product]: PRODUCT_TERMINOLOGY,
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
     [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, workflows, directTools }),

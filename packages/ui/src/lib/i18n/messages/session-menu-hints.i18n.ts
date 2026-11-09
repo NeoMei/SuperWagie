@@ -3,7 +3,7 @@ export const sessionMenuHintsI18n = {
   en: {
     'sessions.sidebar.session.menuHint.rename': 'Change the title shown in the sidebar and tabs.',
     'sessions.sidebar.session.menuHint.aiRename': 'Your Small Model reads the conversation and suggests a title.',
-    'sessions.sidebar.session.menuHint.copyId': 'Copy the ID OpenCode uses for this session. Handy for the CLI or a bug report.',
+    'sessions.sidebar.session.menuHint.copyId': 'Copy the ID Kernel uses for this session. Handy for the CLI or a bug report.',
     'sessions.sidebar.session.menuHint.pin': 'Keep this session at the top of its list. Pins are saved on this device only.',
     'sessions.sidebar.session.menuHint.unpin': 'Let this session sort by recent activity again.',
     'sessions.sidebar.session.menuHint.track': 'Move it to In work: a short list above everything else for what you’re following right now.',
@@ -21,7 +21,7 @@ export const sessionMenuHintsI18n = {
   'zh-CN': {
     'sessions.sidebar.session.menuHint.rename': '修改侧边栏和标签页中显示的标题。',
     'sessions.sidebar.session.menuHint.aiRename': '由你的 Small Model 阅读对话并建议标题。',
-    'sessions.sidebar.session.menuHint.copyId': '复制 OpenCode 为此会话使用的 ID，方便在 CLI 或问题反馈中使用。',
+    'sessions.sidebar.session.menuHint.copyId': '复制内核为此会话使用的 ID，方便在 CLI 或问题反馈中使用。',
     'sessions.sidebar.session.menuHint.pin': '把此会话固定在列表顶部。固定只保存在这台设备上。',
     'sessions.sidebar.session.menuHint.unpin': '让此会话重新按最近活动排序。',
     'sessions.sidebar.session.menuHint.track': '移到“进行中”：位于最上方的简短列表，放你此刻正在跟进的内容。',

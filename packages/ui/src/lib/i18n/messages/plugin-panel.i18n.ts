@@ -39,7 +39,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} found nothing to attach.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} failed: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} did not answer.',
-    'chat.chatInput.toast.guestUnavailableHere': 'This extension is not available here. Open it on OpenChamber web or desktop.',
+    'chat.chatInput.toast.guestUnavailableHere': 'This extension is not available here. Open it on SuperWagie web or desktop.',
   },
   'zh-CN': {
     'chat.workStatus.sections.extensionBadge': '扩展',
@@ -80,6 +80,6 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} 没有找到可附加的内容。',
     'chat.chatInput.toast.guestCommandFailed': '/{command} 失败：{reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} 没有响应。',
-    'chat.chatInput.toast.guestUnavailableHere': '此扩展在此处不可用。请在 OpenChamber 网页版或桌面版中打开。',
+    'chat.chatInput.toast.guestUnavailableHere': '此扩展在此处不可用。请在 SuperWagie 网页版或桌面版中打开。',
   },
 } as const;

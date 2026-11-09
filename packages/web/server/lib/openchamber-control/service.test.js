@@ -853,7 +853,7 @@ describe('OpenChamber control service', () => {
 
   it('rejects actions outside the fixed contract', async () => {
     const { service } = createService();
-    await expect(service.execute('session.delete')).rejects.toThrow('Unsupported OpenChamber action');
+    await expect(service.execute('session.delete')).rejects.toThrow('Unsupported SuperWagie action');
   });
 });
 

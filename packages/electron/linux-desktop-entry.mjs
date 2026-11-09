@@ -29,8 +29,8 @@ const quoteExecArgument = (value) => `"${value.replace(/(["`$\\])/g, '\\$1')}"`.
 export const buildAppImageDesktopEntry = ({ appImagePath, iconPath }) => [
   '[Desktop Entry]',
   'Type=Application',
-  'Name=OpenChamber',
-  'Comment=Desktop runtime for OpenChamber',
+  'Name=SuperWagie',
+  'Comment=Desktop runtime for SuperWagie',
   `Exec=${escapeDesktopString(quoteExecArgument(appImagePath))} %U`,
   `TryExec=${escapeDesktopString(appImagePath)}`,
   `Icon=${escapeDesktopString(iconPath)}`,

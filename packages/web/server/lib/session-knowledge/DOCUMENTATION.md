@@ -29,6 +29,7 @@ source:
 
 | Key | Holds |
 |---|---|
+| `openchamber.product` | SuperWagie product name and Chinese/English engine terminology |
 | `openchamber.pinned` | pinned notes and plan bodies |
 | `openchamber.memory` | the memory index and when to save |
 | `openchamber.guidance` | when to link, when to draw a page, where the tools are called |
@@ -39,6 +40,14 @@ source:
 before the prompt request, the queue, scheduled tasks and dispatched sessions
 call it in process. An empty text removes the entry. A key left out of
 `buildKnowledgeEntries` keeps what the session holds.
+
+Product terminology is supplied even when managed tools and memory are disabled.
+Replies call the application SuperWagie and its engine 内核 in Chinese or Kernel
+in English. Literal commands, tool names, API fields, paths, URLs, code, quotes
+and third-party names retain their original spelling. This entry uses the same
+send, compaction and fork lifecycle as the other instructions. It does not
+rewrite stored or rendered conversation content. Runtimes connected directly
+to an external engine without this server do not receive these instructions.
 
 OpenCode does the rest. The first values go into the session's system prompt;
 a value that changed or went away is announced to the agent at its next step as

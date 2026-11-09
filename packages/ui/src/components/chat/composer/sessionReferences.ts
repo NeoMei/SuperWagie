@@ -24,7 +24,7 @@ export const sessionReference = (session: Pick<Session, 'id' | 'title'>): Sessio
     kind: 'session',
     sessionId: session.id,
     title: session.title,
-    contextText: `The user referenced another OpenChamber session, "${session.title}" (${session.id}). `
+    contextText: `The user referenced another SuperWagie session, "${session.title}" (${session.id}). `
         + `Its messages can be read with the openchamber tool (session.messages, sessionId ${session.id}).`,
 });
 
@@ -37,7 +37,7 @@ export const messageText = (parts: readonly Part[]): string => parts
 const authorOf = (role: Message['role']): string => {
     if (role === 'user') return 'the user of that session';
     if (role === 'assistant') return 'the agent of that session';
-    return 'OpenChamber';
+    return 'SuperWagie';
 };
 
 export const sessionMessageReference = (
@@ -56,7 +56,7 @@ export const sessionMessageReference = (
         // Who attached it and who wrote it are said apart: the user attaches
         // messages they wrote themselves too, and an agent's words must not
         // read as the user's request.
-        contextText: `The user attached a message from another OpenChamber session, "${session.title}" `
+        contextText: `The user attached a message from another SuperWagie session, "${session.title}" `
             + `(${session.id}, message ${message.info.id}). It was written by ${authorOf(message.info.role)}. The message:\n\n${text}`,
     };
 };

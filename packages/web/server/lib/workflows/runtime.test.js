@@ -742,7 +742,7 @@ describe('workflow runtime', () => {
     runtimes.push(restarted);
     await restarted.start();
     const status = await restarted.executeAction('workflow.status', { runId }, { sessionId: 'ses_parent', directory: first.dataDir });
-    expect(status).toMatchObject({ state: 'stopped', error: 'OpenChamber restarted while the workflow ran.' });
+    expect(status).toMatchObject({ state: 'stopped', error: 'SuperWagie restarted while the workflow ran.' });
     await restarted.deliverPending();
     expect(agents.reports.at(-1).body.metadata).toMatchObject({ runId, state: 'stopped' });
 

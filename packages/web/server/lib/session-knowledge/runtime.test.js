@@ -85,6 +85,23 @@ const pinnedStore = () => createMetadataStub({
 });
 
 describe('writing the knowledge into a session', () => {
+  test('keeps product instructions when managed tools and project knowledge are unavailable', async () => {
+    const instructionEntries = createEntriesStub({ fail: new Set([PINNED]) });
+    const runtime = createRuntime({
+      ...pinnedStore(),
+      instructionEntries,
+      isAgentMemoryEnabled: async () => false,
+      isSessionLinkingAvailable: async () => false,
+      isPageRenderingAvailable: async () => false,
+      isWorkflowAvailable: async () => false,
+    });
+
+    expect(await runtime.sync('ses_a', DIRECTORY)).toBe(false);
+    expect(instructionEntries.held.get('openchamber.product')).toBeTruthy();
+    expect(instructionEntries.held.has(GUIDANCE)).toBe(false);
+    expect(instructionEntries.held.has(PINNED)).toBe(false);
+  });
+
   test('a slow earlier recall write cannot restore an entry after a newer clear', async () => {
     const instructionEntries = createEntriesStub();
     const put = instructionEntries.put;
@@ -381,13 +398,14 @@ describe('what the session carries', () => {
     expect(entries[PINNED]).toBe('');
   });
 
-  test('nothing pinned with memory off carries nothing', async () => {
+  test('nothing pinned with memory off clears the project knowledge entries', async () => {
     const runtime = createRuntime({
       projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
       isAgentMemoryEnabled: async () => false,
     });
     const entries = await entriesFor(runtime, NO_PINS);
-    expect(Object.values(entries).every((text) => text === '')).toBe(true);
+    expect(entries[PINNED]).toBe('');
+    expect(entries[MEMORY]).toBe('');
   });
 
   test('an empty memory store still tells the session when to save', async () => {

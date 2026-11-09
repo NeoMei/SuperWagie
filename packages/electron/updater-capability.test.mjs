@@ -20,7 +20,7 @@ test('Windows ARM64 cannot download or install an x64 update', () => {
 test('rejects packaged Linux execution outside an AppImage or an installed package', () => {
   assert.throws(
     () => assertUpdaterCapability({ platform: 'linux', packaged: true, appImagePath: '', packageType: '' }),
-    /Start OpenChamber from its \.AppImage file or install a package/,
+    /Start SuperWagie from its \.AppImage file or install a package/,
   );
   assert.throws(
     () => assertUpdaterCapability({ platform: 'linux', packaged: true, appImagePath: '', packageType: 'pacman' }),

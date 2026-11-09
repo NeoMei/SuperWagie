@@ -14,7 +14,7 @@ export const surfacePanelI18n = {
     'contextPanel.surface.canvasAria': 'Live surface of {name}',
     'contextPanel.surface.ended.service-stopped': 'The extension\'s service stopped.',
     'contextPanel.surface.ended.extension-unavailable': 'The extension is unavailable. Check Settings → Extensions.',
-    'contextPanel.surface.ended.host-shutdown': 'OpenChamber is shutting down.',
+    'contextPanel.surface.ended.host-shutdown': 'SuperWagie is shutting down.',
   },
   'zh-CN': {
     'contextPanel.surface.unavailable': '此扩展的画面不可用。请在设置 → 扩展中确认它已启用并已批准。',
@@ -30,6 +30,6 @@ export const surfacePanelI18n = {
     'contextPanel.surface.canvasAria': '{name} 的实时画面',
     'contextPanel.surface.ended.service-stopped': '扩展的服务已停止。',
     'contextPanel.surface.ended.extension-unavailable': '扩展不可用。请检查设置 → 扩展。',
-    'contextPanel.surface.ended.host-shutdown': 'OpenChamber 正在关闭。',
+    'contextPanel.surface.ended.host-shutdown': 'SuperWagie 正在关闭。',
   },
 } as const;

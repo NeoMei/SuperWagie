@@ -3,7 +3,7 @@ export const settingsLayoutI18n = {
   en: {
     'settings.layout.general.desktopApp.title': 'Desktop app',
     'settings.layout.general.quickAccess.title': 'Quick access',
-    'settings.layout.general.quickAccess.info': 'Shortcuts that bring up OpenChamber from any app, even while it runs in the background.',
+    'settings.layout.general.quickAccess.info': 'Shortcuts that bring up SuperWagie from any app, even while it runs in the background.',
     'settings.layout.general.network.title': 'Password and network access',
     'settings.layout.general.files.title': 'Files and editor',
     'settings.layout.general.terminal.title': 'Terminal',
@@ -31,7 +31,7 @@ export const settingsLayoutI18n = {
   'zh-CN': {
     'settings.layout.general.desktopApp.title': '桌面应用',
     'settings.layout.general.quickAccess.title': '快速访问',
-    'settings.layout.general.quickAccess.info': '在任意应用中唤出 OpenChamber 的快捷键，即使它在后台运行。',
+    'settings.layout.general.quickAccess.info': '在任意应用中唤出 SuperWagie 的快捷键，即使它在后台运行。',
     'settings.layout.general.network.title': '密码与网络访问',
     'settings.layout.general.files.title': '文件与编辑器',
     'settings.layout.general.terminal.title': '终端',

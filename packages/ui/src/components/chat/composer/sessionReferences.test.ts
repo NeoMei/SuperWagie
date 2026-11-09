@@ -14,7 +14,7 @@ const tool = { id: 'prt_t', sessionID: 'ses_a', messageID: 'msg_a', type: 'tool'
 describe('session references', () => {
   test('a mentioned session names itself and how to read it, with no request attached', () => {
     const reference = sessionReference({ id: 'ses_a', title: 'Tweet writing' });
-    expect(reference.contextText).toBe('The user referenced another OpenChamber session, "Tweet writing" (ses_a). Its messages can be read with the openchamber tool (session.messages, sessionId ses_a).');
+    expect(reference.contextText).toBe('The user referenced another SuperWagie session, "Tweet writing" (ses_a). Its messages can be read with the openchamber tool (session.messages, sessionId ses_a).');
     expect(sessionMentionChip(reference)).toEqual({ label: 'Tweet writing', title: 'Tweet writing', icon: 'chat-3' });
   });
 
@@ -23,7 +23,7 @@ describe('session references', () => {
     expect(messageText([text(' First '), tool, context, text(long)])).toBe(`First\n\n${long}`);
     const reference = sessionMessageReference({ id: 'ses_a', title: 'Tweet writing' }, { info: { id: 'msg_a', role: 'assistant' }, parts: [text(`Line one\nline two ${long}`)] });
     if (reference?.kind !== 'session-message') throw new Error('expected a message reference');
-    expect(reference.contextText.startsWith('The user attached a message from another OpenChamber session, "Tweet writing" (ses_a, message msg_a). It was written by the agent of that session. The message:\n\nLine one\nline two')).toBe(true);
+    expect(reference.contextText.startsWith('The user attached a message from another SuperWagie session, "Tweet writing" (ses_a, message msg_a). It was written by the agent of that session. The message:\n\nLine one\nline two')).toBe(true);
     expect(reference.contextText.endsWith(long)).toBe(true);
     // The chip shows the start of the message, on one line.
     expect(sessionMentionChip(reference).label).toBe(`Line one line two ${'x'.repeat(29)}…`);

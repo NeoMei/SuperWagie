@@ -24,8 +24,8 @@ export const fileArtifactsI18n = {
     'filesView.artifact.table.showTable': 'Show as table',
     'filesView.artifact.table.showSource': 'Show source',
     'filesView.artifact.binary.title': 'No preview for this file',
-    'filesView.artifact.binary.description': 'OpenChamber does not decode this kind of file. Download it to open it in another app.',
-    'filesView.artifact.binary.descriptionWithType': 'OpenChamber does not decode {extension} files. Download it to open it in another app.',
+    'filesView.artifact.binary.description': 'SuperWagie does not decode this kind of file. Download it to open it in another app.',
+    'filesView.artifact.binary.descriptionWithType': 'SuperWagie does not decode {extension} files. Download it to open it in another app.',
   },
   'zh-CN': {
     'filesView.artifact.office.openUnavailable': '当前环境无法用默认应用打开文件。',
@@ -51,7 +51,7 @@ export const fileArtifactsI18n = {
     'filesView.artifact.table.showTable': '以表格显示',
     'filesView.artifact.table.showSource': '显示源文本',
     'filesView.artifact.binary.title': '此文件无法预览',
-    'filesView.artifact.binary.description': 'OpenChamber 不解码此类文件。请下载后用其他应用打开。',
-    'filesView.artifact.binary.descriptionWithType': 'OpenChamber 不解码 {extension} 文件。请下载后用其他应用打开。',
+    'filesView.artifact.binary.description': 'SuperWagie 不解码此类文件。请下载后用其他应用打开。',
+    'filesView.artifact.binary.descriptionWithType': 'SuperWagie 不解码 {extension} 文件。请下载后用其他应用打开。',
   },
 } as const;

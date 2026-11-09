@@ -71,7 +71,7 @@ export const createLibraryActions = ({ runtime, isEnabled = async () => true, re
   const requireEnabled = async () => {
     if (!runtime) throw new OpenChamberControlError('The knowledge library is not available on this server', 503);
     if (!(await isEnabled())) {
-      throw new OpenChamberControlError('The knowledge library tool is turned off in OpenChamber settings', 403);
+      throw new OpenChamberControlError('The knowledge library tool is turned off in SuperWagie settings', 403);
     }
   };
 

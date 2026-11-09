@@ -3,8 +3,8 @@ export const autocompleteScopeI18n = {
   en: {
     'chat.autocomplete.scope.user': 'user',
     'chat.autocomplete.scope.project': 'project',
-    'chat.autocomplete.scope.opencode': 'opencode',
-    'chat.autocomplete.scope.openchamber': 'openchamber',
+    'chat.autocomplete.scope.opencode': 'Kernel',
+    'chat.autocomplete.scope.openchamber': 'SuperWagie',
     'chat.autocomplete.skillsEmpty': 'No skills found',
   },
   de: {
@@ -73,8 +73,8 @@ export const autocompleteScopeI18n = {
   'zh-CN': {
     'chat.autocomplete.scope.user': '用户',
     'chat.autocomplete.scope.project': '项目',
-    'chat.autocomplete.scope.opencode': 'opencode',
-    'chat.autocomplete.scope.openchamber': 'openchamber',
+    'chat.autocomplete.scope.opencode': '内核',
+    'chat.autocomplete.scope.openchamber': 'SuperWagie',
     'chat.autocomplete.skillsEmpty': '未找到技能',
   },
   'zh-TW': {

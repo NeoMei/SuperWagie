@@ -134,7 +134,7 @@ export const dict: Record<I18nKey, string> = {
   ...platformUsageActivityI18n['zh-CN'],
   ...creationI18n['zh-CN'],
   ...modelConfigurationI18n['zh-CN'],
-  "opencodeCompatibility.bundled": "内核由犇马管理，会自动检查 OpenCode 官方更新。若仍不兼容，请更新犇马。",
+  "opencodeCompatibility.bundled": "内核由犇马管理，会自动检查内核官方更新。若仍不兼容，请更新犇马。",
   "opencodeCompatibility.title": "需要内核 v2",
   "opencodeCompatibility.outdatedTitle": "请更新内核",
   "opencodeCompatibility.outdatedLocal": "已安装内核 {version}。此版本的犇马需要内核 {minimum} 或更高版本。",
