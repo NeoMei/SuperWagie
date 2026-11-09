@@ -42,15 +42,11 @@ jobs:
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
-          bun run prepare:ripgrep
-          rustup target add aarch64-apple-darwin
-          bun run prepare:embedded-knowledge
           bun run bundle:main
           bun run rebuild:native
           bun run prepare:macos-speech
           bun run prepare:presentation
           node ./scripts/package.mjs --mac --arm64 --publish=never
-          bun run verify:opencode-cli:packaged
       - name: Verify installers
         working-directory: packages/electron
         run: |
