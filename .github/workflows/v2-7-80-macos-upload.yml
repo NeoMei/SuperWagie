@@ -57,7 +57,7 @@ jobs:
           bun run prepare:hy-memory
           bun run prepare:superweb
           bun run prepare:presentation
-          node ./scripts/package.mjs --mac --arm64 --publish=never
+          node ./scripts/package.mjs --mac --arm64 --adhoc
       - name: Verify installers
         working-directory: packages/electron
         run: |
