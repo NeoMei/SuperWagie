@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.77 for macOS Apple silicon and
+The website targets release 2.7.78 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
@@ -25,6 +25,12 @@ available and supports the required purpose. Each supported function is tested
 with the same key before its connection is applied. Tests appear as they start,
 with up to three running together. A missing compatible model has an explicit
 unavailable result. Models without native prices remain unavailable.
+
+Version 2.7.78 lets conversation learning recover after a startup failure and
+reports unavailable until startup succeeds. Memory queries work when no filter
+is selected. Learning and memory organization also continue processing work
+added while another task is finishing. Conversation learning remains opt-in;
+existing history still requires explicit processing.
 
 Version 2.7.77 saves daily platform call totals in application data during
 normal authenticated use and retains them across restarts. The first sync fills
@@ -77,7 +83,7 @@ Conversation learning is opt-in. Once enabled, completed OpenCode turns are
 distilled in the background and indexed for project retrieval. Existing session
 history requires explicit processing. Methodology candidates require confirmation.
 
-Installer links point to the v2.7.77 GitHub Release assets. The unified release
+Installer links point to the v2.7.78 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 
