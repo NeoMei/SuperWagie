@@ -22,6 +22,18 @@ OpenCode remains the conversation authority.
 - Capture starts off. Explicit history consent is persisted per session and is
   reused during that session's later source reconciliation. Consent never
   transfers to another session.
+- Startup is shared by concurrent callers and completes before capture or recall
+  becomes active. A failed initialization stays unavailable even when stored
+  consent is enabled. Authenticated account-session reads retry initialization
+  after restoring the knowledge backend. Repeated starts preserve current
+  extraction jobs; stop retires pending startup and prevents later activation.
+- Enablement becomes active only after its durable setting write succeeds.
+  Failed writes preserve the previously committed runtime setting.
+- A processing request received during an active drain schedules one trailing
+  drain. Capture, confirmation and synthesis cannot lose their wakeup while the
+  previous drain exits. Its final reads and recovery scheduling retain drain
+  ownership so idle and stop wait for them. Waiting indexing jobs retain the
+  configured poll delay.
 - Session locations are resolved authoritatively before selecting a project or
   reading messages. A moved source invalidates old project entries and jobs;
   it never relabels an existing entry into another project.
@@ -120,6 +132,21 @@ management and forget remain available. No setting or credential is copied into
 a second memory service.
 
 ## Decisions
+
+### Why initialization is separate from stored consent
+
+The shared ledger can be unavailable until an authenticated account restores its
+backend model owner. A readable enabled flag alone cannot establish that event
+subscriptions and startup recovery ran. Retrying the single initialization
+operation restores them without reclassifying extraction already running in
+this process or granting new source consent.
+
+### Why drain wakeups coalesce through finalization
+
+One trailing request preserves work committed while a drain exits without
+starting a second owner or replacing indexing delays with immediate polling.
+Final state reads and retry scheduling finish before the synchronous handoff,
+so idle and stop cannot finish while the retired drain still schedules work.
 
 ### Why capture and indexing have separate durable transitions
 

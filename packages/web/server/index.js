@@ -2927,6 +2927,9 @@ async function main(options = {}) {
       await modelBootstrapRuntime.accountKey.read({ identity, owner: identity, accountId: platformAccountRuntime.actor(identity).billingAccountId });
       const state = knowledgeLibraryRuntime.status();
       if (state.backend.state === 'running' && [state.error, state.backend.error].includes('account_key_consumer_owner_unavailable')) await knowledgeLibraryRuntime.start();
+      await conversationMemoryRuntime.start().catch(() => {
+        console.warn('[ConversationMemory] Runtime state is unavailable');
+      });
     },
     isRequestOriginAllowed,
     resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),

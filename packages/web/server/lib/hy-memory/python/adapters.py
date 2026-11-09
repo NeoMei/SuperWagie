@@ -78,7 +78,7 @@ class Overlay:
             self.embed.dimensions = dimensions
 
     def scope(self, filters=None):
-        result = dict(filters or {})
+        result = {key: value for key, value in (filters or {}).items() if value is not None}
         # A caller cannot broaden the trusted project or principal.
         result.update(user_id=self.context['userId'], agent_id=self.context['agentId'],
                       workspace_id=self.context['projectId'])

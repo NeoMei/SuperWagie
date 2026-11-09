@@ -45,7 +45,11 @@ export const createConversationMemoryRuntime = ({
   const extractorVersion = organizer ? 'hy-memory-2.0.8:sw1' : EXTRACTOR_VERSION;
   let enabled = false;
   let stopped = false;
+  let initialized = false;
+  let starting = null;
+  let startError = null;
   let draining = null;
+  let drainRequested = false;
   let pollTimer = null;
   let cleanupTimer = null;
   let cleanupAttempts = 0;
@@ -58,7 +62,7 @@ export const createConversationMemoryRuntime = ({
   const sourceRevisions = new Map();
   const activeDirectories = new Set();
   const requireAllowed = () => { if (isBlocked()) throw new ConversationMemoryError('enterprise_mode', 403); };
-  const canProcess = () => enabled && !stopped && !isBlocked();
+  const canProcess = () => initialized && enabled && !stopped && !isBlocked();
   const withdrawal = organizer && memoryBackend ? createHyWithdrawal({ store, backend: memoryBackend }) : null;
   const recovery = organizer ? createHyRecovery({ store, now, removeLegacy: knowledgeLibrary.removeLegacyManagedDocument }) : null;
   const scheduleCleanup = () => {
@@ -429,8 +433,11 @@ export const createConversationMemoryRuntime = ({
     });
   };
   const kick = () => {
-    if (draining || !enabled || stopped || isBlocked()) return;
+    if (!canProcess()) return;
+    if (draining) { drainRequested = true; return; }
     clearTimeout(pollTimer);
+    let rerun = false;
+    let nextPollDelay = null;
     draining = (async () => {
       const processed = new Set();
       for (;;) {
@@ -462,21 +469,28 @@ export const createConversationMemoryRuntime = ({
       for (const entry of (await store.read()).entries.filter((item) => item.cleanupPending && item.indexState !== 'failed')) await cleanup(entry);
       await withdrawal?.retryPending();
       await recovery?.retireLegacy();
-    })().catch(async (error) => { await store.update((state) => { state.lastError = failureCode(error, 'memory_processing_failed'); }); }).finally(async () => {
-      draining = null;
+    })().catch(async (error) => { await store.update((state) => { state.lastError = failureCode(error, 'memory_processing_failed'); }); }).then(async () => {
       const state = await store.read();
-      const retry = enabled && !stopped && !isBlocked() ? await recovery?.schedule() : null;
-      if (enabled && !stopped && state.pending.length) { kick(); return; }
-      if (enabled && !stopped && retry?.scheduled) { kick(); return; }
-      if (enabled && !stopped && indexPollMs > 0 && ([...state.jobs, ...state.syntheses].some((job) => job.state === 'indexing' || job.state === 'queued') || state.engine.dirtyProjects.length > 0)) {
-        pollTimer = setTimeout(kick, indexPollMs); pollTimer.unref?.();
+      const retry = canProcess() ? await recovery?.schedule() : null;
+      rerun = state.pending.length > 0 || (retry?.scheduled ?? 0) > 0;
+      if (indexPollMs > 0 && ([...state.jobs, ...state.syntheses].some((job) => job.state === 'indexing' || job.state === 'queued') || state.engine.dirtyProjects.length > 0)) {
+        nextPollDelay = indexPollMs;
       } else if (retry?.nextRetryAt && indexPollMs > 0) {
-        pollTimer = setTimeout(kick, Math.max(1, retry.nextRetryAt - now())); pollTimer.unref?.();
+        nextPollDelay = Math.max(1, retry.nextRetryAt - now());
       }
+    }).catch(async (error) => {
+      await store.update((state) => { state.lastError = failureCode(error, 'memory_processing_failed'); }).catch(() => {});
+    }).finally(() => {
+      const requested = drainRequested;
+      drainRequested = false;
+      draining = null;
+      if (!canProcess()) return;
+      if (requested || rerun) { kick(); return; }
+      if (nextPollDelay !== null) { pollTimer = setTimeout(kick, nextPollDelay); pollTimer.unref?.(); }
     });
   };
   const queueCapture = async ({ sessionId, directory, includeHistory = false }) => {
-    if (!enabled || stopped) throw new ConversationMemoryError('conversation_memory_disabled');
+    if (!initialized || !enabled || stopped) throw new ConversationMemoryError('conversation_memory_disabled');
     requireAllowed();
     if (!sessionId || !directory) throw new ConversationMemoryError('source_required', 400);
     if (includeHistory) activeDirectories.add(directory);
@@ -507,7 +521,7 @@ export const createConversationMemoryRuntime = ({
     timer.unref?.(); eventTimers.set(sessionId, timer);
   };
   const attach = () => {
-    if (unsubscribe || !globalEventHub || !enabled || isBlocked()) return;
+    if (unsubscribe || !globalEventHub || !canProcess()) return;
     unsubscribe = globalEventHub.subscribeEvent((event) => {
       const raw = sourceEventSchema.safeParse(event?.payload);
       if (raw.success) {
@@ -630,19 +644,49 @@ export const createConversationMemoryRuntime = ({
     }, { pending: 0, rejected: 0 });
     const result = {
       enabled: state.enabled,
-      state: !state.enabled ? 'off' : isBlocked() || knowledgeLibrary.isReady?.() === false ? 'unavailable' : draining ? 'processing' : 'ready',
+      state: !state.enabled ? 'off' : !initialized || stopped || isBlocked() || knowledgeLibrary.isReady?.() === false ? 'unavailable' : draining ? 'processing' : 'ready',
       pending: state.pending.length + [...state.jobs, ...state.syntheses].filter((job) => ['queued', 'extracting', 'indexing'].includes(job.state)).length + deferred.pending,
       failed: [...state.jobs, ...state.syntheses].filter((job) => job.state === 'failed').length + state.entries.filter((entry) => entry.cleanupPending && entry.error).length
         + state.engine.records.filter((record) => record.collection === 'hy-withdrawal' && record.value.state === 'pending' && record.value.error).length,
       unknown: [...state.jobs, ...state.syntheses].filter((job) => job.state === 'unknown').length,
       entries: state.entries.filter((entry) => ['active', 'candidate'].includes(entry.status)).length,
-      lastError: isBlocked() ? 'enterprise_mode' : state.lastError,
+      lastError: isBlocked() ? 'enterprise_mode' : startError ?? state.lastError,
       candidates: state.entries.filter((entry) => entry.status === 'candidate').length,
       blocked: [...state.jobs, ...state.syntheses].filter((job) => job.state === 'failed' && /enterprise|policy|configuration|scope_unavailable|not_installed/.test(job.error ?? '')).length,
       deferred,
     };
     if (organizer) result.engine = { name: 'hy-memory', version: '2.0.8', ...organizer.status() };
     return result;
+  };
+  const start = () => {
+    if (stopped || initialized) return Promise.resolve();
+    if (starting) return starting;
+    const revision = lifecycleRevision;
+    starting = (async () => {
+      const state = await store.update((next) => { for (const job of [...next.jobs, ...next.syntheses]) if (job.state === 'extracting') { job.state = job.generated ? 'queued' : 'unknown'; job.error = job.generated ? null : 'generation_outcome_unknown'; } });
+      if (stopped) return;
+      if (revision === lifecycleRevision) enabled = state.enabled;
+      await recovery?.migrate();
+      if (stopped) return;
+      const cleanupOutcomes = await withdrawal?.retryPending();
+      if (stopped) return;
+      if (cleanupOutcomes?.some((outcome) => outcome.cleanupPending)) scheduleCleanup();
+      for (const entry of state.entries.filter((item) => item.cleanupPending)) {
+        if (stopped) return;
+        await cleanup(entry);
+      }
+      if (manualIndex && !isBlocked() && await isManualEnabled()) for (const projectId of new Set(state.engine.records.filter((row) => ['manual', 'manual-index'].includes(row.collection)).map((row) => row.projectId))) await synchronizeManual({ projectId });
+      if (stopped) return;
+      initialized = true;
+      startError = null;
+      attach(); kick();
+    })().catch((error) => {
+      initialized = false;
+      detach();
+      if (!stopped) startError = failureCode(error, 'memory_start_failed');
+      throw error;
+    }).finally(() => { starting = null; });
+    return starting;
   };
   return {
     retrieve: async ({ directory, query = '', title, id, documentIds, limit = 10, mode = 'eligible' }) => {
@@ -685,26 +729,17 @@ export const createConversationMemoryRuntime = ({
             : { state: 'unavailable', reason: entry.error ?? (!enabled ? 'disabled' : entry.indexState !== 'ready' ? `index_${entry.indexState}` : 'source_unavailable') } }))].slice(0, limit),
         availability: manualResult?.availability.state === 'degraded' ? manualResult.availability : result.availability ?? { state: canProcess() ? 'ready' : 'unavailable', reason: canProcess() ? null : isBlocked() ? 'enterprise_mode' : 'disabled' }, scope: { projectId } };
     },
-    start: async () => {
-      stopped = false;
-      const state = await store.update((next) => { for (const job of [...next.jobs, ...next.syntheses]) if (job.state === 'extracting') { job.state = job.generated ? 'queued' : 'unknown'; job.error = job.generated ? null : 'generation_outcome_unknown'; } });
-      enabled = state.enabled;
-      await recovery?.migrate();
-      const cleanupOutcomes = await withdrawal?.retryPending();
-      if (cleanupOutcomes?.some((outcome) => outcome.cleanupPending)) scheduleCleanup();
-      for (const entry of state.entries.filter((item) => item.cleanupPending)) await cleanup(entry);
-      if (manualIndex && !isBlocked() && await isManualEnabled()) for (const projectId of new Set(state.engine.records.filter((row) => ['manual', 'manual-index'].includes(row.collection)).map((row) => row.projectId))) await synchronizeManual({ projectId });
-      attach(); kick();
-    },
+    start,
     status,
     isActive: canProcess,
     syncManual: synchronizeManual,
     setEnabled: async (value) => {
       if (value) requireAllowed();
-      enabled = value === true;
+      const requested = value === true;
+      const state = await store.update((next) => { if (requested && !next.enabled) next.enabledAt = now(); next.enabled = requested; });
       lifecycleRevision++;
-      await store.update((state) => { if (enabled && !state.enabled) state.enabledAt = now(); state.enabled = enabled; });
-      if (enabled) { attach(); kick(); } else { detach(); generation?.abort(); methodologies.abort(); maintenance?.abort(); }
+      enabled = state.enabled;
+      if (enabled) { await start(); attach(); kick(); } else { detach(); generation?.abort(); methodologies.abort(); maintenance?.abort(); }
       return status();
     },
     capture: ({ sessionId, directory }) => queueCapture({ sessionId, directory, includeHistory: true }),
@@ -815,6 +850,6 @@ export const createConversationMemoryRuntime = ({
     },
     invalidateSession,
     idle: async () => { while (draining) await draining; },
-    stop: async () => { stopped = true; lifecycleRevision++; clearTimeout(cleanupTimer); cleanupTimer = null; detach(); generation?.abort(); methodologies.abort(); maintenance?.abort(); if (draining) await draining; await organizer?.stop(); },
+    stop: async () => { stopped = true; initialized = false; lifecycleRevision++; clearTimeout(cleanupTimer); cleanupTimer = null; detach(); generation?.abort(); methodologies.abort(); maintenance?.abort(); if (starting) await starting.catch(() => {}); if (draining) await draining; await organizer?.stop(); },
   };
 };

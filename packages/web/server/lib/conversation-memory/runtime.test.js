@@ -11,7 +11,7 @@ const segment = { id: 'seg1', sessionId: 'ses1', projectId: 'project-a', directo
   sourceHash: 'a'.repeat(64), messageIds: ['u1', 'a1'], outcome: 'succeeded', messages: [{ id: 'u1', role: 'user', text: 'Fix the build' }, { id: 'a1', role: 'assistant', text: 'Build passed' }] };
 const card = { id: 'card1', kind: 'experience', title: 'Build fix', body: 'Build passed in the recorded environment.', status: 'active', verification: 'observed', sourceMessageIds: ['u1', 'a1'], sourcePartIds: [], limitations: ['Installation was not tested.'] };
 const harness = async (overrides = {}) => {
-  const { knowledgeLibrary: knowledgeOverrides, ...runtimeOverrides } = overrides;
+  const { knowledgeLibrary: knowledgeOverrides, autoStart = true, ...runtimeOverrides } = overrides;
   const dataDir = overrides.dataDir ?? await fs.mkdtemp(path.join(os.tmpdir(), 'conversation-runtime-'));
   if (!overrides.dataDir) roots.push(dataDir);
   let generated = 0;
@@ -36,7 +36,7 @@ const harness = async (overrides = {}) => {
     distill: async () => { generated++; return [card]; }, renderMarkdown: ({ card: entry }) => entry.body,
     knowledgeLibrary, isBlocked: () => false, ...runtimeOverrides,
   });
-  await runtime.start();
+  if (autoStart) await runtime.start();
   return { dataDir, runtime, indexed, generated: () => generated, failIndex: (value) => { failIndex = value; }, failDelete: (value) => { failDelete = value; } };
 };
 const capture = async (runtime) => { await runtime.capture({ sessionId: 'ses1', directory: '/work/a' }); await runtime.idle(); };
@@ -45,6 +45,231 @@ const deferred = () => {
   const promise = new Promise((done) => { resolve = done; });
   return { promise, resolve };
 };
+const finalizingHarness = async ({ failRead = false } = {}) => {
+  const entered = deferred(); const release = deferred();
+  let persisted; let reads = 0;
+  const h = await harness({ autoStart: false, store: {
+    read: async () => {
+      const attempt = ++reads;
+      const state = await persisted.read();
+      if (attempt === 4) {
+        entered.resolve(); await release.promise;
+        if (failRead) throw Object.assign(new Error('Final state read failed'), { code: 'state_read_failed' });
+      }
+      return state;
+    },
+    update: (...args) => persisted.update(...args),
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await persisted.update((state) => { state.enabled = true; });
+  await h.runtime.start(); await entered.promise;
+  return { ...h, release: release.resolve };
+};
+
+test('idle waits for finalization and its coalesced capture request', async () => {
+  const h = await finalizingHarness();
+  let settled = false;
+  const waiting = h.runtime.idle().then(() => { settled = true; });
+  try {
+    await h.runtime.capture({ sessionId: 'ses1', directory: '/work/a' });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    expect(h.generated()).toBe(0);
+    h.release(); await waiting;
+    expect(h.generated()).toBe(1);
+  } finally { h.release(); await waiting; await h.runtime.stop(); }
+});
+
+test('stop waits for drain finalization before completing shutdown', async () => {
+  const h = await finalizingHarness();
+  let settled = false;
+  const stopping = h.runtime.stop().then(() => { settled = true; });
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    h.release(); await stopping;
+    expect(h.runtime.isActive()).toBe(false);
+    await expect(capture(h.runtime)).rejects.toThrow('conversation_memory_disabled');
+  } finally { h.release(); await stopping; }
+});
+
+test('a failed final state read releases the drain for later explicit work', async () => {
+  const h = await finalizingHarness({ failRead: true });
+  const waiting = h.runtime.idle();
+  try {
+    h.release(); await waiting;
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'state_read_failed' });
+    await capture(h.runtime);
+    expect(h.generated()).toBe(1);
+  } finally { h.release(); await h.runtime.stop(); }
+});
+
+test.each(['start', 'enable'])('failed startup remains unavailable until %s recovers capture', async (recovery) => {
+  let persisted; let unavailable = true;
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: (...args) => {
+      if (unavailable) throw Object.assign(new Error('Owner unavailable'), { code: 'account_key_consumer_owner_unavailable' });
+      return persisted.update(...args);
+    },
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await persisted.update((state) => { state.enabled = true; });
+  try {
+    await expect(h.runtime.start()).rejects.toThrow('Owner unavailable');
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'unavailable', lastError: 'account_key_consumer_owner_unavailable' });
+    expect(h.runtime.isActive()).toBe(false);
+    unavailable = false;
+    if (recovery === 'enable') await h.runtime.setEnabled(true);
+    else await h.runtime.start();
+    await capture(h.runtime);
+    expect(h.runtime.isActive()).toBe(true);
+    expect(h.generated()).toBe(1);
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'ready', lastError: null });
+  } finally { unavailable = false; await h.runtime.stop(); }
+});
+
+test('concurrent startup callers share the same ledger recovery', async () => {
+  const entered = deferred(); const release = deferred();
+  let persisted; let updates = 0;
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: async (...args) => { updates++; entered.resolve(); await release.promise; return persisted.update(...args); },
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await persisted.update((state) => { state.enabled = true; });
+  try {
+    const first = h.runtime.start(); const second = h.runtime.start(); await entered.promise;
+    release.resolve(); await Promise.all([first, second]); await h.runtime.idle();
+    expect(updates).toBe(1);
+    expect(h.runtime.isActive()).toBe(true);
+  } finally { release.resolve(); await h.runtime.stop(); }
+});
+
+test('startup subscription failure releases partial listeners before retry', async () => {
+  let unavailable = true; let subscriptions = 0;
+  const h = await harness({ autoStart: false, globalEventHub: {
+    subscribeEvent: () => { subscriptions++; return () => { subscriptions--; }; },
+    subscribeStatus: () => {
+      if (unavailable) throw Object.assign(new Error('Events unavailable'), { code: 'events_unavailable' });
+      return () => {};
+    },
+  } });
+  await createConversationMemoryStore({ dataDir: h.dataDir }).update((state) => { state.enabled = true; });
+  try {
+    await expect(h.runtime.start()).rejects.toThrow('Events unavailable');
+    expect(h.runtime.isActive()).toBe(false);
+    expect(subscriptions).toBe(0);
+    expect(await h.runtime.status()).toMatchObject({ state: 'unavailable', lastError: 'events_unavailable' });
+    unavailable = false; await h.runtime.start();
+    expect(h.runtime.isActive()).toBe(true);
+    expect(subscriptions).toBe(1);
+  } finally { await h.runtime.stop(); }
+});
+
+test('repeated startup preserves an extraction already running in this process', async () => {
+  const entered = deferred(); const release = deferred();
+  const h = await harness({ distill: async () => { entered.resolve(); await release.promise; return [card]; } });
+  try {
+    await h.runtime.setEnabled(true);
+    await h.runtime.capture({ sessionId: 'ses1', directory: '/work/a' }); await entered.promise;
+    await Promise.all([h.runtime.start(), h.runtime.start()]);
+    expect(await h.runtime.status()).toMatchObject({ state: 'processing', unknown: 0 });
+    release.resolve(); await h.runtime.idle();
+    expect((await h.runtime.listEntries({ directory: '/work/a' })).entries).toMatchObject([{ id: 'card1', indexState: 'ready' }]);
+  } finally { release.resolve(); await h.runtime.stop(); }
+});
+
+test('stop retires an in-flight startup before it can subscribe or process', async () => {
+  const entered = deferred(); const release = deferred();
+  let persisted; let subscriptions = 0;
+  const h = await harness({ autoStart: false, globalEventHub: {
+    subscribeEvent: () => { subscriptions++; return () => { subscriptions--; }; },
+  }, store: {
+    read: () => persisted.read(),
+    update: async (...args) => { entered.resolve(); await release.promise; return persisted.update(...args); },
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await persisted.update((state) => { state.enabled = true; });
+  const starting = h.runtime.start(); await entered.promise;
+  const stopping = h.runtime.stop(); release.resolve();
+  await Promise.all([starting, stopping]);
+  await h.runtime.start();
+  try {
+    expect(h.runtime.isActive()).toBe(false);
+    expect(subscriptions).toBe(0);
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'unavailable' });
+    await expect(capture(h.runtime)).rejects.toThrow('conversation_memory_disabled');
+  } finally { await h.runtime.stop(); }
+});
+
+test('failed enablement writes preserve the last committed runtime setting', async () => {
+  let persisted; let failWrite = false;
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: (...args) => {
+      if (failWrite) throw new Error('Setting write failed');
+      return persisted.update(...args);
+    },
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await h.runtime.start();
+  try {
+    failWrite = true;
+    await expect(h.runtime.setEnabled(true)).rejects.toThrow('Setting write failed');
+    expect(h.runtime.isActive()).toBe(false);
+    failWrite = false; await h.runtime.setEnabled(true); await h.runtime.idle();
+    failWrite = true;
+    await expect(h.runtime.setEnabled(false)).rejects.toThrow('Setting write failed');
+    expect(h.runtime.isActive()).toBe(true);
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'ready' });
+  } finally { failWrite = false; await h.runtime.stop(); }
+});
+
+test('an enablement write completing after stop cannot restore subscriptions', async () => {
+  const entered = deferred(); const release = deferred();
+  let persisted; let pauseWrite = false; let subscriptions = 0;
+  const h = await harness({ autoStart: false, globalEventHub: {
+    subscribeEvent: () => { subscriptions++; return () => { subscriptions--; }; },
+  }, store: {
+    read: () => persisted.read(),
+    update: async (...args) => {
+      if (pauseWrite) { entered.resolve(); await release.promise; }
+      return persisted.update(...args);
+    },
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await h.runtime.start(); pauseWrite = true;
+  const enabling = h.runtime.setEnabled(true); await entered.promise;
+  await h.runtime.stop(); release.resolve();
+  try {
+    expect(await enabling).toMatchObject({ enabled: true, state: 'unavailable' });
+    expect(h.runtime.isActive()).toBe(false);
+    expect(subscriptions).toBe(0);
+  } finally { release.resolve(); await h.runtime.stop(); }
+});
+
+test('startup cannot overwrite a newer committed disable', async () => {
+  const entered = deferred(); const release = deferred();
+  let persisted; let firstUpdate = true;
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: async (...args) => {
+      const state = await persisted.update(...args);
+      if (firstUpdate) { firstUpdate = false; entered.resolve(); await release.promise; }
+      return state;
+    },
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await persisted.update((state) => { state.enabled = true; });
+  const starting = h.runtime.start(); await entered.promise;
+  try {
+    await h.runtime.setEnabled(false); release.resolve(); await starting;
+    expect(h.runtime.isActive()).toBe(false);
+    expect(await h.runtime.status()).toMatchObject({ enabled: false, state: 'off' });
+    await expect(capture(h.runtime)).rejects.toThrow('conversation_memory_disabled');
+  } finally { release.resolve(); await starting; await h.runtime.stop(); }
+});
 
 describe('conversation learning pipeline', () => {
   test('is opt-in, deduplicates source delivery and recalls only the owning project', async () => {
