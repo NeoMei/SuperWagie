@@ -244,13 +244,23 @@ describe('PlatformAccountPage', () => {
   test('renders native request billing without fabricating recorded token zero', async () => {
     useI18nStore.getState().setLocale('en'); nativeScenario = true;
     await render(false, 'usage');
+    expect([...host.querySelectorAll('dl dt')].map((item) => item.textContent)).toEqual(['Credits used', 'Calls', 'Settled calls']);
+    expect([...host.querySelectorAll('dl dd')].map((item) => item.textContent)).toEqual(['0 credits', '1', '1']);
+    expect(host.textContent).not.toContain('CNY 0.000073');
+    expect(host.textContent).not.toContain('Confirmed refund');
+    expect(button('Billing details').getAttribute('aria-expanded')).toBe('false');
     expect(button('Measurement details').getAttribute('aria-expanded')).toBe('false');
     expect(host.textContent).not.toContain('1 requests');
     await act(async () => button('Measurement details').click());
     expect(host.textContent).toContain('1 requests');
     expect(host.textContent).toContain('The Token breakdown has no records');
     expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Token details')).toBe(false);
+    expect(host.textContent).not.toContain('CNY 0.000073');
+    await act(async () => button('Billing details').click());
     expect(host.textContent).toContain('CNY 0.000073');
+    expect(host.textContent).not.toContain('Confirmed refund');
+    expect(button('Measurement details').getAttribute('aria-expanded')).toBe('true');
+    expect(host.textContent).toContain('1 requests');
   });
 
   test('keeps image tier names literal across locales instead of reinterpreting semantic key names', async () => {
@@ -281,7 +291,10 @@ describe('PlatformAccountPage', () => {
     await render(false, 'usage');
     await act(async () => button('Measurement details').click());
     expect(host.textContent).toContain(' small '); expect(host.textContent).toContain(' provider.units ');
+    expect(host.textContent).not.toContain('CNY 0.000073');
+    await act(async () => button('Billing details').click());
     expect(host.textContent).toContain('CNY 0.000073');
+    expect(host.textContent).toContain(' small '); expect(host.textContent).toContain(' provider.units ');
     nativeOverride.native_usage = [image(' small ')];
     nativeOverride.native_usage[0]?.measurements.push({ key: 'small', unit: 'image', quantity: { value: '2', scale: 0 } });
     expect((await readPlatformUsageSummary('team-a', 'superwagie')).native_usage?.[0]?.measurements.map((item) => item.key)).toEqual([' small ', 'small']);
@@ -418,8 +431,11 @@ describe('PlatformAccountPage', () => {
     expect(button('Measurement details').getAttribute('aria-expanded')).toBe('false');
     await act(async () => button('Measurement details').click());
     expect(host.textContent).toContain('9007199254740993');
-    expect(host.textContent).toContain('CNY 0.000081');
-    expect(host.textContent).toContain('0.000017 credits');
+    expect([...host.querySelectorAll('dl dt')].map((item) => item.textContent)).toEqual(['Credits used', 'Calls', 'Settled calls']);
+    expect([...host.querySelectorAll('dl dd')].map((item) => item.textContent)).toEqual(['Unavailable', '3', '2']);
+    expect(host.textContent).not.toContain('CNY 0.000081');
+    expect(host.textContent).not.toContain('0.000017 credits');
+    expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Billing details')).toBe(false);
     expect(host.textContent).toContain('still incomplete');
     expect(nativeReportRequests).toBe(0);
     expect(/UniHub|LLMRouter/i.test(host.textContent ?? '')).toBe(false);

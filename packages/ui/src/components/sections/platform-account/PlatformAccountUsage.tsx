@@ -3,8 +3,8 @@ import { SettingsFieldRow, SettingsSection, SETTINGS_HELPER_CLASS } from '@/comp
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/lib/i18n';
-import { formatPlatformCredits, formatPlatformQuantity, PlatformAccountError, readPlatformUsageCalls, readPlatformUsageSummary } from '@/lib/platformAccount';
-import { formatPlatformMoney } from '@/lib/platformCommerce';
+import { formatPlatformQuantity, PlatformAccountError, readPlatformUsageCalls, readPlatformUsageSummary } from '@/lib/platformAccount';
+import { formatPlatformMoney, formatPlatformPoints } from '@/lib/platformCommerce';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type Report<T> = { status: 'loading' | 'denied' | 'failed' } | { status: 'ready'; data: T };
@@ -76,8 +76,15 @@ const UsageReport = ({ accountId, details }: { accountId: string; details: boole
   };
   const charge = (asset: typeof assets[number], amount: string) => asset === 'CNY/6'
     ? t('platformAccount.cny', { amount: formatPlatformMoney(amount) })
-    : asset === 'CREDIT/6' ? t('platformAccount.usageCreditAmount', { amount: formatPlatformCredits(amount) })
+    : asset === 'CREDIT/6' ? t('platformAccount.usageCreditAmount', { amount: formatPlatformPoints(amount) })
       : t('platformAccount.usageQuotaAmount', { amount });
+  const creditsUsed = summary.status === 'ready' && summary.data.visibility === 'account' && summary.data.charges_by_asset !== undefined
+    ? summary.data.charges_by_asset['CREDIT/6'] ?? '0' : undefined;
+  const billingAssets = summary.status === 'ready' && summary.data.visibility === 'account' ? assets.filter((asset) => {
+    const amount = summary.data.charges_by_asset?.[asset];
+    const refund = summary.data.refunds_by_asset?.[asset];
+    return (asset !== 'CREDIT/6' && amount !== undefined && amount !== '0') || (refund !== undefined && refund !== '0');
+  }) : [];
   const message = (status: 'loading' | 'denied' | 'failed') => <p className={SETTINGS_HELPER_CLASS} role="status">{t(status === 'loading'
     ? 'platformAccount.loading' : status === 'denied' ? 'platformAccount.usageDenied' : 'platformAccount.usageFailed')}</p>;
 
@@ -92,21 +99,27 @@ const UsageReport = ({ accountId, details }: { accountId: string; details: boole
         {summary.data.visibility === 'actor' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageActorScope')}</p>}
         {summary.data.calls_total === '0' ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageEmpty')}</p> : <>
           <dl className="grid min-w-0 grid-cols-2 gap-x-5 gap-y-4 @xl:grid-cols-3">
-            {assets.map((asset) => {
-              const amount = summary.data.charges_by_asset?.[asset];
-              const refund = summary.data.refunds_by_asset?.[asset];
-              return <React.Fragment key={asset}>
-                {amount !== undefined && <div className="min-w-0 space-y-1"><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCharge')}</dt><dd dir="auto" className="break-all text-lg font-medium tabular-nums">{charge(asset, amount)}</dd></div>}
-                {refund !== undefined && <div className="min-w-0 space-y-1"><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageRefund')}</dt><dd dir="auto" className="break-all text-lg font-medium tabular-nums">{charge(asset, refund)}</dd></div>}
-              </React.Fragment>;
-            })}
-            <div className="min-w-0 space-y-1"><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageSettledCalls')}</dt><dd dir="auto" className="break-all text-lg font-medium tabular-nums">{summary.data.settled_calls}</dd></div>
+            <div className="min-w-0 space-y-1"><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCreditsUsed')}</dt><dd dir="auto" className="break-all text-lg font-medium tabular-nums">{creditsUsed === undefined ? t('platformAccount.usageAmountUnavailable') : charge('CREDIT/6', creditsUsed)}</dd></div>
             <div className="min-w-0 space-y-1"><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCalls')}</dt><dd dir="auto" className="break-all text-lg font-medium tabular-nums">{summary.data.calls_total}</dd></div>
+            <div className="min-w-0 space-y-1"><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageSettledCalls')}</dt><dd dir="auto" className="break-all text-lg font-medium tabular-nums">{summary.data.settled_calls}</dd></div>
           </dl>
           {(!summary.data.usage_complete || summary.data.pending_calls !== '0' || summary.data.missing_usage_calls !== '0' || summary.data.unknown_calls !== '0') && <>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageIncomplete')}</p>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageUnconfirmedCalls', { pending: summary.data.pending_calls, missing: summary.data.missing_usage_calls, unknown: summary.data.unknown_calls })}</p>
           </>}
+          {details && billingAssets.length > 0 && <Collapsible>
+            <CollapsibleTrigger className="w-auto typography-meta">{t('platformAccount.usageBillingDetails')}</CollapsibleTrigger>
+            <CollapsibleContent className="pt-3">
+              {billingAssets.map((asset) => {
+                const amount = summary.data.charges_by_asset?.[asset];
+                const refund = summary.data.refunds_by_asset?.[asset];
+                return <React.Fragment key={asset}>
+                  {asset !== 'CREDIT/6' && amount !== undefined && amount !== '0' && <SettingsFieldRow label={t('platformAccount.usageCharge')}><span dir="auto">{charge(asset, amount)}</span></SettingsFieldRow>}
+                  {refund !== undefined && refund !== '0' && <SettingsFieldRow label={t('platformAccount.usageRefund')}><span dir="auto">{charge(asset, refund)}</span></SettingsFieldRow>}
+                </React.Fragment>;
+              })}
+            </CollapsibleContent>
+          </Collapsible>}
           {details && <Collapsible>
             <CollapsibleTrigger className="w-auto typography-meta">{t('platformAccount.usageMeasurements')}</CollapsibleTrigger>
             <CollapsibleContent className="space-y-3 pt-3">
@@ -145,7 +158,7 @@ const UsageReport = ({ accountId, details }: { accountId: string; details: boole
             <td className="space-y-2 break-all py-3 text-end tabular-nums">
               {call.charged !== undefined && <p><span className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCharge')}</span><br /><span dir="auto">{charge(call.asset, call.charged)}</span></p>}
               {call.held !== undefined && !['SETTLED', 'RELEASED', 'REJECTED', 'CANCELED'].includes(call.status) && <p><span className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageHeld')}</span><br /><span dir="auto">{charge(call.asset, call.held)}</span></p>}
-              {call.refunded !== undefined && <p><span className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageRefund')}</span><br /><span dir="auto">{charge(call.asset, call.refunded)}</span></p>}
+              {call.refunded !== undefined && call.refunded !== '0' && <p><span className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageRefund')}</span><br /><span dir="auto">{charge(call.asset, call.refunded)}</span></p>}
             </td>
           </tr>)}</tbody>
         </table>}

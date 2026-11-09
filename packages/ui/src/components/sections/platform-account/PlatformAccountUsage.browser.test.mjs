@@ -101,6 +101,18 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
         { key: 'input', unit: 'token', quantity: { value: '17', scale: 0 } }
       ] }, { operation: 'transcription', measurements: [{ key: 'audio', unit: 'audio_second', quantity: { value: '1001', scale: 3 } }] }];
     }
+    if (scenario === 'credits' || scenario === 'credit-refunds' || scenario === 'actor-hidden') {
+      summary.charges_by_asset = { 'CREDIT/6': '9007199254740993123400' };
+      summary.refunds_by_asset = { 'CREDIT/6': '0', 'CNY/6': '0', 'LR_QUOTA/0': '0' };
+    }
+    if (scenario === 'credit-refunds' || scenario === 'actor-hidden') {
+      summary.charges_by_asset = { ...summary.charges_by_asset, 'CNY/6': '73000000', 'LR_QUOTA/0': '19' };
+      summary.refunds_by_asset = { 'CREDIT/6': '250000', 'CNY/6': '1250000', 'LR_QUOTA/0': '3' };
+    }
+    if (scenario === 'credit-zero') summary.charges_by_asset = { 'CREDIT/6': '0' };
+    if (scenario === 'credit-whole') summary.charges_by_asset = { 'CREDIT/6': '42000000' };
+    if (scenario === 'empty-assets') summary.charges_by_asset = {};
+    if (scenario === 'credits-unavailable') delete summary.charges_by_asset;
     window.mutations = [];
     window.reads = [];
     window.authRequests = 0;
@@ -121,18 +133,20 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
       if (url.pathname.endsWith('/summary')) {
         if (oldOwner) {
           await new Promise(resolve => { window.releaseOldSummary = resolve; });
-          return Response.json({ ...summary, visibility: 'account', charges_by_asset: { 'CNY/6': '91000000' } });
+          return Response.json({ ...summary, visibility: 'account', charges_by_asset: { 'CREDIT/6': '91000000' } });
         }
         if (scenario === 'denied' && !window.allowSummary) return Response.json({ error: 'forbidden' }, { status: 403 });
         if (scenario === 'summary-failed') return Response.json({ error: 'service_unavailable' }, { status: 503 });
-        if (scenario === 'switch' || scenario === 'runtime') return Response.json({ ...summary, visibility: 'account', charges_by_asset: { 'CNY/6': '12000000' } });
+        if (scenario === 'switch' || scenario === 'runtime') return Response.json({ ...summary, visibility: 'account', charges_by_asset: { 'CREDIT/6': '12000000' } });
         if (scenario === 'empty') return Response.json({ ...summary, visibility: 'account', calls_total: '0', settled_calls: '0', native_usage: [], charges_by_asset: {}, refunds_by_asset: {} });
-        return Response.json({ ...summary, visibility: 'account' });
+        return Response.json({ ...summary, visibility: scenario === 'actor-hidden' ? 'actor' : 'account' });
       }
       if (url.pathname.endsWith('/calls')) {
         if (oldOwner) await new Promise(resolve => { window.releaseOldCalls = resolve; });
         if (scenario === 'calls-failed') return Response.json({ error: 'service_unavailable' }, { status: 503 });
-        return Response.json({ has_more: false, items: scenario === 'empty' ? [] : [{ call_id: oldOwner ? 'old' : 'current', model: oldOwner ? 'Previous account model' : 'Current account model', status: 'SETTLED', asset: 'CNY/6', charged: '600000', created_at: '2026-11-06T10:20:00Z' }] });
+        const call = { call_id: oldOwner ? 'old' : 'current', model: oldOwner ? 'Previous account model' : 'Current account model', status: 'SETTLED', asset: scenario?.startsWith('credit') || scenario === 'actor-hidden' ? 'CREDIT/6' : 'CNY/6', created_at: '2026-11-06T10:20:00Z' };
+        if (scenario === 'actor-hidden') return Response.json({ has_more: false, items: [call] });
+        return Response.json({ has_more: false, items: scenario === 'empty' ? [] : [{ ...call, charged: '600000', refunded: scenario === 'credit-refunds' ? '250000' : '0' }] });
       }
       return Response.json([]);
     };
@@ -147,7 +161,7 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
           setRuntimeRevision(value => value + 1);
         } else setAccountId('next-account');
       };
-      return <>{(scenario === 'switch' || scenario === 'runtime') && <button id="change-owner" onClick={changeOwner}>Fixture change owner</button>}{scenario === 'summary' ? <PlatformAccountUsageSummary accountId={accountId} /> : <PlatformAccountUsage accountId={accountId} />}</>;
+      return <><button id="change-locale" onClick={() => useI18nStore.getState().setLocale(useI18nStore.getState().locale === 'en' ? 'zh-CN' : 'en')}>Fixture toggle language</button>{(scenario === 'switch' || scenario === 'runtime') && <button id="change-owner" onClick={changeOwner}>Fixture change owner</button>}{scenario === 'summary' || params.get('view') === 'summary' ? <PlatformAccountUsageSummary accountId={accountId} /> : <PlatformAccountUsage accountId={accountId} />}</>;
     }
     createRoot(document.getElementById('root')).render(<I18nProvider><main className="@container mx-auto max-w-3xl p-6"><UsageFixture /></main></I18nProvider>);
 `);
@@ -169,6 +183,7 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
     cdp = new CdpClient(target.webSocketDebuggerUrl); await cdp.connect();
     const browserErrors = [];
     cdp.on('Runtime.exceptionThrown', ({ exceptionDetails }) => browserErrors.push(exceptionDetails.exception?.description ?? exceptionDetails.text));
+    cdp.on('Runtime.consoleAPICalled', event => { if (event.type === 'error') browserErrors.push(event.args.map(arg => arg.value ?? arg.description).join(' ')); });
     await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
     const evaluate = async (expression) => {
@@ -185,9 +200,34 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
       assert.fail(description + ': ' + (await evaluate('document.body.innerText')).slice(0, 2000) + '\n' + browserErrors.join('\n'));
     };
     const click = async (selector) => {
-      const point = await evaluate(`(() => { const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`);
+      const point = await evaluate(`(() => { const element = document.querySelector(${JSON.stringify(selector)}); element.scrollIntoView({ block: 'nearest' }); const rect = element.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`);
       await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+    };
+    const buttonExpression = (label) => `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)})`;
+    const clickLabel = async (label) => {
+      const point = await evaluate(`(() => { const button = ${buttonExpression(label)}; if (!button) throw Error('Missing button: ' + ${JSON.stringify(label)}); button.scrollIntoView({ block: 'nearest' }); const rect = button.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+    };
+    const panelExpression = (label) => `(() => { const button = ${buttonExpression(label)}; const id = button?.getAttribute('aria-controls'); return id ? document.getElementById(id) : null; })()`;
+    const headline = () => evaluate(`[...document.querySelector('dl').children].map(row => ({ label: row.querySelector('dt').textContent, value: row.querySelector('dd').textContent }))`);
+    const assertHeadline = async (locale, amount) => {
+      assert.deepEqual(await headline(), locale === 'en' ? [
+        { label: 'Credits used', value: amount === null ? 'Unavailable' : amount + ' credits' },
+        { label: 'Calls', value: '1' }, { label: 'Settled calls', value: '1' },
+      ] : [
+        { label: '积分消耗', value: amount === null ? '暂不可用' : amount + ' 积分' },
+        { label: '调用次数', value: '1' }, { label: '已结算调用', value: '1' },
+      ]);
+    };
+    const captureEvidence = async (name) => {
+      if (!process.env.PLATFORM_USAGE_EVIDENCE_DIR) return;
+      await until(`(() => { const triggers = [...document.querySelectorAll('button[aria-expanded="true"]')]; return triggers.every(button => { const id = button.getAttribute('aria-controls'); const panel = id && document.getElementById(id); return panel && getComputedStyle(panel).opacity === '1'; }); })()`, 'Open disclosures did not finish animating');
+      mkdirSync(process.env.PLATFORM_USAGE_EVIDENCE_DIR, { recursive: true });
+      const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+      writeFileSync(path.join(process.env.PLATFORM_USAGE_EVIDENCE_DIR, name + '.png'), Buffer.from(screenshot.data, 'base64'));
+      writeFileSync(path.join(process.env.PLATFORM_USAGE_EVIDENCE_DIR, name + '.txt'), await evaluate('document.body.innerText'));
     };
     const assertProductBoundary = async () => {
       assert.equal(await evaluate(`/unihub|llmrouter|model[ _-]*pool/i.test(document.body.innerText)`), false, 'User-visible usage must not expose backend brands');
@@ -199,9 +239,18 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
         await cdp.send('Emulation.setDeviceMetricsOverride', { width: appearance.width, height: 1000, deviceScaleFactor: 1, mobile: false });
         await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario + '&theme=' + appearance.theme + '&locale=' + appearance.locale });
         await until(`document.body.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'Settled calls' : '已结算调用')})`, 'Actual component did not finish loading');
-        await click('button[aria-expanded="false"]');
+        await assertHeadline(appearance.locale, '0');
+        const measurementsLabel = appearance.locale === 'en' ? 'Measurement details' : '计量详情';
+        const billingLabel = appearance.locale === 'en' ? 'Billing details' : '费用明细';
+        assert.equal(await evaluate(`${buttonExpression(billingLabel)}?.getAttribute('aria-expanded')`), 'false');
+        assert.equal(await evaluate(`document.body.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'CNY 0.000073' : '人民币 0.000073 元')})`), false, 'Historical CNY cannot appear as headline credits or an expanded charge');
+        await clickLabel(measurementsLabel);
         await until(`document.body.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'Billing completeness describes settlement.' : '计费完整性表示结算状态。')})`, 'Measurement details did not expand');
+        await clickLabel(billingLabel);
+        await until(`(${panelExpression(billingLabel)})?.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'CNY 0.000073' : '人民币 0.000073 元')})`, 'Historical CNY billing details did not expand');
         const text = await evaluate('document.body.innerText');
+        assert.equal(text.includes(appearance.locale === 'en' ? 'Confirmed refund' : '已确认退款'), false, 'Zero refunds must not add summary or per-call rows');
+        await assertHeadline(appearance.locale, '0');
         if (scenario === 'request') {
           assert.ok(text.includes(appearance.locale === 'en' ? 'CNY 0.000073' : '人民币 0.000073 元'), text);
           assert.ok(text.includes(appearance.locale === 'en' ? '1 requests' : '1 次请求'), text);
@@ -224,32 +273,85 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
         }
         if (scenario === 'unknown') assert.ok(text.includes(appearance.locale === 'en' ? 'does not report usage recording coverage' : '未提供用量记录覆盖情况'), text);
         await assertProductBoundary();
-        if (process.env.PLATFORM_USAGE_EVIDENCE_DIR) {
-          await until(`(() => { const id = document.querySelector('button[aria-expanded="true"]')?.getAttribute('aria-controls'); const panel = id && document.getElementById(id); return !panel || getComputedStyle(panel).opacity === '1'; })()`, 'Measurement details did not finish opening');
-          mkdirSync(process.env.PLATFORM_USAGE_EVIDENCE_DIR, { recursive: true });
-          const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
-          writeFileSync(path.join(process.env.PLATFORM_USAGE_EVIDENCE_DIR, scenario + '-' + appearance.width + '-' + appearance.theme + '-' + appearance.locale + '.png'), Buffer.from(screenshot.data, 'base64'));
-          writeFileSync(path.join(process.env.PLATFORM_USAGE_EVIDENCE_DIR, scenario + '-' + appearance.width + '-' + appearance.locale + '.txt'), await evaluate('document.body.innerText'));
-        }
+        await until(`(() => { const panel = ${panelExpression(measurementsLabel)}; return panel && getComputedStyle(panel).opacity === '1'; })()`, 'Measurement details did not finish opening');
+        await captureEvidence(scenario + '-' + appearance.width + '-' + appearance.theme + '-' + appearance.locale);
       }
     }
+    for (const scenario of ['credits', 'credit-refunds', 'credit-zero', 'credit-whole', 'empty-assets', 'credits-unavailable', 'actor-hidden']) {
+      const appearances = ['credits', 'credit-refunds', 'credit-whole'].includes(scenario)
+        ? [{ locale: 'en', theme: 'light', width: 1440 }, { locale: 'zh-CN', theme: 'light', width: 1440 }, { locale: 'zh-CN', theme: 'dark', width: 390 }]
+        : [{ locale: 'en', theme: 'light', width: 1440 }];
+      for (const appearance of appearances) {
+        await cdp.send('Emulation.setDeviceMetricsOverride', { width: appearance.width, height: 1000, deviceScaleFactor: 1, mobile: false });
+        await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario + '&locale=' + appearance.locale + '&theme=' + appearance.theme });
+        await until(`!!document.querySelector('dl') && document.body.innerText.includes('Current account model')`, 'Credit usage did not load');
+        const amount = ['credits-unavailable', 'actor-hidden'].includes(scenario) ? null : ['credit-zero', 'empty-assets'].includes(scenario) ? '0' : scenario === 'credit-whole' ? '42' : '9007199254740993.1234';
+        await assertHeadline(appearance.locale, amount);
+        const billingLabel = appearance.locale === 'en' ? 'Billing details' : '费用明细';
+        const measurementsLabel = appearance.locale === 'en' ? 'Measurement details' : '计量详情';
+        assert.equal(await evaluate(`!!(${buttonExpression(billingLabel)})`), scenario === 'credit-refunds', 'Only a detailed authorized report with nonzero secondary billing has a billing disclosure');
+        assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, 'Exact large credits must fit narrow panes');
+        await captureEvidence(scenario + '-collapsed-' + appearance.width + '-' + appearance.theme + '-' + appearance.locale);
+        if (scenario === 'credit-refunds') {
+          assert.equal(await evaluate(`${buttonExpression(billingLabel)}.getAttribute('aria-expanded')`), 'false');
+          assert.equal(await evaluate(`document.body.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'CNY 73.00' : '人民币 73.00 元')})`), false);
+          await clickLabel(billingLabel);
+          await until(`(${panelExpression(billingLabel)})?.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'CNY 73.00' : '人民币 73.00 元')})`, 'Mixed-asset billing did not expand');
+          const billingText = await evaluate(`(${panelExpression(billingLabel)}).innerText`);
+          for (const amount of appearance.locale === 'en' ? ['0.25 credits', 'CNY 1.25', '19 quota units', '3 quota units'] : ['0.25 积分', '人民币 1.25 元', '19 配额单位', '3 配额单位']) assert.ok(billingText.includes(amount), billingText);
+          assert.equal(billingText.includes('9007199254740993.1234'), false, 'Primary CREDIT settlement must not be duplicated in secondary billing');
+          await assertHeadline(appearance.locale, amount);
+          await captureEvidence(scenario + '-expanded-' + appearance.width + '-' + appearance.theme + '-' + appearance.locale);
+          assert.ok(await evaluate(`document.querySelector('tbody').innerText.includes(${JSON.stringify(appearance.locale === 'en' ? '0.25 credits' : '0.25 积分')})`), 'A real nonzero per-call refund remains visible');
+          if (appearance.locale === 'en') {
+            await clickLabel(measurementsLabel);
+            await until(`document.body.innerText.includes('Billing completeness describes settlement.')`, 'Measurement disclosure did not remain independent');
+            const readCount = await evaluate('window.reads.length');
+            await evaluate(`window.headlineBeforeLocale = document.querySelector('dl'); window.billingBeforeLocale = ${panelExpression(billingLabel)}; true`);
+            await click('#change-locale');
+            await until(`document.body.innerText.includes('积分消耗') && document.body.innerText.includes('计费完整性表示结算状态。')`, 'Runtime locale switch did not translate the open report');
+            await assertHeadline('zh-CN', amount);
+            assert.equal(await evaluate(`document.querySelector('dl') === window.headlineBeforeLocale && (${panelExpression('费用明细')}) === window.billingBeforeLocale`), true, 'Locale switching must retain the current report and expanded panel');
+            assert.equal(await evaluate(`${buttonExpression('费用明细')}.getAttribute('aria-expanded')`), 'true');
+            assert.equal(await evaluate('window.reads.length'), readCount, 'Locale switching must not refetch accounting data');
+          }
+        } else {
+          assert.equal(await evaluate(`document.querySelector('tbody').innerText.includes('Confirmed refund')`), false, 'Zero or unavailable call refunds must stay hidden');
+          if (scenario === 'actor-hidden') {
+            assert.equal(await evaluate(`document.body.innerText.includes('9007199254740993.1234') || document.body.innerText.includes('CNY 73.00') || document.body.innerText.includes('19 quota units')`), false, 'Actor-scoped summary financial fields must not leak');
+            await clickLabel(measurementsLabel);
+            await until(`document.body.innerText.includes('1 requests')`, 'Actor usage measurements became hidden with financial details');
+          }
+        }
+        await assertProductBoundary();
+      }
+    }
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
     await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=summary' });
     await until(`document.body.innerText.includes('Settled calls')`, 'Overview summary did not load');
     assert.deepEqual(await evaluate('window.reads'), ['/api/platform-account/usage/fixture-account/summary'], 'The overview must not fetch call lists or the native report');
     assert.equal(await evaluate(`document.querySelector('table') === null`), true);
     assert.equal(await evaluate(`document.body.innerText.includes('Measurement details')`), false);
+    assert.equal(await evaluate(`document.body.innerText.includes('Billing details') || document.body.innerText.includes('CNY 0.000073')`), false);
+    await assertHeadline('en', '0');
+    await assertProductBoundary();
+    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=credit-refunds&view=summary' });
+    await until(`!!document.querySelector('dl')`, 'Credit overview summary did not load');
+    await assertHeadline('en', '9007199254740993.1234');
+    assert.deepEqual(await evaluate('window.reads'), ['/api/platform-account/usage/fixture-account/summary']);
+    assert.equal(await evaluate(`!!document.querySelector('table') || !!(${buttonExpression('Billing details')}) || document.body.innerText.includes('CNY 73.00')`), false, 'Overview must keep secondary billing and call tables out of the summary');
     await assertProductBoundary();
 
     for (const scenario of ['switch', 'runtime']) {
       await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario });
       await until(`typeof window.releaseOldSummary === 'function' && typeof window.releaseOldCalls === 'function'`, 'Old owner requests were not in flight');
       await click('#change-owner');
-      await until(`document.body.innerText.includes('Current account model') && document.body.innerText.includes('12.00')`, 'Current owner report did not render');
+      await until(`document.body.innerText.includes('Current account model') && document.body.innerText.includes('12 credits')`, 'Current owner report did not render');
       await evaluate(`window.releaseOldSummary(); window.releaseOldCalls()`);
       await wait(100);
-      assert.equal(await evaluate(`document.body.innerText.includes('91.00')`), false, 'An old owner summary must not replace the current report');
+      assert.equal(await evaluate(`document.body.innerText.includes('91 credits')`), false, 'An old owner summary must not replace the current report');
       assert.equal(await evaluate(`document.body.innerText.includes('Previous account model')`), false, 'An old owner call list must not replace the current report');
-      assert.equal(await evaluate(`document.body.innerText.includes('12.00')`), true);
+      assert.equal(await evaluate(`document.body.innerText.includes('12 credits')`), true);
       assert.equal(await evaluate('window.authRequests'), scenario === 'runtime' ? 1 : 0, 'Runtime switching refreshes URL authentication once');
       await assertProductBoundary();
     }
