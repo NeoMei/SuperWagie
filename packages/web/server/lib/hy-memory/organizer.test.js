@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createHyMemoryOrganizer } from './organizer.js';
+import { truncateUtf8 } from './embed-limit.js';
 
 describe('Hy host governance', () => {
   test('recall yields while organization runs and cannot cancel the writer', async () => {
@@ -140,17 +141,25 @@ test('a long Chinese embed payload fits the backend byte limit and stays valid t
   const state = guardedState(1);
   const calls = [];
   const organizer = createHyMemoryOrganizer({ readState: async () => structuredClone(state),
-    backend: async (action, input) => { calls.push({ action, input }); return { nodes: [], vectors: [], space_id: 'space' }; },
+    backend: async (action, input) => { calls.push({ action, input }); return { nodes: [], vectors: input.texts.map(() => [1, 0]), space_id: 'space', dimensions: 2 }; },
     generate: async () => ({ text: '{}' }),
     createWorker: (options) => ({ call: async (_method, params) => {
       const result = await options.handlers['host.embed']({ jobId: params.context.jobId, texts: ['经验'.repeat(200_000)] });
       expect(result.space_id).toBe('space');
+      expect(result.vectors).toHaveLength(1);
       return {};
     }, stop: async () => {}, status: () => ({ state: 'ready' }) }),
   });
   await organizer.organize({ segment: { id: 'new', projectId: 'p', directory: '/p', sessionId: 's', messages: [] } });
-  const [embed] = calls;
-  expect(embed.action).toBe('embed');
-  expect(Buffer.byteLength(JSON.stringify(embed.input), 'utf8')).toBeLessThanOrEqual(900 * 1024);
-  expect(embed.input.texts[0]).not.toContain('\uFFFD');
+  const embeds = calls.filter((call) => call.action === 'embed');
+  expect(embeds.length).toBeGreaterThan(1);
+  // The gateway rejects a multi-text input, so every request carries exactly one segment.
+  expect(embeds.every((call) => call.input.texts.length === 1)).toBe(true);
+  expect(embeds.every((call) => Buffer.byteLength(JSON.stringify(call.input), 'utf8') <= 900 * 1024)).toBe(true);
+  // Segments cover the whole payload the backend accepts: the byte ceiling cuts
+  // the tail before segmenting, exactly as the card projection does.
+  const payload = '经验'.repeat(200_000);
+  expect(embeds.flatMap((call) => call.input.texts).join('')).toBe(truncateUtf8(payload));
+  expect(Buffer.byteLength(truncateUtf8(payload), 'utf8')).toBeLessThanOrEqual(768 * 1024);
+  expect(embeds.some((call) => call.input.texts[0].includes('\uFFFD'))).toBe(false);
 });

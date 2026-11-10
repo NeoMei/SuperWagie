@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { createHyMemoryWorker } from './worker.js';
-import { truncateUtf8 } from './embed-limit.js';
+import { averageVectors, embedSegments, truncateUtf8 } from './embed-limit.js';
 
 const hostSchema = z.object({ jobId: z.string().min(1), namespace: z.string().optional() }).passthrough();
 const generateSchema = hostSchema.extend({ prompt: z.string().min(1).max(2_000_000), systemPrompt: z.string().max(200_000).optional(), maxTokens: z.number().int().positive().max(32_000).optional() });
@@ -133,7 +133,28 @@ export function createHyMemoryOrganizer({ backend, generate, readState, isBlocke
       if (generated.inputTruncated) throw fail('hy_input_truncated');
       return { content: z.string().parse(generated.text) };
     },
-    'host.embed': async (input) => { const parsed = embedSchema.parse(input); const job = authorize(parsed); await checkReadSources(job); const result = await backend('embed', { texts: parsed.texts.map(truncateUtf8), input_role: parsed.input_role }); job.spaceId = z.object({ space_id: z.string() }).parse(result).space_id; return result; },
+    'host.embed': async (input) => {
+      const parsed = embedSchema.parse(input); const job = authorize(parsed); await checkReadSources(job);
+      const vectors = []; let spaceId; let dimensions = 0;
+      for (const text of parsed.texts) {
+        const segments = embedSegments(truncateUtf8(text));
+        if (!segments.length) throw fail('hy_embed_input_empty');
+        const parts = [];
+        for (let offset = 0; offset < segments.length; offset += 8) {
+          const batch = segments.slice(offset, offset + 8);
+          const result = await Promise.all(batch.map((segment) => backend('embed', { texts: [segment], input_role: parsed.input_role })));
+          for (const part of result) {
+            const parsedPart = z.object({ vectors: z.array(z.array(z.number().finite())).length(1), space_id: z.string().min(1), dimensions: z.number().int().positive() }).parse(part);
+            if (spaceId && spaceId !== parsedPart.space_id) throw fail('hy_embed_space_changed');
+            spaceId = parsedPart.space_id; dimensions = parsedPart.dimensions;
+            parts.push(parsedPart.vectors[0]);
+          }
+        }
+        vectors.push(averageVectors(parts));
+      }
+      job.spaceId = spaceId;
+      return { vectors, space_id: spaceId, dimensions };
+    },
     'host.store': async (input) => {
       const parsed = storeSchema.parse(input); const job = authorize(parsed);
       if (parsed.operation.startsWith('nodes/')) {
