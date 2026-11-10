@@ -29,6 +29,7 @@ import { findLiveSession } from '@/sync/live-aggregate';
 import { isInvisibleText } from '@/lib/invisibleText';
 import { getCompactReasoningSummary } from '../lib/reasoningSummary';
 import { useStreamingTextThrottle } from '../hooks/useStreamingTextThrottle';
+import { useWaitingBreath } from '@/hooks/useDurationTicker';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
 
@@ -178,6 +179,10 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         allowTextReplacement: true,
     });
     const reasoningPreview = React.useMemo(() => getCompactReasoningSummary(reasoningText), [reasoningText]);
+    // The folded header breathes while the turn works, like the status above
+    // the composer: four opacity steps on the shared 1 s clock, one drawn
+    // frame a second. It stands still once the turn settles.
+    const breath = useWaitingBreath(!settled);
     // Questions, pages and proposed workflows remain outside execution,
     // including after the turn ends without a final answer.
     const interactions = React.useMemo(() => getShownInteractions(turn.assistantMessages), [turn.assistantMessages]);
@@ -214,10 +219,13 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             <span className="live-activity-icon inline-flex shrink-0" data-running={liveTool ? 'true' : undefined}>
                 <Icon name="stack" className="size-3.5 text-[var(--tools-icon)]" />
             </span>
-            <span className="shrink-0 font-semibold text-[var(--tools-title)]">{t(settled ? 'chat.liveActivity.title'
-                : waitingPermission ? 'chat.toolPart.status.waitingPermission'
-                    : waitingAnswer ? 'chat.toolPart.status.waitingAnswer'
-                        : liveThought ? 'chat.reasoningTrace.thinking' : 'chat.liveActivity.title')}{!settled ? <BusyDots /> : null}</span>
+            <span className="oc-breath shrink-0 font-semibold text-[var(--tools-title)]" data-breath={breath ?? undefined}>
+                {t(settled ? 'chat.liveActivity.title'
+                    : waitingPermission ? 'chat.toolPart.status.waitingPermission'
+                        : waitingAnswer ? 'chat.toolPart.status.waitingAnswer'
+                            : liveThought ? 'chat.reasoningTrace.thinking' : 'chat.liveActivity.title')}
+                {!settled ? <BusyDots /> : null}
+            </span>
             <Icon name={isExpanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3 shrink-0" />
             {terminalFailed ? (
                 <span className={terminalStopped ? 'typography-meta' : 'typography-meta text-[var(--status-error-text)]'}>

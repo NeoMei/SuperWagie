@@ -204,44 +204,44 @@ describe('createParsedStatus', () => {
     const statusOf = (parts: Part[]) => createParsedStatus(parts, 'ses_1:msg_1');
 
     test('names a tool by the kind of work it does', () => {
-        expect(english(statusOf([tool('1', 'read')]).status)).toBe('reading a file');
-        expect(english(statusOf([tool('1', 'patch')]).status)).toBe('editing a file');
-        expect(english(statusOf([tool('1', 'shell')]).status)).toBe('running a command');
-        expect(english(statusOf([tool('1', 'webfetch')]).status)).toBe('looking things up');
-        expect(english(statusOf([tool('1', 'subagent')]).status)).toBe('handing off a task');
-        expect(english(statusOf([tool('1', 'skill')]).status)).toBe('picking up a skill');
+        expect(english(statusOf([tool('1', 'read')]).status)).toBe('turning the pages');
+        expect(english(statusOf([tool('1', 'patch')]).status)).toBe('mending a page');
+        expect(english(statusOf([tool('1', 'shell')]).status)).toBe('letting the command stretch its legs');
+        expect(english(statusOf([tool('1', 'webfetch')]).status)).toBe('asking around for it');
+        expect(english(statusOf([tool('1', 'subagent')]).status)).toBe('handing the task to a fellow pony');
+        expect(english(statusOf([tool('1', 'skill')]).status)).toBe('opening the book on a new craft');
     });
 
     test('counts parallel calls of the same kind', () => {
-        expect(english(statusOf([tool('1', 'read'), tool('2', 'read'), tool('3', 'file-diff')]).status)).toBe('reading 3 files');
-        expect(english(statusOf([tool('1', 'write'), tool('2', 'patch')]).status)).toBe('editing 2 files');
-        expect(english(statusOf([tool('1', 'shell'), tool('2', 'execute')]).status)).toBe('running 2 commands');
-        expect(english(statusOf([tool('1', 'subagent'), tool('2', 'subagent')]).status)).toBe('handing off 2 tasks');
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'read'), tool('3', 'file-diff')]).status)).toBe('reading 3 pages in a row');
+        expect(english(statusOf([tool('1', 'write'), tool('2', 'patch')]).status)).toBe('mending 2 pages');
+        expect(english(statusOf([tool('1', 'shell'), tool('2', 'execute')]).status)).toBe('running 2 errands side by side');
+        expect(english(statusOf([tool('1', 'subagent'), tool('2', 'subagent')]).status)).toBe('handing 2 legs over to ride apart');
     });
 
     test('does not count searches, since one call spans many files', () => {
-        expect(english(statusOf([tool('1', 'grep'), tool('2', 'glob')]).status)).toBe('searching files');
+        expect(english(statusOf([tool('1', 'grep'), tool('2', 'glob')]).status)).toBe('rummaging through the hay');
     });
 
     test('counts only unfinished calls', () => {
-        expect(english(statusOf([tool('1', 'read'), tool('2', 'read', 'completed')]).status)).toBe('reading a file');
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'read', 'completed')]).status)).toBe('turning the pages');
     });
 
     test('keeps command and file details in their tool rows while the status chip names the work', () => {
         const shell = tool('1', 'shell');
         if (shell.type !== 'tool') throw new Error('expected a tool');
         shell.state = { status: 'running', input: { command: 'npm test' }, time: { start: 1 } };
-        expect(english(statusOf([shell]).status)).toBe('running a command');
+        expect(english(statusOf([shell]).status)).toBe('letting the command stretch its legs');
 
         const edit = tool('1', 'edit');
         if (edit.type !== 'tool') throw new Error('expected a tool');
         edit.state = { status: 'running', input: { path: 'src/a.ts' }, time: { start: 1 } };
-        expect(english(statusOf([edit]).status)).toBe('editing a file');
+        expect(english(statusOf([edit]).status)).toBe('mending a page');
     });
 
     test('shows the newest kind when different tools run together', () => {
-        expect(english(statusOf([tool('1', 'read'), tool('2', 'shell')]).status)).toBe('running a command');
-        expect(english(statusOf([tool('1', 'shell'), tool('2', 'read')]).status)).toBe('reading a file');
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'shell')]).status)).toBe('letting the command stretch its legs');
+        expect(english(statusOf([tool('1', 'shell'), tool('2', 'read')]).status)).toBe('turning the pages');
     });
 
     describe('OpenChamber tools', () => {
@@ -281,7 +281,7 @@ describe('createParsedStatus', () => {
         test('a page that waits for the answer says so once it shows', () => {
             const input = { action: 'render.page', parameters: { html: '<p>a</p>', awaitAnswer: true } };
             expect(english(statusOf([call('openchamber_render', input, 'pending')]).status)).toBe('drawing a page');
-            expect(english(statusOf([call('openchamber_render', input)]).status)).toBe('waiting for your answer');
+            expect(english(statusOf([call('openchamber_render', input)]).status)).toBe('standing still for your answer');
         });
 
         test('read the same from inside a Code Mode script', () => {
@@ -321,7 +321,7 @@ describe('createParsedStatus', () => {
 
         test('a tool no server claims reads as words', () => {
             expect(english(statusOf([script('linear_list_issues')]).status)).toBe('using linear list issues');
-            expect(english(statusOf([tool('1', 'jev-route')]).status)).toBe('using jev route');
+            expect(english(statusOf([tool('1', 'jev-route')]).status)).toBe('leading jev route along to help');
         });
     });
 });

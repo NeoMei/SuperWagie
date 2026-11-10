@@ -716,7 +716,15 @@ retain the existing 1200 ms display hold; permission transitions display at once
 
 ### Why thinking lines use reasoning identity
 
-One in roughly 4 reasoning parts selects a Benma line using a deterministic hash.
-The same part keeps its line across renders and status-row/pill handoff. Selecting
-from the hash quotient keeps all 6 lines reachable after the frequency gate.
-No additional clock, polling or model request selects copy.
+Every kind of work carries two phrasings of its own, and thinking carries six
+Benma lines. The status signature (key, count, tool name, reasoning seed) picks
+one by hash, so the same work keeps its line across renders and the
+status-row/pill handoff, and every line stays reachable. No additional clock,
+polling or model request selects copy.
+
+### Why waiting labels breathe on the shared clock
+
+The folded Activity header and the status above the composer dim through four
+opacity steps on the 1 s clock while the turn works: one drawn frame a second,
+the same bill as a blink, and nothing infinite on the compositor. A permission
+wait stands still so it stays authoritative, and a settled turn stands still.

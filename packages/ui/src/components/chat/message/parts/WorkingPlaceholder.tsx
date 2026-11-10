@@ -2,6 +2,7 @@ import React from 'react';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { agentStatusSignature, type AgentStatus } from '@/lib/agentStatus';
 import { useAgentStatusLabel } from '@/hooks/useAgentStatusLabel';
+import { useWaitingBreath } from '@/hooks/useDurationTicker';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 
@@ -192,6 +193,11 @@ export function WorkingPlaceholder({
 
   React.useEffect(() => () => clearTimers(), [clearTimers]);
 
+  // The wait breathes above the composer: one inhale every four seconds on
+  // the shared clock, so a long run costs one drawn frame a second. A
+  // permission wait and a retry countdown stand still: both are authoritative.
+  const breath = useWaitingBreath(isWorking && !displayedPermission && !retryInfo);
+
   if (!isWorking) {
     return null;
   }
@@ -264,7 +270,7 @@ export function WorkingPlaceholder({
       data-waiting={displayedPermission ? 'true' : undefined}
     >
       {providerLogo}
-      <span className="text-[0.8125rem] leading-4">{label}</span>
+      <span className="oc-breath text-[0.8125rem] leading-4" data-breath={breath ?? undefined}>{label}</span>
     </div>
   );
 }

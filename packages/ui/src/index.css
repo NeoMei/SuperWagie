@@ -2424,6 +2424,21 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 }
 
 /*
+ * The inhale of a waiting label's four-second breath (`useWaitingBreath`):
+ * four opacity steps on the shared 1 s clock, one drawn frame a second.
+ * Phase 0 carries no rule and sits at full opacity. No transition: a fade
+ * would draw every frame of it.
+ */
+.oc-breath[data-breath='1'],
+.oc-breath[data-breath='3'] {
+  opacity: 0.8;
+}
+
+.oc-breath[data-breath='2'] {
+  opacity: 0.6;
+}
+
+/*
  * A surface kept mounted while hidden is inert (a closed side panel at
  * opacity 0): its CSS animations pause there instead of drawing every frame
  * nobody sees. Clock-driven indicators pause through `PauseClock`.
@@ -2494,6 +2509,10 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   }
 
   .waiting-dim {
+    opacity: 1;
+  }
+
+  .oc-breath {
     opacity: 1;
   }
 
