@@ -123,3 +123,31 @@ Where that decision is settled depends on who is working:
 
 When the call is unclear, ask before building. Deciding it silently is the one
 thing that is always wrong.
+
+## Multi-Agent Collaboration
+
+多个 agent 可同时在本仓库开发：共享一份 `.git`，各自独立 worktree、分支、本地栈，`main` 是唯一交接点。Codex 用 `codex/*` 分支，WorkBuddy 用 `wb/*` 分支。
+
+### 工作区与分支
+
+- 用独立 git worktree，不要直接改主工作区 `~/项目/codexprojects/SuperWagie-open`。worktree 根目录读 `~/.codex/config.toml` 的 `git-worktree-root`（当前 `/Volumes/codex/new-worktrees`）。
+- 分支前缀即所有权，只在自己前缀下提交；不直接推 `main`，合并由人决定。
+
+### 本地运行
+
+- Web HMR 端口通过环境变量可配：`OPENCHAMBER_HMR_UI_PORT`（默认 5180）、`OPENCHAMBER_HMR_API_PORT`（默认 3902）。并行开发时，第二个实例必须改用不同端口，否则 dev server 起不来。
+- 桌面端 OpenChamber 后端固定在 `127.0.0.1:57123`；同一时间只有一个实例能占用。并行联调时按实际需要串行使用，或各自在隔离环境跑。
+
+### 依赖与环境
+
+- `node_modules`、`packages/electron/dist*`、`packages/electron/resources/embedded-knowledge` 等构建产物不跨 worktree 共享，每个 worktree 用 `bun install` 自己准备。
+- `.local`、`.codex` 只属于各自 worktree，不复制、不提交。
+
+### Git 操作约束
+
+本仓库的 `Always-On Constraints` 写明 `Do not run git or GitHub commands unless the user explicitly asks`。多 agent 协作时这条**仍然有效**：除非当前会话的任务就是版本控制操作，否则不要擅自 commit/push；交接时先向用户说明需要提交，获得确认后再执行。
+
+### 交接
+
+- 收工前把改动提交到自己的 `wb/*` 分支并推送；接手前 `git fetch origin`，确认 `main` 与 `origin/main` 一致。
+- 交接说明写四件事：做了什么、没做什么、下一步、未合并的依赖分支。
