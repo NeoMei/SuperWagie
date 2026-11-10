@@ -142,19 +142,16 @@ uses a redirect or HTTP success as evidence of funds arriving.
   `payments.mode` describes external funding, while `canPurchase` describes
   financial authorization. External collection is available only when UniHub
   reports configured payment providers; missing configuration stays unavailable.
-  Sandbox recharge and settlement require separate explicit actions, the
-  authoritative sandbox capability and the local
-  `OPENCHAMBER_UNIHUB_ALLOW_SANDBOX_FUNDING=true` opt-in. Without that local
-  switch the adapter never reports sandbox mode, never filters in sandbox
-  catalog offers and never dispatches a recharge or simulate-settlement
-  command, even if UniHub reports sandbox capability. Refresh never advances
-  those actions.
+  Sandbox offers are never listed, and product-wallet recharge or simulated
+  settlement is not exposed even when UniHub reports a sandbox capability.
+  Only published non-sandbox offers can be purchased from an existing
+  authorized balance or through an external provider checkout.
 - Formal offers marked `entitlements.pricing_program=superwagie-ai-points-v1`
   expose `purchaseReadiness`. New purchases, quotes and first acceptance require
   authoritative `native_credits.ready: true`, even when paid from cash. Missing
   or false readiness returns `points_runtime_unavailable`. CREDIT rates alone
-  do not establish usable point benefits. Sandbox offers remain testable; the
-  marker does not block recovery of an already admitted original intent.
+  do not establish usable point benefits. The marker does not block recovery of
+  an already admitted original intent.
 - Cash values remain canonical decimal integer strings in CNY/6. External
   recharge amounts must be positive whole cents. UniHub chooses the offer's own
   product wallet and any explicitly authorized unified-wallet funding. The
@@ -181,8 +178,8 @@ uses a redirect or HTTP success as evidence of funds arriving.
   reads a known object; if the original response was lost before its ID was
   saved, recovery resubmits only the original payload and idempotency key. A
   repeated request with changed parameters is rejected.
-- Recharge creation remains pending until the associated UniHub ledger
-  operation is APPLIED. Purchases display payment and fulfillment independently;
+- External checkout remains pending until UniHub reports payment and
+  fulfillment. Balance purchases display payment and fulfillment independently;
   their local intent is applied only once payment is PAID and fulfillment is
   FULFILLED. Response loss remains UNKNOWN and prevents the same actor from
   starting another uncertain operation on that account.
@@ -192,9 +189,6 @@ uses a redirect or HTTP success as evidence of funds arriving.
   the current read scope for their kind; scope revocation hides their projection
   while retaining unresolved write guards. Empty authorized results are
   represented by empty arrays.
-- Local recharge history covers this instance and the authenticated actor only.
-  UniHub purchase orders are queried from the service. The adapter makes no
-  cross-device completeness claim because UniHub has no recharge-list endpoint.
 - The journal has one writer per data directory, atomic fsync-backed writes and
   an 8 MiB limit. A second writer, corrupted state or stale lock fails closed.
   Graceful shutdown waits for active commands and releases its own lock. After a
@@ -207,23 +201,14 @@ A response can disappear after funds were applied. Persisted keys let UniHub
 return the original result, while an explicit recovery action prevents page
 mounts, refreshes and account switches from initiating payments.
 
-### Why sandbox funding and purchase remain separate
+### Why external checkout and wallet purchase remain separate
 
-Creating a recharge, confirming sandbox funds and purchasing an offer have
-separate idempotency and authorization boundaries. A combined checkout would
-need a durable parent operation to bind and recover those steps. Sandbox
-recharge keeps each step explicit. Configured external checkout instead uses
-its own durable original-provider receipt and separate fulfillment state.
-
-### Why sandbox funding needs a local opt-in
-
-UniHub's `sandbox` capability is a remote flag. Trusting it alone would let a
-misconfigured, downgraded or spoofed upstream turn on product-wallet recharge
-and its simulation, which writes ledger value without collecting money. The
-adapter requires `OPENCHAMBER_UNIHUB_ALLOW_SANDBOX_FUNDING=true` in the managed
-backend environment as well, so a normal production build cannot expose a free
-funding path by configuration drift alone. Test deployments set the switch
-explicitly and keep the existing separate create and settle actions.
+An external provider checkout and a purchase from an existing authorized
+balance have separate idempotency and authorization boundaries. External
+checkout uses its own durable original-provider receipt and separate
+fulfillment state. A balance purchase rechecks the offer, membership and
+financial role before debit. Neither path creates a sandbox recharge or a
+simulated settlement.
 
 ### Why points have a separate runtime readiness gate
 
@@ -269,23 +254,15 @@ Configure these values in the managed backend's environment and restart it:
 | `OPENCHAMBER_UNIHUB_API_URL` | The UniHub API origin. |
 | `OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID` | A public client explicitly enabled for JSON login and registration. |
 | `OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI` | The exact redirect registered for that client. JSON login does not navigate there. |
-| `OPENCHAMBER_UNIHUB_ALLOW_SANDBOX_FUNDING` | Set to `true` only for sandbox commerce tests. Unset in production; free recharge and simulate-settlement stay unavailable. |
-
-For sandbox commerce, the client also needs commerce capabilities in
-UniHub. `/v1/capabilities` must report sandbox mode and product-wallet recharge
-availability. Published sandbox SuperWagie memberships and llmrouter addons
-populate the catalog. Missing scopes are shown in the account page. Financial
-actions require the account's current owner or billing administrator role.
+Missing scopes are shown in the account page. Financial actions require the
+account's current owner or billing administrator role.
 
 Register and sign in at the app's login screen. Open User center to edit the
-profile or password, then open membership and recharge to select an offer.
-When the backend reports sandbox funding, use the following sandbox sequence.
-Fill its recharge amount, create the sandbox recharge, and select Simulate
-settlement in the request history. Check the original request until UniHub
-reports the ledger operation as applied. Confirm the purchase separately and
-verify both payment and fulfillment. A backend restart restores a valid platform
-session from the encrypted local store; an expired access token requires sign-in
-again. The journal and UniHub orders remain available.
+profile or password, then open membership and add-ons to select an offer.
+Confirm the purchase, then verify both payment and fulfillment. A backend
+restart restores a valid platform session from the encrypted local store; an
+expired access token requires sign-in again. The journal and UniHub orders
+remain available.
 
 The browser OIDC client and optional console link retain their separate
 configuration. External checkout requires UniHub to advertise configured

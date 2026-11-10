@@ -1,22 +1,18 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { SettingsSection, SettingsFieldRow, SettingsControlGroup, SettingsChipGroup, SettingsRadioGroup, SettingsRadioOption, SettingsTwoColumn, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsFieldRow, SettingsControlGroup, SettingsChipGroup, SettingsRadioGroup, SettingsRadioOption, SettingsTwoColumn, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { PlatformAccountError, type PlatformAccountState } from '@/lib/platformAccount';
-import { readPlatformCommerce, createPlatformCheckout, updatePlatformCheckout, createPlatformRecharge, purchasePlatformOffer, createPlatformUpgradeQuote, acceptPlatformUpgradeQuote, reconcilePlatformIntent, settlePlatformSandboxRecharge, formatPlatformMoney, formatPlatformPoints, parsePlatformRechargeAmount, type PlatformCommerceState, type PlatformCommerceIntent, type PlatformUpgradeQuote } from '@/lib/platformCommerce';
+import { readPlatformCommerce, createPlatformCheckout, updatePlatformCheckout, purchasePlatformOffer, createPlatformUpgradeQuote, acceptPlatformUpgradeQuote, reconcilePlatformIntent, formatPlatformMoney, formatPlatformPoints, type PlatformCommerceState, type PlatformCommerceIntent, type PlatformUpgradeQuote } from '@/lib/platformCommerce';
 import { PlatformCheckoutCard } from './PlatformCheckoutCard';
 import { platformAccountErrorKey } from './platformAccountErrors';
 import { usePlatformAccountTabStore } from './platformAccountTabs';
 
-type Product = 'superwagie' | 'llmrouter';
 type PendingCommand = { kind: 'checkout'; offerId?: string; quoteId?: string; provider: 'wechat' | 'alipay'; productId: string; amount: string; idempotencyKey: string }
-  | { kind: 'recharge'; productId: Product; amount: string; idempotencyKey: string }
   | { kind: 'purchase'; offerId: string; productId: string; amount: string; idempotencyKey: string }
   | { kind: 'upgrade'; quoteId: string; productId: string; amount: string; idempotencyKey: string };
-const commandRejected = (error: PlatformAccountError, original: PendingCommand) => (original.kind !== 'recharge' && error.code === 'credit_rates_unavailable' && error.status === 409) || ['platform_account_changed', 'platform_session_changed', 'platform_billing_forbidden', 'platform_scope_required', 'platform_offer_unavailable', 'platform_membership_active', 'platform_amount_invalid', 'platform_operation_pending', 'payment_not_configured', 'platform_idempotency_conflict', 'subscription_required', 'quote_expired', 'platform_quote_expired', 'platform_quote_unavailable', 'points_runtime_unavailable', 'unsupported_plan_change'].includes(error.code);
+const commandRejected = (error: PlatformAccountError) => (error.code === 'credit_rates_unavailable' && error.status === 409) || ['platform_account_changed', 'platform_session_changed', 'platform_billing_forbidden', 'platform_scope_required', 'platform_offer_unavailable', 'platform_membership_active', 'platform_amount_invalid', 'platform_operation_pending', 'payment_not_configured', 'platform_idempotency_conflict', 'subscription_required', 'quote_expired', 'platform_quote_expired', 'platform_quote_unavailable', 'points_runtime_unavailable', 'unsupported_plan_change'].includes(error.code);
 const orderStatusKey = (status: string): I18nKey | null => {
   switch (status.toUpperCase()) {
     case 'UNPAID': return 'platformAccount.order.unpaid';
@@ -49,16 +45,11 @@ export const PlatformAccountCommerce: React.FC<{
   const [error, setError] = React.useState<I18nKey | null>(null);
   const [offerId, setOfferId] = React.useState('');
   const [billingPeriod, setBillingPeriod] = React.useState<'month' | 'year'>('month');
-  const rechargeTarget = usePlatformAccountTabStore((store) => store.rechargeTarget);
   const purchaseTarget = usePlatformAccountTabStore((store) => store.purchaseTarget);
-  const [buyingTask, setBuyingTask] = React.useState<'membership' | 'addon' | 'recharge' | null>(rechargeTarget ? 'recharge' : hasActiveMembership ? null : 'membership');
+  const [buyingTask, setBuyingTask] = React.useState<'membership' | 'addon' | null>(hasActiveMembership ? null : 'membership');
   const [paymentChannel, setPaymentChannel] = React.useState<'wechat' | 'alipay' | 'wallet'>('wechat');
   const [quote, setQuote] = React.useState<PlatformUpgradeQuote | null>(null);
   const [purchaseApplied, setPurchaseApplied] = React.useState(false);
-  const [productId, setProductId] = React.useState<Product>(rechargeTarget ?? 'superwagie');
-  const rechargeFormRef = React.useRef<HTMLFormElement>(null);
-  const revealRecharge = React.useRef(Boolean(rechargeTarget));
-  const [amount, setAmount] = React.useState('');
   const [command, setCommand] = React.useState<PendingCommand | null>(null);
   const generation = React.useRef(0);
   const accountRefresh = React.useRef(onAccountRefresh);
@@ -67,22 +58,10 @@ export const PlatformAccountCommerce: React.FC<{
   const mutationActive = React.useRef(false);
   const runtimeKey = getRuntimeKey();
   React.useEffect(() => {
-    if (!rechargeTarget) return;
-    revealRecharge.current = true;
-    setProductId(rechargeTarget);
-    setBuyingTask('recharge');
-    usePlatformAccountTabStore.getState().clearRechargeTarget();
-  }, [rechargeTarget]);
-  React.useEffect(() => {
     if (!purchaseTarget) return;
     setBuyingTask(purchaseTarget === 'funding' ? hasActiveMembership ? 'addon' : 'membership' : purchaseTarget);
     usePlatformAccountTabStore.getState().clearPurchaseTarget();
   }, [purchaseTarget, hasActiveMembership]);
-  React.useLayoutEffect(() => {
-    if (!revealRecharge.current || !rechargeFormRef.current) return;
-    rechargeFormRef.current.scrollIntoView({ block: 'center' });
-    revealRecharge.current = false;
-  }, [state, view, buyingTask, rechargeTarget]);
   const refresh = React.useCallback(async () => {
     const version = ++generation.current;
     setBusy(true); setError(null); setPurchaseApplied(false);
@@ -129,12 +108,12 @@ export const PlatformAccountCommerce: React.FC<{
       if (next.accountId !== accountId) throw new PlatformAccountError('platform_account_changed');
       setState(next); onAccountRefresh();
       if (result.status === 'FAILED') setError(platformAccountErrorKey(new PlatformAccountError(result.errorCode ?? ''), 'platformAccount.commerceFailed'));
-      if (result.status === 'APPLIED' && result.kind !== 'recharge') { setPurchaseApplied(true); setQuote(null); setOfferId(''); setBuyingTask(null); }
+      if (result.status === 'APPLIED') { setPurchaseApplied(true); setQuote(null); setOfferId(''); setBuyingTask(null); }
     } catch (cause) {
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
       const quoteInvalidated = !confirmed && (original?.kind === 'upgrade' || original?.kind === 'checkout' && !!original.quoteId) && cause instanceof PlatformAccountError && cause.code === 'quote_invalidated' && cause.status === 409;
       if (quoteInvalidated) { setQuote(null); setCommand(null); }
-      else if (original && cause instanceof PlatformAccountError && commandRejected(cause, original)) setCommand(null);
+      else if (original && cause instanceof PlatformAccountError && commandRejected(cause)) setCommand(null);
       setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, original && !confirmed ? 'platformAccount.commandUnknown' : 'platformAccount.commerceFailed'));
       // A failed read never leaves a balance presented as current.
       if (!quoteInvalidated && !(original?.kind === 'purchase' && cause instanceof PlatformAccountError && cause.code === 'credit_rates_unavailable' && cause.status === 409)) setState(null);
@@ -142,18 +121,9 @@ export const PlatformAccountCommerce: React.FC<{
   };
   const submitCommand = (original: PendingCommand) => mutate(() => original.kind === 'checkout'
     ? createPlatformCheckout({ accountId, offerId: original.offerId, quoteId: original.quoteId, provider: original.provider, idempotencyKey: original.idempotencyKey })
-    : original.kind === 'recharge'
-    ? createPlatformRecharge({ accountId, productId: original.productId, amount: original.amount, idempotencyKey: original.idempotencyKey })
     : original.kind === 'upgrade'
       ? acceptPlatformUpgradeQuote({ accountId, quoteId: original.quoteId, idempotencyKey: original.idempotencyKey })
       : purchasePlatformOffer({ accountId, offerId: original.offerId, idempotencyKey: original.idempotencyKey }), original);
-  const recharge = (event: React.FormEvent) => {
-    event.preventDefault();
-    try {
-      const parsedAmount = parsePlatformRechargeAmount(amount);
-      void submitCommand({ kind: 'recharge', productId, amount: parsedAmount, idempotencyKey: crypto.randomUUID() });
-    } catch { setError('platformAccount.error.amount'); }
-  };
   const checkoutAction = async (id: string, action: 'reconcile' | 'close' | 'refund') => {
     if (mutationActive.current) return;
     mutationActive.current = true;
@@ -188,7 +158,6 @@ export const PlatformAccountCommerce: React.FC<{
   const addonNeedsMembership = !hasActiveMembership && selectedOffer?.kind === 'addon' && selectedOffer.productId === 'superwagie';
   const unresolved = !!(error && error !== 'platformAccount.quoteInvalidated' && state?.checkouts?.length) || !!command || !!state?.checkouts?.some((item) => !['CLOSED'].includes(item.payment_status) && !(item.payment_status === 'PAID' && item.fulfillment_status === 'FULFILLED' && !['PENDING', 'REVIEW'].includes(item.refund_status)) && item.refund_status !== 'SUCCEEDED') || !!state?.intents.some((intent) => intent.status === 'PREPARED' || intent.status === 'UNKNOWN');
   const finance = state?.financialAccess === true;
-  const sandbox = state?.payments.mode === 'sandbox';
   const walletName = (product: string) => product === 'superwagie' ? t('platformAccount.membershipWallet') : product === 'llmrouter' ? t('platformAccount.modelWallet') : product === '' ? t('platformAccount.unifiedWallet') : t('platformAccount.originalRequest');
   const purchaseName = (product: string) => t(product === 'superwagie' ? 'platformAccount.membershipPlans' : product === 'llmrouter' ? 'platformAccount.addonPlans' : 'platformAccount.originalRequest');
   const offerName = (offer: NonNullable<PlatformCommerceState['offers']>[number]) => offer.kind === 'addon' && offer.productId === 'llmrouter' ? t('platformAccount.addonPlans') : offer.name;
@@ -199,15 +168,6 @@ export const PlatformAccountCommerce: React.FC<{
   const money = (units: string) => t('platformAccount.cny', { amount: formatPlatformMoney(units) });
   const selectOffer = (id: string | null) => {
     setOfferId(id ?? ''); setQuote(null); setError(null); setPurchaseApplied(false);
-    const offer = offers.find((item) => item.id === id);
-    if (offer?.productId === 'superwagie' || offer?.productId === 'llmrouter') setProductId(offer.productId);
-  };
-  const fundSelectedOffer = () => {
-    if (!selectedOffer || (selectedOffer.productId !== 'superwagie' && selectedOffer.productId !== 'llmrouter')) return;
-    const shortfall = BigInt(purchaseAmount) - BigInt(wallet?.amount ?? '0');
-    const wholeCents = ((shortfall + 9_999n) / 10_000n) * 10_000n;
-    setBuyingTask('recharge'); setProductId(selectedOffer.productId); setAmount(formatPlatformMoney(wholeCents.toString()));
-    requestAnimationFrame(() => document.getElementById('unihub-recharge-amount')?.focus());
   };
   const summary = () => membershipSummary({
     openMembership: () => setBuyingTask((task) => task === 'membership' ? null : 'membership'),
@@ -255,7 +215,7 @@ export const PlatformAccountCommerce: React.FC<{
   if (!state) return <>{view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">{summary()}</SettingsTwoColumn>}<SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={collapsedOverview ? undefined : refreshAction} contentClassName="space-y-3">
     {statusRow}
     {command && !busy && <SettingsControlGroup title={t('platformAccount.originalRequest')} description={t('platformAccount.commandUnknown')}>
-      <p className={SETTINGS_HELPER_CLASS}>{t(command.kind === 'recharge' ? 'platformAccount.rechargeRecord' : 'platformAccount.purchaseRecord', { product: command.kind === 'recharge' ? walletName(command.productId) : purchaseName(command.productId), amount: money(command.amount) })}</p>
+      <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId), amount: money(command.amount) })}</p>
       <Button variant="outline" disabled={busy} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
     </SettingsControlGroup>}
   </SettingsSection></>;
@@ -263,21 +223,9 @@ export const PlatformAccountCommerce: React.FC<{
   const recoverableIntents = state.intents.filter((intent) => intent.status !== 'APPLIED' && intent.status !== 'FAILED');
   const historyIntents = state.intents.filter((intent) => intent.productId === 'superwagie' || intent.productId === 'llmrouter' || (intent.status !== 'APPLIED' && intent.status !== 'FAILED'));
   const orders = state.orders?.filter((order) => order.productId === 'superwagie' || order.productId === 'llmrouter') ?? [];
-  const intentRow = (intent: PlatformCommerceIntent) => <SettingsFieldRow key={intent.idempotencyKey} label={t(intent.kind === 'recharge' ? 'platformAccount.rechargeRecord' : 'platformAccount.purchaseRecord', { product: intent.kind === 'recharge' ? walletName(intent.productId) : purchaseName(intent.productId), amount: money(intent.amount) })} description={<>{t(`platformAccount.intent.${intent.status}`)}{intent.errorCode ? ` · ${t(platformAccountErrorKey(new PlatformAccountError(intent.errorCode), 'platformAccount.commerceFailed'))}` : ''}</>}>
-    {intent.status !== 'APPLIED' && intent.status !== 'FAILED' && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => void mutate(() => reconcilePlatformIntent(accountId, intent.idempotencyKey))}>{t('platformAccount.checkIntent')}</Button>{intent.kind === 'recharge' && intent.status === 'PENDING' && intent.resourceId && sandbox && state.payments.canRecharge && <Button variant="outline" disabled={busy} onClick={() => void mutate(() => settlePlatformSandboxRecharge(accountId, intent.idempotencyKey))}>{t('platformAccount.simulateSettlement')}</Button>}</div>}
+  const intentRow = (intent: PlatformCommerceIntent) => <SettingsFieldRow key={intent.idempotencyKey} label={t('platformAccount.purchaseRecord', { product: purchaseName(intent.productId), amount: money(intent.amount) })} description={<>{t(`platformAccount.intent.${intent.status}`)}{intent.errorCode ? ` · ${t(platformAccountErrorKey(new PlatformAccountError(intent.errorCode), 'platformAccount.commerceFailed'))}` : ''}</>}>
+    {intent.status !== 'APPLIED' && intent.status !== 'FAILED' && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => void mutate(() => reconcilePlatformIntent(accountId, intent.idempotencyKey))}>{t('platformAccount.checkIntent')}</Button></div>}
   </SettingsFieldRow>;
-  const rechargeForm = <form ref={rechargeFormRef} onSubmit={recharge} className="space-y-2">
-    <SettingsFieldRow settingsItem="platform-account.model-recharge" label={t('platformAccount.walletDestination')}>
-      <Select value={productId} disabled={busy || unresolved || !state.payments.canRecharge} onValueChange={(value) => { if (value === 'superwagie' || value === 'llmrouter') setProductId(value); }}>
-        <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('platformAccount.walletDestination')}><SelectValue>{walletName(productId)}</SelectValue></SelectTrigger>
-        <SelectContent>{(['superwagie', 'llmrouter'] as const).map((product) => <SelectItem key={product} value={product}>{walletName(product)}</SelectItem>)}</SelectContent>
-      </Select>
-    </SettingsFieldRow>
-    <SettingsFieldRow settingsItem="platform-account.recharge" label={<label htmlFor="unihub-recharge-amount">{t('platformAccount.rechargeAmount')}</label>}>
-      <Input id="unihub-recharge-amount" inputMode="decimal" className="max-w-48" value={amount} onChange={(event) => setAmount(event.target.value)} disabled={busy || unresolved || !state.payments.canRecharge} required />
-    </SettingsFieldRow>
-    <Button type="submit" disabled={busy || unresolved || !sandbox || !state.payments.canRecharge}>{t('platformAccount.createRecharge')}</Button>
-  </form>;
   return <>
     {view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">
       {summary()}
@@ -285,26 +233,22 @@ export const PlatformAccountCommerce: React.FC<{
     <SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={view === 'orders' ? refreshAction : undefined} contentClassName="space-y-3">
       {statusRow}
       {command && !busy && <SettingsControlGroup title={t('platformAccount.originalRequest')} description={t('platformAccount.commandUnknown')}>
-        <p className={SETTINGS_HELPER_CLASS}>{t(command.kind === 'recharge' ? 'platformAccount.rechargeRecord' : 'platformAccount.purchaseRecord', { product: command.kind === 'recharge' ? walletName(command.productId) : purchaseName(command.productId), amount: money(command.amount) })}</p>
+        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId), amount: money(command.amount) })}</p>
         <Button variant="outline" disabled={busy} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
       </SettingsControlGroup>}
-      {(sandbox || buyingTask !== null && state.payments.mode === 'unconfigured') && <p className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]" role="status">{t(sandbox ? 'platformAccount.sandboxNotice' : 'platformAccount.paymentUnconfigured')}</p>}
+      {buyingTask !== null && state.payments.mode === 'unconfigured' && <p className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]" role="status">{t('platformAccount.paymentUnconfigured')}</p>}
       {!finance && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.memberRestricted')}</p>}
       {state.missingScopes.length > 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.missingScopes')}</p>}
       {finance && view === 'overview' && recoverableIntents.length > 0 && <SettingsControlGroup title={t('platformAccount.originalRequest')}>{recoverableIntents.map(intentRow)}</SettingsControlGroup>}
       {(state.checkouts ?? []).filter((item) => view === 'orders' || item.payment_status !== 'CLOSED').map((item) => <PlatformCheckoutCard key={item.id} checkout={item} busy={busy} onAction={(action) => void checkoutAction(item.id, action)} />)}
       {view === 'overview' && buyingTask !== null && <>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {buyingTask !== 'recharge' && <SettingsChipGroup value={buyingTask} onChange={(task) => { setBuyingTask(task); setQuote(null); }} aria-label={t('platformAccount.buyingTask')} options={[
+        <SettingsChipGroup value={buyingTask} onChange={(task) => { setBuyingTask(task); setQuote(null); }} aria-label={t('platformAccount.buyingTask')} options={[
           { value: 'membership', label: t('platformAccount.membershipPlans') },
           { value: 'addon', label: t('platformAccount.addonPlans') },
-        ]} />}
+        ]} />
         <div className="flex items-center gap-2">{refreshAction}<Button variant="ghost" size="sm" onClick={() => setBuyingTask(null)}>{t('dialog.common.actions.close')}</Button></div>
       </div>
-      {buyingTask === 'recharge' && finance && <SettingsControlGroup title={t('platformAccount.recharge')} description={t(productId === 'llmrouter' ? 'platformAccount.modelRechargeHint' : 'platformAccount.rechargeHint')}>
-        <SettingsFieldRow label={t('platformAccount.taskAccount')}><span>{payer}</span></SettingsFieldRow>
-        {rechargeForm}
-      </SettingsControlGroup>}
       {buyingTask === 'membership' && <SettingsControlGroup description={t('platformAccount.membershipRules')}>
         {offers.some((offer) => offer.kind === 'membership' && offer.period === 'year') && <SettingsFieldRow label={t('platformAccount.billingPeriod')}>
           <SettingsChipGroup value={billingPeriod} onChange={(period) => { setBillingPeriod(period); setQuote(null); if (selectedOffer?.kind === 'membership' && selectedOffer.period !== period) setOfferId(''); }} aria-label={t('platformAccount.billingPeriod')} options={[
@@ -348,7 +292,6 @@ export const PlatformAccountCommerce: React.FC<{
               ? <><Button disabled={busy || unresolved || !finance || !state.payments.canPurchase || !!insufficient || (!external && state.wallets === null) || Date.parse(validQuote.expiresAt) <= Date.now()} onClick={confirmUpgrade}>{t('platformAccount.confirmUpgrade', { price: money(validQuote.amount) })}</Button><Button variant="outline" disabled={busy || unresolved || !finance || !state.payments.canPurchase} onClick={() => void requestUpgrade()}>{t('platformAccount.getUpgradeQuote')}</Button></>
               : <Button disabled={busy || unresolved || !finance || !state.payments.canPurchase || !currentMembership || selectedOffer.salesReadiness?.ready === false || selectedOffer.purchaseReadiness?.ready === false || selectedOffer.id === currentMembership.offer.id} onClick={() => void requestUpgrade()}>{t('platformAccount.getUpgradeQuote')}</Button>
               : <Button className="max-w-full whitespace-normal text-start" disabled={busy || unresolved || selectedOffer.salesReadiness?.ready === false || selectedOffer.purchaseReadiness?.ready === false || !finance || addonNeedsMembership || !state.payments.canPurchase || !!insufficient || (!external && state.wallets === null)} onClick={() => void submitCommand({ ...(external ? { kind: 'checkout', provider: effectiveChannel } as const : { kind: 'purchase' } as const), offerId: selectedOffer.id, productId: selectedOffer.productId, amount: selectedOffer.price, idempotencyKey: crypto.randomUUID() })}>{t('platformAccount.purchase', { name: offerName(selectedOffer), price: money(selectedOffer.price) })}</Button>}
-            {insufficient && (!membershipActive || validQuote) && !addonNeedsMembership && finance && sandbox && state.payments.canRecharge && <Button variant="outline" disabled={busy || unresolved} onClick={fundSelectedOffer}>{t('platformAccount.fundPurchase')}</Button>}
             {addonNeedsMembership && <Button variant="outline" onClick={() => { setBuyingTask('membership'); selectOffer(null); }}>{t('platformAccount.membershipPlans')}</Button>}
           </div>
         </div>

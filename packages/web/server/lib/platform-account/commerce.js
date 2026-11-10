@@ -9,7 +9,6 @@ const units = z.string().regex(/^(0|[1-9]\d*)$/);
 const product = z.enum(['superwagie', 'llmrouter']);
 const key = z.string().uuid();
 const accountInput = z.object({ accountId: id }).strict();
-const rechargeInput = accountInput.extend({ productId: product, amount: units, idempotencyKey: key });
 const purchaseInput = accountInput.extend({ offerId: id, idempotencyKey: key });
 const quoteInput = accountInput.extend({ subscriptionId: id, offerId: id, paymentSource: z.enum(['wallet', 'external']).default('wallet') });
 const checkoutInput = accountInput.extend({ offerId: id.optional(), quoteId: id.optional(), provider: z.enum(['wechat', 'alipay']), idempotencyKey: key }).refine((value) => Boolean(value.offerId) !== Boolean(value.quoteId));
@@ -41,7 +40,6 @@ const quoteSchema = z.object({
   offer: offerSchema, amount: units, grant_amount: units,
   period_start: z.string().datetime(), expires_at: z.string().datetime(), created_at: z.string().datetime(),
 });
-const rechargeSchema = z.object({ id, account_id: id, product_id: product, amount: units, currency: z.literal('CNY'), operation_id: id.nullish() });
 const checkoutSchema = z.object({
   id, account_id: id, product_id: product, provider: z.enum(['wechat', 'alipay']), offer_name: z.string(), amount: units, currency: z.literal('CNY'),
   payment_status: z.enum(['CREATED', 'PENDING', 'UNKNOWN', 'PAID', 'CLOSED', 'REVIEW']), fulfillment_status: z.enum(['NOT_STARTED', 'PENDING', 'FULFILLED', 'REVIEW']), refund_status: z.enum(['', 'PENDING', 'SUCCEEDED', 'REVIEW', 'REJECTED']).default(''),
@@ -56,8 +54,7 @@ const checkoutSchema = z.object({
     if (!valid) ctx.addIssue({ code: 'custom', message: 'Invalid provider session' });
   } catch { ctx.addIssue({ code: 'custom', message: 'Invalid provider session' }); }
 });
-const operationSchema = z.object({ id, account_id: id, kind: z.literal('recharge'), status: z.enum(['CREATED', 'SUBMITTING', 'UNKNOWN', 'APPLIED', 'REJECTED']), error_code: z.string().regex(/^[a-z][a-z0-9_]{0,100}$/).optional() });
-const requiredScopes = ['catalog:read', 'subscriptions:read', 'wallets:read', 'orders:read', 'recharges:read', 'recharges:write', 'orders:write', 'operations:read'];
+const requiredScopes = ['catalog:read', 'subscriptions:read', 'wallets:read', 'orders:read', 'orders:write'];
 const fail = (code, status = 400) => { throw new PlatformAccountError(code, status); };
 const parse = (schema, value, code = 'platform_response_invalid') => {
   const result = schema.safeParse(value);
@@ -69,8 +66,8 @@ const pathFor = (accountId, suffix) => `/v1/accounts/${segment(accountId)}/${suf
 const hasScopes = (caps, names) => names.every((scope) => caps.scopes.includes(scope));
 const financialRole = (role) => role === 'owner' || role === 'billing_admin';
 const supportedOffer = (offer) => offer.product_id === 'superwagie' || (offer.product_id === 'llmrouter' && offer.kind === 'addon');
-const pointsRuntimeUnavailable = (sandbox, pricingProgram, capabilities) => !sandbox && pricingProgram === 'superwagie-ai-points-v1' && capabilities?.native_credits?.ready !== true;
-const publicOffer = (offer, capabilities) => ({ id: offer.id, productId: offer.product_id, name: offer.name, accountKind: offer.account_kind, kind: offer.kind, period: offer.period, price: offer.price, monthlyCredit: offer.monthly_credit, validityMonths: offer.validity_months, rank: offer.rank, sandbox: offer.sandbox, salesReadiness: offer.sales_readiness, pricingProgram: offer.entitlements?.pricing_program, purchaseReadiness: pointsRuntimeUnavailable(offer.sandbox, offer.entitlements?.pricing_program, capabilities) ? { ready: false, reason: 'points_runtime_unavailable' } : { ready: true } });
+const pointsRuntimeUnavailable = (pricingProgram, capabilities) => pricingProgram === 'superwagie-ai-points-v1' && capabilities?.native_credits?.ready !== true;
+const publicOffer = (offer, capabilities) => ({ id: offer.id, productId: offer.product_id, name: offer.name, accountKind: offer.account_kind, kind: offer.kind, period: offer.period, price: offer.price, monthlyCredit: offer.monthly_credit, validityMonths: offer.validity_months, rank: offer.rank, sandbox: offer.sandbox, salesReadiness: offer.sales_readiness, pricingProgram: offer.entitlements?.pricing_program, purchaseReadiness: pointsRuntimeUnavailable(offer.entitlements?.pricing_program, capabilities) ? { ready: false, reason: 'points_runtime_unavailable' } : { ready: true } });
 const publicOrder = (order) => ({ id: order.id, productId: order.product_id, offerName: order.offer.name, amount: order.amount, paymentStatus: order.payment_status, fulfillmentStatus: order.fulfillment_status, refundStatus: order.refund_status ?? '' });
 const publicIntent = (intent) => ({ idempotencyKey: intent.idempotencyKey, kind: intent.kind, accountId: intent.accountId, productId: intent.productId, amount: intent.amount, offerId: intent.offerId, resourceId: intent.resourceId, quoteId: intent.quoteId, provider: intent.provider, subscriptionId: intent.subscriptionId, status: intent.status, errorCode: intent.errorCode, createdAt: intent.createdAt });
 const intentId = (session, accountId, idempotencyKey) => crypto.createHash('sha256').update(JSON.stringify([session.serviceId, session.actingUserId, accountId, idempotencyKey])).digest('hex');
@@ -78,12 +75,7 @@ const safeError = (error) => error instanceof PlatformAccountError && /^[a-z][a-
 const rejectedCodes = new Set(['invalid_request', 'forbidden', 'insufficient_funds', 'insufficient_credits', 'not_found', 'unsupported_plan_change', 'subscription_required', 'payment_not_configured']);
 
 /** UniHub remains the authority for balances and fulfillment. Only recovery intent is local. */
-export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = Date.now, env = process.env }) => {
-  // A remote sandbox flag alone must not authorize free funding. Product-wallet
-  // recharge and its simulation settle real ledger value without collecting
-  // money, so this build only exposes them when the operator explicitly opts in.
-  const allowSandboxFunding = env.OPENCHAMBER_UNIHUB_ALLOW_SANDBOX_FUNDING === 'true';
-  const trustedSandbox = (capabilities) => allowSandboxFunding && capabilities.sandbox === true;
+export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = Date.now }) => {
   let storePromise;
   let closing = false;
   const active = new Map();
@@ -107,7 +99,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     if (!hasScopes(ctx.capabilities, scopes)) fail('platform_scope_required', 403);
   };
   const catalog = async (ctx) => parse(z.array(offerSchema), await ctx.session.request('/v1/catalog'))
-    .filter((offer) => supportedOffer(offer) && (!offer.sandbox || trustedSandbox(ctx.capabilities)) && offer.status === 'published' && (offer.account_kind === 'both' || offer.account_kind === ctx.account.kind));
+    .filter((offer) => supportedOffer(offer) && !offer.sandbox && offer.status === 'published' && (offer.account_kind === 'both' || offer.account_kind === ctx.account.kind));
   const readOrders = async (ctx) => {
     const orders = parse(z.array(orderSchema), await ctx.session.request(pathFor(ctx.account.id, 'orders')));
     if (orders.some((order) => order.account_id !== ctx.account.id || order.product_id !== order.offer.product_id)) fail('platform_response_invalid', 502);
@@ -128,15 +120,6 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     Object.assign(intent, values, { updatedAt: new Date(now()).toISOString() });
     return structuredClone(intent);
   });
-  const operationStatus = (operation) => operation.status === 'APPLIED' ? 'APPLIED' : operation.status === 'REJECTED' ? 'FAILED' : 'PENDING';
-  const readRecharge = async (ctx, intent) => {
-    const recharge = parse(rechargeSchema, await ctx.session.request(pathFor(intent.accountId, `recharges/${segment(intent.resourceId)}`)));
-    if (recharge.id !== intent.resourceId || recharge.account_id !== intent.accountId || recharge.product_id !== intent.productId || recharge.amount !== intent.amount) fail('platform_response_invalid', 502);
-    if (!recharge.operation_id) return { resourceId: recharge.id, status: 'PENDING', errorCode: undefined };
-    const operation = parse(operationSchema, await ctx.session.request(pathFor(intent.accountId, `operations/${segment(recharge.operation_id)}`)));
-    if (operation.id !== recharge.operation_id || operation.account_id !== intent.accountId) fail('platform_response_invalid', 502);
-    return { resourceId: recharge.id, operationId: operation.id, status: operationStatus(operation), errorCode: operation.error_code || undefined };
-  };
   const orderValues = (intent, order) => {
     if (order.account_id !== intent.accountId || order.actor_id !== intent.actorId || order.product_id !== intent.productId || order.offer.id !== intent.offerId || order.amount !== intent.amount) fail('platform_response_invalid', 502);
     if (intent.kind === 'upgrade' && (order.kind !== 'upgrade' || order.subscription_id !== intent.subscriptionId)) fail('platform_response_invalid', 502);
@@ -146,7 +129,6 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     if (!intent.resourceId) return intent;
     let values;
     if (intent.kind === 'checkout') values = checkoutValues(intent, await readCheckout(ctx, intent.resourceId, 'reconcile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }));
-    else if (intent.kind === 'recharge') values = await readRecharge(ctx, intent);
     else {
       const order = (await readOrders(ctx)).find((item) => item.id === intent.resourceId);
       if (!order) fail('platform_order_unavailable', 503);
@@ -162,11 +144,6 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       if (intent.kind === 'checkout') {
         init.body = JSON.stringify({ ...(intent.quoteId ? { quote_id: intent.quoteId } : { offer_id: intent.offerId }), provider: intent.provider });
         values = checkoutValues(intent, parse(checkoutSchema, await ctx.session.request(pathFor(intent.accountId, 'checkouts'), init)));
-      } else if (intent.kind === 'recharge') {
-        init.body = JSON.stringify({ product_id: intent.productId, amount: intent.amount });
-        const recharge = parse(rechargeSchema, await ctx.session.request(pathFor(intent.accountId, 'recharges'), init));
-        if (recharge.account_id !== intent.accountId || recharge.product_id !== intent.productId || recharge.amount !== intent.amount) fail('platform_response_invalid', 502);
-        values = { resourceId: recharge.id, status: 'PENDING', errorCode: undefined };
       } else if (intent.kind === 'upgrade') {
         init.body = JSON.stringify({});
         const order = parse(orderSchema, await ctx.session.request(pathFor(intent.accountId, `quotes/${segment(intent.quoteId)}/accept`), init));
@@ -179,9 +156,9 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       return mutateIntent(journal, storageId, values);
     } catch (error) {
       const sourceCode = safeError(error);
-      const errorCode = sourceCode === 'insufficient_funds' && !trustedSandbox(ctx.capabilities) ? 'payment_not_configured' : sourceCode;
+      const errorCode = sourceCode === 'insufficient_funds' ? 'payment_not_configured' : sourceCode;
       const rejectedQuote = (intent.kind === 'upgrade' || intent.kind === 'checkout' && Boolean(intent.quoteId)) && errorCode === 'quote_invalidated' && error.status === 409;
-      return mutateIntent(journal, storageId, { status: rejectedCodes.has(errorCode) || rejectedQuote || (intent.kind !== 'recharge' && errorCode === 'credit_rates_unavailable' && error.status === 409) ? 'FAILED' : 'UNKNOWN', errorCode });
+      return mutateIntent(journal, storageId, { status: rejectedCodes.has(errorCode) || rejectedQuote || errorCode === 'credit_rates_unavailable' && error.status === 409 ? 'FAILED' : 'UNKNOWN', errorCode });
     }
   };
   const exclusive = (storageId, action, signature) => {
@@ -219,9 +196,9 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
           if (existing.kind !== intent.kind || existing.productId !== intent.productId || existing.amount !== intent.amount || existing.offerId !== intent.offerId || existing.quoteId !== intent.quoteId || existing.provider !== intent.provider) fail('platform_idempotency_conflict', 409);
           return { value: structuredClone(existing), created: false };
         }
-        const unresolved = Object.values(intents).find((item) => item.serviceId === intent.serviceId && item.actorId === intent.actorId && item.accountId === intent.accountId && (['PREPARED', 'UNKNOWN'].includes(item.status) || item.kind === 'checkout' && item.status === 'PENDING'));
+        const unresolved = Object.values(intents).find((item) => item.kind !== 'recharge' && item.serviceId === intent.serviceId && item.actorId === intent.actorId && item.accountId === intent.accountId && (['PREPARED', 'UNKNOWN'].includes(item.status) || item.kind === 'checkout' && item.status === 'PENDING'));
         if (unresolved) {
-          if (!hasScopes(ctx.capabilities, [unresolved.kind === 'recharge' ? 'recharges:read' : 'orders:read'])) fail('platform_scope_required', 403);
+          if (!hasScopes(ctx.capabilities, ['orders:read'])) fail('platform_scope_required', 403);
           fail('platform_operation_pending', 409);
         }
         intents[storageId] = intent;
@@ -237,10 +214,6 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     const intent = journal.read()[storageId];
     if (!intent) fail('platform_intent_not_found', 404);
     return { journal, storageId };
-  };
-  const assertRecharge = (ctx) => {
-    requireFinance(ctx, ['recharges:read', 'recharges:write', 'operations:read']);
-    if (!trustedSandbox(ctx.capabilities) || !ctx.capabilities.product_wallet_recharge) fail('payment_not_configured', 503);
   };
   return {
     overview: async (identity) => {
@@ -272,14 +245,14 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
           Object.assign(intents[storageId], values, { updatedAt: new Date(now()).toISOString() });
         }
       });
-      const intents = journal ? Object.values(journal.read()).filter((intent) => intent.serviceId === ctx.session.serviceId && intent.actorId === ctx.session.actingUserId && intent.accountId === ctx.account.id && hasScopes(ctx.capabilities, [intent.kind === 'recharge' ? 'recharges:read' : 'orders:read'])).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicIntent) : [];
+      const intents = journal ? Object.values(journal.read()).filter((intent) => intent.kind !== 'recharge' && intent.serviceId === ctx.session.serviceId && intent.actorId === ctx.session.actingUserId && intent.accountId === ctx.account.id && hasScopes(ctx.capabilities, ['orders:read'])).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicIntent) : [];
       return {
         accountId: ctx.account.id, role: ctx.account.role, financialAccess: finance,
         missingScopes: requiredScopes.filter((scope) => !ctx.capabilities.scopes.includes(scope)),
-        payments: { mode: trustedSandbox(ctx.capabilities) ? 'sandbox' : ctx.capabilities.real_payments_configured && ctx.capabilities.payment_providers?.length ? 'external' : 'unconfigured', providers: ctx.capabilities.payment_providers ?? [], canRecharge: finance && trustedSandbox(ctx.capabilities) && ctx.capabilities.product_wallet_recharge && hasScopes(ctx.capabilities, ['recharges:read', 'recharges:write', 'operations:read']), canPurchase: finance && hasScopes(ctx.capabilities, ['orders:read', 'orders:write', 'catalog:read']) },
+        payments: { mode: ctx.capabilities.real_payments_configured && ctx.capabilities.payment_providers?.length ? 'external' : 'unconfigured', providers: ctx.capabilities.payment_providers ?? [], canPurchase: finance && hasScopes(ctx.capabilities, ['orders:read', 'orders:write', 'catalog:read']) },
         wallets: resources ? resources.wallets.map((wallet) => ({ productId: wallet.product_id, asset: wallet.asset, amount: wallet.amount })) : null,
         offers: offers?.map((offer) => publicOffer(offer, ctx.capabilities)) ?? null, orders: orders?.map(publicOrder) ?? null, intents,
-        checkouts, rechargeHistoryScope: 'this-instance',
+        checkouts,
       };
     },
     createCheckout: async (identity, rawBody) => {
@@ -296,11 +269,11 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       if (body.quoteId) {
         quote = (await store()).readQuotes()[intentId(ctx.session, body.accountId, body.quoteId)];
         if (!quote || quote.paymentSource !== 'external') fail('platform_quote_unavailable', 409);
-        if (pointsRuntimeUnavailable(quote.sandbox, quote.pricingProgram, ctx.capabilities)) fail('points_runtime_unavailable', 409);
+        if (pointsRuntimeUnavailable(quote.pricingProgram, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       } else {
         offer = (await catalog(ctx)).find((item) => item.id === body.offerId);
         if (!offer) fail('platform_offer_unavailable', 404);
-        if (pointsRuntimeUnavailable(offer.sandbox, offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
+        if (pointsRuntimeUnavailable(offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       }
       return createIntent(ctx, body, 'checkout', offer, quote);
     },
@@ -347,13 +320,6 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       };
       return exclusive(storageId ?? `checkout:${ctx.session.serviceId}:${ctx.account.id}:${checkoutId}`, run);
     },
-    createRecharge: async (identity, rawBody) => {
-      const body = parse(rechargeInput, rawBody, 'platform_request_invalid');
-      if (BigInt(body.amount) <= 0n || BigInt(body.amount) > 9_223_372_036_854_775_807n || BigInt(body.amount) % 10_000n !== 0n) fail('platform_amount_invalid');
-      const ctx = await context(identity, body.accountId);
-      assertRecharge(ctx);
-      return createIntent(ctx, body, 'recharge');
-    },
     purchase: async (identity, rawBody) => {
       const body = parse(purchaseInput, rawBody, 'platform_request_invalid');
       const ctx = await context(identity, body.accountId);
@@ -365,7 +331,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       }
       const offer = (await catalog(ctx)).find((item) => item.id === body.offerId);
       if (!offer) fail('platform_offer_unavailable', 404);
-      if (pointsRuntimeUnavailable(offer.sandbox, offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
+      if (pointsRuntimeUnavailable(offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       return createIntent(ctx, body, 'purchase', offer);
     },
     quoteUpgrade: async (identity, rawBody) => {
@@ -374,12 +340,12 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       requireFinance(ctx, ['catalog:read', 'subscriptions:read', 'orders:read', 'orders:write']);
       const offer = (await catalog(ctx)).find((item) => item.id === body.offerId && item.product_id === 'superwagie' && item.kind === 'membership');
       if (!offer) fail('platform_offer_unavailable', 404);
-      if (pointsRuntimeUnavailable(offer.sandbox, offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
+      if (pointsRuntimeUnavailable(offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       const input = { subscription_id: body.subscriptionId, offer_id: body.offerId };
       if (body.paymentSource === 'external') input.payment_source = 'external';
       const quote = parse(quoteSchema, await ctx.session.request(pathFor(body.accountId, 'quotes'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
       if (quote.account_id !== body.accountId || quote.subscription_id !== body.subscriptionId || quote.offer.id !== body.offerId || quote.offer.product_id !== 'superwagie' || quote.offer.kind !== 'membership' || quote.offer.sandbox !== offer.sandbox || quote.offer.entitlements?.pricing_program !== offer.entitlements?.pricing_program || Date.parse(quote.expires_at) <= now()) fail('platform_response_invalid', 502);
-      if (pointsRuntimeUnavailable(quote.offer.sandbox, quote.offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
+      if (pointsRuntimeUnavailable(quote.offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       if (body.paymentSource === 'external' && (quote.payment_source !== 'external' || quote.rounding_rule !== 'cny_cent_ceil_v1' || !quote.original_amount || BigInt(quote.amount) !== ((BigInt(quote.original_amount) + 9999n) / 10000n) * 10000n)) fail('platform_response_invalid', 502);
       const journal = await store();
       const quoteStorageId = intentId(ctx.session, body.accountId, quote.id);
@@ -406,45 +372,22 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       if (!quote || quote.accountId !== body.accountId || quote.actorId !== ctx.session.actingUserId || quote.serviceId !== ctx.session.serviceId) fail('platform_quote_unavailable', 404);
       if (quote.paymentSource === 'external') fail('platform_quote_unavailable', 409);
       if (Date.parse(quote.expiresAt) <= now()) fail('platform_quote_expired', 409);
-      if (quote.sandbox && !trustedSandbox(ctx.capabilities)) fail('payment_not_configured', 503);
-      if (pointsRuntimeUnavailable(quote.sandbox, quote.pricingProgram, ctx.capabilities)) fail('points_runtime_unavailable', 409);
+      if (quote.sandbox) fail('payment_not_configured', 503);
+      if (pointsRuntimeUnavailable(quote.pricingProgram, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       return createIntent(ctx, body, 'upgrade', undefined, quote);
     },
     reconcile: async (identity, idempotencyKey, rawBody) => {
       const body = parse(accountInput, rawBody, 'platform_request_invalid');
       const ctx = await context(identity, body.accountId);
       const { journal, storageId } = await findIntent(ctx, idempotencyKey);
-      const selectedIntent = journal.read()[storageId];
-      requireFinance(ctx, selectedIntent.kind === 'recharge' ? ['recharges:read', 'operations:read'] : ['orders:read']);
+      if (journal.read()[storageId]?.kind === 'recharge') fail('platform_request_invalid', 409);
+      requireFinance(ctx, ['orders:read']);
       return exclusive(storageId, async () => {
         const intent = journal.read()[storageId];
         if (intent.resourceId) return publicIntent(await reconcileRead(ctx, journal, storageId, intent));
         if (!['PREPARED', 'UNKNOWN'].includes(intent.status)) return publicIntent(intent);
-        if (intent.kind === 'recharge') assertRecharge(ctx);
-        else {
-          requireFinance(ctx, ['orders:write']);
-        }
+        requireFinance(ctx, ['orders:write']);
         return publicIntent(await dispatch(ctx, journal, storageId, intent));
-      });
-    },
-    sandboxSettle: async (identity, idempotencyKey, rawBody) => {
-      const body = parse(accountInput, rawBody, 'platform_request_invalid');
-      const ctx = await context(identity, body.accountId);
-      assertRecharge(ctx);
-      const { journal, storageId } = await findIntent(ctx, idempotencyKey);
-      return exclusive(storageId, async () => {
-        const intent = journal.read()[storageId];
-        if (intent.kind !== 'recharge' || !intent.resourceId) fail('platform_recharge_unresolved', 409);
-        const before = await reconcileRead(ctx, journal, storageId, intent);
-        if (before.operationId || before.status === 'APPLIED') return publicIntent(before);
-        await mutateIntent(journal, storageId, { status: 'UNKNOWN', errorCode: undefined });
-        try {
-          const operation = parse(operationSchema, await ctx.session.request(pathFor(intent.accountId, `recharges/${segment(intent.resourceId)}/sandbox-settle`), { method: 'POST' }));
-          if (operation.account_id !== intent.accountId) fail('platform_response_invalid', 502);
-          return publicIntent(await mutateIntent(journal, storageId, { operationId: operation.id, status: operationStatus(operation), errorCode: operation.error_code || undefined }));
-        } catch (error) {
-          return publicIntent(await mutateIntent(journal, storageId, { status: 'UNKNOWN', errorCode: safeError(error) }));
-        }
       });
     },
     close: async () => {

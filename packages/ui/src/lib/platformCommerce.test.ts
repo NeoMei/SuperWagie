@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { PlatformAccountError, readPlatformAuthMethods, registerPlatformAccount } from './platformAccount';
-import { createPlatformCheckout, updatePlatformCheckout, acceptPlatformUpgradeQuote, createPlatformRecharge, createPlatformUpgradeQuote, formatPlatformMoney, formatPlatformPoints, parsePlatformRechargeAmount, readPlatformCommerce, reconcilePlatformIntent } from './platformCommerce';
+import { createPlatformCheckout, updatePlatformCheckout, acceptPlatformUpgradeQuote, createPlatformUpgradeQuote, formatPlatformMoney, formatPlatformPoints, purchasePlatformOffer, readPlatformCommerce, reconcilePlatformIntent } from './platformCommerce';
 
 const snapshots = {
   accountId: 'account-a', role: 'owner', financialAccess: true, missingScopes: [],
-  payments: { mode: 'sandbox', canRecharge: true, canPurchase: true },
+  payments: { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] },
   wallets: [{ productId: 'superwagie', asset: 'CNY/6', amount: '9007199254740993' }],
-  offers: [], orders: [], intents: [], rechargeHistoryScope: 'this-instance',
+  offers: [], orders: [], intents: [],
 };
-const intent = { idempotencyKey: 'intent-a', kind: 'recharge', accountId: 'account-a', productId: 'superwagie', amount: '10000000', status: 'UNKNOWN', createdAt: '2026-10-25T00:00:00Z' };
+const intent = { idempotencyKey: 'intent-a', kind: 'purchase', accountId: 'account-a', productId: 'superwagie', amount: '10000000', status: 'UNKNOWN', createdAt: '2026-10-25T00:00:00Z' };
 const restore: (() => void)[] = [];
 afterEach(() => { for (const cleanup of restore.splice(0)) cleanup(); });
 const intercept = (fn: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) => {
@@ -23,14 +23,6 @@ describe('platform commerce transport', () => {
     expect(formatPlatformMoney('9007199254740993')).toBe('9007199254.740993');
     expect(formatPlatformMoney('1000000')).toBe('1.00'); expect(formatPlatformMoney('1')).toBe('0.000001');
   });
-  test('accepts only positive whole-cent recharge input without floating point', () => {
-    expect(parsePlatformRechargeAmount('10.01')).toBe('10010000');
-    expect(parsePlatformRechargeAmount('0.01')).toBe('10000');
-    expect(parsePlatformRechargeAmount('9007199254740993.12')).toBe('9007199254740993120000');
-    for (const value of ['0', '0.00', '-1', '1.001', '1e3', 'NaN', ' 1', '01', '.1', '1.']) {
-      expect(() => parsePlatformRechargeAmount(value)).toThrow(PlatformAccountError);
-    }
-  });
   test('formats point summaries exactly without trailing fractional zeros', () => {
     expect(formatPlatformPoints('1000000000')).toBe('1000');
     expect(formatPlatformPoints('1234567')).toBe('1.234567');
@@ -40,7 +32,7 @@ describe('platform commerce transport', () => {
     expect(() => formatPlatformPoints('-1')).toThrow('platform_response_invalid');
   });
   test('keeps authoritative quote creation separate from acceptance and preserves the acceptance key', async () => {
-    const quote = { id: 'quote-a', accountId: 'account-a', subscriptionId: 'sub-a', subscriptionVersion: 1, offer: { id: 'offer-a', productId: 'superwagie', name: 'Upgrade', accountKind: 'both', kind: 'membership', period: 'month', price: '99000000', monthlyCredit: '3000000000', validityMonths: 0, rank: 2, sandbox: true }, amount: '1000001', additionalCredits: '2000000', periodStart: '2026-11-01T00:00:00Z', expiresAt: '2026-12-01T00:00:00Z', createdAt: '2026-11-08T00:00:00Z' };
+    const quote = { id: 'quote-a', accountId: 'account-a', subscriptionId: 'sub-a', subscriptionVersion: 1, offer: { id: 'offer-a', productId: 'superwagie', name: 'Upgrade', accountKind: 'both', kind: 'membership', period: 'month', price: '99000000', monthlyCredit: '3000000000', validityMonths: 0, rank: 2, sandbox: false }, amount: '1000001', additionalCredits: '2000000', periodStart: '2026-11-01T00:00:00Z', expiresAt: '2026-12-01T00:00:00Z', createdAt: '2026-11-08T00:00:00Z' };
     const calls: string[] = [];
     intercept(async (url, init) => {
       calls.push(String(url));
@@ -61,10 +53,10 @@ describe('platform commerce transport', () => {
     intercept(async (_url, init) => {
       attempts += 1;
       expect(init?.method).toBe('POST');
-      expect(JSON.parse(String(init?.body))).toEqual({ accountId: 'account-a', productId: 'superwagie', amount: '10000000', idempotencyKey: 'intent-a' });
+      expect(JSON.parse(String(init?.body))).toEqual({ accountId: 'account-a', offerId: 'offer-a', idempotencyKey: 'intent-a' });
       throw new Error('Connection interrupted');
     });
-    await expect(createPlatformRecharge({ accountId: 'account-a', productId: 'superwagie', amount: '10000000', idempotencyKey: 'intent-a' })).rejects.toThrow('platform_unavailable');
+    await expect(purchasePlatformOffer({ accountId: 'account-a', offerId: 'offer-a', idempotencyKey: 'intent-a' })).rejects.toThrow('platform_unavailable');
     expect(attempts).toBe(1);
   });
   test('reconciles by original key and explicit account', async () => {

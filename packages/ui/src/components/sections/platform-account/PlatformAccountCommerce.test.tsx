@@ -13,20 +13,20 @@ for (const [name, value] of Object.entries({ window: browser, document: browser.
 }
 const commerce: PlatformCommerceState = {
   accountId: 'team-a', role: 'owner', financialAccess: true, missingScopes: [],
-  payments: { mode: 'sandbox', canRecharge: true, canPurchase: true },
+  payments: { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] },
   wallets: [{ productId: '', asset: 'CNY/6', amount: '1234567' }, { productId: 'superwagie', asset: 'CNY/6', amount: '30000000' }, { productId: 'llmrouter', asset: 'CNY/6', amount: '86400000' }, { productId: 'other-service', asset: 'CNY/6', amount: '999999000000' }],
   offers: [
-    { id: 'addon-a', productId: 'llmrouter', name: 'llmrouter add-on', accountKind: 'both', kind: 'addon', period: 'once', price: '10000000', monthlyCredit: '20000000', validityMonths: 12, rank: 1, sandbox: true },
-    { id: 'other-addon', productId: 'other-service', name: 'Other service add-on', accountKind: 'both', kind: 'addon', period: 'once', price: '10000000', monthlyCredit: '20000000', validityMonths: 12, rank: 1, sandbox: true },
-    { id: 'membership-a', productId: 'superwagie', name: 'SuperWagie Plus', accountKind: 'both', kind: 'membership', period: 'month', price: '10000000', monthlyCredit: '20000000', validityMonths: 1, rank: 1, sandbox: true },
-    { id: 'other-membership', productId: 'llmrouter', name: 'llmrouter membership', accountKind: 'both', kind: 'membership', period: 'month', price: '10000000', monthlyCredit: '20000000', validityMonths: 1, rank: 1, sandbox: true },
+    { id: 'addon-a', productId: 'llmrouter', name: 'llmrouter add-on', accountKind: 'both', kind: 'addon', period: 'once', price: '10000000', monthlyCredit: '20000000', validityMonths: 12, rank: 1, sandbox: false },
+    { id: 'other-addon', productId: 'other-service', name: 'Other service add-on', accountKind: 'both', kind: 'addon', period: 'once', price: '10000000', monthlyCredit: '20000000', validityMonths: 12, rank: 1, sandbox: false },
+    { id: 'membership-a', productId: 'superwagie', name: 'SuperWagie Plus', accountKind: 'both', kind: 'membership', period: 'month', price: '10000000', monthlyCredit: '20000000', validityMonths: 1, rank: 1, sandbox: false },
+    { id: 'other-membership', productId: 'llmrouter', name: 'llmrouter membership', accountKind: 'both', kind: 'membership', period: 'month', price: '10000000', monthlyCredit: '20000000', validityMonths: 1, rank: 1, sandbox: false },
   ],
   orders: [
     { id: 'order-a', productId: 'superwagie', offerName: 'Previous membership', amount: '30000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' },
     { id: 'order-addon', productId: 'llmrouter', offerName: 'llmrouter add-on order', amount: '10000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' },
     { id: 'order-other', productId: 'other-service', offerName: 'Other service order', amount: '999999000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' },
   ],
-  checkouts: [], intents: [], rechargeHistoryScope: 'this-instance',
+  checkouts: [], intents: [],
 };
 let writes = 0;
 let accountRefreshes = 0;
@@ -106,7 +106,7 @@ test('overview opens a buying task deliberately and preserves its offer while vi
   expect(writes).toBe(0);
 });
 
-test('model recharge navigation opens the model wallet without creating a payment', async () => {
+test('model funding navigation opens add-on plans without creating a payment', async () => {
   await render('overview');
   expect(host?.textContent).not.toContain('Existing cash balances');
   expect(host?.textContent).not.toContain('Account balance');
@@ -115,10 +115,9 @@ test('model recharge navigation opens the model wallet without creating a paymen
   expect(/unihub|llmrouter|other-service|999999/i.test(host?.textContent ?? '')).toBe(false);
   expect(host?.querySelector('#unihub-recharge-amount')).toBeNull();
   await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
-  expect(host?.querySelector('#unihub-recharge-amount')).not.toBeNull();
-  expect(host?.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('Model balance');
+  expect(host?.querySelector('[role="radio"][aria-label="Buy extra credits"]')).not.toBeNull();
   expect(/unihub|llmrouter/i.test(host?.textContent ?? '')).toBe(false);
-  expect(usePlatformAccountTabStore.getState().rechargeTarget).toBeNull();
+  expect(usePlatformAccountTabStore.getState().purchaseTarget).toBeNull();
   expect(writes).toBe(0);
 });
 
@@ -139,11 +138,9 @@ test('older unresolved requests stay recoverable without exposing another servic
 });
 
 test('unconfirmed intent recovery remains reachable in overview and orders while new commands stay blocked', async () => {
-  commerce.intents = [{ idempotencyKey: 'original-command', kind: 'recharge', accountId: 'team-a', productId: 'llmrouter', amount: '5000000', status: 'UNKNOWN', createdAt: '2026-11-06T00:00:00Z' }];
+  commerce.intents = [{ idempotencyKey: 'original-command', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '5000000', provider: 'wechat', status: 'UNKNOWN', createdAt: '2026-11-06T00:00:00Z' }];
   await render('overview');
   expect(button('Check original request').disabled).toBe(false);
-  await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
-  expect(host?.querySelector<HTMLInputElement>('#unihub-recharge-amount')?.disabled).toBe(true);
   await render('orders');
   expect(button('Check original request').disabled).toBe(false);
   expect(host?.textContent).toContain('Previous membership');
@@ -180,19 +177,17 @@ test('point runtime readiness blocks selection while leaving original balance re
   const addon = commerce.offers?.find((offer) => offer.id === 'addon-a');
   if (!addon) throw new Error('Missing fixture addon');
   addon.productId = 'superwagie'; addon.name = 'Extra 200'; addon.purchaseReadiness = { ready: false, reason: 'points_runtime_unavailable' };
-  commerce.payments.mode = 'unconfigured'; commerce.payments.canRecharge = false;
+  commerce.payments.mode = 'unconfigured';
   await render('overview');
   await act(async () => preparePlatformAccountTarget('platform-account.addon'));
   expect(host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Extra 200"]')?.disabled).toBe(true);
   expect(host?.textContent).toContain('not open for purchase yet');
-  await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
-  expect(host?.querySelector('#unihub-recharge-amount')).not.toBeNull();
   expect(host?.textContent).not.toContain('Existing cash balances');
   expect(writes).toBe(0);
 });
 
 test('existing eligible offers can use a sufficient balance without external payment configuration', async () => {
-  commerce.payments.mode = 'unconfigured'; commerce.payments.canRecharge = false;
+  commerce.payments.mode = 'unconfigured';
   const addon = commerce.offers?.find((offer) => offer.id === 'addon-a');
   if (!addon) throw new Error('Missing fixture addon');
   addon.sandbox = false;
@@ -207,7 +202,8 @@ for (const lostResponse of [false, true]) test(`upgrade confirms the authoritati
   const offer = commerce.offers?.find((item) => item.id === 'membership-a');
   if (!offer) throw new Error('Missing fixture membership');
   currentMembership = { id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-08T00:00:00Z', offer: { id: 'previous-plan', name: 'Standard', period: 'month', rank: 0 } };
-  upgradeQuote = { id: 'quote-a', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1, offer, amount: '5000000', additionalCredits: '100000000', periodStart: '2026-11-08T00:00:00Z', createdAt: '2026-11-08T00:00:00Z', expiresAt: '2099-11-09T00:00:00Z' };
+  upgradeQuote = { paymentSource: 'wallet', id: 'quote-a', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1, offer, amount: '5000000', additionalCredits: '100000000', periodStart: '2026-11-08T00:00:00Z', createdAt: '2026-11-08T00:00:00Z', expiresAt: '2099-11-09T00:00:00Z' };
+  commerce.payments.mode = 'unconfigured';
   await render('overview');
   await act(async () => button('Subscribe').click());
   await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
@@ -232,7 +228,8 @@ test('an expired upgrade quote can be refreshed without accepting or charging it
   const offer = commerce.offers?.find((item) => item.id === 'membership-a');
   if (!offer) throw new Error('Missing fixture membership');
   currentMembership = { id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-08T00:00:00Z', offer: { id: 'previous-plan', name: 'Standard' } };
-  upgradeQuote = { id: 'expired-quote', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1, offer, amount: '5000000', additionalCredits: '100000000', periodStart: '2000-01-01T00:00:00Z', createdAt: '2000-01-01T00:00:00Z', expiresAt: '2000-01-02T00:00:00Z' };
+  upgradeQuote = { paymentSource: 'wallet', id: 'expired-quote', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1, offer, amount: '5000000', additionalCredits: '100000000', periodStart: '2000-01-01T00:00:00Z', createdAt: '2000-01-01T00:00:00Z', expiresAt: '2000-01-02T00:00:00Z' };
+  commerce.payments.mode = 'unconfigured';
   await render('overview');
   await act(async () => button('Subscribe').click());
   await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
@@ -249,7 +246,8 @@ for (const rejection of ['failed', 'http', 'conflict'] as const) test(`upgrade $
   const offer = commerce.offers?.find((item) => item.id === 'membership-a');
   if (!offer) throw new Error('Missing fixture membership');
   currentMembership = { id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-08T00:00:00Z', offer: { id: 'previous-plan', name: 'Standard' } };
-  upgradeQuote = { id: 'quote-a', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1, offer, amount: '5000000', additionalCredits: '100000000', periodStart: '2026-11-08T00:00:00Z', createdAt: '2026-11-08T00:00:00Z', expiresAt: '2099-12-01T00:00:00Z' };
+  upgradeQuote = { paymentSource: 'wallet', id: 'quote-a', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1, offer, amount: '5000000', additionalCredits: '100000000', periodStart: '2026-11-08T00:00:00Z', createdAt: '2026-11-08T00:00:00Z', expiresAt: '2099-12-01T00:00:00Z' };
+  commerce.payments.mode = 'unconfigured';
   await render('overview');
   await act(async () => button('Subscribe').click());
   await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
@@ -331,7 +329,7 @@ test('a source-unavailable account keeps its authoritative total without inventi
 
 
 test('external channel selection stays read-only until explicit confirmation and unknown checkout blocks another payment', async () => {
-  commerce.payments = { mode: 'external', canRecharge: false, canPurchase: true, providers: ['wechat', 'alipay'] };
+  commerce.payments = { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] };
   commerce.wallets = [];
   activeMembership = false;
   await render('overview');
@@ -367,7 +365,7 @@ test('reopening retains paid activation and refund states without presenting ano
 
 
 for (const rejection of ['failed','http','conflict'] as const) test(`external upgrade ${rejection} releases only a conclusively invalidated quote and requires fresh confirmation`, async () => {
-  commerce.payments={mode:'external',canRecharge:false,canPurchase:true,providers:['wechat','alipay']};
+  commerce.payments={mode:'external',canPurchase:true,providers:['wechat','alipay']};
   const offer=commerce.offers?.find(item=>item.id==='membership-a');if(!offer)throw new Error('Missing offer');
   currentMembership={id:'subscription-a',product_id:'superwagie',status:'active',paid_through:'2099-12-08T00:00:00Z',offer:{id:'old',name:'Old',period:'month',rank:0}};
   upgradeQuote={id:'quote-a',accountId:'team-a',subscriptionId:'subscription-a',subscriptionVersion:1,offer,amount:'5000000',additionalCredits:'100000000',periodStart:'2026-11-08T00:00:00Z',createdAt:'2026-11-08T00:00:00Z',expiresAt:'2099-11-09T00:00:00Z',paymentSource:'external',originalAmount:'5000000',roundingRule:'cny_cent_ceil_v1'};

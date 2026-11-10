@@ -46,7 +46,6 @@ let purchaseRequests = 0;
 let nextAccountResponse: Promise<Response> | null = null;
 let nextPasswordResponse: Promise<Response> | null = null;
 let rechargeResponseGate: Promise<void> | null = null;
-let commerceReads = 0;
 let usageStatus = 200;
 let nativeReportRequests = 0;
 const usageSummary = { usage_coverage: { legacy_token_calls: '2', native_metered_calls: '0' }, visibility: 'actor', calls_total: '3', settled_calls: '2', pending_calls: '0', unknown_calls: '1',
@@ -64,10 +63,10 @@ const rechargeKeys: string[] = [];
 const rechargeProducts: string[] = [];
 const commerce: PlatformCommerceState = {
   accountId: 'team-a', role: 'owner', financialAccess: true, missingScopes: [],
-  payments: { mode: 'sandbox', canRecharge: true, canPurchase: true },
+  payments: { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] },
   wallets: [{ productId: 'superwagie', asset: 'CNY/6', amount: '9007199254740993' }, { productId: 'llmrouter', asset: 'CNY/6', amount: '0' }],
-  offers: [{ id: 'addon-a', productId: 'llmrouter', name: 'Fixture credits', accountKind: 'both', kind: 'addon', period: 'once', price: '10000000', monthlyCredit: '20000000', validityMonths: 12, rank: 1, sandbox: true }],
-  orders: [], intents: [], rechargeHistoryScope: 'this-instance',
+  offers: [{ id: 'addon-a', productId: 'llmrouter', name: 'Fixture credits', accountKind: 'both', kind: 'addon', period: 'once', price: '10000000', monthlyCredit: '20000000', validityMonths: 12, rank: 1, sandbox: false }],
+  orders: [], intents: [],
 };
 const bodySchema = z.object({ username: z.string().optional(), password: z.string().optional(), idempotencyKey: z.string().optional(), productId: z.string().optional(), amount: z.string().optional(), accountId: z.string().optional(), offerId: z.string().optional() });
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -109,7 +108,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   if (path.endsWith('/api/platform-account/commerce/recharges')) {
     const body = bodySchema.parse(JSON.parse(String(init?.body)));
     rechargeRequests++; rechargeKeys.push(body.idempotencyKey ?? ''); rechargeProducts.push(body.productId ?? '');
-    const intent: PlatformCommerceIntent = { idempotencyKey: body.idempotencyKey ?? '', kind: 'recharge', accountId: 'team-a', productId: body.productId ?? '', amount: body.amount ?? '', status: 'PENDING', resourceId: 'recharge-a', createdAt: '2026-10-25T00:00:00Z' };
+    const intent: PlatformCommerceIntent = { idempotencyKey: body.idempotencyKey ?? '', kind: 'purchase', accountId: 'team-a', productId: body.productId ?? '', amount: body.amount ?? '', status: 'PENDING', resourceId: 'recharge-a', createdAt: '2026-10-25T00:00:00Z' };
     if (!commerce.intents.some((item) => item.idempotencyKey === intent.idempotencyKey)) commerce.intents.push(intent);
     if (rechargeResponseGate) await rechargeResponseGate;
     if (lostRechargeResponse) { lostRechargeResponse = false; throw new TypeError('network'); }
@@ -131,7 +130,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     const intent: PlatformCommerceIntent = { idempotencyKey: body.idempotencyKey ?? '', kind: 'purchase', accountId: 'team-a', productId: 'llmrouter', amount: '10000000', status: purchaseFailure === 'intent' ? 'FAILED' : 'APPLIED', errorCode: purchaseFailure === 'intent' ? 'credit_rates_unavailable' : undefined, createdAt: '2026-10-25T00:00:00Z' };
     commerce.intents.push(intent); return Response.json(intent);
   }
-  if (path.endsWith('/api/platform-account/commerce')) { commerceReads++; if (failCommerceAfterPurchase && purchaseRequests) return Response.json({ error: 'service_unavailable' }, { status: 503 }); return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'sandbox', canRecharge: false, canPurchase: false } }); }
+  if (path.endsWith('/api/platform-account/commerce')) { if (failCommerceAfterPurchase && purchaseRequests) return Response.json({ error: 'service_unavailable' }, { status: 503 }); return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'unconfigured', canPurchase: false } }); }
   if (path.endsWith('/api/platform-account/usage/team-a/summary')) return usageStatus === 200
     ? Response.json(nativeOverride ?? (nativeScenario ? { ...nativeRequestSummary, visibility: 'account' } : { ...usageSummary, usage_coverage: legacyCoverageUnknown ? undefined : usageSummary.usage_coverage })) : Response.json({ error: 'forbidden' }, { status: usageStatus });
   if (path.endsWith('/api/platform-account/usage/team-a/activity')) return usageStatus === 200 ? Response.json({
@@ -172,7 +171,6 @@ const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
 const { createWebAPIs } = await import('../../../../../web/src/api/index');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
-const { useUIStore } = await import('@/stores/useUIStore');
 const { ManagedModelFundingNotice } = await import('@/components/chat/ManagedModelFundingNotice');
 const { PlatformAccountPage } = await import('./PlatformAccountPage');
 const { preparePlatformAccountTarget, usePlatformAccountTabStore } = await import('./platformAccountTabs');
@@ -184,7 +182,7 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider>{showFundingNotice ? <ManagedModelFundingNotice /> : <PlatformAccountPage />}</I18nProvider></RuntimeAPIContext.Provider>));
   if (!vscode && host.querySelector('[data-platform-account-tab]')) await tab(initialTab === 'usage' ? 'Consumption records' : initialTab === 'profile' ? 'Personal details' : 'Membership and usage');
 };
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; commerceReads = 0; usageStatus = 200; nativeReportRequests = 0; nativeScenario = false; legacyCoverageUnknown = false; nativeOverride = null; purchaseFailure = null; failCommerceAfterPurchase = false; if (commerce.offers?.[0]) delete commerce.offers[0].salesReadiness; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; usageStatus = 200; nativeReportRequests = 0; nativeScenario = false; legacyCoverageUnknown = false; nativeOverride = null; purchaseFailure = null; failCommerceAfterPurchase = false; if (commerce.offers?.[0]) delete commerce.offers[0].salesReadiness; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
 
 const button = (text: string) => {
@@ -344,7 +342,7 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).toContain('1.001 provider units · fixture:credits');
   });
   test('does not turn a confirmed blocked purchase into an unknown outcome when the follow-up read fails', async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; purchaseFailure = 'intent'; failCommerceAfterPurchase = true;
+    useI18nStore.getState().setLocale('en'); financialAccess = true; purchaseFailure = 'intent'; failCommerceAfterPurchase = true; commerce.payments.mode = 'unconfigured';
     if (commerce.wallets?.[1]) commerce.wallets[1].amount = '10000000';
     await render(); await chooseOffer();
     const buy = [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.startsWith('Buy Buy extra credits'));
@@ -395,7 +393,7 @@ describe('PlatformAccountPage', () => {
     expect(purchaseRequests).toBe(0);
   });
   for (const failure of ['intent', 'http', 'uncertain'] as const) test(`handles stale-catalog purchase ${failure} without treating every 409 as definitive`, async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; purchaseFailure = failure;
+    useI18nStore.getState().setLocale('en'); financialAccess = true; purchaseFailure = failure; commerce.payments.mode = 'unconfigured';
     if (commerce.wallets?.[1]) commerce.wallets[1].amount = '10000000';
     commerce.orders = [{ id: 'paid-before', productId: 'llmrouter', offerName: 'Previously paid benefit', amount: '1000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' }];
     await render(); await chooseOffer();
@@ -949,33 +947,6 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).toContain('billing administrator'); expect(host.textContent).toContain('9007199254.740993');
     expect(host.querySelector('#unihub-recharge-amount')).toBeNull(); expect(rechargeRequests).toBe(0); expect(settlementRequests).toBe(0);
   });
-  for (const initialTab of ['profile', 'billing'] as const) test(`opens the model wallet dialog from a funding refusal after visiting ${initialTab}`, async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; await render(false, initialTab, true);
-    useUIStore.setState({ settingsPage: 'appearance', isSettingsDialogOpen: false, settingsJumpRequest: null });
-    const openFunding = async () => {
-      await act(async () => host.querySelector<HTMLButtonElement>('[role="status"] button')?.click());
-      expect(useUIStore.getState().settingsJumpRequest).toBeNull();
-      expect(useUIStore.getState().isSettingsDialogOpen).toBe(false);
-      expect(useUIStore.getState().settingsPage).toBe('appearance');
-      expect(document.querySelector('[role="dialog"]')).not.toBeNull();
-    };
-    await openFunding();
-    const destination = () => document.querySelector('[role="dialog"] [data-settings-item="platform-account.model-recharge"]');
-    expect(destination()?.textContent).toContain('Model balance');
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('This top-up funds your model balance.');
-    expect(rechargeRequests).toBe(0); expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
-    await act(async () => preparePlatformAccountTarget('platform-account.recharge'));
-    expect(destination()?.textContent).toContain('Subscription balance');
-    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('This top-up funds your model balance.');
-    await act(async () => document.querySelector<HTMLButtonElement>('[data-slot="dialog-close"]')?.click());
-    await openFunding();
-    expect(destination()?.textContent).toContain('Model balance');
-    await fill('unihub-recharge-amount', '1.00', document); await submit(document);
-    expect(rechargeRequests).toBe(1); expect(commerce.intents[0]?.productId).toBe('llmrouter');
-    expect(commerce.intents[0]?.amount).toBe('1000000');
-    expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
-  });
-
   test('shows authoritative refunded and unknown membership states even with a future paid-through date', async () => {
     useI18nStore.getState().setLocale('en');
     const membership = signedIn.membership[0];
@@ -1003,10 +974,7 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).not.toContain('Session expires');
     await chooseOffer();
     expect(host.textContent).toContain('Team A');
-    await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
-    expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('Model balance');
-    expect(host.querySelector('[role="radiogroup"]')).toBeNull();
-    expect(host.textContent).not.toContain('Buy Buy extra credits for CNY 10.00');
+    expect(host.textContent).not.toContain('Confirm purchase');
     expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
   });
 
@@ -1028,58 +996,6 @@ describe('PlatformAccountPage', () => {
     }
   });
 
-  test('model funding shows only recharge and retains a deliberate offer for its buying task', async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
-    await chooseOffer();
-    await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
-    expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('Model balance');
-    expect(host.querySelector('[aria-label="Billing account"]')?.textContent).toContain('Team A');
-    expect(host.querySelector('[role="radiogroup"]')).toBeNull();
-    expect(host.textContent).not.toContain('Buy Buy extra credits for CNY 10.00');
-    await act(async () => button('Refresh wallets and orders').click());
-    expect(host.querySelector('[data-settings-item="platform-account.model-recharge"]')?.textContent).toContain('Model balance');
-    await act(async () => button('Buy extra credits').click());
-    expect(button('Buy Buy extra credits for CNY 10.00')).toBeDefined();
-    expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
-  });
-
-  test('keeps the ordinary membership recharge destination as SuperWagie', async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
-    await fill('unihub-recharge-amount', '1.00'); await submit();
-    expect(commerce.intents[0]?.productId).toBe('superwagie');
-    expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
-  });
-
-  test('requires separate sandbox settlement and purchase after funding an offer', async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
-    expect(host.querySelector('[data-settings-item="platform-account.recharge"] input')).toBeNull();
-    expect(rechargeRequests).toBe(0);
-    expect(host.textContent).not.toContain('CNY 9007199254.740993');
-    await chooseOffer();
-    expect(button('Buy Buy extra credits for CNY 10.00').disabled).toBe(true);
-    await act(async () => button('Fill recharge for this offer').click());
-    expect(host.querySelector<HTMLInputElement>('#unihub-recharge-amount')?.value).toBe('10.00');
-    await submit(); expect(rechargeRequests).toBe(1); expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
-    expect(commerce.intents[0]?.productId).toBe('llmrouter');
-    await act(async () => button('Simulate settlement').click());
-    expect(settlementRequests).toBe(1); expect(purchaseRequests).toBe(0);
-    await act(async () => button('Buy extra credits').click());
-    expect(button('Buy Buy extra credits for CNY 10.00').disabled).toBe(false);
-    await act(async () => button('Refresh wallets and orders').click());
-    expect(button('Buy Buy extra credits for CNY 10.00').disabled).toBe(false);
-    expect(rechargeRequests).toBe(1); expect(settlementRequests).toBe(1);
-    await act(async () => button('Buy Buy extra credits for CNY 10.00').click()); expect(purchaseRequests).toBe(1);
-  });
-  test('recovers a lost recharge response using the same key without starting another request', async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; lostRechargeResponse = true; await render();
-    await fill('unihub-recharge-amount', '5.00'); await submit();
-    expect(host.textContent).toContain('request outcome is unknown'); expect(host.textContent).not.toContain('CNY 9007199254.740993');
-    await act(async () => preparePlatformAccountTarget('platform-account.model-recharge'));
-    await act(async () => button('Recover original request').click());
-    expect(rechargeKeys).toHaveLength(2); expect(rechargeKeys[1]).toBe(rechargeKeys[0]); expect(commerce.intents).toHaveLength(1);
-    expect(rechargeProducts.slice(-2)).toEqual(['superwagie', 'superwagie']);
-    expect(settlementRequests).toBe(0); expect(purchaseRequests).toBe(0);
-  });
 
   test('drops a late account read after switching the runtime endpoint', async () => {
     useI18nStore.getState().setLocale('en');
@@ -1091,26 +1007,11 @@ describe('PlatformAccountPage', () => {
     await act(async () => resolveOld(Response.json(signedIn)));
     expect(host.textContent).not.toContain('Alice'); expect(host.textContent).not.toContain('9007199254.740993');
   });
-  test('drops a pending recharge result after sign-out and never refreshes the old account', async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
-    let release = () => {};
-    rechargeResponseGate = new Promise<void>((resolve) => { release = resolve; });
-    await fill('unihub-recharge-amount', '5.00'); await submit();
-    expect(rechargeRequests).toBe(1);
-    expect(host.textContent).toContain('Loading');
-    expect(host.textContent).not.toContain('Unconfirmed request');
-    expect(host.textContent).not.toContain('request outcome is unknown');
-    expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Recover original request')).toBe(false);
-    await act(async () => button('Sign out').click());
-    await act(async () => release());
-    expect(commerceReads).toBe(1); expect(host.textContent).not.toContain('Simulate settlement'); expect(host.textContent).toContain('Sign in');
-  });
-
   test('separates monthly and annual memberships from addons and clears hidden purchase selections', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true;
     commerce.offers?.push(
-      { id: 'monthly-plan', productId: 'superwagie', name: 'Monthly plan', accountKind: 'both', kind: 'membership', period: 'month', price: '19000000', monthlyCredit: '7000000', validityMonths: 0, rank: 1, sandbox: true },
-      { id: 'annual-plan', productId: 'superwagie', name: 'Annual plan', accountKind: 'both', kind: 'membership', period: 'year', price: '190000000', monthlyCredit: '7000000', validityMonths: 0, rank: 1, sandbox: true },
+      { id: 'monthly-plan', productId: 'superwagie', name: 'Monthly plan', accountKind: 'both', kind: 'membership', period: 'month', price: '19000000', monthlyCredit: '7000000', validityMonths: 0, rank: 1, sandbox: false },
+      { id: 'annual-plan', productId: 'superwagie', name: 'Annual plan', accountKind: 'both', kind: 'membership', period: 'year', price: '190000000', monthlyCredit: '7000000', validityMonths: 0, rank: 1, sandbox: false },
     );
     await render();
     await act(async () => button('Manage membership').click());
@@ -1152,7 +1053,7 @@ describe('PlatformAccountPage', () => {
 
   test('shows annual membership billing and translated order states without a zero-month term', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true;
-    commerce.offers?.push({ id: 'membership-a', productId: 'superwagie', name: 'Annual membership', accountKind: 'both', kind: 'membership', period: 'year', price: '100000000', monthlyCredit: '20000000', validityMonths: 0, rank: 1, sandbox: true });
+    commerce.offers?.push({ id: 'membership-a', productId: 'superwagie', name: 'Annual membership', accountKind: 'both', kind: 'membership', period: 'year', price: '100000000', monthlyCredit: '20000000', validityMonths: 0, rank: 1, sandbox: false });
     commerce.wallets?.push({ productId: '', asset: 'CNY/6', amount: '1230000' });
     commerce.orders?.push({ id: 'order-a', productId: 'superwagie', offerName: 'Annual membership', amount: '100000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' });
     await render();
