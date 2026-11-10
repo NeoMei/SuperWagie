@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { MAX_EMBED_BYTES, truncateUtf8 } from './embed-limit.js';
+import { averageVectors, embedSegments, MAX_EMBED_BYTES, truncateUtf8 } from './embed-limit.js';
 
 test('leaves bytes at or below the embed limit unchanged', () => {
   const exact = '中'.repeat(Math.floor(MAX_EMBED_BYTES / 3));
@@ -22,4 +22,19 @@ test('handles an astral character straddling the limit', () => {
   const truncated = truncateUtf8(`${prefix}😀`);
   expect(truncated).toBe(prefix);
   expect(Buffer.byteLength(truncated, 'utf8')).toBe(MAX_EMBED_BYTES - 1);
+});
+
+test('splits long text into budgeted UTF-8 segments and rejoins it unchanged', () => {
+  const text = '经验学习'.repeat(20) + '😀' + '边界'.repeat(10);
+  const segments = embedSegments(text, 40);
+  expect(segments.length).toBeGreaterThan(1);
+  expect(segments.join('')).toBe(text);
+  expect(segments.every((segment) => Buffer.byteLength(segment, 'utf8') <= 40)).toBe(true);
+  expect(segments.every((segment) => !segment.includes('\uFFFD'))).toBe(true);
+});
+
+test('averages vectors and refuses mixed widths', () => {
+  expect(averageVectors([[1, 3], [3, 5]])).toEqual([2, 4]);
+  expect(averageVectors([])).toEqual([]);
+  expect(() => averageVectors([[1, 2], [1]])).toThrow('embedding_dimension_mismatch');
 });

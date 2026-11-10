@@ -58,7 +58,7 @@ test('a markdown card over the embed limit is cut on a character boundary', asyn
   const calls = [];
   const projection = createMemoryProjection({ backend: async (action, input) => {
     calls.push({ action, input });
-    if (action === 'embed') return { vectors: [[1, 0]], space_id: 'fixture-space', dimensions: 2 };
+    if (action === 'embed') return { vectors: input.texts.map(() => [1, 0]), space_id: 'fixture-space', dimensions: 2 };
     return { ids: input.nodes.map((node) => node.id) };
   } });
   const markdown = '长'.repeat(700_000);
@@ -68,4 +68,19 @@ test('a markdown card over the embed limit is cut on a character boundary', asyn
   expect(embed.input.texts[0]).not.toContain('\uFFFD');
   // The stored node keeps the complete canonical card for later reads.
   expect(calls.find((call) => call.action === 'nodes/upsert').input.nodes[0].content).toBe(markdown);
+});
+
+test('a long Chinese card is embedded in segments and stored whole', async () => {
+  const calls = [];
+  const projection = createMemoryProjection({ backend: async (action, input) => {
+    calls.push({ action, input });
+    if (action === 'embed') return { vectors: input.texts.map(() => [1, 0]), space_id: 'fixture-space', dimensions: 2 };
+    return { ids: input.nodes.map((node) => node.id) };
+  } });
+  const markdown = '经验'.repeat(120);
+  await projection.upsertManagedDocument({ projectId: 'p', id: 'card', title: 'Long Chinese card', markdown });
+  const embeds = calls.filter((call) => call.action === 'embed');
+  expect(embeds.length).toBeGreaterThan(0);
+  expect(embeds.flatMap((call) => call.input.texts).join('')).toBe(markdown);
+  expect(calls.find((call) => call.action === 'nodes/upsert').input.nodes[0]).toMatchObject({ content: markdown, vector: [1, 0] });
 });

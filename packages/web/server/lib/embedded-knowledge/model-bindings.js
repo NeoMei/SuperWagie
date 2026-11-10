@@ -62,7 +62,10 @@ export function knowledgeModelParameters(purpose, binding, existing = {}) {
   }
   if (purpose === 'embedding' && binding.providerId === 'llmrouter' && binding.protocol === 'openai-compatible' && binding.model === 'text-embedding-v4') {
     const bound = existing.spec?.compat?.max_batch_size;
-    const maxBatchSize = Number.isInteger(bound) && bound > 0 ? Math.min(bound, 10) : 10;
+    // The account gateway rejects an input array with more than one text for
+    // this embedding model. Serial requests keep long cards indexable while
+    // the caller's batching still preserves the input order.
+    const maxBatchSize = Number.isInteger(bound) && bound > 0 ? Math.min(bound, 1) : 1;
     parameters.spec = { ...existing.spec, compat: { ...existing.spec?.compat, max_batch_size: maxBatchSize } };
   }
   return parameters;

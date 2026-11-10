@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { memoryNamespace } from './organizer.js';
-import { truncateUtf8 } from './embed-limit.js';
+import { averageVectors, embedSegments, truncateUtf8 } from './embed-limit.js';
 
 const embeddedSchema = z.object({ vectors: z.array(z.array(z.number().finite())), space_id: z.string().min(1), dimensions: z.number().int().positive() });
 const nodeSchema = z.object({ id: z.string(), content: z.string(), payload: z.object({ title: z.string().optional(), entry_id: z.string().optional() }).passthrough(), score: z.number().optional() }).passthrough();
@@ -12,10 +12,32 @@ export function createMemoryProjection({ backend, legacyLibrary = null, ensureSp
   const namespace = (projectId) => `${memoryNamespace(projectId)}:cards`;
   const index = async ({ projectId, id, title, markdown }) => {
     await ensureSpace?.({ projectId });
-    const result = embeddedSchema.parse(await backend('embed', { texts: [truncateUtf8(markdown)] }));
-    if (result.vectors.length !== 1 || result.vectors[0].length !== result.dimensions) throw fail('embedding_dimension_mismatch');
-    await backend('nodes/upsert', { namespace: namespace(projectId), space_id: result.space_id,
-      nodes: [{ id, content: markdown, vector: result.vectors[0], payload: { entry_id: id, project_id: projectId, title, representation: 'card' }, active: true }] });
+    const texts = [];
+    const whole = truncateUtf8(markdown);
+    for (const segment of embedSegments(whole)) {
+      const cut = truncateUtf8(segment);
+      if (cut) texts.push(cut);
+    }
+    if (!texts.length) throw fail('embedding_input_empty');
+    const vectors = [];
+    let spaceId; let dimensions;
+    // The account gateway accepts one text per request. Send eight segments
+    // in parallel: measured stable against the local backend, and keeps a
+    // multi-kilobyte card from taking minutes to index.
+    for (let offset = 0; offset < texts.length; offset += 8) {
+      const slice = texts.slice(offset, offset + 8);
+      const results = await Promise.all(slice.map((segment) => backend('embed', { texts: [segment] }).then((value) => embeddedSchema.parse(value))));
+      for (const result of results) {
+        if (result.vectors.length !== 1) throw fail('embedding_dimension_mismatch');
+        if (spaceId && spaceId !== result.space_id) throw fail('embedding_space_changed');
+        spaceId = result.space_id; dimensions = result.dimensions;
+        vectors.push(...result.vectors);
+      }
+    }
+    const vector = averageVectors(vectors);
+    if (vector.length !== dimensions) throw fail('embedding_dimension_mismatch');
+    await backend('nodes/upsert', { namespace: namespace(projectId), space_id: spaceId,
+      nodes: [{ id, content: markdown, vector, payload: { entry_id: id, project_id: projectId, title, representation: 'card' }, active: true }] });
     return { documentId: id, knowledgeId: id, state: 'ready' };
   };
   return {
