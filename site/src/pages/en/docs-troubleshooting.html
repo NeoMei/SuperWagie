@@ -3,15 +3,15 @@
 
 <h2>The app will not open</h2>
 <ul>
-  <li>If 2.7.64 reports that the app is damaged, download 2.7.79 and replace the old copy in Applications. This version fixes incomplete bundle signatures and remains unnotarised.</li>
-  <li>Only for a trusted, unmodified 2.7.79 repair package: try opening the app first. If macOS blocks it because it is not notarised, open System Settings → Privacy &amp; Security, scroll down to Open Anyway, then confirm when prompted. See <a href="https://support.apple.com/en-gb/102445">Apple's instructions</a>.</li>
+  <li>If 2.7.64 reports that the app is damaged, download 2.7.82 and replace the old copy in Applications. This version fixes incomplete bundle signatures and remains unnotarised.</li>
+  <li>Only for a trusted, unmodified 2.7.82 repair package: try opening the app first. If macOS blocks it because it is not notarised, open System Settings → Privacy &amp; Security, scroll down to Open Anyway, then confirm when prompted. See <a href="https://support.apple.com/en-gb/102445">Apple's instructions</a>.</li>
   <li>Match the installer to your device. The Apple silicon arm64 build requires macOS 13 or later; Windows uses the x64 installer.</li>
   <li>If Open Anyway is unavailable or the app still will not launch, include the system message in an issue. Attach relevant app logs if any were created.</li>
 </ul>
 
 <h2>Startup or session errors</h2>
 <ul>
-  <li><strong>agent.list failed (403):</strong> update to 2.7.79. This version fixes the desktop page being rejected by the newer engine's origin check.</li>
+  <li><strong>agent.list failed (403):</strong> update to 2.7.82. This version fixes the desktop page being rejected by the newer engine's origin check.</li>
   <li><strong>session.prompt failed (503):</strong> requests wait for the engine during startup or restart. If the failure continues, check the log for its cause. A missing session returns 404 separately.</li>
   <li><strong>Old session not found:</strong> SuperWagie uses its private session database and does not import system OpenCode history. Start a new session in SuperWagie; the original database is retained.</li>
   <li><strong>Key activated but configuration failed:</strong> after updating, choose Continue setup under API keys in the account panel. Setup reuses the existing key without another activation.</li>
@@ -20,7 +20,7 @@
 <h2>Model errors</h2>
 <p>Model messages follow the current interface language. Expand the response details for diagnostic information.</p>
 <ul>
-  <li><strong>Auto reports an unavailable model:</strong> open Settings → Routing and select the fallback again from the available models. Version 2.7.79 reports an unavailable fallback before sending; updating retains existing routing settings.</li>
+  <li><strong>Auto reports an unavailable model:</strong> open Settings → Routing and select the fallback again from the available models. Version 2.7.82 reports an unavailable fallback before sending; updating retains existing routing settings.</li>
   <li><strong>Model not set up:</strong> use a bundled free model when no model is configured. To use another model, click your avatar to activate a SuperWagie Key, or add your own provider in Settings.</li>
   <li><strong>Model connection failed:</strong> check the connection settings and key. If your SuperWagie Key is already activated, continue setup in the account panel.</li>
   <li><strong>Free allowance used up:</strong> wait for the service to restore the allowance, or choose another configured model.</li>
@@ -60,4 +60,4 @@
 </ul>
 
 <h2>Windows</h2>
-<p>Windows x64 uses 2.7.79. The installer is unsigned, so SmartScreen may block the first run. It contains no keys.</p>
+<p>Windows x64 uses 2.7.82. The installer is unsigned, so SmartScreen may block the first run. It contains no keys.</p>
