@@ -126,17 +126,40 @@ thing that is always wrong.
 
 ## Multi-Agent Collaboration
 
-多个 agent 可同时在本仓库开发：共享一份 `.git`，各自独立 worktree、分支、本地栈，`main` 是唯一交接点。Codex 用 `codex/*` 分支，WorkBuddy 用 `wb/*` 分支。
+**Codex、犇马（SuperWagie）、WorkBuddy** 三路可同时在本仓库开发：共享一份 `.git`，各自独立 worktree、分支、本地运行实例。
+
+三方交接点是**文件**，不依赖任一客户端的 API：
+
+- 代码交接：`main` 分支
+- 状态记录：`~/项目/codexprojects/U-L-S 综合验收/OPERATIONS.md`（发布/验收记录，**三方只读**）
+- 交接日志：同目录 `HANDOFF.md`（**append-only**）
 
 ### 工作区与分支
 
-- 用独立 git worktree，不要直接改主工作区 `~/项目/codexprojects/SuperWagie-open`。worktree 根目录读 `~/.codex/config.toml` 的 `git-worktree-root`（当前 `/Volumes/codex/new-worktrees`）。
-- 分支前缀即所有权，只在自己前缀下提交；不直接推 `main`，合并由人决定。
+- 用独立 git worktree，不要直接改主工作区 `~/项目/codexprojects/SuperWagie-open`。worktree 根目录读 `~/.codex/config.toml` 的 `git-worktree-root`（当前 `/Volumes/codex/new-worktrees`）；外置卷不可用时停下说明，不回退内置盘。
+- 目录用途带所有者前缀：`codex-`、`sw-`（犇马）、`wb-`（WorkBuddy）。
+
+| 客户端 | 分支前缀 |
+|---|---|
+| Codex | `codex/*` |
+| 犇马 | `sw/*` |
+| WorkBuddy | `wb/*` |
+
+- 分支前缀即所有权，只在自己前缀下提交。`agent/*` 是历史遗留，不再使用。
+- **三方都不直接推 `main`**，只走分支 + 由人合并。合并时机：每轮联调开始前，由人在 `main` 上合入已验收的分支；合完各客户端 `fetch` 后从 `main` 拉新分支。
 
 ### 本地运行
 
-- Web HMR 端口通过环境变量可配：`OPENCHAMBER_HMR_UI_PORT`（默认 5180）、`OPENCHAMBER_HMR_API_PORT`（默认 3902）。并行开发时，第二个实例必须改用不同端口，否则 dev server 起不来。
-- 桌面端 OpenChamber 后端固定在 `127.0.0.1:57123`；同一时间只有一个实例能占用。并行联调时按实际需要串行使用，或各自在隔离环境跑。
+**只改 HMR 端口不够。** dev server 默认数据目录是 `~/.config/openchamber`，两个客户端同时跑会共用 settings / 会话存储。必须同时设 `OPENCHAMBER_DATA_DIR`。
+
+| 客户端 | HMR UI | HMR API | DATA_DIR |
+|---|---|---|---|
+| Codex | 5180（默认） | 3902（默认） | `~/.config/openchamber` |
+| WorkBuddy | 5380 | 4102 | `/Volumes/codex/agent-data/wb` |
+| 犇马 | 5280 | 4002 | `/Volumes/codex/agent-data/sw` |
+
+- 桌面端后端固定在 `127.0.0.1:57123`，同一时间只能一个实例占用。犇马桌面 app 运行时，其他客户端不要并发起第二个桌面实例；需要该端口的联调串行进行。
+- 同一个 `OPENCHAMBER_DATA_DIR` 只能被一个客户端使用。
 
 ### 依赖与环境
 
@@ -149,5 +172,5 @@ thing that is always wrong.
 
 ### 交接
 
-- 收工前把改动提交到自己的 `wb/*` 分支并推送；接手前 `git fetch origin`，确认 `main` 与 `origin/main` 一致。
-- 交接说明写四件事：做了什么、没做什么、下一步、未合并的依赖分支。
+- 收工前把改动提交到自己的分支并推送；接手前 `git fetch origin`，确认 `main` 与 `origin/main` 一致。
+- 在 `HANDOFF.md` 追加一条，写清四件事：做了什么、没做什么、下一步、未合并的依赖分支。不改别人写过的段落。
