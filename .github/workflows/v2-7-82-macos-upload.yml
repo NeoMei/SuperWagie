@@ -1,0 +1,80 @@
+name: Upload v2.7.82 macOS installers
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload-macos-arm64:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v2.7.82
+      - name: Ensure the frozen release candidate
+        run: |
+          test "$(node -p "require('./package.json').version")" = "2.7.82"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse v2.7.82^{})"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.x'
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.97.1'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Check SuperWagie customizations
+        run: bun run test:customizations
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        run: echo "version=$(node -p "require('./packages/electron/package.json').opencodeCli.version")" >> "${GITHUB_OUTPUT}"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-macos-arm64-${{ steps.opencode_cli_version.outputs.version }}
+      - name: Build macOS arm64 installers
+        working-directory: packages/electron
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ELECTRON_BUILDER_ARCH: arm64
+        run: |
+          bun run build:web-assets
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+          bun run prepare:ripgrep
+          rustup target add aarch64-apple-darwin
+          bun run prepare:embedded-knowledge
+          bun run bundle:main
+          bun run rebuild:native
+          bun run prepare:macos-speech
+          bun run prepare:hy-memory
+          bun run prepare:superweb
+          bun run prepare:presentation
+          node ./scripts/package.mjs --mac --arm64 --adhoc
+      - name: Verify installers
+        working-directory: packages/electron
+        run: |
+          test -f dist/SuperWagie-2.7.82-mac-arm64.dmg
+          test -f dist/SuperWagie-2.7.82-mac-arm64.zip
+          /usr/bin/hdiutil verify dist/SuperWagie-2.7.82-mac-arm64.dmg
+          /usr/bin/codesign --verify --deep --strict --verbose=2 dist/mac-arm64/犇马.app
+      - name: Upload DMG, ZIP and blockmaps to the existing draft release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: v2.7.82
+          draft: true
+          files: |
+            packages/electron/dist/SuperWagie-2.7.82-mac-arm64.dmg
+            packages/electron/dist/SuperWagie-2.7.82-mac-arm64.dmg.blockmap
+            packages/electron/dist/SuperWagie-2.7.82-mac-arm64.zip
+            packages/electron/dist/SuperWagie-2.7.82-mac-arm64.zip.blockmap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

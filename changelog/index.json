@@ -1,5 +1,21 @@
 [
   {
+    "version": "2.7.82",
+    "date": "2026-11-10",
+    "title": "Sandbox payment removed",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "**Payments:** Sandbox recharge, simulated settlement and sandbox-only offers are removed. The billing page now shows only published formal plans; purchases use an existing authorized balance or a real WeChat/Alipay checkout.",
+        "**Recovery:** Existing unresolved sandbox recharge records no longer block a new formal purchase."
+      ],
+      "misc": []
+    },
+    "vscode": null
+  },
+  {
     "version": "2.7.43",
     "date": "2026-11-01",
     "title": "Reliable sidebar creation entries",

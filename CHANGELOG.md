@@ -2,6 +2,13 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.82] - 2026-11-10
+
+### Fixes
+
+- **Payments:** Sandbox recharge, simulated settlement and sandbox-only offers are removed. The billing page now shows only published formal plans; purchases use an existing authorized balance or a real WeChat/Alipay checkout.
+- **Recovery:** Existing unresolved sandbox recharge records no longer block a new formal purchase.
+
 ## [2.7.43] - 2026-11-01
 
 ### Fixes
