@@ -67,6 +67,18 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await HyEngine(broken).organize({'segment': segment(), 'context': context()})
 
+    async def test_chat_writer_failure_maps_agent_error_code(self):
+        from hy_memory.pipelines.base import WriteResponse
+        host = Host()
+        async def failed_writer(self, request, ctx=None, tracer=None):
+            return WriteResponse(success=False, extra={'agent_error_code': 'EMPTY_RESPONSE'})
+        from unittest.mock import patch
+        with patch('hy_memory.pipelines.writer.MemoryWriter.write', new=failed_writer), \
+             patch('hy_memory.pipelines.writer.MemoryWriter.initialize', new=lambda self: asyncio.sleep(0)):
+            with self.assertRaisesRegex(ValueError, 'hy_chat_empty_response'):
+                source = segment(); source['messages'] = [source['messages'][0]]; source['messageIds'] = ['m1']
+                await HyEngine(host).organize({'segment': source, 'context': context()})
+
 if __name__ == '__main__':
     unittest.main()
 

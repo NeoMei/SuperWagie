@@ -11,6 +11,12 @@ const retryableErrors = new Set([
   'indexing_failed', 'index_failed', 'memory_projection_missing', 'state_conflict',
   'unavailable', 'timeout', 'backend_error', 'conflict',
   'hy_space_migration_pending',
+  'hy_chat_llm_error', 'hy_chat_llm_unavailable', 'hy_chat_persist_failed',
+  'hy_chat_reconcile_failed', 'hy_chat_agent_exception', 'memory_index_unavailable',
+]);
+const transientExtractionErrors = new Set([
+  'hy_chat_llm_error', 'hy_chat_llm_unavailable', 'hy_chat_persist_failed',
+  'hy_chat_reconcile_failed', 'hy_chat_agent_exception',
 ]);
 const safeCode = (error) => /^[a-z][a-z0-9_:-]{0,79}$/.test(error?.code ?? '') ? error.code : 'legacy_cleanup_failed';
 const sourceValid = (state, job) => {
@@ -66,7 +72,8 @@ export function createHyRecovery({ store, now = () => Date.now(), baseDelayMs = 
             if (kind === 'capture') {
               if (!sourceValid(state, job)) continue;
               cards = storedCards(state, job);
-              if (!job.generated && !cards.length && job.error !== 'hy_space_migration_pending') continue;
+              if (!job.generated && !cards.length
+                && !transientExtractionErrors.has(job.error) && job.error !== 'hy_space_migration_pending') continue;
               if (!cards.length && state.tombstones.includes(`source:${job.segment.id}:${job.segment.sourceHash}`)) continue;
             } else {
               if (!job.generated || !job.supports.every((support) => {
@@ -98,7 +105,10 @@ export function createHyRecovery({ store, now = () => Date.now(), baseDelayMs = 
               continue;
             }
             const missingProjection = job.error === 'memory_projection_missing';
-            job.state = !cards.length && (job.generated || job.error === 'hy_space_migration_pending') ? 'queued' : 'indexing'; job.error = null;
+            job.state = !cards.length
+              && (job.generated || job.error === 'hy_space_migration_pending' || transientExtractionErrors.has(job.error))
+              ? 'queued' : 'indexing';
+            job.error = null;
             for (const entry of cards) if (entry.status === 'active') {
               entry.indexState = 'pending'; entry.error = null;
               if (missingProjection) { entry.documentId = null; entry.knowledgeId = null; }

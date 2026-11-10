@@ -1495,6 +1495,7 @@ const conversationMemoryRuntime = createConversationMemoryRuntime({
   knowledgeLibrary: memoryProjection,
   globalEventHub: globalMessageStreamHub,
   isBlocked: () => isEnterpriseMode(),
+  persistKnowledgeLibraryEnabled: (value) => persistSettings({ knowledgeLibraryEnabled: value }).catch(() => {}),
 });
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({

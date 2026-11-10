@@ -114,11 +114,11 @@ describe('conversation memory management', () => {
     const toggle = host.querySelector<HTMLElement>('[data-settings-item="knowledge-library.conversation-memory-enabled"] [role="button"]')
       ?? host.querySelector<HTMLElement>('[data-settings-item="knowledge-library.conversation-memory-enabled"][role="button"]');
     expect(toggle?.getAttribute('aria-pressed')).toBe('false');
-    expect(button('Process current session').disabled).toBe(true);
+    expect(button('Import session history').disabled).toBe(true);
     await act(async () => toggle?.click());
     expect(toggle?.getAttribute('aria-pressed')).toBe('true');
     expect(calls.find((call) => call.method === 'PUT')?.body).toBe('{"enabled":true}');
-    await click('Process current session');
+    await click('Import session history');
     expect(calls.find((call) => call.path.endsWith('/capture'))?.body).toBe('{"sessionId":"ses_current","directory":"/project"}');
     expect(host.textContent).toContain('History queued');
   });
@@ -182,6 +182,17 @@ describe('conversation memory management', () => {
     await click('Fixture experience');
     expect(host.textContent).toContain('Candidate');
     expect(button('Retry indexing').disabled).toBe(false);
+  });
+
+  test('names the model failure without blaming the embedding backend', async () => {
+    currentStatus = {
+      ...initialStatus, enabled: true, state: 'ready', entries: 1,
+      engine: { name: 'hy-memory', state: 'ready', error: null, version: '2.0.8' },
+    };
+    entries = [{ ...initialEntry, status: 'active', indexState: 'ready', error: 'hy_chat_llm_unavailable' }];
+    await render();
+    expect(host.textContent).toContain('The configured model could not complete extraction');
+    expect(host.textContent).not.toContain('Check the embedding model settings');
   });
 
   test('aborts the old scope and ignores its late data when the project changes', async () => {

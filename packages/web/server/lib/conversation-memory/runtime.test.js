@@ -30,11 +30,11 @@ const harness = async (overrides = {}) => {
     searchManagedDocuments: async ({ projectId, documentIds }) => ({ query: 'build', documents: [], passages: [...indexed].filter(([id, value]) => value.projectId === projectId && documentIds.includes(`doc-${id}`)).map(([id]) => ({ documentId: `doc-${id}`, content: 'Build fix' })) }),
     ...knowledgeOverrides,
   };
-  const runtime = createConversationMemoryRuntime({ dataDir, now: () => 100, indexPollMs: 0,
+  const runtime = createConversationMemoryRuntime({ dataDir, indexPollMs: 0,
     resolveProjectId: async (directory) => directory === '/work/b' ? 'project-b' : 'project-a',
     createClient: () => ({}), readSegments: async () => ({ segments: [segment], checkpoint: { version: 1 }, reset: false, complete: true, sourceMessageIds: ['u1', 'a1'] }),
     distill: async () => { generated++; return [card]; }, renderMarkdown: ({ card: entry }) => entry.body,
-    knowledgeLibrary, isBlocked: () => false, ...runtimeOverrides,
+    knowledgeLibrary, isBlocked: () => false, now: () => 100, ...runtimeOverrides,
   });
   if (autoStart) await runtime.start();
   return { dataDir, runtime, indexed, generated: () => generated, failIndex: (value) => { failIndex = value; }, failDelete: (value) => { failDelete = value; } };
@@ -224,6 +224,82 @@ test('failed enablement writes preserve the last committed runtime setting', asy
     expect(h.runtime.isActive()).toBe(true);
     expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'ready' });
   } finally { failWrite = false; await h.runtime.stop(); }
+});
+
+test('enabling learning turns on the shared library switch without undoing a committed enable on write failure', async () => {
+  const writes = [];
+  const h = await harness({ autoStart: false, persistKnowledgeLibraryEnabled: async (value) => { writes.push(value); } });
+  try {
+    await h.runtime.setEnabled(true); await h.runtime.idle();
+    expect(writes).toEqual([true]);
+    expect((await h.runtime.status()).enabled).toBe(true);
+    writes.length = 0;
+    await h.runtime.setEnabled(false);
+    expect(writes).toEqual([]);
+    const broken = await harness({ autoStart: false, persistKnowledgeLibraryEnabled: async () => { throw new Error('settings unavailable'); } });
+    try {
+      await broken.runtime.setEnabled(true);
+      expect((await broken.runtime.status()).enabled).toBe(true);
+    } finally { await broken.runtime.stop(); }
+  } finally { await h.runtime.stop(); }
+});
+
+test('a completed turn in a session without a directory is captured after resolving its location', async () => {
+  let listener; const resolved = []; const requests = [];
+  let now = 100;
+  const newSession = { ...segment, id: 'seg-new', sessionId: 'ses-new' };
+  const h = await harness({ autoStart: false, debounceMs: 1,
+    now: () => now,
+    resolveSessionDirectory: async ({ sessionId }) => { resolved.push(sessionId); return '/work/a'; },
+    readSegments: async (request) => { requests.push(request); return { segments: [newSession], checkpoint: null, reset: false, complete: true }; },
+    distill: async () => [{ ...card, id: 'card-new', title: 'New session lesson' }],
+    knowledgeLibrary: {
+      upsertManagedDocument: async ({ id }) => ({ documentId: `doc-${id}`, knowledgeId: `kb-${id}`, state: 'ready' }),
+      ensureManagedDocumentIndexed: async ({ id }) => ({ documentId: `doc-${id}`, knowledgeId: `kb-${id}`, state: 'ready' }),
+      searchManagedDocuments: async () => ({ documents: [], passages: [] }),
+    },
+    globalEventHub: { subscribeEvent: (callback) => { listener = callback; return () => {}; } },
+  });
+  try {
+    // This runtime's client cannot list sessions, so the sweep leaves capture
+    // to the live event path under test here.
+    await h.runtime.start(); await h.runtime.setEnabled(true);
+    now = 200;
+    listener({ directory: 'global', payload: { type: 'unknown' }, translated: () => [{
+      type: 'message.updated', properties: { sessionID: 'ses-new', info: { role: 'assistant', time: { completed: 2 } } },
+    }] });
+    await new Promise((resolve) => setTimeout(resolve, 20)); await h.runtime.idle();
+    expect(resolved).toContain('ses-new');
+    expect(requests.map((request) => request.sessionId)).toEqual(['ses-new']);
+    expect((await h.runtime.listEntries({ directory: '/work/a' })).entries.map((entry) => entry.id)).toEqual(['card-new']);
+  } finally { await h.runtime.stop(); }
+});
+
+test('a connected event sweep queues sessions changed after learning was enabled', async () => {
+  let listener; let statusListener;
+  const listed = [
+    { id: 'ses-new', location: { directory: '/work/a' }, time: { created: 100, updated: 100 } },
+    { id: 'ses-old', location: { directory: '/work/a' }, time: { created: 1, updated: 2 } },
+    { id: 'ses-child', parentID: 'ses-new', location: { directory: '/work/a' }, time: { created: 100, updated: 100 } },
+  ];
+  const requests = [];
+  let now = 100;
+  const h = await harness({ autoStart: false, debounceMs: 1,
+    now: () => now,
+    createClient: () => ({ session: { list: async () => ({ data: listed, cursor: {} }) } }),
+    readSegments: async (request) => { requests.push(request.sessionId); return { segments: [{ ...segment, sessionId: request.sessionId }], checkpoint: null, reset: false, complete: true }; },
+    globalEventHub: { subscribeEvent: (callback) => { listener = callback; return () => {}; },
+      subscribeStatus: (callback) => { statusListener = callback; return () => {}; } },
+  });
+  try {
+    await h.runtime.start();
+    now = 50; await h.runtime.setEnabled(true); now = 100;
+    await h.runtime.idle();
+    expect(requests).toContain('ses-new');
+    expect(requests).not.toContain('ses-old');
+    expect(requests).not.toContain('ses-child');
+    expect(listener).toBeFunction(); expect(statusListener).toBeFunction();
+  } finally { await h.runtime.stop(); }
 });
 
 test('an enablement write completing after stop cannot restore subscriptions', async () => {

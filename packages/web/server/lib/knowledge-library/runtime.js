@@ -1743,9 +1743,18 @@ export function createKnowledgeLibraryRuntime({
       if (action === 'embed') assertManagedAccess();
       return consumeBackend(async () => {
         memoryDemand = true;
-        await start();
+        // Account OCR/model-owner recovery must still fail start. Memory embed
+        // may use an already running backend and its stored model set.
+        await start().catch((error) => {
+          if (error?.code !== 'account_key_consumer_owner_unavailable') throw error;
+        });
         if (!client || supervisor?.getState() !== 'running') throw new ProvisionError('memory_backend_unavailable', 'The shared memory backend is unavailable');
-        if (action === 'embed' || action === 'capabilities' && !isEnterpriseMode()) await syncConfiguredModels();
+        if (action === 'embed' || action === 'capabilities' && !isEnterpriseMode()) {
+          await syncConfiguredModels().catch((error) => {
+            if (error?.code !== 'account_key_consumer_owner_unavailable') throw error;
+            log.warn?.('[KnowledgeLibrary] memory embed uses existing backend models', error?.message ?? error);
+          });
+        }
         const id = knowledgeBaseId();
         if (!id) throw new ProvisionError('memory_backend_unavailable', 'The shared memory backend is not configured');
         return client.memoryIndex({ knowledgeBaseId: id, action, input });

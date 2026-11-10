@@ -211,6 +211,10 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
       if (searchBarrier) await searchBarrier;
       return json({ data: [] });
     }
+    if (route === '/api/v1/knowledge-bases/kb1/memory-index/embed') {
+      const body = JSON.parse(options.body);
+      return json({ data: { vectors: body.texts.map(() => [1, 0]), space_id: 'fixture-space', dimensions: 2 } });
+    }
     throw new Error(`Unexpected fixture backend route ${route}`);
   };
   runtime = createKnowledgeLibraryRuntime({

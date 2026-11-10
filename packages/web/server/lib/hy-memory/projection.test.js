@@ -53,3 +53,19 @@ test('duplicate model-space hits retain their highest channel score', async () =
   const result = await projection.searchManagedDocuments({ projectId: 'p', query: 'lesson', documentIds: ['same', 'other'], limit: 2 });
   expect(result.passages.map((hit) => [hit.documentId, hit.score])).toEqual([['same', 0.9], ['other', 0.6]]);
 });
+
+test('a markdown card over the embed limit is cut on a character boundary', async () => {
+  const calls = [];
+  const projection = createMemoryProjection({ backend: async (action, input) => {
+    calls.push({ action, input });
+    if (action === 'embed') return { vectors: [[1, 0]], space_id: 'fixture-space', dimensions: 2 };
+    return { ids: input.nodes.map((node) => node.id) };
+  } });
+  const markdown = '长'.repeat(700_000);
+  await projection.upsertManagedDocument({ projectId: 'p', id: 'card', title: 'Long card', markdown });
+  const embed = calls.find((call) => call.action === 'embed');
+  expect(Buffer.byteLength(embed.input.texts[0], 'utf8')).toBeLessThanOrEqual(768 * 1024);
+  expect(embed.input.texts[0]).not.toContain('\uFFFD');
+  // The stored node keeps the complete canonical card for later reads.
+  expect(calls.find((call) => call.action === 'nodes/upsert').input.nodes[0].content).toBe(markdown);
+});

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { createHyMemoryWorker } from './worker.js';
+import { truncateUtf8 } from './embed-limit.js';
 
 const hostSchema = z.object({ jobId: z.string().min(1), namespace: z.string().optional() }).passthrough();
 const generateSchema = hostSchema.extend({ prompt: z.string().min(1).max(2_000_000), systemPrompt: z.string().max(200_000).optional(), maxTokens: z.number().int().positive().max(32_000).optional() });
@@ -132,7 +133,7 @@ export function createHyMemoryOrganizer({ backend, generate, readState, isBlocke
       if (generated.inputTruncated) throw fail('hy_input_truncated');
       return { content: z.string().parse(generated.text) };
     },
-    'host.embed': async (input) => { const parsed = embedSchema.parse(input); const job = authorize(parsed); await checkReadSources(job); const result = await backend('embed', { texts: parsed.texts, input_role: parsed.input_role }); job.spaceId = z.object({ space_id: z.string() }).parse(result).space_id; return result; },
+    'host.embed': async (input) => { const parsed = embedSchema.parse(input); const job = authorize(parsed); await checkReadSources(job); const result = await backend('embed', { texts: parsed.texts.map(truncateUtf8), input_role: parsed.input_role }); job.spaceId = z.object({ space_id: z.string() }).parse(result).space_id; return result; },
     'host.store': async (input) => {
       const parsed = storeSchema.parse(input); const job = authorize(parsed);
       if (parsed.operation.startsWith('nodes/')) {

@@ -171,3 +171,19 @@ A method has several source sessions and its own confirmation. A synthetic
 single-session extraction job would lose those dependencies or require repeating
 generation to retry indexing. The synthesis queue persists proposals before any
 indexing call and checks every supporting source again at use time.
+
+### Why automatic new-session capture and not current-session-only
+
+Once the user enables learning, every later message in any project is in scope
+after enabledAt. The history button remains for pre-enable sessions or the
+session the user has open. Alternative rejected: requiring a per-session
+"process current" click, which the user rejected and which made the feature
+look broken when only that button seemed to be the entry.
+
+### Why knowledge-library enablement follows conversation learning
+
+The experiences tab depends on the shared embedding backend. A single learn
+switch should not require a second trip to the library switch. Disabling
+learning does not disable the document library. Alternative rejected: two
+independent switches, which left users on a ready-looking experiences tab with
+a blocked embed path.

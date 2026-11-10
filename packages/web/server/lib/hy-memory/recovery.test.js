@@ -111,6 +111,39 @@ test('uses persisted generation receipts but never retries unknown generation or
   expect(state.jobs.slice(1).every((job) => ['unknown', 'failed'].includes(job.state))).toBe(true);
 });
 
+test('retries a chat generation failure without a receipt but keeps an unknown outcome terminal', async () => {
+  const store = await setup([]); let time = 1;
+  await store.update((state) => {
+    state.engine.migrated = true;
+    state.jobs[0].error = 'hy_chat_llm_unavailable';
+    state.jobs[0].state = 'failed';
+    state.jobs.push({ ...state.jobs[0], id: 'unknown-outcome', error: 'generation_outcome_unknown' });
+  });
+  const recovery = createHyRecovery({ store, now: () => time, baseDelayMs: 1 });
+  expect(await recovery.schedule()).toMatchObject({ scheduled: 0 });
+  time += 2;
+  expect(await recovery.schedule()).toMatchObject({ scheduled: 1 });
+  const state = await store.read();
+  expect(state.jobs[0]).toMatchObject({ state: 'queued', error: null });
+  expect(state.jobs[1]).toMatchObject({ state: 'failed', error: 'generation_outcome_unknown' });
+});
+
+test('retries a shared memory index outage through the stored card path', async () => {
+  const store = await setup([card({ extractorVersion: 'hy-memory-2.0.8:sw1' })]);
+  let time = 1;
+  await store.update((state) => {
+    state.engine.migrated = true;
+    state.jobs[0].error = 'memory_index_unavailable';
+    state.jobs[0].state = 'failed';
+  });
+  const recovery = createHyRecovery({ store, now: () => time, baseDelayMs: 1 });
+  await recovery.schedule(); time += 2;
+  expect(await recovery.schedule()).toMatchObject({ scheduled: 1 });
+  const state = await store.read();
+  expect(state.jobs[0]).toMatchObject({ state: 'indexing', error: null });
+  expect(state.entries[0].indexState).toBe('pending');
+});
+
 test('explicit retry resets the durable limit without changing the saved generation', async () => {
   const store = await setup(); await store.update((state) => {
     state.engine.records.push({ collection: 'hy-retry', id: 'capture:capture', projectId: 'project', value: { attempts: 3, nextRetryAt: null, error: 'unavailable' } });

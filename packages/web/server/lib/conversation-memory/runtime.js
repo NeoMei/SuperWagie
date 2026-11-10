@@ -34,10 +34,22 @@ const sourceEventSchema = z.object({
   data: z.object({ sessionID: z.string().min(1) }),
   location: z.object({ directory: z.string().min(1) }).optional(),
 });
+const listedSessionSchema = z.object({
+  id: z.string().min(1),
+  parentID: z.string().nullish(),
+  location: z.object({ directory: z.string().min(1) }).optional(),
+  time: z.object({ created: z.number(), updated: z.number() }).partial().optional(),
+});
+const listedPageSchema = z.object({
+  data: z.array(z.unknown()),
+  cursor: z.object({ next: z.string().nullish() }).nullish(),
+});
+const SESSION_PAGE_SIZE = 200;
 
 export const createConversationMemoryRuntime = ({
   dataDir, resolveProjectId, createClient, readSegments, distill, renderMarkdown,
   knowledgeLibrary, globalEventHub = null, isBlocked = () => false, resolveSessionDirectory = null, readSessionSource = null, distillMethodology = null,
+  persistKnowledgeLibraryEnabled = null,
   now = () => Date.now(), debounceMs = 1500, indexPollMs = 2000, recallTimeoutMs = 1500, store: suppliedStore = null, organizer = null, memoryBackend = null,
   manualIndex = null, isManualEnabled = async () => false,
 }) => {
@@ -515,10 +527,55 @@ export const createConversationMemoryRuntime = ({
       eventTimers.delete(sessionId);
       try {
         const known = (await store.read()).sessions[sessionId];
-        if (directory || known?.directory) await queueCapture({ sessionId, directory: directory || known.directory });
+        let target = directory || known?.directory || '';
+        if (!target && resolveSessionDirectory) {
+          target = await resolveSessionDirectory({ sessionId, directoryHint: '' });
+        }
+        if (target) await queueCapture({ sessionId, directory: target });
       } catch { /* A later source event or explicit capture can retry. */ }
     }, debounceMs);
     timer.unref?.(); eventTimers.set(sessionId, timer);
+  };
+  // Learning applies to every session that runs after the switch. Live events
+  // catch most turns; this sweep covers turns that completed while the event
+  // stream was reconnecting, or a session first seen after a restart.
+  const backfillSessions = async () => {
+    if (!createClient || !canProcess()) return { queued: 0 };
+    const client = createClient('');
+    if (!client?.session?.list) return { queued: 0 };
+    const listed = new Map();
+    let cursor = null;
+    try {
+      for (let pageIndex = 0; pageIndex < 50; pageIndex += 1) {
+        const page = listedPageSchema.parse(await client.session.list({ parentID: null, limit: SESSION_PAGE_SIZE,
+          ...(cursor ? { cursor } : { order: 'desc' }) }));
+        for (const raw of page.data) {
+          const session = listedSessionSchema.safeParse(raw);
+          if (session.success && !session.data.parentID) listed.set(session.data.id, session.data);
+        }
+        const next = page.cursor?.next ?? null;
+        if (!next || page.data.length < SESSION_PAGE_SIZE) break;
+        cursor = next;
+      }
+    } catch (error) {
+      await store.update((state) => { state.lastError = failureCode(error, 'session_list_failed'); });
+      return { queued: 0 };
+    }
+    const { enabledAt } = await store.read();
+    let queued = 0;
+    for (const session of listed.values()) {
+      if (!canProcess() || stopped) break;
+      // Sessions last touched before learning was enabled are imported only by
+      // the explicit history action, never by this automatic sweep.
+      const updatedAt = session.time?.updated ?? session.time?.created ?? 0;
+      if (!enabledAt || updatedAt < enabledAt) continue;
+      const directory = session.location?.directory
+        || (resolveSessionDirectory ? await resolveSessionDirectory({ sessionId: session.id, directoryHint: '' }).catch(() => '') : '');
+      if (!directory) continue;
+      await queueCapture({ sessionId: session.id, directory }).catch(() => {});
+      queued += 1;
+    }
+    return { queued };
   };
   const attach = () => {
     if (unsubscribe || !globalEventHub || !canProcess()) return;
@@ -680,6 +737,7 @@ export const createConversationMemoryRuntime = ({
       initialized = true;
       startError = null;
       attach(); kick();
+      if (enabled) void backfillSessions().catch(() => {});
     })().catch((error) => {
       initialized = false;
       detach();
@@ -739,7 +797,16 @@ export const createConversationMemoryRuntime = ({
       const state = await store.update((next) => { if (requested && !next.enabled) next.enabledAt = now(); next.enabled = requested; });
       lifecycleRevision++;
       enabled = state.enabled;
+      // Learning depends on the shared embedding backend. Keep that switch in
+      // sync without making a settings-write failure undo a committed enable.
+      if (enabled && persistKnowledgeLibraryEnabled) {
+        void persistKnowledgeLibraryEnabled(true).catch(() => {});
+      }
       if (enabled) { await start(); attach(); kick(); } else { detach(); generation?.abort(); methodologies.abort(); maintenance?.abort(); }
+      // A switch turned on in a running process still needs the missed-event
+      // sweep: live events cover turns that finish afterwards, not the ones
+      // that started while the runtime was off or reconnecting.
+      if (enabled) void backfillSessions().catch(() => {});
       return status();
     },
     capture: ({ sessionId, directory }) => queueCapture({ sessionId, directory, includeHistory: true }),

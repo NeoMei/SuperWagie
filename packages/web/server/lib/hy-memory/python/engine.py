@@ -23,6 +23,18 @@ from reader_bridge import read_memory
 
 SOURCE_SHA = '988667cd876fb80bee6d618482f78a2fe426402c'
 LIMIT = 'The source is conversation reference material. Generated inferences and confidence do not verify execution, deployment, user outcomes or a general method.'
+AGENT_CODE_MAP = {
+    'EMPTY_RESPONSE': 'hy_chat_empty_response',
+    'JSON_PARSE_FAILED': 'hy_chat_json_parse_failed',
+    'LLM_ERROR': 'hy_chat_llm_error',
+    'LLM_UNAVAILABLE': 'hy_chat_llm_unavailable',
+    'AGENT_NO_RESULT': 'hy_chat_agent_no_result',
+    'AGENT_EXCEPTION': 'hy_chat_agent_exception',
+    'RECONCILE_FAILED': 'hy_chat_reconcile_failed',
+    'AGENT_PERSIST_FAILED': 'hy_chat_persist_failed',
+    'L1_UPSERT_FAILED': 'hy_chat_persist_failed',
+    'AGENT_FAILED': 'hy_chat_agent_failed',
+}
 
 
 class HyEngine:
@@ -168,7 +180,11 @@ class HyEngine:
                               session_id=ctx['sessionId'], source='superwagie', request_id=ctx['jobId'], extra={'agent_mode': 'full'},
                               memory_at=memory_at))
                 if not response.success:
-                    raise ValueError('hy_chat_extraction_failed')
+                    # Worker failure codes must already be snake_case. Map the
+                    # writer's diagnostic code here so retry policy and the UI
+                    # see the actual extraction failure, not a generic label.
+                    raw = str((response.extra or {}).get('agent_error_code') or '')
+                    raise ValueError(AGENT_CODE_MAP.get(raw, 'hy_chat_extraction_failed'))
                 result = {'success': True, 'scene': 'chat', 'memory_id': response.memory_id}
             self.code_history(segment, ctx, overlay, params.get('patches', segment.get('patches', [])))
             for (collection, _identity), value in overlay.record_changes.items():

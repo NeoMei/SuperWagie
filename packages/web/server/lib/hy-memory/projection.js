@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { memoryNamespace } from './organizer.js';
+import { truncateUtf8 } from './embed-limit.js';
 
 const embeddedSchema = z.object({ vectors: z.array(z.array(z.number().finite())), space_id: z.string().min(1), dimensions: z.number().int().positive() });
 const nodeSchema = z.object({ id: z.string(), content: z.string(), payload: z.object({ title: z.string().optional(), entry_id: z.string().optional() }).passthrough(), score: z.number().optional() }).passthrough();
@@ -11,7 +12,7 @@ export function createMemoryProjection({ backend, legacyLibrary = null, ensureSp
   const namespace = (projectId) => `${memoryNamespace(projectId)}:cards`;
   const index = async ({ projectId, id, title, markdown }) => {
     await ensureSpace?.({ projectId });
-    const result = embeddedSchema.parse(await backend('embed', { texts: [markdown] }));
+    const result = embeddedSchema.parse(await backend('embed', { texts: [truncateUtf8(markdown)] }));
     if (result.vectors.length !== 1 || result.vectors[0].length !== result.dimensions) throw fail('embedding_dimension_mismatch');
     await backend('nodes/upsert', { namespace: namespace(projectId), space_id: result.space_id,
       nodes: [{ id, content: markdown, vector: result.vectors[0], payload: { entry_id: id, project_id: projectId, title, representation: 'card' }, active: true }] });

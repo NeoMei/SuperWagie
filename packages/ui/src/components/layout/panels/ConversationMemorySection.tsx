@@ -58,6 +58,8 @@ const errorKeyOf = (code: string): I18nKey => {
   if (code === 'hy_runtime_not_installed') return 'conversationMemory.error.engineMissing';
   if (code === 'hy_worker_exited') return 'conversationMemory.error.engineStopped';
   if (code.startsWith('embedding')) return 'conversationMemory.error.embedding';
+  if (code.startsWith('memory_index') || code.startsWith('account_key')) return 'conversationMemory.error.embedding';
+  if (code.startsWith('hy_chat_')) return 'conversationMemory.error.model';
   if (code === 'source_changed' || code === 'conversation_memory_source_changed' || code === 'hy_source_invalid') return 'conversationMemory.error.sourceChanged';
   return 'conversationMemory.error';
 };

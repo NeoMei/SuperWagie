@@ -135,3 +135,22 @@ test('a source change while the backend reads cannot expose the returned prose',
   });
   await organizer.organize({ segment: { id: 'new', projectId: 'p', directory: '/p', sessionId: 's' } });
 });
+
+test('a long Chinese embed payload fits the backend byte limit and stays valid text', async () => {
+  const state = guardedState(1);
+  const calls = [];
+  const organizer = createHyMemoryOrganizer({ readState: async () => structuredClone(state),
+    backend: async (action, input) => { calls.push({ action, input }); return { nodes: [], vectors: [], space_id: 'space' }; },
+    generate: async () => ({ text: '{}' }),
+    createWorker: (options) => ({ call: async (_method, params) => {
+      const result = await options.handlers['host.embed']({ jobId: params.context.jobId, texts: ['经验'.repeat(200_000)] });
+      expect(result.space_id).toBe('space');
+      return {};
+    }, stop: async () => {}, status: () => ({ state: 'ready' }) }),
+  });
+  await organizer.organize({ segment: { id: 'new', projectId: 'p', directory: '/p', sessionId: 's', messages: [] } });
+  const [embed] = calls;
+  expect(embed.action).toBe('embed');
+  expect(Buffer.byteLength(JSON.stringify(embed.input), 'utf8')).toBeLessThanOrEqual(900 * 1024);
+  expect(embed.input.texts[0]).not.toContain('\uFFFD');
+});
