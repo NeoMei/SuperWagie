@@ -78,7 +78,12 @@ const safeError = (error) => error instanceof PlatformAccountError && /^[a-z][a-
 const rejectedCodes = new Set(['invalid_request', 'forbidden', 'insufficient_funds', 'insufficient_credits', 'not_found', 'unsupported_plan_change', 'subscription_required', 'payment_not_configured']);
 
 /** UniHub remains the authority for balances and fulfillment. Only recovery intent is local. */
-export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = Date.now }) => {
+export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = Date.now, env = process.env }) => {
+  // A remote sandbox flag alone must not authorize free funding. Product-wallet
+  // recharge and its simulation settle real ledger value without collecting
+  // money, so this build only exposes them when the operator explicitly opts in.
+  const allowSandboxFunding = env.OPENCHAMBER_UNIHUB_ALLOW_SANDBOX_FUNDING === 'true';
+  const trustedSandbox = (capabilities) => allowSandboxFunding && capabilities.sandbox === true;
   let storePromise;
   let closing = false;
   const active = new Map();
@@ -102,7 +107,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     if (!hasScopes(ctx.capabilities, scopes)) fail('platform_scope_required', 403);
   };
   const catalog = async (ctx) => parse(z.array(offerSchema), await ctx.session.request('/v1/catalog'))
-    .filter((offer) => supportedOffer(offer) && (!offer.sandbox || ctx.capabilities.sandbox) && offer.status === 'published' && (offer.account_kind === 'both' || offer.account_kind === ctx.account.kind));
+    .filter((offer) => supportedOffer(offer) && (!offer.sandbox || trustedSandbox(ctx.capabilities)) && offer.status === 'published' && (offer.account_kind === 'both' || offer.account_kind === ctx.account.kind));
   const readOrders = async (ctx) => {
     const orders = parse(z.array(orderSchema), await ctx.session.request(pathFor(ctx.account.id, 'orders')));
     if (orders.some((order) => order.account_id !== ctx.account.id || order.product_id !== order.offer.product_id)) fail('platform_response_invalid', 502);
@@ -174,7 +179,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       return mutateIntent(journal, storageId, values);
     } catch (error) {
       const sourceCode = safeError(error);
-      const errorCode = sourceCode === 'insufficient_funds' && !ctx.capabilities.sandbox ? 'payment_not_configured' : sourceCode;
+      const errorCode = sourceCode === 'insufficient_funds' && !trustedSandbox(ctx.capabilities) ? 'payment_not_configured' : sourceCode;
       const rejectedQuote = (intent.kind === 'upgrade' || intent.kind === 'checkout' && Boolean(intent.quoteId)) && errorCode === 'quote_invalidated' && error.status === 409;
       return mutateIntent(journal, storageId, { status: rejectedCodes.has(errorCode) || rejectedQuote || (intent.kind !== 'recharge' && errorCode === 'credit_rates_unavailable' && error.status === 409) ? 'FAILED' : 'UNKNOWN', errorCode });
     }
@@ -235,7 +240,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
   };
   const assertRecharge = (ctx) => {
     requireFinance(ctx, ['recharges:read', 'recharges:write', 'operations:read']);
-    if (!ctx.capabilities.sandbox || !ctx.capabilities.product_wallet_recharge) fail('payment_not_configured', 503);
+    if (!trustedSandbox(ctx.capabilities) || !ctx.capabilities.product_wallet_recharge) fail('payment_not_configured', 503);
   };
   return {
     overview: async (identity) => {
@@ -271,7 +276,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       return {
         accountId: ctx.account.id, role: ctx.account.role, financialAccess: finance,
         missingScopes: requiredScopes.filter((scope) => !ctx.capabilities.scopes.includes(scope)),
-        payments: { mode: ctx.capabilities.sandbox ? 'sandbox' : ctx.capabilities.real_payments_configured && ctx.capabilities.payment_providers?.length ? 'external' : 'unconfigured', providers: ctx.capabilities.payment_providers ?? [], canRecharge: finance && ctx.capabilities.sandbox && ctx.capabilities.product_wallet_recharge && hasScopes(ctx.capabilities, ['recharges:read', 'recharges:write', 'operations:read']), canPurchase: finance && hasScopes(ctx.capabilities, ['orders:read', 'orders:write', 'catalog:read']) },
+        payments: { mode: trustedSandbox(ctx.capabilities) ? 'sandbox' : ctx.capabilities.real_payments_configured && ctx.capabilities.payment_providers?.length ? 'external' : 'unconfigured', providers: ctx.capabilities.payment_providers ?? [], canRecharge: finance && trustedSandbox(ctx.capabilities) && ctx.capabilities.product_wallet_recharge && hasScopes(ctx.capabilities, ['recharges:read', 'recharges:write', 'operations:read']), canPurchase: finance && hasScopes(ctx.capabilities, ['orders:read', 'orders:write', 'catalog:read']) },
         wallets: resources ? resources.wallets.map((wallet) => ({ productId: wallet.product_id, asset: wallet.asset, amount: wallet.amount })) : null,
         offers: offers?.map((offer) => publicOffer(offer, ctx.capabilities)) ?? null, orders: orders?.map(publicOrder) ?? null, intents,
         checkouts, rechargeHistoryScope: 'this-instance',
@@ -401,7 +406,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       if (!quote || quote.accountId !== body.accountId || quote.actorId !== ctx.session.actingUserId || quote.serviceId !== ctx.session.serviceId) fail('platform_quote_unavailable', 404);
       if (quote.paymentSource === 'external') fail('platform_quote_unavailable', 409);
       if (Date.parse(quote.expiresAt) <= now()) fail('platform_quote_expired', 409);
-      if (quote.sandbox && !ctx.capabilities.sandbox) fail('payment_not_configured', 503);
+      if (quote.sandbox && !trustedSandbox(ctx.capabilities)) fail('payment_not_configured', 503);
       if (pointsRuntimeUnavailable(quote.sandbox, quote.pricingProgram, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       return createIntent(ctx, body, 'upgrade', undefined, quote);
     },

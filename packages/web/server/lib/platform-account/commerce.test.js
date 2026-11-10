@@ -14,7 +14,8 @@ afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) awai
 const identity = { type: 'client', token: 'private-runtime-token' };
 const scopes = ['catalog:read', 'subscriptions:read', 'wallets:read', 'orders:read', 'recharges:read', 'recharges:write', 'orders:write', 'operations:read'];
 const offer = { id: 'sandbox-membership', product_id: 'superwagie', name: 'Sandbox membership', account_kind: 'both', kind: 'membership', period: 'month', price: '1000000', monthly_credit: '2000000', validity_months: 0, rank: 1, sandbox: true, status: 'published' };
-const fixture = async () => {
+const SANDBOX_ENV = { OPENCHAMBER_UNIHUB_ALLOW_SANDBOX_FUNDING: 'true' };
+const fixture = async (env = SANDBOX_ENV) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-commerce-test-'));
   cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
   const state = { actor: 'actor-a', account: 'personal-a', service: 'service-a', role: 'owner', scopes: [...scopes], sandbox: true, failRead: false, loseResponse: false, blockPost: null, calls: [], wallet: 0n, credits: 0n, now: Date.now(), offers: [offer, { ...offer, id: 'other-account', account_kind: 'team' }, { ...offer, id: 'formal', sandbox: false }] };
@@ -87,7 +88,7 @@ const fixture = async () => {
     } };
   } };
   const create = () => {
-    const runtime = createPlatformCommerceRuntime({ accountRuntime, dataDir: directory, now: () => state.now });
+    const runtime = createPlatformCommerceRuntime({ accountRuntime, dataDir: directory, now: () => state.now, env });
     cleanups.push(() => runtime.close());
     return runtime;
   };

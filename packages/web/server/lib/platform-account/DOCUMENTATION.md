@@ -142,8 +142,13 @@ uses a redirect or HTTP success as evidence of funds arriving.
   `payments.mode` describes external funding, while `canPurchase` describes
   financial authorization. External collection is available only when UniHub
   reports configured payment providers; missing configuration stays unavailable.
-  Sandbox recharge and settlement require separate explicit actions and the
-  authoritative sandbox capability; refresh never advances those actions.
+  Sandbox recharge and settlement require separate explicit actions, the
+  authoritative sandbox capability and the local
+  `OPENCHAMBER_UNIHUB_ALLOW_SANDBOX_FUNDING=true` opt-in. Without that local
+  switch the adapter never reports sandbox mode, never filters in sandbox
+  catalog offers and never dispatches a recharge or simulate-settlement
+  command, even if UniHub reports sandbox capability. Refresh never advances
+  those actions.
 - Formal offers marked `entitlements.pricing_program=superwagie-ai-points-v1`
   expose `purchaseReadiness`. New purchases, quotes and first acceptance require
   authoritative `native_credits.ready: true`, even when paid from cash. Missing
@@ -210,6 +215,16 @@ need a durable parent operation to bind and recover those steps. Sandbox
 recharge keeps each step explicit. Configured external checkout instead uses
 its own durable original-provider receipt and separate fulfillment state.
 
+### Why sandbox funding needs a local opt-in
+
+UniHub's `sandbox` capability is a remote flag. Trusting it alone would let a
+misconfigured, downgraded or spoofed upstream turn on product-wallet recharge
+and its simulation, which writes ledger value without collecting money. The
+adapter requires `OPENCHAMBER_UNIHUB_ALLOW_SANDBOX_FUNDING=true` in the managed
+backend environment as well, so a normal production build cannot expose a free
+funding path by configuration drift alone. Test deployments set the switch
+explicitly and keep the existing separate create and settle actions.
+
 ### Why points have a separate runtime readiness gate
 
 Published model CREDIT rates describe pricing. They do not prove that the
@@ -254,6 +269,7 @@ Configure these values in the managed backend's environment and restart it:
 | `OPENCHAMBER_UNIHUB_API_URL` | The UniHub API origin. |
 | `OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID` | A public client explicitly enabled for JSON login and registration. |
 | `OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI` | The exact redirect registered for that client. JSON login does not navigate there. |
+| `OPENCHAMBER_UNIHUB_ALLOW_SANDBOX_FUNDING` | Set to `true` only for sandbox commerce tests. Unset in production; free recharge and simulate-settlement stay unavailable. |
 
 For sandbox commerce, the client also needs commerce capabilities in
 UniHub. `/v1/capabilities` must report sandbox mode and product-wallet recharge
