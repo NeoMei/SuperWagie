@@ -244,6 +244,18 @@ test('enabling learning turns on the shared library switch without undoing a com
   } finally { await h.runtime.stop(); }
 });
 
+test('a restarted process restores memory demand for an already enabled runtime', async () => {
+  const demands = [];
+  const h = await harness({ autoStart: false,
+    knowledgeLibrary: { setMemoryDemand: async (value) => { demands.push(value); } } });
+  await createConversationMemoryStore({ dataDir: h.dataDir }).update((state) => { state.enabled = true; });
+  try {
+    await h.runtime.start();
+    await h.runtime.idle();
+    expect(demands).toContain(true);
+  } finally { await h.runtime.stop(); }
+});
+
 test('a completed turn in a session without a directory is captured after resolving its location', async () => {
   let listener; const resolved = []; const requests = [];
   let now = 100;

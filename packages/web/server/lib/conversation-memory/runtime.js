@@ -723,6 +723,11 @@ export const createConversationMemoryRuntime = ({
       const state = await store.update((next) => { for (const job of [...next.jobs, ...next.syntheses]) if (job.state === 'extracting') { job.state = job.generated ? 'queued' : 'unknown'; job.error = job.generated ? null : 'generation_outcome_unknown'; } });
       if (stopped) return;
       if (revision === lifecycleRevision) enabled = state.enabled;
+      // A fresh process has not made the library's memory demand yet. Claim it
+      // before the knowledge runtime decides whether its document switch alone
+      // is enough to start; otherwise the experiences tab looks enabled while
+      // its embedding backend is stopped.
+      if (enabled) await knowledgeLibrary.setMemoryDemand?.(true).catch(() => {});
       await recovery?.migrate();
       if (stopped) return;
       const cleanupOutcomes = await withdrawal?.retryPending();
