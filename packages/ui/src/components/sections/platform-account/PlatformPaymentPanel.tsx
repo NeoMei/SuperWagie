@@ -66,7 +66,7 @@ const toneFor = (checkout: PlatformCheckout): 'waiting' | 'progress' | 'done' | 
   return 'waiting';
 };
 
-export type PlatformPaymentPanelProps = {
+type PlatformPaymentPanelProps = {
   checkout: PlatformCheckout;
   /** Suppress every action while another financial command is in flight. */
   busy: boolean;
