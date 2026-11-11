@@ -12,12 +12,20 @@ import { nativeSmokeMain, smokeFailure, smokeRuntimeFailure, smokePhase, createS
 const projectId = 'hy-smoke-s2-project';
 const directory = '/synthetic/hy-smoke-s2-project';
 const methodBody = 'Validate editable exports against independent source sessions, check required conditions and record validation limits.';
+const EMBED_SEGMENT_BYTES = 40;
+const marked = (lesson, text) => {
+  const marker = `lesson ${lesson} `;
+  const chunks = [];
+  const chunkLength = EMBED_SEGMENT_BYTES - marker.length;
+  for (let offset = 0; offset < text.length; offset += chunkLength) chunks.push(marker + text.slice(offset, offset + chunkLength));
+  return chunks.join(' ');
+};
 const segmentFor = (lesson) => ({
   id: `hy-smoke-segment-${lesson}`, sessionId: `hy-smoke-session-${lesson}`, projectId, directory,
   title: `Synthetic lesson ${lesson}`, createdAt: 100, sourceHash: (lesson === 'A' ? 'a' : 'b').repeat(64),
   messageIds: [`hy-smoke-user-${lesson}`, `hy-smoke-tool-${lesson}`], outcome: 'succeeded',
-  messages: [{ id: `hy-smoke-user-${lesson}`, role: 'user', text: `Independent export lesson ${lesson}: inspect editable text before reuse.` },
-    { id: `hy-smoke-tool-${lesson}`, role: 'tool', partId: `hy-smoke-part-${lesson}`, tool: 'export', status: 'completed', text: `Editable export inspection completed for lesson ${lesson}.` }],
+  messages: [{ id: `hy-smoke-user-${lesson}`, role: 'user', text: marked(lesson, `Independent export lesson ${lesson}: inspect editable text before reuse.`) },
+    { id: `hy-smoke-tool-${lesson}`, role: 'tool', partId: `hy-smoke-part-${lesson}`, tool: 'export', status: 'completed', text: marked(lesson, `Editable export inspection completed for lesson ${lesson}.`) }],
 });
 
 async function scenario({ root, backend: actualBackend, ownRuntime }, options, progress) {
@@ -36,9 +44,10 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
   const ensureSpace = (input) => spaces.ensure(input);
   const segments = ['A', 'B'].map(segmentFor);
   const generate = async ({ prompt }) => {
+    const lesson = prompt.includes('lesson B') ? 'B' : 'A';
     if (prompt.includes('behavioral psychologist')) {
       generationCalls.behavior++;
-      return { text: JSON.stringify({ abstraction_for_embedding: 'Requires independent source evidence and validation before reusing an engineering procedure.' }) };
+      return { text: JSON.stringify({ abstraction_for_embedding: marked(lesson, 'Requires independent source evidence and validation before reusing an engineering procedure.') }) };
     }
     const evidence = [...new Set([...prompt.matchAll(/\(id=(hy_support_[a-zA-Z0-9_]+)/g)].map((match) => match[1]))];
     if (evidence.length) {
@@ -46,15 +55,14 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
       if (generationCalls.system2 > 2) throw smokeFailure('smoke_s2_generation_repeated');
       if (generationCalls.system2 === 2) return { text: '[]' };
       return { text: JSON.stringify([{ op: 'create_schema', schema_kind: 'engineering_methodology', content: methodBody,
-        retrieval_text: 'Engineering export inspection with independent source evidence.', evidence_list: evidence, tags: ['editable-export', 'synthetic-fixture'] }]) };
+        retrieval_text: marked('B', 'Engineering export inspection with independent source evidence.'), evidence_list: evidence, tags: ['editable-export', 'synthetic-fixture'] }]) };
     }
     generationCalls.capture++;
     if (generationCalls.capture > 4) throw smokeFailure('smoke_capture_generation_repeated');
     if (prompt.includes('"draft_idx"')) return { text: JSON.stringify({ ops: [{ action: 'ADD', draft_idx: 0, supersedes: [] }] }) };
-    const lesson = prompt.includes('lesson B') ? 'B' : 'A';
-    return { text: JSON.stringify({ experiences: [{ task: `Inspect editable export lesson ${lesson}`, search_keys: [`editable export lesson ${lesson}`],
-      solution: `Check editable text and export constraints for independent lesson ${lesson}.`, boundary_envs: 'Synthetic slide workflow', confidence: 0.9 }],
-      fact: { subject: `Export lesson ${lesson}`, statement: `Independent lesson ${lesson} records an editable export inspection.`, details: 'Synthetic tool observation.', files: [] } }) };
+    return { text: JSON.stringify({ experiences: [{ task: marked(lesson, `Inspect editable export lesson ${lesson}`), search_keys: [marked(lesson, `editable export lesson ${lesson}`)],
+      solution: marked(lesson, `Check editable text and export constraints for independent lesson ${lesson}.`), boundary_envs: 'Synthetic slide workflow', confidence: 0.9 }],
+      fact: { subject: marked(lesson, `Export lesson ${lesson}`), statement: marked(lesson, `Independent lesson ${lesson} records an editable export inspection.`), details: 'Synthetic tool observation.', files: [] } }) };
   };
   const createRuntime = () => {
     const organizer = createHyMemoryOrganizer({ backend, readState: () => store.read(), command: options.python, generate, ensureSpace,
@@ -145,12 +153,13 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
     resolveProjectId: async () => projectId, retrieveMemory: (input) => runtime.retrieve(input) });
   const inspection = await phase('candidate_inspection', () => actions.execute('library.inspect', { entryId: method.id }, directory));
   assert.equal(inspection.memories[0]?.availability.state, 'unverified');
-  const beforeConfirm = await phase('before_confirmation_recall', () => runtime.recall({ directory, query: 'independent export inspection' })); assert(!beforeConfirm.includes(methodBody));
+  const recallQuery = marked('B', 'independent export inspection');
+  const beforeConfirm = await phase('before_confirmation_recall', () => runtime.recall({ directory, query: recallQuery })); assert(!beforeConfirm.includes(methodBody));
   await phase('method_confirmation', () => runtime.confirm({ id: method.id, directory })); await phase('confirmation_idle', () => runtime.idle());
   const read = await phase('confirmed_method_read', () => actions.execute('library.read', { entryId: method.id }, directory));
   assert.equal(read.memory?.availability.state, 'eligible'); assert.equal(read.memory?.verification, 'unverified'); assert.equal(read.memory?.content, methodBody);
   assert.equal(JSON.stringify(generationCalls), callsAfterContinuation);
-  const afterConfirm = await phase('confirmed_method_recall', () => runtime.recall({ directory, query: 'independent export inspection' })); assert(afterConfirm.includes(methodBody));
+  const afterConfirm = await phase('confirmed_method_recall', () => runtime.recall({ directory, query: recallQuery })); assert(afterConfirm.includes(methodBody));
   return { ok: true, engine: 'hy-memory', backend: 'sqlite-vec', sourceSessions: 2, generationCalls,
     checks: { automaticScheduler: true, actualSystem2SchemaTool: true, independentSources: true, candidateSupportsRemainUnverified: true,
       schemaCandidateRequiresConfirmation: true, continuationReviewExhausted: true, failedProjectionReceiptRetained: true, restartReceiptReuse: true,
@@ -158,4 +167,7 @@ async function scenario({ root, backend: actualBackend, ownRuntime }, options, p
     boundaries: ['Synthetic sources, generation responses and embedding vectors', 'Two real System2 batches; no provider quality assessment', 'Agent action adapter invoked directly; HTTP routes not exercised'] };
 }
 
+// The organizer embeds one short segment per request. Each fixture text repeats
+// its lesson marker at every 40-byte slice boundary, so the synthetic model
+// keeps the lesson's vector stable while production segmentation runs.
 await nativeSmokeMain(scenario, { vectorForText: (text) => text.includes('lesson B') ? [0.7, 0.7] : [1, 0] });

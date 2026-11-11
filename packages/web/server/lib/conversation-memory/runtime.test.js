@@ -127,6 +127,170 @@ test('status derives its error from current failures without a coupling write', 
   } finally { await h.runtime.stop(); }
 });
 
+test('a capture failure stays visible until a later capture succeeds', async () => {
+  let unavailable = true;
+  const h = await harness({
+    readSegments: async () => {
+      if (unavailable) throw Object.assign(new Error('Source directory unavailable'), { code: 'source_directory_unavailable' });
+      return { segments: [segment], checkpoint: { version: 1 }, reset: false, complete: true };
+    },
+  });
+  try {
+    await h.runtime.setEnabled(true);
+    await capture(h.runtime);
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'source_directory_unavailable', pending: 0 });
+    expect((await createConversationMemoryStore({ dataDir: h.dataDir }).read()).lastError).toBe('source_directory_unavailable');
+    unavailable = false;
+    await capture(h.runtime);
+    expect(h.generated()).toBe(1);
+    expect(await h.runtime.status()).toMatchObject({ lastError: null, pending: 0 });
+  } finally { await h.runtime.stop(); }
+});
+
+test('a current failed job keeps its error ahead of a newer manual failure', async () => {
+  let persisted;
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: (...args) => persisted.update(...args),
+  },
+    manualIndex: { sync: async () => { throw Object.assign(new Error('Manual backend down'), { code: 'manual_backend_down' }); } },
+    isManualEnabled: async () => true,
+    readKnowledgeLibraryEnabled: async () => null,
+  });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await persisted.update((state) => {
+    state.enabled = true;
+    state.libraryCouplingMigrated = true;
+    state.lastObservedKnowledgeLibraryEnabled = null;
+    state.jobs.push({ id: 'failed', segment, state: 'failed', error: 'hy_chat_agent_failed', attempts: 0 });
+  });
+  try {
+    await h.runtime.start();
+    await h.runtime.syncManual({ projectId: 'project-a' });
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'hy_chat_agent_failed' });
+  } finally { await h.runtime.stop(); }
+});
+
+test('a successful manual sync clears its own error and keeps a newer concurrent error', async () => {
+  const manualDown = Object.assign(new Error('Manual backend down'), { code: 'manual_backend_down' });
+  const sourceDown = Object.assign(new Error('Source directory unavailable'), { code: 'source_directory_unavailable' });
+  let syncCount = 0;
+  const entered = deferred();
+  const release = deferred();
+  const h = await harness({ autoStart: false,
+    manualIndex: { sync: async () => {
+      syncCount++;
+      if (syncCount === 1) throw manualDown;
+      if (syncCount === 2) return { indexed: 0, deleted: 0, pending: 0 };
+      if (syncCount === 3) return { indexed: 0, deleted: 0, pending: 0 };
+      entered.resolve(); await release.promise;
+      return { indexed: 0, deleted: 0, pending: 0 };
+    } },
+    isManualEnabled: async () => true,
+    readSegments: async () => {
+      if (syncCount >= 4) throw sourceDown;
+      return { segments: [segment], checkpoint: { version: 1 }, reset: false, complete: true };
+    },
+    readKnowledgeLibraryEnabled: async () => null,
+  });
+  await createConversationMemoryStore({ dataDir: h.dataDir }).update((state) => {
+    state.enabled = true;
+    state.libraryCouplingMigrated = true;
+    state.lastObservedKnowledgeLibraryEnabled = null;
+  });
+  try {
+    await h.runtime.start();
+    await h.runtime.syncManual({ projectId: 'project-a' });
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'manual_backend_down' });
+    await h.runtime.syncManual({ projectId: 'project-a' });
+    expect(await h.runtime.status()).toMatchObject({ lastError: null });
+    await h.runtime.syncManual({ projectId: 'project-a' });
+    expect(await h.runtime.status()).toMatchObject({ lastError: null });
+
+    const syncing = h.runtime.syncManual({ projectId: 'project-a' });
+    await entered.promise;
+    await capture(h.runtime);
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'source_directory_unavailable' });
+    release.resolve(); await syncing;
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'source_directory_unavailable' });
+  } finally { release.resolve(); await h.runtime.stop(); }
+});
+
+test('a successful manual sync keeps an older concurrent failure visible', async () => {
+  let persisted;
+  let failing = false;
+  const syncingManual = deferred();
+  const finishManual = deferred();
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: (...args) => persisted.update(...args),
+  }, manualIndex: { sync: async () => {
+    syncingManual.resolve(); await finishManual.promise;
+    return { indexed: 0, deleted: 0, pending: 0 };
+  } },
+    readSegments: async () => {
+      if (failing) throw Object.assign(new Error('Source directory unavailable'), { code: 'source_directory_unavailable' });
+      return { segments: [], checkpoint: { version: 1 }, reset: false, complete: true };
+    },
+    isManualEnabled: async () => true,
+    readKnowledgeLibraryEnabled: async () => null });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await persisted.update((state) => {
+    state.enabled = true;
+    state.libraryCouplingMigrated = true;
+    state.lastObservedKnowledgeLibraryEnabled = null;
+  });
+  try {
+    await h.runtime.start();
+    const syncing = h.runtime.syncManual({ projectId: 'project-a' });
+    await syncingManual.promise;
+    failing = true;
+    await capture(h.runtime);
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'source_directory_unavailable' });
+    finishManual.resolve();
+    await syncing;
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'source_directory_unavailable' });
+  } finally { finishManual.resolve(); await h.runtime.stop(); }
+});
+
+test('a disabled manual sync leaves its previous failure visible', async () => {
+  let manualEnabled = true;
+  const h = await harness({
+    manualIndex: { sync: async () => { throw Object.assign(new Error('Manual backend down'), { code: 'manual_backend_down' }); } },
+    isManualEnabled: async () => manualEnabled,
+  });
+  try {
+    await h.runtime.setEnabled(true);
+    await h.runtime.syncManual({ projectId: 'project-a' });
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'manual_backend_down' });
+    manualEnabled = false;
+    await h.runtime.syncManual({ projectId: 'project-a' });
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'manual_backend_down' });
+  } finally { await h.runtime.stop(); }
+});
+
+test('a successful drain keeps an unrecovered manual failure visible', async () => {
+  let manualDown = true;
+  const h = await harness({
+    manualIndex: { sync: async () => {
+      if (manualDown) throw Object.assign(new Error('Manual backend down'), { code: 'manual_backend_down' });
+      return { indexed: 0, deleted: 0, pending: 0 };
+    } },
+    isManualEnabled: async () => true,
+    readKnowledgeLibraryEnabled: async () => null,
+  });
+  try {
+    await h.runtime.setEnabled(true);
+    await h.runtime.syncManual({ projectId: 'project-a' });
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'manual_backend_down' });
+    await capture(h.runtime);
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'manual_backend_down' });
+    manualDown = false;
+    await h.runtime.syncManual({ projectId: 'project-a' });
+    expect(await h.runtime.status()).toMatchObject({ lastError: null });
+  } finally { await h.runtime.stop(); }
+});
+
 test.each(['start', 'enable'])('failed startup remains unavailable until %s recovers capture', async (recovery) => {
   let persisted; let unavailable = true;
   const h = await harness({ autoStart: false, store: {
