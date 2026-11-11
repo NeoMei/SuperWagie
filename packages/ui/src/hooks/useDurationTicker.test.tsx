@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-import { useDurationTickerNow, useMinuteTickerNow, useSpinnerPhase, useWaitingBlink, useWaitingBreath } from './useDurationTicker';
+import { useDurationTickerNow, useMinuteTickerNow, useSpinnerPhase, useWaitingBlink } from './useDurationTicker';
 
 let root: Root | null = null;
 let host: HTMLElement;
@@ -12,12 +12,6 @@ const originals = new Map<string, PropertyDescriptor | undefined>();
 const Indicator: React.FC<{ id: string; active?: boolean }> = ({ id, active = true }) => (
   <span data-id={id} className={useWaitingBlink(active)} />
 );
-
-const Breather: React.FC<{ id: string; active?: boolean }> = ({ id, active = true }) => (
-  <span data-id={id} data-breath={useWaitingBreath(active) ?? undefined} />
-);
-
-const breathOf = (id: string) => host.querySelector(`[data-id="${id}"]`)?.getAttribute('data-breath') ?? null;
 
 const Counter: React.FC = () => <span data-id="counter">{useDurationTickerNow(true)}</span>;
 
@@ -119,20 +113,6 @@ test('waiting indicators and live counters share one 1 s timer', async () => {
   expect(setInterval.mock.calls.length).toBe(1);
   expect(setInterval.mock.calls[0]?.[1]).toBe(1000);
   setInterval.mockRestore();
-});
-
-test('a breath steps through four phases once a second and stands still when not waiting', async () => {
-  await render(<Breather id="breath" />);
-  expect(breathOf('breath')).toBe('0');
-  await advance(1000);
-  expect(breathOf('breath')).toBe('1');
-  await advance(1000);
-  expect(breathOf('breath')).toBe('2');
-  await advance(2000);
-  expect(breathOf('breath')).toBe('0');
-
-  await render(<Breather id="breath" active={false} />);
-  expect(breathOf('breath')).toBeNull();
 });
 
 test('a minute clock renders again only when the minute turns', async () => {

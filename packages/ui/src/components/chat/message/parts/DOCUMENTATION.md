@@ -708,23 +708,43 @@ Why: only navigation tools use the compact static path; all other tools need obs
 
 ## Working status copy
 
-`useAssistantStatus` derives semantic dictionary keys, tool counts and reasoning
-part identity from live execution state. `useAgentStatusLabel` resolves them in
-the current interface language for both the floating status row and scroll pill.
-Permission and retry states take precedence over thinking copy. Ordinary changes
-retain the existing 1200 ms display hold; permission transitions display at once.
+`useAssistantStatus` derives semantic dictionary keys, tool counts, one short
+tool target and reasoning part identity from live execution state. The target
+comes from the newest active tool's input: paths keep their basename, commands
+their first line, URLs their host, searches their pattern and skills their name.
+Sensitive fields and pending streamed input stay out of the copy; long values
+are capped at 60 visible characters.
+`useAgentStatusLabel` resolves a complete sentence in the current interface
+language for both the floating status row and scroll pill. One active tool shows
+its concrete target; parallel calls of one kind show their count. Permission and
+retry states take precedence over thinking copy. Ordinary changes retain the
+existing 1200 ms display hold; permission transitions display at once.
+
+### Why the status row names the work
+
+WorkBuddy resolves a loading line from the current phase and the active tool
+name. SuperWagie follows that order and adds the tool's short target, so a
+reader sees what the agent is reading, running, editing or searching. Benma
+lines remain for thinking, composing and states with no concrete tool target.
 
 ### Why thinking lines use reasoning identity
 
 Every kind of work carries two phrasings of its own, and thinking carries six
-Benma lines. The status signature (key, count, tool name, reasoning seed) picks
-one by hash, so the same work keeps its line across renders and the
+Benma lines. The status signature (key, count, tool name, target, reasoning seed)
+picks one by hash, so the same work keeps its line across renders and the
 status-row/pill handoff, and every line stays reachable. No additional clock,
 polling or model request selects copy.
 
-### Why waiting labels breathe on the shared clock
+### Why only the folded header shimmers
 
-The folded Activity header and the status above the composer dim through four
-opacity steps on the 1 s clock while the turn works: one drawn frame a second,
-the same bill as a blink, and nothing infinite on the compositor. A permission
-wait stands still so it stays authoritative, and a settled turn stands still.
+The folded Activity header sweeps one 2.8 s luminance band from left to right
+through a visual copy of its own text. The copy keeps the original sizes and
+weights and uses the title color for the highlight. The shimmer starts only
+after the visible header identity has held still for one second, and resets on
+any identity, tool, target or language change. The gray status row and scroll
+pill stay still so their concrete work text reads cleanly. Permission waits,
+settled turns, hidden or offscreen headers, minimized or tray-hidden native
+windows, paused clocks, inert subtrees and reduced-motion preferences stand
+still. The new infinite CSS animation is listed in
+`lib/infiniteAnimations.test.ts`; its measured cost is recorded in
+`scripts/perf/DOCUMENTATION.md`.

@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useAgentStatusLabel } from '@/hooks/useAgentStatusLabel';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
-import { useWaitingBreath } from '@/hooks/useDurationTicker';
 import { useBackgroundSessionWork } from '@/hooks/useBackgroundSessionWork';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
@@ -54,8 +53,6 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
     }, [activeModel, providers]);
 
     const label = useAgentStatusLabel(working.isWorking ? (working.retryInfo ? { key: 'chat.agentStatus.retry' } : working.status) : null, modelName);
-    // The pill carries the same breath as the status row it takes over from.
-    const breath = useWaitingBreath(working.isWorking);
     if (!label) return <ScrollAction onClick={onClick} />;
 
     return (
@@ -63,7 +60,7 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
             <ScrollAction onClick={onClick}>
                 {/* leading-5: `truncate` clips at the line box, and a 16px one
                     cut off descenders in fonts with taller metrics. */}
-                <span className={cn('oc-breath -ms-px min-w-0 truncate text-[0.8125rem] leading-5 text-muted-foreground', working.canBackground ? 'pe-1' : 'pe-2')} data-breath={breath ?? undefined}>
+                <span className={cn('-ms-px min-w-0 truncate text-[0.8125rem] leading-5 text-muted-foreground', working.canBackground ? 'pe-1' : 'pe-2')}>
                     {label}
                 </span>
             </ScrollAction>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { z } from 'zod';
 import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
-import type { JsonValue, Message, ModelRef, Part, ReasoningPart, StructuredError, TextPart, ToolPart } from '@/lib/opencode/model';
+import type { JsonValue, Message, ModelRef, Part, ReasoningPart, StructuredError, TextPart, ToolInput, ToolPart } from '@/lib/opencode/model';
 import {
     executeHasBackgroundableWork,
     isExecuteTool,
@@ -137,6 +137,74 @@ const BUCKET_STATUS = {
     skill: ['chat.agentStatus.skill', 'chat.agentStatus.skill.count'],
 } satisfies Record<ToolBucket, readonly [I18nKey, I18nKey]>;
 
+const BUCKET_STATUS_WITH_TARGET = {
+    read: 'chat.agentStatus.read.withTarget',
+    search: 'chat.agentStatus.search.withTarget',
+    edit: 'chat.agentStatus.edit.withTarget',
+    command: 'chat.agentStatus.command.withTarget',
+    lookup: 'chat.agentStatus.lookup.withTarget',
+    delegate: 'chat.agentStatus.delegate.withTarget',
+    question: 'chat.agentStatus.question.withTarget',
+    skill: 'chat.agentStatus.skill.withTarget',
+} satisfies Record<ToolBucket, I18nKey>;
+
+const TARGET_FIELDS = {
+    read: ['path', 'filePath', 'file_path'],
+    search: ['pattern', 'query', 'path', 'filePath', 'file_path'],
+    edit: ['path', 'filePath', 'file_path'],
+    command: ['command', 'description'],
+    lookup: ['url', 'query', 'search'],
+    delegate: ['description', 'agent', 'prompt'],
+    question: ['question', 'header', 'title'],
+    skill: ['name', 'skill', 'id', 'title'],
+} satisfies Record<ToolBucket, readonly string[]>;
+
+const SENSITIVE_TARGET_FIELD = /^(?:api[_-]?key|token|password|passwd|secret|authorization|cookie|credential|private[_-]?key|access[_-]?key|refresh[_-]?token|content|html|text|patchText|code|raw)$/i;
+const MAX_TARGET_LENGTH = 60;
+const CONTROL_CHARACTER = String.fromCharCode(0);
+const CONTROL_CHARACTER_PATTERN = new RegExp(`[\r\t${CONTROL_CHARACTER}-${String.fromCharCode(31)}]+`, 'g');
+const FIRST_LINE = new RegExp("[\r]?\n");
+const RESIDUAL_CONTROL_CHARACTER = new RegExp(`[${CONTROL_CHARACTER}-${String.fromCharCode(31)}${String.fromCharCode(127)}]`);
+
+const JsonString = z.string();
+const ToolInputObject = z.record(z.string(), z.json());
+
+const nestedToolInput = (input: JsonValue | undefined): ToolInput | undefined => {
+    const parsed = ToolInputObject.safeParse(input);
+    return parsed.success ? parsed.data : undefined;
+};
+
+/** A short, readable name for one concrete call. Streamed raw input and secrets stay out. */
+const getToolTarget = (toolName: string, input: ToolInput | undefined, running: boolean): string | undefined => {
+    if (!input || !running) return undefined;
+    const bucket = TOOL_BUCKETS.get(toolName);
+    if (!bucket) return undefined;
+    const fields = TARGET_FIELDS[bucket];
+    const field = fields.find((name) => JsonString.safeParse(input[name]).success);
+    const value = field ? JsonString.safeParse(input[field]) : undefined;
+    if (!field || !value?.success || SENSITIVE_TARGET_FIELD.test(field)) return undefined;
+    let target = value.data.replace(CONTROL_CHARACTER_PATTERN, ' ').trim().split(FIRST_LINE)[0]?.trim() ?? '';
+    if (!target) return undefined;
+    if (field === 'url') {
+        try { target = new URL(target).hostname; } catch {
+            const host = target.match(/^(?:[a-z][a-z0-9+.-]*:\/\/)?([^/?#\s]+)/i)?.[1];
+            if (!host || /[\s@]/.test(host)) return undefined;
+            target = host.replace(/:\d+$/, '');
+        }
+    } else if (/^(?:path|filePath|file_path)$/.test(field)) {
+        target = target.split(/[\\/]/).filter(Boolean).at(-1) ?? target;
+    } else if (field === 'command') {
+        target = target.replace(/\s+/g, ' ');
+    }
+    target = target.replace(/\s+/g, ' ').trim();
+    if (!target || RESIDUAL_CONTROL_CHARACTER.test(target) || /\s*\S*@\S+\s*/.test(target)) return undefined;
+    if (/[?&](?:token|key|secret|password)=/i.test(target)) return undefined;
+    const visible = Array.from(target);
+    return visible.length > MAX_TARGET_LENGTH
+        ? `${visible.slice(0, MAX_TARGET_LENGTH - 1).join('')}…`
+        : target;
+};
+
 // Shown while no part says what the turn does; one per turn, picked by its key.
 const WORKING_STATUS: readonly I18nKey[] = [
     'chat.agentStatus.working',
@@ -242,12 +310,14 @@ const asWords = (name: string): string => name.replace(/[_-]+/g, ' ').trim();
 
 const usingTool = (name: string): AgentStatus => ({ key: 'chat.agentStatus.usingTool', name: asWords(name) });
 
-const getToolStatus = (toolName: string, count = 1): AgentStatus => {
+const getToolStatus = (toolName: string, count = 1, target?: string): AgentStatus => {
     const bucket = TOOL_BUCKETS.get(toolName);
     // A plugin tool nobody described: its name, read as words.
     if (!bucket) return usingTool(toolName);
     const [one, many] = BUCKET_STATUS[bucket];
-    return count > 1 && many !== one ? { key: many, count } : status(one);
+    if (count > 1 && many !== one) return { key: many, count };
+    if (target) return status(BUCKET_STATUS_WITH_TARGET[bucket]);
+    return status(one);
 };
 
 /**
@@ -280,18 +350,32 @@ const getNamedToolStatus = (
  */
 const getRunningToolStatus = (part: ToolPart, toolName: string, count: number, mcpServers: readonly string[]): AgentStatus => {
     const state = part.state;
-    const named = getNamedToolStatus(toolName, state?.input, state?.status === 'running', mcpServers);
+    const running = state?.status === 'running';
+    const named = getNamedToolStatus(toolName, state?.input, running, mcpServers);
     if (named) {
         return named;
     }
+    const target = getToolTarget(toolName, state?.input, running);
+    const bucket = TOOL_BUCKETS.get(toolName);
     if (!isExecuteTool(toolName) || count > 1) {
-        return getToolStatus(toolName, count);
+        const resolved = getToolStatus(toolName, count, target);
+        return target && bucket && resolved.key === BUCKET_STATUS_WITH_TARGET[bucket]
+            ? { ...resolved, target }
+            : resolved;
     }
     const last = lastExecuteToolCall(state && 'metadata' in state ? state.metadata : undefined);
-    if (!last) {
+    if (!last || last.status === 'completed' || last.status === 'error') {
         return getToolStatus(toolName);
     }
-    return getNamedToolStatus(last.tool, last.input, false, mcpServers) ?? getToolStatus(last.tool);
+    const nested = getNamedToolStatus(last.tool, last.input, false, mcpServers);
+    if (nested) return nested;
+    const nestedInput = nestedToolInput(last.input);
+    const nestedTarget = getToolTarget(last.tool, nestedInput, true);
+    const resolved = getToolStatus(last.tool, 1, nestedTarget);
+    const nestedBucket = TOOL_BUCKETS.get(last.tool);
+    return nestedTarget && nestedBucket && resolved.key === BUCKET_STATUS_WITH_TARGET[nestedBucket]
+        ? { ...resolved, target: nestedTarget }
+        : resolved;
 };
 
 const hashString = (value: string): number => {
@@ -390,7 +474,10 @@ const encodeParsedStatus = (status: ParsedStatusResult): string => {
         status.activePartType ?? '',
         status.activeToolName ?? '',
         // The signature decides re-renders: equal statuses encode the same.
-        JSON.stringify([status.status.key, status.status.count ?? null, status.status.name ?? null, status.status.seed ?? null]),
+        JSON.stringify([
+            status.status.key, status.status.count ?? null, status.status.name ?? null,
+            status.status.seed ?? null, status.status.target ?? null,
+        ]),
         status.isGenericStatus ? '1' : '0',
         status.canBackground ? '1' : '0',
     ].join(STATUS_SIGNATURE_SEPARATOR);
@@ -400,11 +487,14 @@ const decodeStatus = (encoded: string | undefined): AgentStatus => {
     if (!encoded) return { key: 'chat.agentStatus.working' };
     // SAFETY: `encodeParsedStatus` wrote this tuple from an AgentStatus, and the
     // signature only travels from that encoder to this decoder.
-    const [key, count, name, seed] = JSON.parse(encoded) as [I18nKey, number | null, string | null, string | null];
+    const [key, count, name, seed, target] = JSON.parse(encoded) as [
+        I18nKey, number | null, string | null, string | null, string | null,
+    ];
     const decoded: AgentStatus = { key };
     if (count !== null) decoded.count = count;
     if (name !== null) decoded.name = name;
     if (seed !== null) decoded.seed = seed;
+    if (target !== null) decoded.target = target;
     return decoded;
 };
 

@@ -6,12 +6,12 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.85 for macOS Apple silicon and
+The website targets release 2.7.86 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
-Windows installer is unsigned. Installer sizes are updated from the verified
-final artifacts before deployment.
+Windows installer is unsigned. Precise installer sizes are added to the public
+site after the final artifacts are verified.
 
 The bundled OpenCode runs in SuperWagie's private application space. Its model
 settings, credentials and runtime data are separate from a system OpenCode
@@ -25,6 +25,17 @@ available and supports the required purpose. Each supported function is tested
 with the same key before its connection is applied. Tests appear as they start,
 with up to three running together. A missing compatible model has an explicit
 unavailable result. Models without native prices remain unavailable.
+
+Version 2.7.86 gives the folded activity header a highlight that sweeps from
+left to right when its visible text has stayed unchanged for more than one
+second. Font size and weight stay as they are, and the highlight uses the title
+color. The gray status line names the current file, command, URL or search
+pattern with dry humor about office work. The library switch and experience
+learning stay linked: turning the library on enables learning, and turning it
+off and back on resumes learning after a manual pause. Every user-visible root
+session in any project with a new conversation enters extraction automatically,
+while internal child sessions remain outside the experience reader. Capture and
+indexing failures keep their specific reasons and clear after recovery.
 
 Version 2.7.85 makes capture and indexing failures visible on the Experiences
 status page and clears them after recovery. A completed manual index clears its
@@ -122,7 +133,7 @@ background and indexed for project retrieval. The Experiences checkbox can pause
 or resume learning. Sessions from before enablement require explicit processing.
 Methodology candidates require confirmation.
 
-Installer links point to the v2.7.85 GitHub Release assets. The unified release
+Installer links point to the v2.7.86 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 

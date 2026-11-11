@@ -1,5 +1,5 @@
 import React, { act } from 'react';
-import { afterEach, beforeEach, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, setDefaultTimeout, spyOn, test } from 'bun:test';
 import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -1060,5 +1060,46 @@ describe('live Activity with the real message body', () => {
         await act(async () => changedFilesToggle()?.click());
         expect(container.textContent).toContain('file-4.ts');
         expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(0);
+    });
+
+    test('shimmers the folded header only after its text stays still for one second', async () => {
+        const shell = (command: string): Part => ({
+            type: 'tool', tool: 'shell', id: 'shell', callID: 'shell', sessionID: 'session', messageID: 'progress',
+            state: { status: 'running', input: { command }, time: { start: 1 } },
+        });
+        const record = (command: string) => turn([assistant('progress', [text('progress-text', 'Checking'), shell(command)], 'tool-calls')]);
+        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        const previousMatchMedia = Object.getOwnPropertyDescriptor(globalThis, 'matchMedia');
+        jest.useFakeTimers();
+        try {
+            // The suite runs with reduced motion to keep disclosure tests
+            // deterministic; this test opts into the shimmer preference.
+            Object.defineProperty(globalThis, 'matchMedia', {
+                configurable: true,
+                writable: true,
+                value: (query: string): MediaQueryList => window.matchMedia(query.replace('reduce', 'no-preference')),
+            });
+            await act(async () => root.render(<Harness record={record('npm test')} initialExpanded={false} />));
+            expect(header()?.getAttribute('data-shimmer')).toBeNull();
+            await act(async () => jest.advanceTimersByTime(999));
+            expect(header()?.getAttribute('data-shimmer')).toBeNull();
+            await act(async () => jest.advanceTimersByTime(1));
+            expect(header()?.getAttribute('data-shimmer')).toBe('ready');
+            expect(header()?.querySelector('.oc-live-header-shimmer')?.textContent).toContain('npm test');
+
+            await act(async () => root.render(<Harness record={record('bun test')} initialExpanded={false} />));
+            expect(header()?.getAttribute('data-shimmer')).toBeNull();
+            expect(header()?.querySelector('.oc-live-header-shimmer')).toBeNull();
+            await act(async () => jest.advanceTimersByTime(1000));
+            expect(header()?.querySelector('.oc-live-header-shimmer')?.textContent).toContain('bun test');
+
+            await act(async () => root.render(<Harness record={record('bun test')} working={false} initialExpanded={false} />));
+            expect(header()?.getAttribute('data-shimmer')).toBeNull();
+            expect(header()?.querySelector('.oc-live-header-shimmer')).toBeNull();
+        } finally {
+            jest.useRealTimers();
+            if (previousMatchMedia) Object.defineProperty(globalThis, 'matchMedia', previousMatchMedia);
+            else Reflect.deleteProperty(globalThis, 'matchMedia');
+        }
     });
 });

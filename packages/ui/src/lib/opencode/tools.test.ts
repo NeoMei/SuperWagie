@@ -15,6 +15,7 @@ import {
   isWebTool,
   normalizeToolName,
   renderedPage,
+  lastExecuteToolCall,
   subagentSessionId,
   toolDescription,
   toolFileDiffs,
@@ -213,6 +214,18 @@ describe("tool row description", () => {
 })
 
 describe("execute call details", () => {
+  test("reads the newest call's status and arguments", () => {
+    expect(lastExecuteToolCall({
+      toolCalls: [
+        { tool: "read", status: "running", input: { path: "a.ts" } },
+        { tool: "shell", status: "completed", input: { command: "bun test" } },
+      ],
+    })).toEqual({ tool: "shell", status: "completed", input: { command: "bun test" } })
+    expect(lastExecuteToolCall({ toolCalls: [{ tool: "read", input: { path: "a.ts" } }] }))
+      .toEqual({ tool: "read", input: { path: "a.ts" } })
+    expect(lastExecuteToolCall({})).toBe(undefined)
+  })
+
   test("recognizes blocking child progress and ignores invalid job markers", () => {
     expect(executeHasBackgroundableWork({ shellID: "sh_1" })).toBe(true)
     expect(executeHasBackgroundableWork({ sessionID: "ses_child", status: "running" })).toBe(true)

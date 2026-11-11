@@ -57,6 +57,8 @@ const DEFAULT_VARIANTS = [
   "ctx-opacity",
   "ctx-transformed-parent",
   "ctx-currentcolor",
+  "activity-header-static",
+  "activity-header-shimmer",
 ]
 
 const HELP = `Usage: bun run profile:animation -- [options]
