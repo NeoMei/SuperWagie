@@ -294,21 +294,26 @@ export function executeToolCalls(metadata: Metadata | undefined): ExecuteToolCal
   return parsed
 }
 
+const executeRawCall = z.object({ tool: z.string(), status: optionalText, input: z.json().optional() });
 const executeRawCallSchema = z
   .object({
     toolCalls: z
-      .array(z.object({ tool: optionalText, input: z.json().optional().catch(undefined) }).nullable().catch(null))
+      .array(executeRawCall.extend({ tool: optionalText }).nullable().catch(null))
       .optional()
       .catch(undefined),
   })
   .catch({})
 
 /** The newest call an `execute` script made, with its arguments as the script passed them. */
-export function lastExecuteToolCall(metadata: Metadata | undefined): { tool: string; input?: JsonValue } | undefined {
+export function lastExecuteToolCall(metadata: Metadata | undefined): z.infer<typeof executeRawCall> | undefined {
   const calls = executeRawCallSchema.parse(metadata ?? {}).toolCalls ?? []
   for (let index = calls.length - 1; index >= 0; index -= 1) {
     const call = calls[index]
-    if (call?.tool) return { tool: call.tool, input: call.input }
+    if (!call?.tool) continue
+    const entry: z.infer<typeof executeRawCall> = { tool: call.tool }
+    if (call.status) entry.status = call.status
+    if (call.input !== undefined) entry.input = call.input
+    return entry
   }
   return undefined
 }

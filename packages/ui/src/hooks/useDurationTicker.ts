@@ -131,14 +131,3 @@ export const useSpinnerPhase = (active: boolean, count: number): number => {
     const step = useClockStep(active, 'beat');
     return active ? step % count : 0;
 };
-
-/**
- * Breath phase for a waiting label: four opacity steps on the shared 1 s
- * clock, so the text inhales and exhales once every four seconds and costs
- * one drawn frame a second, the same bill as `useWaitingBlink`. Steady text
- * never calls this.
- */
-export const useWaitingBreath = (active: boolean): number | null => {
-    const phase = useWaitingPhase(active, 4);
-    return active ? phase : null;
-};

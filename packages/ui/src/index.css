@@ -2424,18 +2424,56 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 }
 
 /*
- * The inhale of a waiting label's four-second breath (`useWaitingBreath`):
- * four opacity steps on the shared 1 s clock, one drawn frame a second.
- * Phase 0 carries no rule and sits at full opacity. No transition: a fade
- * would draw every frame of it.
+ * The folded Activity header sweeps one soft luminance band from left to right
+ * through a duplicate of its own text. The duplicate carries the original
+ * classes, so font size and weight stay as they are; the highlight uses the
+ * title color. React mounts it only after the header has held still for one
+ * second, and removes it when the visible identity changes or the turn settles.
  */
-.oc-breath[data-breath='1'],
-.oc-breath[data-breath='3'] {
-  opacity: 0.8;
+.oc-live-header-shimmer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: inherit;
+  gap: inherit;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding-inline: inherit;
+  pointer-events: none;
+  color: var(--tools-title);
+  background: linear-gradient(90deg,
+    transparent 0 40%,
+    color-mix(in srgb, currentColor 18%, transparent) 46%,
+    color-mix(in srgb, currentColor 20%, white) 50%,
+    color-mix(in srgb, currentColor 18%, transparent) 54%,
+    transparent 60% 100%) 100% 0 / 200% 100% no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: oc-live-header-shimmer 2.8s linear infinite;
 }
 
-.oc-breath[data-breath='2'] {
-  opacity: 0.6;
+.oc-live-header-shimmer,
+.oc-live-header-shimmer * {
+  -webkit-text-fill-color: transparent;
+}
+
+.oc-live-header-shimmer svg,
+.oc-live-header-shimmer [aria-hidden='true'] {
+  visibility: hidden;
+}
+
+@keyframes oc-live-header-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-live-header-shimmer {
+    animation: none;
+    display: none;
+  }
 }
 
 /*
@@ -2509,10 +2547,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   }
 
   .waiting-dim {
-    opacity: 1;
-  }
-
-  .oc-breath {
     opacity: 1;
   }
 

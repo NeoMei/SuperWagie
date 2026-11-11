@@ -29,7 +29,32 @@ import { findLiveSession } from '@/sync/live-aggregate';
 import { isInvisibleText } from '@/lib/invisibleText';
 import { getCompactReasoningSummary } from '../lib/reasoningSummary';
 import { useStreamingTextThrottle } from '../hooks/useStreamingTextThrottle';
-import { useWaitingBreath } from '@/hooks/useDurationTicker';
+import { ClockPausedContext } from '@/hooks/clockPausedContext';
+import { isShimmerAllowed, watchHeaderShimmer } from '@/hooks/liveHeaderShimmer';
+
+const SHIMMER_STABLE_DELAY_MS = 1000;
+
+/** The shimmer starts only after the whole folded header has held still for one second. */
+const useStableHeaderShimmer = (identity: string, active: boolean) => {
+    const clockPaused = React.useContext(ClockPausedContext);
+    const [allowed, setAllowed] = React.useState(isShimmerAllowed);
+    const headerRef = React.useRef<HTMLButtonElement>(null);
+    const [readyIdentity, setReadyIdentity] = React.useState<string | null>(null);
+    const canShimmer = active && !clockPaused && allowed;
+
+    React.useEffect(() => {
+        return watchHeaderShimmer(headerRef.current, setAllowed);
+    }, []);
+
+    React.useEffect(() => {
+        setReadyIdentity(null);
+        if (!canShimmer) return;
+        const timer = window.setTimeout(() => setReadyIdentity(identity), SHIMMER_STABLE_DELAY_MS);
+        return () => window.clearTimeout(timer);
+    }, [identity, canShimmer]);
+
+    return { ready: readyIdentity === identity && canShimmer, headerRef };
+};
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
 
@@ -43,7 +68,7 @@ interface LiveTurnActivityProps {
 }
 
 export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded, onToggle, renderMessage }: LiveTurnActivityProps) {
-    const { t } = useI18n();
+    const { t, locale } = useI18n();
     const contentId = React.useId();
     const finalContentId = React.useId();
     const belowInteractionsContentId = React.useId();
@@ -179,10 +204,9 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         allowTextReplacement: true,
     });
     const reasoningPreview = React.useMemo(() => getCompactReasoningSummary(reasoningText), [reasoningText]);
-    // The folded header breathes while the turn works, like the status above
-    // the composer: four opacity steps on the shared 1 s clock, one drawn
-    // frame a second. It stands still once the turn settles.
-    const breath = useWaitingBreath(!settled);
+    // The folded header sweeps a soft highlight along its whole text row once
+    // the row has stopped changing for a second. The composer status stays
+    // still. Permission waits and settled turns carry no shimmer.
     // Questions, pages and proposed workflows remain outside execution,
     // including after the turn ends without a final answer.
     const interactions = React.useMemo(() => getShownInteractions(turn.assistantMessages), [turn.assistantMessages]);
@@ -214,16 +238,17 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         summary.researched ? t('chat.liveActivity.researched') : null,
         summary.subagents > 0 ? t(summary.subagents === 1 ? 'chat.liveActivity.usedSubagent' : 'chat.liveActivity.usedSubagents', { count: summary.subagents }) : null,
     ].filter(Boolean).join(' · ') : '';
+    const headerTitle = t(settled ? 'chat.liveActivity.title'
+        : waitingPermission ? 'chat.toolPart.status.waitingPermission'
+            : waitingAnswer ? 'chat.toolPart.status.waitingAnswer'
+                : liveThought ? 'chat.reasoningTrace.thinking' : 'chat.liveActivity.title');
     const label = (
         <>
             <span className="live-activity-icon inline-flex shrink-0" data-running={liveTool ? 'true' : undefined}>
                 <Icon name="stack" className="size-3.5 text-[var(--tools-icon)]" />
             </span>
-            <span className="oc-breath shrink-0 font-semibold text-[var(--tools-title)]" data-breath={breath ?? undefined}>
-                {t(settled ? 'chat.liveActivity.title'
-                    : waitingPermission ? 'chat.toolPart.status.waitingPermission'
-                        : waitingAnswer ? 'chat.toolPart.status.waitingAnswer'
-                            : liveThought ? 'chat.reasoningTrace.thinking' : 'chat.liveActivity.title')}
+            <span className="shrink-0 font-semibold text-[var(--tools-title)]">
+                {headerTitle}
                 {!settled ? <BusyDots /> : null}
             </span>
             <Icon name={isExpanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3 shrink-0" />
@@ -262,6 +287,14 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             {details ? <span className="hidden min-w-0 flex-1 truncate text-start typography-meta @min-[560px]:inline" title={details}>{fileLabel ? '· ' : ''}{details}</span> : null}
         </>
     );
+    const headerIdentity = React.useMemo(() => [
+        locale, headerTitle, String(settled), String(isExpanded), String(waitingPermission), String(waitingAnswer),
+        String(terminalFailed), String(terminalStopped), liveTool?.label ?? '', liveTool?.description ?? '',
+        reasoningPreview ?? '', fileLabel ?? '', details, String(showReasoningTraces),
+    ].join('\u0000'), [locale, headerTitle, settled, isExpanded, waitingPermission, waitingAnswer,
+        terminalFailed, terminalStopped, liveTool?.label, liveTool?.description, reasoningPreview,
+        fileLabel, details, showReasoningTraces]);
+    const shimmer = useStableHeaderShimmer(headerIdentity, !settled && !waitingForUser && !isExpanded);
     const windowStore = React.useContext(TurnMessageWindowContext);
     // The fold opens below its header, which stays where the reader clicked
     // it, and mounts its first steps (see openedFoldMessageWindow), so a very
@@ -288,9 +321,14 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                 <div className="chat-message-column @container">
                     <div className="mt-1">
                         <Button variant="ghost" size="sm" className={headerClass} onClick={handleToggle}
+                            ref={shimmer.headerRef}
+                            data-shimmer={shimmer.ready ? 'ready' : undefined}
                             aria-expanded={isExpanded}
                             aria-controls={[contentId, ...(finalMessage ? [finalContentId] : []), ...(messagesBelowInteractions.length > 0 ? [belowInteractionsContentId] : [])].join(' ')}>
                             {label}
+                            {shimmer.ready ? (
+                                <span key={headerIdentity} className="oc-live-header-shimmer" aria-hidden="true">{label}</span>
+                            ) : null}
                         </Button>
                     </div>
                 </div>
