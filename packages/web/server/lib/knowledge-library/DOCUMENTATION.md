@@ -23,9 +23,19 @@ The user-facing feature over the embedded knowledge backend:
 
 - The document-library setting controls document APIs, watchers and ingestion.
   Internal memory demand can keep the same owned backend running while that
-  setting is off. `start()` reconciles document-setting changes;
+  setting is off. The start routine reconciles document-setting changes;
   `setMemoryDemand(false)` releases memory demand. Full server shutdown calls
   `stop()`. Memory-only startup creates no document watcher or ingest queue.
+  On desktop, a committed true library write enables conversation learning when
+  its shared state has no recorded decision. Startup applies that one-time
+  migration when the library is already on, including an upgraded install whose
+  settings file has no library key. A missing key reads as enabled, and a strict
+  settings read failure produces no library transition. Repeating a true write
+  preserves an explicit learning pause across restarts. A real false-to-true
+  library transition resumes learning after a pause. Disabling the library
+  leaves learning on, and disabling learning leaves the library on. A settings
+  save waits for the same learning state commit, and a coupling failure appears
+  as `library_coupling_failed` in learning status.
 - Cleanup of an old managed memory document remains available with document
   activity disabled. It uses the managed identity and original document ledger;
   an absent old document needs no model or backend mutation.

@@ -21,6 +21,8 @@ export const memoryEntrySchema = z.object({
 
 export const conversationMemoryStateSchema = z.object({
   version: z.literal(1), enabled: z.boolean(), enabledAt: z.number(),
+  libraryCouplingMigrated: z.boolean().default(false),
+  lastObservedKnowledgeLibraryEnabled: z.boolean().nullable().default(null),
   pending: z.array(z.object({ sessionId: z.string(), directory: z.string(), includeHistory: z.boolean() })),
   // Reader and extractor own the opaque source/checkpoint codecs and reparse
   // them before use; this store owns only durable processing transitions.
@@ -52,7 +54,7 @@ export const conversationMemoryStateSchema = z.object({
     migrated: z.boolean().default(false),
   }).default({ records: [], projections: [], dirtyProjects: [], continuations: {}, migrated: false }),
 });
-const emptyState = () => conversationMemoryStateSchema.parse({ version: 1, enabled: false, enabledAt: 0, pending: [], sessions: {}, jobs: [], syntheses: [], entries: [], tombstones: [], lastError: null });
+const emptyState = () => conversationMemoryStateSchema.parse({ version: 1, enabled: false, enabledAt: 0, libraryCouplingMigrated: false, lastObservedKnowledgeLibraryEnabled: null, pending: [], sessions: {}, jobs: [], syntheses: [], entries: [], tombstones: [], lastError: null });
 
 export const createConversationMemoryStore = ({ dataDir }) => {
   const directory = path.join(dataDir, 'conversation-memory');

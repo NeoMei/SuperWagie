@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "catalogVersion": "2026-11-11.6",
-  "revision": 6,
+  "catalogVersion": "2026-11-11.8",
+  "revision": 8,
   "minAppVersion": "2.7.59",
   "articles": [
     {
@@ -412,11 +412,11 @@
       "keywords": [],
       "en": {
         "title": "Review conversation learning and memory",
-        "text": "1. Open Knowledge library → Experiences, or Settings → Knowledge library → Conversation learning. Turning on the knowledge library also enables Learn from new conversations. Refresh to check status.\n2. After learning is enabled, later conversations in every project enter extraction automatically. Select a project and its session before Process current session to import older history or an already open session. Historical processing starts when you request it and can use the configured small model and embedding service. Check entry and index status after processing.\n3. Make active allows an experience entry to be recalled; Retry indexing retries its failed index; Forget removes it from recall and prevents regeneration from the same source while retaining the source conversation. Search project experiences filters the list. Extraction failures show a specific reason, and transient failures keep retry available.\n4. The separate Agent memory tool is controlled in Settings → General → OpenChamber tools. Its saved memories and conversation-learning entries have separate controls; disabling a tool does not itself erase stored content."
+        "text": "1. Open Knowledge library → Experiences, or Settings → Knowledge library → Conversation learning. Turning on the knowledge library also enables Learn from new conversations. An install upgraded with the library already on gets the same setting at first launch. The Experiences checkbox pauses or resumes learning while the library stays on. A pause survives restarts and later saves that keep the library on. Turn the library off and back on to start learning again. Refresh to check status.\n2. While the library switch is on and learning is active, every session in any project that gets a new conversation enters extraction automatically, including sessions you do not have open. Select a project and its session, then choose Import session history to import conversations from before the switch or the session you have open now. Historical processing starts when you request it and can use the configured small model and embedding service. Check entry and index status after processing.\n3. Make active allows an experience entry to be recalled; Retry indexing retries its failed index; Forget removes it from recall and prevents regeneration from the same source while retaining the source conversation. Search project experiences filters the list. Extraction failures show a specific reason, and transient failures keep retry available.\n4. The separate Agent memory tool is controlled in Settings → General → OpenChamber tools. Its saved memories and conversation-learning entries have separate controls; disabling a tool does not itself erase stored content."
       },
       "zh-CN": {
         "title": "查看对话学习、经验与记忆",
-        "text": "1. 打开“资料库 → 经验”，或“设置 → 资料库 → 对话学习”。开启资料库会同时启用“从新对话中学习”，通过“刷新”检查状态。\n2. 启用后，各项目之后发生的对话会自动进入提炼。选择项目及该项目中的会话，再点击“处理当前会话”，可导入启用前的历史或已经打开的旧会话。历史处理由你主动发起，可能调用已配置的小模型和嵌入服务。处理后检查条目状态与索引状态。\n3. “启用条目”允许经验被召回，“重试索引”重试失败的索引，“遗忘”将条目移出召回并阻止从相同来源再次生成，来源对话仍然保留。“搜索项目经验”用于筛选列表。提炼失败会显示具体原因，临时失败的任务保留重试入口。\n4. 独立的“智能体记忆工具”在“设置 → 通用 → 犇马工具”控制，它保存的记忆与对话学习条目分别管理；关闭工具不会自动清除已保存内容。"
+        "text": "1. 打开“资料库 → 经验”，或“设置 → 资料库 → 对话学习”。开启资料库时，服务端会同时启用“从新对话中学习”；升级前资料库已开启的安装，首次启动会补齐这一设置。资料库保持开启时，经验页复选框可单独暂停或恢复学习。手动暂停会跨重启保留，再次保存已开启的资料库设置也会保留暂停；关闭资料库再重新打开，会重新开始学习。通过“刷新”检查状态。\n2. 资料库开关开启且学习处于启用状态时，任何项目中发生新对话的会话都会自动进入提炼，包括没有在当前窗口打开的会话。选择项目及该项目中的会话，再点击“导入历史会话”，可导入启用前的历史或当前打开的会话。历史处理由你主动发起，可能调用已配置的小模型和嵌入服务。处理后检查条目状态与索引状态。\n3. “启用条目”允许经验被召回，“重试索引”重试失败的索引，“遗忘”将条目移出召回并阻止从相同来源再次生成，来源对话仍然保留。“搜索项目经验”用于筛选列表。提炼失败会显示具体原因，临时失败的任务保留重试入口。\n4. 独立的“智能体记忆工具”在“设置 → 通用 → 犇马工具”控制，它保存的记忆与对话学习条目分别管理；关闭工具不会自动清除已保存内容。"
       },
       "target": "memory"
     },

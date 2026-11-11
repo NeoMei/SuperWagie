@@ -104,6 +104,29 @@ test('a failed final state read releases the drain for later explicit work', asy
   } finally { h.release(); await h.runtime.stop(); }
 });
 
+test('status derives its error from current failures without a coupling write', async () => {
+  let updates = 0;
+  let persisted;
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: (change) => { updates++; return persisted.update(change); },
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await h.runtime.start();
+  try {
+    await persisted.update((state) => { state.lastError = 'hy_chat_extraction_failed'; });
+    updates = 0;
+    expect(await h.runtime.status()).toMatchObject({ lastError: null, state: 'off' });
+    expect(updates).toBe(0);
+    await persisted.update((state) => {
+      state.jobs.push({ id: 'failed', segment: { id: 'failed', sessionId: 'ses1', projectId: 'project-a', directory: '/work/a' }, state: 'failed', error: 'hy_chat_agent_failed', attempts: 0 });
+    });
+    expect(await h.runtime.status()).toMatchObject({ lastError: 'hy_chat_agent_failed' });
+    await persisted.update((state) => { state.jobs[0].state = 'done'; state.jobs[0].error = null; });
+    expect(await h.runtime.status()).toMatchObject({ lastError: null });
+  } finally { await h.runtime.stop(); }
+});
+
 test.each(['start', 'enable'])('failed startup remains unavailable until %s recovers capture', async (recovery) => {
   let persisted; let unavailable = true;
   const h = await harness({ autoStart: false, store: {
@@ -244,6 +267,233 @@ test('enabling learning turns on the shared library switch without undoing a com
   } finally { await h.runtime.stop(); }
 });
 
+test('an upgraded install with the library already enabled enables learning on its first start', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'conversation-library-coupling-'));
+  roots.push(root);
+  const legacy = createConversationMemoryStore({ dataDir: root });
+  await legacy.update((state) => { state.enabled = false; state.libraryCouplingMigrated = false; });
+  const stateFile = path.join(root, 'conversation-memory', 'state.json');
+  const stored = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+  delete stored.libraryCouplingMigrated;
+  delete stored.lastObservedKnowledgeLibraryEnabled;
+  await fs.writeFile(stateFile, JSON.stringify(stored));
+  const h = await harness({ autoStart: false, dataDir: root, readKnowledgeLibraryEnabled: async () => true, now: () => 100 });
+  try {
+    await h.runtime.start();
+    await h.runtime.idle();
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'ready' });
+    const migrated = await createConversationMemoryStore({ dataDir: root }).read();
+    expect(migrated).toMatchObject({ enabledAt: 100, libraryCouplingMigrated: true, lastObservedKnowledgeLibraryEnabled: true });
+    await h.runtime.setEnabled(false);
+    const restarted = await harness({ dataDir: root, autoStart: false, readKnowledgeLibraryEnabled: async () => true, now: () => 100 });
+    try {
+      await restarted.runtime.start();
+      await restarted.runtime.idle();
+      expect(await restarted.runtime.status()).toMatchObject({ enabled: false, state: 'off' });
+    } finally { await restarted.runtime.stop(); }
+  } finally { await h.runtime.stop(); }
+});
+
+test('startup migration preserves a newer explicit disable and a read failure', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'conversation-library-upgrade-'));
+  roots.push(root);
+  const legacy = createConversationMemoryStore({ dataDir: root });
+  await legacy.update((state) => { state.enabled = false; state.libraryCouplingMigrated = false; });
+  const stateFile = path.join(root, 'conversation-memory', 'state.json');
+  const stored = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+  delete stored.libraryCouplingMigrated;
+  delete stored.lastObservedKnowledgeLibraryEnabled;
+  await fs.writeFile(stateFile, JSON.stringify(stored));
+  const entered = deferred(); const release = deferred();
+  const h = await harness({ autoStart: false, dataDir: root, now: () => 100,
+    readKnowledgeLibraryEnabled: async () => { entered.resolve(); await release.promise; return true; },
+  });
+  try {
+    const starting = h.runtime.start();
+    await entered.promise;
+    await h.runtime.setEnabled(false);
+    release.resolve(); await starting; await h.runtime.idle();
+    expect(await h.runtime.status()).toMatchObject({ enabled: false, state: 'off' });
+    expect(await createConversationMemoryStore({ dataDir: root }).read()).toMatchObject({ enabled: false, enabledAt: 0 });
+  } finally { release.resolve(); await h.runtime.stop(); }
+
+  const failed = await harness({ dataDir: root, autoStart: false, readKnowledgeLibraryEnabled: async () => { throw new Error('settings unavailable'); } });
+  try {
+    await failed.runtime.start();
+    expect(await failed.runtime.status()).toMatchObject({ enabled: false, state: 'off' });
+    expect((await createConversationMemoryStore({ dataDir: root }).read()).lastObservedKnowledgeLibraryEnabled).toBe(null);
+  } finally { await failed.runtime.stop(); }
+});
+
+test('the first enabled library write follows through, and a library cycle resumes paused learning', async () => {
+  const writes = [];
+  let libraryEnabled = false;
+  let now = 100;
+  const h = await harness({ autoStart: false,
+    persistKnowledgeLibraryEnabled: async (value) => { writes.push(value); libraryEnabled = value; },
+    readKnowledgeLibraryEnabled: async () => libraryEnabled, now: () => now,
+  });
+  try {
+    libraryEnabled = true;
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).resolves.toBe(true);
+    await h.runtime.idle();
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'ready' });
+    expect(writes).toEqual([]);
+    expect(await createConversationMemoryStore({ dataDir: h.dataDir }).read()).toMatchObject({ enabled: true, enabledAt: 100, libraryCouplingMigrated: true, lastObservedKnowledgeLibraryEnabled: true });
+    now = 200;
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).resolves.toBe(true);
+    expect((await createConversationMemoryStore({ dataDir: h.dataDir }).read()).enabledAt).toBe(100);
+    await expect(h.runtime.followKnowledgeLibraryEnabled(false, true)).resolves.toBe(false);
+    await h.runtime.setEnabled(false);
+    expect((await createConversationMemoryStore({ dataDir: h.dataDir }).read()).enabledAt).toBe(100);
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).resolves.toBe(false);
+    await expect(h.runtime.followKnowledgeLibraryEnabled(false, true)).resolves.toBe(false);
+    now = 300;
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, false)).resolves.toBe(true);
+    expect((await createConversationMemoryStore({ dataDir: h.dataDir }).read()).enabledAt).toBe(300);
+    await h.runtime.idle();
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'ready' });
+    const restarted = await harness({ dataDir: h.dataDir, readKnowledgeLibraryEnabled: async () => libraryEnabled });
+    try {
+      await restarted.runtime.idle();
+      expect(await restarted.runtime.status()).toMatchObject({ enabled: true, state: 'ready' });
+      expect((await createConversationMemoryStore({ dataDir: h.dataDir }).read()).enabledAt).toBe(300);
+    } finally { await restarted.runtime.stop(); }
+  } finally { await h.runtime.stop(); }
+});
+
+test('a read failure cannot fabricate a switch edge', async () => {
+  let readResult = undefined;
+  const h = await harness({ autoStart: false, readKnowledgeLibraryEnabled: async () => readResult });
+  try {
+    await h.runtime.start(); await h.runtime.idle();
+    expect(await h.runtime.status()).toMatchObject({ enabled: false, state: 'off' });
+    expect((await createConversationMemoryStore({ dataDir: h.dataDir }).read()).lastObservedKnowledgeLibraryEnabled).toBe(null);
+    readResult = null;
+    await h.runtime.setEnabled(false);
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).resolves.toBe(false);
+    expect(await h.runtime.status()).toMatchObject({ enabled: false, state: 'off' });
+    readResult = false;
+    await expect(h.runtime.followKnowledgeLibraryEnabled(false, true)).resolves.toBe(false);
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, false)).resolves.toBe(true);
+  } finally { await h.runtime.stop(); }
+});
+
+test('a repeated true library write preserves sessions changed since enablement', async () => {
+  const listed = [
+    { id: 'ses-new', location: { directory: '/work/a' }, time: { created: 150, updated: 150 } },
+    { id: 'ses-old', location: { directory: '/work/a' }, time: { created: 1, updated: 50 } },
+  ];
+  const requests = [];
+  let now = 100;
+  const h = await harness({ autoStart: false, now: () => now,
+    createClient: () => ({ session: { list: async () => ({ data: listed, cursor: {} }) } }),
+    readSegments: async (request) => { requests.push(request.sessionId); return { segments: [{ ...segment, sessionId: request.sessionId }], checkpoint: null, reset: false, complete: true }; },
+    readKnowledgeLibraryEnabled: async () => true,
+  });
+  try {
+    await h.runtime.start();
+    await h.runtime.idle();
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'ready' });
+    expect((await createConversationMemoryStore({ dataDir: h.dataDir }).read()).enabledAt).toBe(100);
+    requests.length = 0;
+    now = 200;
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).resolves.toBe(true);
+    await h.runtime.idle();
+    expect(requests).toContain('ses-new');
+    expect(requests).not.toContain('ses-old');
+    expect((await createConversationMemoryStore({ dataDir: h.dataDir }).read()).enabledAt).toBe(100);
+  } finally { await h.runtime.stop(); }
+});
+
+test('concurrent library writes share one internal learning enable', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'conversation-library-concurrent-'));
+  roots.push(root);
+  const persisted = createConversationMemoryStore({ dataDir: root });
+  let enableWrites = 0;
+  const h = await harness({ autoStart: false, dataDir: root, store: {
+    read: () => persisted.read(),
+    update: (change) => persisted.update((state) => {
+      const before = state.enabled;
+      change(state);
+      if (!before && state.enabled) enableWrites++;
+    }),
+  } });
+  try {
+    await h.runtime.start();
+    enableWrites = 0;
+    await expect(Promise.all([
+      h.runtime.followKnowledgeLibraryEnabled(true, true),
+      h.runtime.followKnowledgeLibraryEnabled(true, true),
+    ])).resolves.toEqual([true, true]);
+    expect(enableWrites).toBe(1);
+    await h.runtime.idle();
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'ready' });
+  } finally { await h.runtime.stop(); }
+});
+
+test('an explicit learning off survives repeated library writes and restart', async () => {
+  const h = await harness({ autoStart: false });
+  try {
+    await h.runtime.start();
+    await h.runtime.setEnabled(false);
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).resolves.toBe(false);
+    expect(await h.runtime.status()).toMatchObject({ enabled: false, state: 'off' });
+    await expect(h.runtime.followKnowledgeLibraryEnabled(false, true)).resolves.toBe(false);
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).resolves.toBe(false);
+    const restarted = await harness({ dataDir: h.dataDir, readKnowledgeLibraryEnabled: async () => true });
+    try {
+      await restarted.runtime.idle();
+      expect(await restarted.runtime.status()).toMatchObject({ enabled: false, state: 'off' });
+    } finally { await restarted.runtime.stop(); }
+  } finally { await h.runtime.stop(); }
+});
+
+test('a failed library coupling write keeps the legacy state available for retry', async () => {
+  let persisted; let failWrite = false;
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: (...args) => {
+      if (failWrite) throw new Error('Setting write failed');
+      return persisted.update(...args);
+    },
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  try {
+    await h.runtime.start();
+    failWrite = true;
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).rejects.toThrow('Setting write failed');
+    expect(await h.runtime.status()).toMatchObject({ enabled: false, state: 'off' });
+    expect((await persisted.read()).libraryCouplingMigrated).toBe(false);
+    failWrite = false;
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).resolves.toBe(true);
+    expect((await persisted.read()).libraryCouplingMigrated).toBe(true);
+    await h.runtime.idle();
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, state: 'ready' });
+  } finally { failWrite = false; await h.runtime.stop(); }
+});
+
+test('a library coupling write failure appears in the status response', async () => {
+  let persisted; let failWrite = false;
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: (...args) => {
+      if (failWrite) throw Object.assign(new Error('Setting write failed'), { code: 'setting_write_failed' });
+      return persisted.update(...args);
+    },
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  try {
+    await h.runtime.start();
+    failWrite = true;
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).rejects.toThrow('Setting write failed');
+    expect(await h.runtime.status()).toMatchObject({ enabled: false, lastError: 'setting_write_failed' });
+    failWrite = false;
+    await expect(h.runtime.followKnowledgeLibraryEnabled(true, true)).resolves.toBe(true);
+    expect(await h.runtime.status()).toMatchObject({ enabled: true, lastError: null });
+  } finally { failWrite = false; await h.runtime.stop(); }
+});
+
 test('a restarted process restores memory demand for an already enabled runtime', async () => {
   const demands = [];
   const h = await harness({ autoStart: false,
@@ -310,7 +560,8 @@ test('a connected event sweep queues sessions changed after learning was enabled
     expect(requests).toContain('ses-new');
     expect(requests).not.toContain('ses-old');
     expect(requests).not.toContain('ses-child');
-    expect(listener).toBeFunction(); expect(statusListener).toBeFunction();
+    expect(listener).toBeInstanceOf(Function);
+    expect(statusListener).toBeInstanceOf(Function);
   } finally { await h.runtime.stop(); }
 });
 

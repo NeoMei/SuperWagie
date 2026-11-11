@@ -101,9 +101,11 @@ generated changes pass Node's source validation before their final commit.
   indexing. This bypass never authorizes generation.
 - Recovery retries known backend transport and indexing failures at most 3
   times with durable exponential backoff. A stored generation receipt or
-  source-backed card is required. Source, policy, credential and malformed
-  result errors remain visible for explicit repair. Unknown generation never
-  enters automatic recovery.
+  source-backed card is required. The older generic
+  `hy_chat_extraction_failed` code is eligible only when that durable result
+  exists, so old tasks recover without paying for another generation. Source,
+  policy, credential and malformed result errors remain visible for explicit
+  repair. Unknown generation never enters automatic recovery.
 - Legacy document cleanup uses the original document owner after the new
   typed projection is ready. Its marker survives failures. Candidate and
   withdrawn old documents can be removed without embedding generated text.
@@ -156,6 +158,14 @@ extraction as a Hy inference. A source change still withdraws their eligibility.
 Restarts must preserve the attempt limit and next attempt time. Keeping recovery
 metadata in the shared ledger prevents repeated backend outages from creating an
 unbounded retry loop or repeating a paid generation call.
+
+### Why generic extraction failures require a durable result
+
+An older engine used `hy_chat_extraction_failed` for several distinct failures.
+Its completed receipts and stored cards can be committed without another model
+call. Jobs without either result stay failed, so the user decides when to
+import the session history again. Automatically regenerating all of them would
+repeat paid calls and could mask credential or format failures.
 
 ### Why transport maintenance plans from raw ledger rows
 

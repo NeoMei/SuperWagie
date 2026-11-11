@@ -19,16 +19,30 @@ OpenCode remains the conversation authority.
 
 ## Invariants
 
-- Capture starts off. Explicit history consent is persisted per session and is
-  reused during that session's later source reconciliation. Consent never
-  transfers to another session.
+- On desktop, the first enabled document-library write enables learning when
+  the shared state has no recorded decision. Startup applies that one-time
+  migration when the library was already on, including an upgraded install whose
+  settings file has no library key. A missing key reads as enabled. A strict
+  settings read failure leaves the recorded state unchanged and produces no
+  library transition. Each committed library write records the observed value.
+  A real false-to-true library transition enables learning after an explicit
+  pause. A pause survives restarts and repeated true writes. Disabling learning
+  leaves the document library on, and disabling the library leaves learning on.
+  Explicit history consent is persisted per session and is reused during that
+  session's later source reconciliation. Consent never transfers to another
+  session.
 - Startup is shared by concurrent callers and completes before capture or recall
   becomes active. A failed initialization stays unavailable even when stored
   consent is enabled. Authenticated account-session reads retry initialization
   after restoring the knowledge backend. Repeated starts preserve current
   extraction jobs; stop retires pending startup and prevents later activation.
 - Enablement becomes active only after its durable setting write succeeds.
-  Failed writes preserve the previously committed runtime setting.
+  Failed writes preserve the previously committed runtime setting. A failed
+  library coupling is reported as `library_coupling_failed`. Status derives its
+  visible error from current failed jobs, entries, indexing and withdrawal
+  records, then from startup, coupling and transient errors. Recovering a stored
+  failure clears the visible error when the authoritative state has no remaining
+  failed record.
 - A processing request received during an active drain schedules one trailing
   drain. Capture, confirmation and synthesis cannot lose their wakeup while the
   previous drain exits. Its final reads and recovery scheduling retain drain
@@ -115,9 +129,15 @@ locations and project ownership. Bodies are limited to 64 KiB.
 
 The shared knowledge panel and knowledge settings use the same runtimeFetch
 client. Web, Electron, hosted mobile and Capacitor use the connected server's
-storage. VS Code hides these controls. The feature starts disabled and leaves
-existing message full-text search, manual memories and document libraries
-independent. Capture does not require an open management panel.
+storage and learning state. VS Code hides these controls. The desktop server
+owns the library-to-learning transition: it reads its library switch, migrates
+an upgraded install at startup and follows committed library writes. A settings
+save waits for the same learning state commit. Connected clients keep the
+learning checkbox as an explicit off or on override. Existing message full-text
+search and manual memories keep their own settings. Once learning is on, a new
+conversation in any project can enter capture through the server's global event
+subscription and startup backfill. Capture does not require an open management
+panel; the history action imports earlier conversations for one selected session.
 
 UI, queue, scheduler, review and agent-dispatched prompt paths pass their current
 prompt into session knowledge. Its serialized `openchamber.recalled` entry is
@@ -174,16 +194,22 @@ indexing call and checks every supporting source again at use time.
 
 ### Why automatic new-session capture and not current-session-only
 
-Once the user enables learning, every later message in any project is in scope
-after enabledAt. The history button remains for pre-enable sessions or the
-session the user has open. Alternative rejected: requiring a per-session
-"process current" click, which the user rejected and which made the feature
-look broken when only that button seemed to be the entry.
+Once the user enables learning, every later message in any project and session
+is in scope after enabledAt, including sessions the user has closed. The history
+action imports conversations from before enablement for one selected session.
+Alternative rejected: requiring a per-session "process current" click, which the
+user rejected and which made the feature look broken when only that button
+seemed to be the entry.
 
-### Why knowledge-library enablement follows conversation learning
+### Why the server owns the library-to-learning transition
 
-The experiences tab depends on the shared embedding backend. A single learn
-switch should not require a second trip to the library switch. Disabling
-learning does not disable the document library. Alternative rejected: two
-independent switches, which left users on a ready-looking experiences tab with
-a blocked embed path.
+The experiences tab depends on the shared embedding backend. Settings writes
+call the learning runtime after the document switch is committed, and startup
+migrates an install that already had the library on. One serialized transition
+reads the committed learning state before enabling it, so concurrent settings
+writes cannot start a second enable. The recorded library value distinguishes a
+real false-to-true transition from a repeated true save: the former resumes
+learning after a pause, and the latter preserves that pause across restarts.
+Disabling learning leaves the document library on. Alternative rejected: asking
+the UI to send a second learning request, which failed for remote clients and
+for installs upgraded with the library already enabled.

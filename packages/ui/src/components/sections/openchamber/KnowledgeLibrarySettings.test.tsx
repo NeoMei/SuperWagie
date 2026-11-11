@@ -66,6 +66,7 @@ describe('KnowledgeLibrarySettings', () => {
     fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const path = new URL(input instanceof Request ? input.url : String(input), browser.location.href).pathname;
       if (path.endsWith('/api/conversation-memory/status')) return Response.json({ enabled: false, state: 'off', pending: 0, failed: 0, unknown: 0, entries: 0, lastError: null });
+      if (path.endsWith('/api/conversation-memory/settings')) throw new Error(`Unexpected request: ${path}`);
       if (path.endsWith('/api/conversation-memory/entries')) return Response.json({ entries: [] });
       if (path.endsWith('/api/knowledge-library/status')) {
         return Response.json(current);

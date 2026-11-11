@@ -334,6 +334,8 @@ const shouldSkipApiCompression = () => {
   return process.env.OPENCHAMBER_RUNTIME === 'desktop';
 };
 
+const isDesktopRuntime = () => process.env.OPENCHAMBER_RUNTIME === 'desktop';
+
 const OPENCHAMBER_VERBOSE_REQUEST_LOGS = isEnvFlagEnabled(process.env.OPENCHAMBER_VERBOSE_REQUEST_LOGS);
 
 const fsPromises = fs.promises;
@@ -517,8 +519,10 @@ const settingsRuntime = createSettingsRuntime({
   // Declared further down; settings are only saved once the server serves requests.
   onMessageSearchEnabledChanged: (enabled) => messageSearchRuntime.setEnabled(enabled),
   onMessageSearchReasoningChanged: (enabled) => messageSearchRuntime.setReasoningEnabled(enabled),
-  onKnowledgeLibraryEnabledChanged: () => {
+  onKnowledgeLibraryEnabledChanged: (enabled, wasEnabled) => {
     void knowledgeLibraryRuntime.start();
+    if (isDesktopRuntime()) return conversationMemoryRuntime.followKnowledgeLibraryEnabled(enabled === true, wasEnabled !== false);
+    return undefined;
   },
   // Running spaces hear the new default at once; the save does not wait for them.
   onPermissionDefaultModeChanged: (mode) => {
@@ -1496,6 +1500,12 @@ const conversationMemoryRuntime = createConversationMemoryRuntime({
   globalEventHub: globalMessageStreamHub,
   isBlocked: () => isEnterpriseMode(),
   persistKnowledgeLibraryEnabled: (value) => persistSettings({ knowledgeLibraryEnabled: value }).catch(() => {}),
+  readKnowledgeLibraryEnabled: async () => {
+    if (!isDesktopRuntime()) return undefined;
+    const settings = await readSettingsFromDiskStrict().catch(() => null);
+    if (!settings) return null;
+    return settings.knowledgeLibraryEnabled !== false;
+  },
 });
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({

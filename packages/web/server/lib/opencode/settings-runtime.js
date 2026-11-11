@@ -1234,7 +1234,12 @@ export const createSettingsRuntime = (deps) => {
         onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
       }
       if (changedKeys.includes('knowledgeLibraryEnabled')) {
-        onKnowledgeLibraryEnabledChanged(next.knowledgeLibraryEnabled !== false);
+        await Promise.resolve(onKnowledgeLibraryEnabledChanged(
+          next.knowledgeLibraryEnabled !== false,
+          current.knowledgeLibraryEnabled !== false,
+        )).catch((error) => {
+          console.warn('Failed to follow the library switch in conversation learning:', error?.message ?? error);
+        });
       }
       if (changedKeys.includes('messageSearchReasoningEnabled')) {
         onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);

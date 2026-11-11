@@ -16,13 +16,15 @@
     <div class="faq-page-group">
       <h2>Experience learning</h2>
       <h3>Does the library need a separate learning switch?</h3>
-      <p>No. Turning on the library also enables experience learning. Turning the library off keeps the saved learning setting.</p>
+      <p>No. The server enables experience learning when you turn the library on. The Experiences checkbox remains available to pause or resume it. Turning the library off keeps the saved learning setting.</p>
       <h3>Which conversations are captured automatically?</h3>
-      <p>Once the switch is enabled, later conversations in any project enter extraction automatically. Sessions from before enablement, or an older open session, can be imported explicitly.</p>
+      <p>Once learning is enabled, every session with a later conversation in any project enters extraction automatically, including sessions you do not have open. Sessions from before enablement, or an older open session, can be imported explicitly.</p>
+      <h3>What happens after upgrading with the library already on?</h3>
+      <p>The first launch after upgrading applies the shared learning setting. Refresh the Experiences tab to check its state.</p>
       <h3>Can a failed extraction be retried?</h3>
       <p>Yes. The Experiences tab shows a specific error, and transient failures keep retry available. Resolve model quota, credential or embedding service problems before retrying.</p>
       <h3>Does long Chinese content exceed the embedding request limit?</h3>
-      <p>Version 2.7.83 splits long content at UTF-8 character boundaries and sends one short text per embedding request.</p>
+      <p>Long content is split at UTF-8 character boundaries, and each embedding request carries one short text.</p>
     </div>
 
     <div class="faq-page-group">
