@@ -123,3 +123,80 @@ Where that decision is settled depends on who is working:
 
 When the call is unclear, ask before building. Deciding it silently is the one
 thing that is always wrong.
+
+## Multi-Agent Collaboration
+
+**Codex、犇马（SuperWagie）、WorkBuddy** 三路可同时在本仓库开发：共享一份 `.git`，各自独立 worktree、分支、本地运行实例。
+
+三方交接点是**文件**，不依赖任一客户端的 API：
+
+- 代码交接：`main` 分支
+- 状态记录：`~/项目/codexprojects/U-L-S 综合验收/OPERATIONS.md`。**发布方追加新段落，不改旧段落**；总控保留验收段落。三方不并发写同一段落。
+- 交接日志：同目录 `HANDOFF.md`。**append-only**：写入前先读文件尾部，只在末尾追加；**禁止整文件覆盖或重写模板**。该文件无技术写保护（2026-11-10 22:19 曾被整体重写丢 3 条记录），整文件写入前必须先确认没有他人条目。
+
+### 工作区与分支
+
+- 用独立 git worktree，不要直接改主工作区 `~/项目/codexprojects/SuperWagie-open`。worktree 根目录读 `~/.codex/config.toml` 的 `git-worktree-root`（当前 `/Volumes/codex/new-worktrees`）；外置卷不可用时停下说明，不回退内置盘。
+- 目录用途带所有者前缀：`codex-`、`sw-`（犇马）、`wb-`（WorkBuddy）。
+
+| 客户端 | 分支前缀 |
+|---|---|
+| Codex | `codex/*` |
+| 犇马 | `sw/*` |
+| WorkBuddy | `wb/*` |
+
+- 分支前缀即所有权，只在自己前缀下提交。**`agent/*` 已冻结**：历史遗留分支，不再提交、不再新建；新提交只进 `codex/*` / `sw/*` / `wb/*`。本约定立即生效，不等规则合 main。
+- **三方都不直接推 `main`**，只走分支 + 由人合并。常规合并时机：每轮联调开始前，由人在 `main` 上合入已验收的分支；合完各客户端 `fetch` 后从 `main` 拉新分支。
+- 人合并时在 merge commit message 末尾加一行 `merged-by: human`，用来区分「人合并」与「agent 代做」——`main` 上的历史合并提交多为项目原身份，靠作者判断不出来。2026-11-10 之前这类提交不追溯、不改写。
+- **发布例外**：发布类合并可随时进行，不受「每轮联调开始前」限制，条件是人授权 + 在 `HANDOFF.md` 记下 tag 与 commit。进行中的分支允许 `merge main` 保持同步；**禁止跨客户端 `rebase` 他人分支**，要改造别人的分支就提出来由对方做。
+
+### 提交身份
+
+分支前缀只是名义所有权，提交作者必须也能区分客户端。每个客户端在自己的 worktree 设 local 作者（不改全局配置）：
+
+| 客户端 | user.name | user.email |
+|---|---|---|
+| Codex | `Codex` | `codex@local` |
+| 犇马 | `SuperWagie`（或 `犇马`） | `sw@superwagie.local` |
+| WorkBuddy | `WorkBuddy` | `wb@workbuddy.local` |
+
+```sh
+git config user.name "WorkBuddy"
+git config user.email "wb@workbuddy.local"
+```
+
+已推送的提交不改写。
+
+### 本地运行
+
+**只改 HMR 端口不够。** dev server 默认数据目录是 `~/.config/openchamber`，两个客户端同时跑会共用 settings / 会话存储。必须同时设 `OPENCHAMBER_DATA_DIR`。
+
+| 客户端 | HMR UI | HMR API | DATA_DIR |
+|---|---|---|---|
+| Codex | 5180（默认） | 3902（默认） | `~/.config/openchamber` |
+| WorkBuddy | 5380 | 4102 | `/Volumes/codex/agent-data/wb` |
+| 犇马 | 5280 | 4002 | `/Volumes/codex/agent-data/sw` |
+
+- 桌面端后端固定在 `127.0.0.1:57123`，同一时间只能一个实例占用。犇马桌面 app 运行时，其他客户端不要并发起第二个桌面实例；需要该端口的联调串行进行。
+- 同一个 `OPENCHAMBER_DATA_DIR` 只能被一个客户端使用。
+
+### 依赖与环境
+
+- `node_modules`、`packages/electron/dist*`、`packages/electron/resources/embedded-knowledge` 等构建产物不跨 worktree 共享，每个 worktree 用 `bun install` 自己准备。
+- `.local`、`.codex` 只属于各自 worktree，不复制、不提交。
+
+### 生产边界
+
+- 生产部署、生产库写入（含直接执行 SQL）、官网与发布包上传**只由总控会话执行，且须先取得人的授权**。客户端会话不自行部署、不自行改生产数据。
+- 渠道连接测试、对外探针类操作**必须写明目标环境**（本地 / 联调 / 生产），不得默认打生产。
+- 允许在连接测试里直接调用收费 API——这条既有偏好不变，本约束只增加「声明目标环境」的义务。
+- 发布动作按 `SuperWagie release checklist status` 走，并记入 `OPERATIONS.md`；`HANDOFF.md` 里留下 tag 与 commit。
+
+### Git 操作约束
+
+本仓库的 `Always-On Constraints` 写明 `Do not run git or GitHub commands unless the user explicitly asks`。多 agent 协作时这条**仍然有效**：除非当前会话的任务就是版本控制操作，否则不要擅自 commit/push；交接时先向用户说明需要提交，获得确认后再执行。
+
+### 交接
+
+- 收工前把改动提交到自己的分支并推送；接手前 `git fetch origin`，确认 `main` 与 `origin/main` 一致。
+- 在 `HANDOFF.md` 追加一条，写清四件事：做了什么、没做什么、下一步、未合并的依赖分支。不改别人写过的段落。
