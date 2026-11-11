@@ -53,7 +53,7 @@ The SuperWagie account page owns in-app registration and login, the user center 
 
 ### Why platform sessions require explicit refresh
 
-Browser login opens externally and provides a refresh action after authorization. In-app login receives only the public account result. Commerce refreshes after an explicit action. No persistent polling or cross-window token message is needed.
+Browser login opens externally and provides a refresh action after authorization. In-app login receives only the public account result. Commerce reads on mount and after each explicit action. The only repeated read is the status of an open payment attempt, which the account polls on its own so the customer never has to confirm an internal request; no cross-window token message is needed.
 
 ### Why registration retains metadata without a password
 
@@ -135,11 +135,23 @@ cent-rounded external charge before confirmation.
 
 The checkout panel recovers server records after reopening. Waiting, unknown,
 paid-but-activating, completed and original-channel refund states stay distinct.
-The WeChat QR is generated locally from the validated server session. Alipay
-opens the official URL through `openExternalUrl` only after a click. Returning
-from the browser cannot prove payment. Status, close and refund controls act on
-the original checkout; refund requires a separate visible confirmation. Read
-failure preserves the last checkout state with an error and recovery action.
+One attempt is drawn as a single card: the published offer, the exact amount,
+the payment code and the channel choice sit together, so paying never requires
+reading a field list or finding a code elsewhere on the page. The code is
+generated locally from the validated server session. Alipay reaches the account
+as an official gateway redirect: the same URL is drawn as a scannable code and
+only opens through `openExternalUrl` after a click, so both channels can be paid
+by scanning. Choosing the other channel closes the open attempt and checks the
+same offer out with that provider in one step. Returning from the browser cannot
+prove payment. While an attempt is open the account queries the provider on a
+fixed cadence and settles the attempt itself; no control asks the customer to
+reconcile, re-check or interpret an internal request. An unconfirmed command is
+recovered the same way, once per visit, and its record appears only under
+Orders. Closed and older attempts collapse into a payment-history disclosure in
+the overview and remain listed in full under Orders. Status, close and refund
+controls act on the original checkout; refund requires a separate visible
+confirmation. Read failure preserves the last checkout state with an error and
+recovery action.
 Verified fulfillment refreshes account benefits and never replays a model task.
 A `REJECTED` manual refund preserves the confirmed purchase status and shows
 that the request was declined without a refund. A paid, fulfilled purchase

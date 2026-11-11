@@ -32,6 +32,8 @@ let writes = 0;
 let accountRefreshes = 0;
 const initialCommerce = structuredClone(commerce);
 const mutations: Array<{ path: string; body: string }> = [];
+/** Provider reconciliation is a status query, not a financial command. */
+const paymentMutations = () => mutations.filter((item) => !/(intents|checkouts)\/[^/]+\/reconcile$/.test(item.path));
 let activeMembership = true;
 let currentMembership: Extract<PlatformAccountState, { status: 'signed-in' }>['membership'][number] | undefined;
 let upgradeQuote: PlatformUpgradeQuote | undefined;
@@ -121,30 +123,29 @@ test('model funding navigation opens add-on plans without creating a payment', a
   expect(writes).toBe(0);
 });
 
-test('older unresolved requests stay recoverable without exposing another service', async () => {
+test('older unresolved requests are confirmed automatically without exposing another service', async () => {
   commerce.intents = [
     { idempotencyKey: 'older-command', kind: 'purchase', accountId: 'team-a', productId: 'other-service', amount: '4321000', status: 'UNKNOWN', createdAt: '2026-11-06T00:00:00Z' },
     { idempotencyKey: 'completed-other', kind: 'purchase', accountId: 'team-a', productId: 'other-service', amount: '999999000000', status: 'APPLIED', createdAt: '2026-11-06T00:00:00Z' },
   ];
   await render('overview');
-  expect(button('Check original request').disabled).toBe(false);
-  expect(host?.textContent).toContain('4.321');
+  await act(async () => {});
+  expect(host?.textContent).toContain('being confirmed automatically');
+  // No control asks the customer to interpret an internal request record.
+  expect([...(host?.querySelectorAll('button') ?? [])].some((item) => /original request|check again/i.test(item.textContent ?? ''))).toBe(false);
   expect(/other-service|999999/i.test(host?.textContent ?? '')).toBe(false);
-  await render('orders');
-  expect(button('Check original request').disabled).toBe(false);
-  expect(host?.textContent).toContain('4.321');
-  expect(/unihub|llmrouter|other-service|other service|999999/i.test(host?.textContent ?? '')).toBe(false);
-  expect(writes).toBe(0);
+  expect(mutations.filter((item) => /intents\/older-command\/reconcile$/.test(item.path))).toHaveLength(1);
 });
 
-test('unconfirmed intent recovery remains reachable in overview and orders while new commands stay blocked', async () => {
+test('an unconfirmed intent settles itself and keeps its record out of the buying view', async () => {
   commerce.intents = [{ idempotencyKey: 'original-command', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '5000000', provider: 'wechat', status: 'UNKNOWN', createdAt: '2026-11-06T00:00:00Z' }];
   await render('overview');
-  expect(button('Check original request').disabled).toBe(false);
+  await act(async () => {});
+  expect(mutations.some((item) => /intents\/original-command\/reconcile$/.test(item.path))).toBe(true);
+  expect([...(host?.querySelectorAll('button') ?? [])].some((item) => /original request/i.test(item.textContent ?? ''))).toBe(false);
   await render('orders');
-  expect(button('Check original request').disabled).toBe(false);
+  expect(button('Check again').disabled).toBe(false);
   expect(host?.textContent).toContain('Previous membership');
-  expect(writes).toBe(0);
 });
 
 test('an unsubscribed account opens published plans without inventing candidate prices', async () => {
@@ -208,17 +209,18 @@ for (const lostResponse of [false, true]) test(`upgrade confirms the authoritati
   await act(async () => button('Subscribe').click());
   await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
   await act(async () => button('Check upgrade price').click());
-  expect(mutations).toHaveLength(1);
-  expect(mutations[0].path.endsWith('/upgrade-quotes')).toBe(true);
+  expect(paymentMutations()).toHaveLength(1);
+  expect(paymentMutations()[0].path.endsWith('/upgrade-quotes')).toBe(true);
   expect(host?.textContent).toContain('100 credits');
   loseUpgradeResponse = lostResponse;
   await act(async () => button('Confirm upgrade for CNY 5.00').click());
-  expect(mutations[1].path.endsWith('/upgrade-purchases')).toBe(true);
-  expect(mutations[1].body).toContain('"quoteId":"quote-a"');
+  expect(paymentMutations()[1].path.endsWith('/upgrade-purchases')).toBe(true);
+  expect(paymentMutations()[1].body).toContain('"quoteId":"quote-a"');
   if (lostResponse) {
-    expect(host?.textContent).toContain('request outcome is unknown');
-    await act(async () => button('Recover original request').click());
-    expect(mutations[2].body).toBe(mutations[1].body);
+    await render('orders');
+    expect(host?.textContent).toContain('has no confirmed result yet');
+    await act(async () => button('Submit this payment again').click());
+    expect(paymentMutations()[2].body).toBe(paymentMutations()[1].body);
   }
   expect(host?.textContent).toContain('Your purchase is active');
   expect(mutations.every((request) => !request.path.endsWith('/purchases') && !request.path.endsWith('/recharges'))).toBe(true);
@@ -238,7 +240,7 @@ test('an expired upgrade quote can be refreshed without accepting or charging it
   upgradeQuote = { ...upgradeQuote, id: 'fresh-quote', expiresAt: '2099-12-01T00:00:00Z' };
   await act(async () => button('Check upgrade price').click());
   expect(button('Confirm upgrade for CNY 5.00').disabled).toBe(false);
-  expect(mutations).toHaveLength(2);
+  expect(paymentMutations()).toHaveLength(2);
   expect(mutations.every((request) => request.path.endsWith('/upgrade-quotes'))).toBe(true);
 });
 
@@ -255,14 +257,15 @@ for (const rejection of ['failed', 'http', 'conflict'] as const) test(`upgrade $
   upgradeRejection = rejection;
   await act(async () => button('Confirm upgrade for CNY 5.00').click());
   if (rejection === 'conflict') {
-    expect(host?.textContent).toContain('request outcome is unknown');
-    await act(async () => button('Recover original request').click());
-    expect(mutations[2].body).toBe(mutations[1].body);
-    expect(mutations[2].path.endsWith('/upgrade-purchases')).toBe(true);
+    await render('orders');
+    expect(host?.textContent).toContain('has no confirmed result yet');
+    await act(async () => button('Submit this payment again').click());
+    expect(paymentMutations()[2].body).toBe(paymentMutations()[1].body);
+    expect(paymentMutations()[2].path.endsWith('/upgrade-purchases')).toBe(true);
   } else {
     expect(host?.textContent).toContain('This quote is no longer valid');
     expect(host?.textContent).not.toContain('Confirm upgrade for CNY 5.00');
-    expect(host?.textContent).not.toContain('Recover original request');
+    expect(host?.textContent).not.toContain('Submit this payment again');
     expect(button('Check upgrade price').disabled).toBe(false);
     await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
     expect(host?.textContent).toContain('报价已失效，请重新获取补差报价。');
@@ -270,8 +273,8 @@ for (const rejection of ['failed', 'http', 'conflict'] as const) test(`upgrade $
     upgradeQuote = { ...upgradeQuote, id: 'quote-b', subscriptionVersion: 2 };
     await act(async () => button('Check upgrade price').click());
     await act(async () => button('Confirm upgrade for CNY 5.00').click());
-    expect(mutations[3].body).toContain('"quoteId":"quote-b"');
-    expect(mutations[3].body).not.toBe(mutations[1].body);
+    expect(paymentMutations()[3].body).toContain('"quoteId":"quote-b"');
+    expect(paymentMutations()[3].body).not.toBe(paymentMutations()[1].body);
   }
   expect(host?.textContent).toContain('Your purchase is active');
 });
@@ -339,14 +342,15 @@ test('external channel selection stays read-only until explicit confirmation and
   const purchase = [...(host?.querySelectorAll('button') ?? [])].find(item => item.textContent?.includes('SuperWagie Plus') && item.textContent?.includes('10.00') && item.getAttribute('role') !== 'radio');
   expect(purchase?.disabled).toBe(false);
   await act(async () => purchase?.click());
-  expect(mutations).toHaveLength(1);
-  expect(mutations[0].path.endsWith('/checkouts')).toBe(true);
-  expect(JSON.parse(mutations[0].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
-  expect(host?.textContent).toContain('Check original request');
+  expect(paymentMutations()).toHaveLength(1);
+  expect(paymentMutations()[0].path.endsWith('/checkouts')).toBe(true);
+  expect(JSON.parse(paymentMutations()[0].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
+  await act(async () => {});
+  expect(host?.textContent).toContain('being confirmed automatically');
   expect(button('WeChat Pay').disabled).toBe(true);
   await render('orders');
   await render('overview');
-  expect(writes).toBe(1);
+  expect(paymentMutations()).toHaveLength(1);
 });
 
 test('reopening retains paid activation and refund states without presenting another payment link', async () => {
@@ -371,12 +375,12 @@ for (const rejection of ['failed','http','conflict'] as const) test(`external up
   upgradeQuote={id:'quote-a',accountId:'team-a',subscriptionId:'subscription-a',subscriptionVersion:1,offer,amount:'5000000',additionalCredits:'100000000',periodStart:'2026-11-08T00:00:00Z',createdAt:'2026-11-08T00:00:00Z',expiresAt:'2099-11-09T00:00:00Z',paymentSource:'external',originalAmount:'5000000',roundingRule:'cny_cent_ceil_v1'};
   await render('overview');await act(async()=>button('Subscribe').click());await act(async()=>host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());await act(async()=>button('Check upgrade price').click());
   upgradeRejection=rejection;await act(async()=>button('Confirm upgrade for CNY 5.00').click());
-  expect(mutations).toHaveLength(2);const oldKey=JSON.parse(mutations[1].body).idempotencyKey;
-  if(rejection==='conflict'){expect(host?.textContent).toContain('Recover original request');return;}
+  expect(paymentMutations()).toHaveLength(2);const oldKey=JSON.parse(paymentMutations()[1].body).idempotencyKey;
+  if(rejection==='conflict'){await render('orders');expect(host?.textContent).toContain('has no confirmed result yet');return;}
   expect(host?.textContent).not.toContain('Confirm upgrade for CNY 5.00');expect(button('Check upgrade price').disabled).toBe(false);
-  upgradeQuote={...upgradeQuote,id:'quote-b'};await act(async()=>button('Check upgrade price').click());expect(mutations).toHaveLength(3);
-  await act(async()=>button('Confirm upgrade for CNY 5.00').click());expect(mutations).toHaveLength(4);
-  expect(JSON.parse(mutations[3].body)).toMatchObject({quoteId:'quote-b',provider:'wechat'});expect(JSON.parse(mutations[3].body).idempotencyKey).not.toBe(oldKey);
+  upgradeQuote={...upgradeQuote,id:'quote-b'};await act(async()=>button('Check upgrade price').click());expect(paymentMutations()).toHaveLength(3);
+  await act(async()=>button('Confirm upgrade for CNY 5.00').click());expect(paymentMutations()).toHaveLength(4);
+  expect(JSON.parse(paymentMutations()[3].body)).toMatchObject({quoteId:'quote-b',provider:'wechat'});expect(JSON.parse(paymentMutations()[3].body).idempotencyKey).not.toBe(oldKey);
 });
 
 

@@ -4,14 +4,20 @@ import { SettingsSection, SettingsFieldRow, SettingsControlGroup, SettingsChipGr
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { PlatformAccountError, type PlatformAccountState } from '@/lib/platformAccount';
-import { readPlatformCommerce, createPlatformCheckout, updatePlatformCheckout, purchasePlatformOffer, createPlatformUpgradeQuote, acceptPlatformUpgradeQuote, reconcilePlatformIntent, formatPlatformMoney, formatPlatformPoints, type PlatformCommerceState, type PlatformCommerceIntent, type PlatformUpgradeQuote } from '@/lib/platformCommerce';
-import { PlatformCheckoutCard } from './PlatformCheckoutCard';
+import { readPlatformCommerce, createPlatformCheckout, updatePlatformCheckout, purchasePlatformOffer, createPlatformUpgradeQuote, acceptPlatformUpgradeQuote, reconcilePlatformIntent, formatPlatformMoney, formatPlatformPoints, type PlatformCommerceState, type PlatformCommerceIntent, type PlatformUpgradeQuote, type PlatformCheckout } from '@/lib/platformCommerce';
+import { PlatformPaymentPanel } from './PlatformPaymentPanel';
 import { platformAccountErrorKey } from './platformAccountErrors';
 import { usePlatformAccountTabStore } from './platformAccountTabs';
 
 type PendingCommand = { kind: 'checkout'; offerId?: string; quoteId?: string; provider: 'wechat' | 'alipay'; productId: string; amount: string; idempotencyKey: string }
   | { kind: 'purchase'; offerId: string; productId: string; amount: string; idempotencyKey: string }
   | { kind: 'upgrade'; quoteId: string; productId: string; amount: string; idempotencyKey: string };
+/** A payment attempt the account has not settled yet. */
+const WAITING_PAYMENT = ['CREATED', 'PENDING', 'UNKNOWN'];
+const waitingCheckout = (checkout: { payment_status: string; refund_status: string }) => WAITING_PAYMENT.includes(checkout.payment_status) && !checkout.refund_status;
+const settledCheckout = (checkout: { payment_status: string; fulfillment_status: string; refund_status: string }) => (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'FULFILLED') || checkout.refund_status === 'SUCCEEDED';
+/** The provider is queried on this cadence while a code is on screen. */
+const PAYMENT_POLL_MS = 4000;
 const commandRejected = (error: PlatformAccountError) => (error.code === 'credit_rates_unavailable' && error.status === 409) || ['platform_account_changed', 'platform_session_changed', 'platform_billing_forbidden', 'platform_scope_required', 'platform_offer_unavailable', 'platform_membership_active', 'platform_amount_invalid', 'platform_operation_pending', 'payment_not_configured', 'platform_idempotency_conflict', 'subscription_required', 'quote_expired', 'platform_quote_expired', 'platform_quote_unavailable', 'points_runtime_unavailable', 'unsupported_plan_change'].includes(error.code);
 const orderStatusKey = (status: string): I18nKey | null => {
   switch (status.toUpperCase()) {
@@ -56,6 +62,9 @@ export const PlatformAccountCommerce: React.FC<{
   accountRefresh.current = onAccountRefresh;
   const observedBenefits = React.useRef('');
   const mutationActive = React.useRef(false);
+  /** Offer or quote behind the open attempt, so a channel switch reuses it. */
+  const lastCheckout = React.useRef<{ offerId?: string; quoteId?: string }>({});
+  const reconciledIntents = React.useRef(new Set<string>());
   const runtimeKey = getRuntimeKey();
   React.useEffect(() => {
     if (!purchaseTarget) return;
@@ -81,6 +90,53 @@ export const PlatformAccountCommerce: React.FC<{
     } finally { if (version === generation.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   }, [accountId, runtimeKey]);
   React.useEffect(() => { const requestGeneration = generation; void refresh(); return () => { ++requestGeneration.current; }; }, [refresh]);
+
+  const activeCheckout = state?.checkouts?.find(waitingCheckout) ?? null;
+  const activeCheckoutId = activeCheckout?.id ?? '';
+  const activeCheckoutStatus = activeCheckout?.payment_status ?? '';
+  const activeCheckoutDeadline = Date.parse(activeCheckout?.session?.expires_at ?? activeCheckout?.expires_at ?? '');
+  // A payment is confirmed by asking the provider, not the customer: while a
+  // code is on screen the attempt is queried and settled on its own.
+  React.useEffect(() => {
+    if (!activeCheckoutId) return undefined;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped || mutationActive.current || document.hidden) return;
+      // A code that expired long ago cannot settle; stop asking for it.
+      if (Number.isFinite(activeCheckoutDeadline) && Date.now() > activeCheckoutDeadline + 120_000) return;
+      mutationActive.current = true;
+      try {
+        const result = await updatePlatformCheckout(accountId, activeCheckoutId, 'reconcile');
+        if (stopped || runtimeKey !== getRuntimeKey()) return;
+        if (result.account_id !== accountId) throw new PlatformAccountError('platform_account_changed');
+        setState((previous) => previous ? { ...previous, checkouts: (previous.checkouts ?? []).map((item) => item.id === result.id ? result : item) } : previous);
+        if (settledCheckout(result)) accountRefresh.current();
+        if (!waitingCheckout(result)) { setCommand(null); void refresh(); }
+      } catch { /* the next tick asks again; a manual refresh stays available */ }
+      finally { mutationActive.current = false; }
+    };
+    const timer = window.setInterval(() => void tick(), PAYMENT_POLL_MS);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [accountId, activeCheckoutId, activeCheckoutStatus, activeCheckoutDeadline, runtimeKey, refresh]);
+
+  // An unconfirmed command is resolved the same way, once per visit, instead of
+  // asking the customer to interpret an internal request record.
+  const intentSignature = (state?.intents ?? []).filter((intent) => intent.status === 'PREPARED' || intent.status === 'UNKNOWN').map((intent) => intent.idempotencyKey).join('|');
+  React.useEffect(() => {
+    const keys = intentSignature ? intentSignature.split('|').filter((key) => !reconciledIntents.current.has(key)) : [];
+    if (!keys.length) return undefined;
+    for (const key of keys) reconciledIntents.current.add(key);
+    let stopped = false;
+    void (async () => {
+      let changed = false;
+      for (const key of keys) {
+        if (stopped || runtimeKey !== getRuntimeKey()) return;
+        try { await reconcilePlatformIntent(accountId, key); changed = true; } catch { /* a later visit retries */ }
+      }
+      if (changed && !stopped) void refresh();
+    })();
+    return () => { stopped = true; };
+  }, [accountId, intentSignature, runtimeKey, refresh]);
 
   const mutate = async (operation: () => Promise<PlatformCommerceIntent>, original?: PendingCommand) => {
     if (mutationActive.current) return;
@@ -119,11 +175,40 @@ export const PlatformAccountCommerce: React.FC<{
       if (!quoteInvalidated && !(original?.kind === 'purchase' && cause instanceof PlatformAccountError && cause.code === 'credit_rates_unavailable' && cause.status === 409)) setState(null);
     } finally { mutationActive.current = false; if (version === generation.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   };
-  const submitCommand = (original: PendingCommand) => mutate(() => original.kind === 'checkout'
-    ? createPlatformCheckout({ accountId, offerId: original.offerId, quoteId: original.quoteId, provider: original.provider, idempotencyKey: original.idempotencyKey })
-    : original.kind === 'upgrade'
-      ? acceptPlatformUpgradeQuote({ accountId, quoteId: original.quoteId, idempotencyKey: original.idempotencyKey })
-      : purchasePlatformOffer({ accountId, offerId: original.offerId, idempotencyKey: original.idempotencyKey }), original);
+  const submitCommand = (original: PendingCommand) => {
+    if (original.kind === 'checkout') lastCheckout.current = { offerId: original.offerId, quoteId: original.quoteId };
+    return mutate(() => original.kind === 'checkout'
+      ? createPlatformCheckout({ accountId, offerId: original.offerId, quoteId: original.quoteId, provider: original.provider, idempotencyKey: original.idempotencyKey })
+      : original.kind === 'upgrade'
+        ? acceptPlatformUpgradeQuote({ accountId, quoteId: original.quoteId, idempotencyKey: original.idempotencyKey })
+        : purchasePlatformOffer({ accountId, offerId: original.offerId, idempotencyKey: original.idempotencyKey }), original);
+  };
+  /**
+   * Changing the channel mid-payment replaces the attempt: the open code is
+   * closed, then the same offer is checked out with the other provider. Prices
+   * never change hands here, so no confirmation is asked twice.
+   */
+  const switchChannel = async (provider: 'wechat' | 'alipay') => {
+    setPaymentChannel(provider);
+    setQuote(null);
+    const spec = lastCheckout.current;
+    if (!activeCheckout || (!spec.offerId && !spec.quoteId) || mutationActive.current) return;
+    mutationActive.current = true;
+    const version = ++generation.current;
+    setBusy(true); setError(null);
+    try {
+      await updatePlatformCheckout(accountId, activeCheckout.id, 'close');
+      if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
+      await createPlatformCheckout({ accountId, offerId: spec.offerId, quoteId: spec.quoteId, provider, idempotencyKey: crypto.randomUUID() });
+      if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
+      const next = await readPlatformCommerce();
+      if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
+      if (next.accountId !== accountId) throw new PlatformAccountError('platform_account_changed');
+      setState(next);
+    } catch (cause) {
+      if (version === generation.current && runtimeKey === getRuntimeKey()) setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.commerceFailed'));
+    } finally { mutationActive.current = false; if (version === generation.current && runtimeKey === getRuntimeKey()) setBusy(false); }
+  };
   const checkoutAction = async (id: string, action: 'reconcile' | 'close' | 'refund') => {
     if (mutationActive.current) return;
     mutationActive.current = true;
@@ -156,7 +241,9 @@ export const PlatformAccountCommerce: React.FC<{
   const purchaseAmount = validQuote?.amount ?? selectedOffer?.price ?? '0';
   const insufficient = !external && selectedOffer && state?.wallets !== null && BigInt(wallet?.amount ?? '0') < BigInt(purchaseAmount);
   const addonNeedsMembership = !hasActiveMembership && selectedOffer?.kind === 'addon' && selectedOffer.productId === 'superwagie';
-  const unresolved = !!(error && error !== 'platformAccount.quoteInvalidated' && state?.checkouts?.length) || !!command || !!state?.checkouts?.some((item) => !['CLOSED'].includes(item.payment_status) && !(item.payment_status === 'PAID' && item.fulfillment_status === 'FULFILLED' && !['PENDING', 'REVIEW'].includes(item.refund_status)) && item.refund_status !== 'SUCCEEDED') || !!state?.intents.some((intent) => intent.status === 'PREPARED' || intent.status === 'UNKNOWN');
+  // One open attempt is enough: an unsettled payment, an unfinished
+  // activation or a refund under review justifiably holds the next purchase.
+  const unresolved = !!command || !!state?.checkouts?.some((item) => waitingCheckout(item) || item.payment_status === 'REVIEW' || (item.payment_status === 'PAID' && item.fulfillment_status !== 'FULFILLED') || ['PENDING', 'REVIEW'].includes(item.refund_status)) || !!state?.intents.some((intent) => intent.status === 'PREPARED' || intent.status === 'UNKNOWN');
   const finance = state?.financialAccess === true;
   const walletName = (product: string) => product === 'superwagie' ? t('platformAccount.membershipWallet') : product === 'llmrouter' ? t('platformAccount.modelWallet') : product === '' ? t('platformAccount.unifiedWallet') : t('platformAccount.originalRequest');
   const purchaseName = (product: string) => t(product === 'superwagie' ? 'platformAccount.membershipPlans' : product === 'llmrouter' ? 'platformAccount.addonPlans' : 'platformAccount.originalRequest');
@@ -214,33 +301,43 @@ export const PlatformAccountCommerce: React.FC<{
   </div>;
   if (!state) return <>{view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">{summary()}</SettingsTwoColumn>}<SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={collapsedOverview ? undefined : refreshAction} contentClassName="space-y-3">
     {statusRow}
-    {command && !busy && <SettingsControlGroup title={t('platformAccount.originalRequest')} description={t('platformAccount.commandUnknown')}>
+    {command && !busy && <SettingsControlGroup title={t('platformAccount.pendingCommand')} description={t('platformAccount.commandUnknown')}>
       <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId), amount: money(command.amount) })}</p>
       <Button variant="outline" disabled={busy} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
     </SettingsControlGroup>}
   </SettingsSection></>;
 
+  const checkouts = state.checkouts ?? [];
+  // One attempt stays in front: still payable, activating, or under review.
+  const payment = checkouts.find((item) => waitingCheckout(item) || item.payment_status === 'REVIEW' || (item.payment_status === 'PAID' && item.fulfillment_status !== 'FULFILLED') || ['PENDING', 'REVIEW'].includes(item.refund_status)) ?? null;
+  const pastPayments = checkouts.filter((item) => item.id !== payment?.id);
   const recoverableIntents = state.intents.filter((intent) => intent.status !== 'APPLIED' && intent.status !== 'FAILED');
   const historyIntents = state.intents.filter((intent) => intent.productId === 'superwagie' || intent.productId === 'llmrouter' || (intent.status !== 'APPLIED' && intent.status !== 'FAILED'));
   const orders = state.orders?.filter((order) => order.productId === 'superwagie' || order.productId === 'llmrouter') ?? [];
   const intentRow = (intent: PlatformCommerceIntent) => <SettingsFieldRow key={intent.idempotencyKey} label={t('platformAccount.purchaseRecord', { product: purchaseName(intent.productId), amount: money(intent.amount) })} description={<>{t(`platformAccount.intent.${intent.status}`)}{intent.errorCode ? ` · ${t(platformAccountErrorKey(new PlatformAccountError(intent.errorCode), 'platformAccount.commerceFailed'))}` : ''}</>}>
-    {intent.status !== 'APPLIED' && intent.status !== 'FAILED' && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => void mutate(() => reconcilePlatformIntent(accountId, intent.idempotencyKey))}>{t('platformAccount.checkIntent')}</Button></div>}
+    {view === 'orders' && intent.status !== 'APPLIED' && intent.status !== 'FAILED' && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void mutate(() => reconcilePlatformIntent(accountId, intent.idempotencyKey))}>{t('platformAccount.recheckIntent')}</Button>}
   </SettingsFieldRow>;
+  const paymentPanel = (checkout: PlatformCheckout, active: boolean) => <PlatformPaymentPanel key={checkout.id} checkout={checkout} busy={busy} compact={!active}
+    channels={active ? channels : []} onSwitchChannel={active ? (provider) => void switchChannel(provider) : undefined}
+    onRefresh={() => void checkoutAction(checkout.id, 'reconcile')} onClose={() => void checkoutAction(checkout.id, 'close')} onRefund={() => void checkoutAction(checkout.id, 'refund')} />;
   return <>
     {view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">
       {summary()}
     </SettingsTwoColumn>}
     <SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={view === 'orders' ? refreshAction : undefined} contentClassName="space-y-3">
       {statusRow}
-      {command && !busy && <SettingsControlGroup title={t('platformAccount.originalRequest')} description={t('platformAccount.commandUnknown')}>
+      {view !== 'orders' && command && !busy && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.commandUnknownAuto')}</p>}
+      {view === 'orders' && command && !busy && <SettingsControlGroup title={t('platformAccount.pendingCommand')} description={t('platformAccount.commandUnknown')}>
         <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId), amount: money(command.amount) })}</p>
         <Button variant="outline" disabled={busy} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
       </SettingsControlGroup>}
       {buyingTask !== null && state.payments.mode === 'unconfigured' && <p className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]" role="status">{t('platformAccount.paymentUnconfigured')}</p>}
       {!finance && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.memberRestricted')}</p>}
       {state.missingScopes.length > 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.missingScopes')}</p>}
-      {finance && view === 'overview' && recoverableIntents.length > 0 && <SettingsControlGroup title={t('platformAccount.originalRequest')}>{recoverableIntents.map(intentRow)}</SettingsControlGroup>}
-      {(state.checkouts ?? []).filter((item) => view === 'orders' || item.payment_status !== 'CLOSED').map((item) => <PlatformCheckoutCard key={item.id} checkout={item} busy={busy} onAction={(action) => void checkoutAction(item.id, action)} />)}
+      {view === 'orders' && finance && recoverableIntents.length > 0 && <SettingsControlGroup title={t('platformAccount.pendingCommand')}>{recoverableIntents.map(intentRow)}</SettingsControlGroup>}
+      {view !== 'orders' && recoverableIntents.length > 0 && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.intentAutoConfirm')}</p>}
+      {payment && paymentPanel(payment, true)}
+      {view === 'orders' && pastPayments.map((item) => paymentPanel(item, false))}
       {view === 'overview' && buyingTask !== null && <>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SettingsChipGroup value={buyingTask} onChange={(task) => { setBuyingTask(task); setQuote(null); }} aria-label={t('platformAccount.buyingTask')} options={[
@@ -297,6 +394,12 @@ export const PlatformAccountCommerce: React.FC<{
         </div>
       </SettingsControlGroup>}
       </>}
+      {view === 'overview' && pastPayments.length > 0 && <details className="group">
+        <summary className="cursor-pointer list-none typography-meta text-muted-foreground select-none">
+          {t('platformAccount.pastPayments', { count: pastPayments.length })}
+        </summary>
+        <div className="mt-2 space-y-1.5">{pastPayments.map((item) => paymentPanel(item, false))}</div>
+      </details>}
     </SettingsSection>
     {finance && view === 'orders' && <SettingsSection description={t('platformAccount.historyScope')} divider={false} className="pt-0" contentClassName="space-y-4">
       {historyIntents.length === 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noIntents')}</p>}

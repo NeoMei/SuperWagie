@@ -60,11 +60,11 @@ test('rejected manual refunds cross the journal, HTTP parser and rendered UI wit
     import React from 'react'; import { createRoot } from 'react-dom/client'; import '@/index.css';
     import { I18nProvider, useI18nStore } from '@/lib/i18n';
     import { readPlatformCommerce, updatePlatformCheckout, createPlatformCheckout } from '@/lib/platformCommerce';
-    import { PlatformCheckoutCard } from '@/components/sections/platform-account/PlatformCheckoutCard';
+    import { PlatformPaymentPanel } from '@/components/sections/platform-account/PlatformPaymentPanel';
     const root = createRoot(document.getElementById('root'));
     useI18nStore.getState().setLocale('en');
     window.locale = locale => useI18nStore.getState().setLocale(locale);
-    window.load = async () => { window.snapshot = await readPlatformCommerce(); root.render(<I18nProvider><PlatformCheckoutCard checkout={window.snapshot.checkouts[0]} busy={false} onAction={async action => { await updatePlatformCheckout('account','checkout-1',action); await window.load(); }} /></I18nProvider>); };
+    window.load = async () => { window.snapshot = await readPlatformCommerce(); root.render(<I18nProvider><PlatformPaymentPanel checkout={window.snapshot.checkouts[0]} busy={false} onRefresh={() => {}} onClose={() => {}} onRefund={async () => { await updatePlatformCheckout('account','checkout-1','refund'); await window.load(); }} /></I18nProvider>); };
     window.replay = () => updatePlatformCheckout('account', 'checkout-1', 'refund');
     window.purchase = idempotencyKey => createPlatformCheckout({ accountId:'account',offerId:'addon',provider:'wechat',idempotencyKey });
     window.load().catch(error => { window.loadError = error.message; });

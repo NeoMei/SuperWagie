@@ -350,7 +350,7 @@ describe('PlatformAccountPage', () => {
     await act(async () => buy.click());
     expect(purchaseRequests).toBe(1);
     expect(host.textContent).not.toContain('The request outcome is unknown');
-    expect(host.textContent).not.toContain('Recover original request');
+    expect(host.textContent).not.toContain('Submit this payment again');
     expect(host.textContent).toContain('Could not read');
   });
   test('does not expose legacy counters when old-server coverage is unknown', async () => {
@@ -402,11 +402,10 @@ describe('PlatformAccountPage', () => {
     await act(async () => buy.click());
     expect(purchaseRequests).toBe(1);
     if (failure === 'uncertain') {
-      expect(host.textContent).toContain('unknown');
-      expect(host.textContent).toContain('Recover');
+      expect(host.textContent).toContain('has no confirmed result yet');
     } else {
       expect(host.textContent).toContain('complete its model credit rates');
-      expect(host.textContent).not.toContain('Recover original request');
+      expect(host.textContent).not.toContain('Submit this payment again');
       expect(host.textContent).toContain('9007199254.740993');
       await tab('Orders');
       expect(host.textContent).toContain('Buy extra credits');
