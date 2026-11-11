@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.84 for macOS Apple silicon and
+The website targets release 2.7.85 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
@@ -25,6 +25,14 @@ available and supports the required purpose. Each supported function is tested
 with the same key before its connection is applied. Tests appear as they start,
 with up to three running together. A missing compatible model has an explicit
 unavailable result. Models without native prices remain unavailable.
+
+Version 2.7.85 makes capture and indexing failures visible on the Experiences
+status page and clears them after recovery. A completed manual index clears its
+own error, and an older failed task with a complete extraction result is reused
+for indexing. Experience extraction covers user-visible root sessions in any
+project after learning is enabled; internal child sessions remain outside the
+experience reader. The Windows memory smoke fixture now follows the segmented
+embedding contract used by the release build.
 
 Version 2.7.84 puts the library-to-learning coupling in the server. Turning the
 library on enables learning for later conversations in every project, and an
@@ -114,7 +122,7 @@ background and indexed for project retrieval. The Experiences checkbox can pause
 or resume learning. Sessions from before enablement require explicit processing.
 Methodology candidates require confirmation.
 
-Installer links point to the v2.7.84 GitHub Release assets. The unified release
+Installer links point to the v2.7.85 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 

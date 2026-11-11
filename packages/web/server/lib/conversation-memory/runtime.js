@@ -84,11 +84,11 @@ export const createConversationMemoryRuntime = ({
     couplingQueue = result.catch(() => {});
     return result;
   };
-  const recordTransientError = (code) => {
-    transientError = { code, sequence: ++transientErrorSequence };
+  const recordTransientError = (code, owner = null) => {
+    transientError = { code, sequence: ++transientErrorSequence, owner };
   };
-  const clearTransientError = (sequence) => {
-    if (transientError && transientError.sequence <= sequence) transientError = null;
+  const clearTransientError = (sequence, owner = null) => {
+    if (transientError && transientError.sequence <= sequence && transientError.owner === owner) transientError = null;
   };
   const currentFailureCode = (state) => {
     const job = [...state.jobs, ...state.syntheses].find((item) => item.state === 'failed' || item.state === 'unknown');
@@ -112,10 +112,10 @@ export const createConversationMemoryRuntime = ({
     if (engine?.success && engine.data.error && engine.data.state !== 'ready') return engine.data.error;
     return null;
   };
-  const reportDurableError = async (error, fallback) => {
+  const reportDurableError = async (error, fallback, owner = null) => {
     const code = failureCode(error, fallback);
     await store.update((state) => { state.lastError = code; });
-    recordTransientError(code);
+    recordTransientError(code, owner);
   };
   const eventTimers = new Map();
   const sourceRevisions = new Map();
@@ -139,17 +139,18 @@ export const createConversationMemoryRuntime = ({
   const synchronizeManual = async ({ projectId }) => {
     if (!manualIndex || stopped || isBlocked() || !await isManualEnabled()) return;
     const sequence = transientErrorSequence;
+    let completed = true;
     try {
       for (let batch = 0; batch < 32; batch++) {
-        if (stopped || isBlocked() || !await isManualEnabled()) return;
+        if (stopped || isBlocked() || !await isManualEnabled()) { completed = false; break; }
         const result = await manualIndex.sync({ projectId });
-        if (!result.pending) return;
+        if (!result.pending) break;
       }
     } catch (error) {
-      await reportDurableError(error, 'manual_index_failed');
+      await reportDurableError(error, 'manual_index_failed', 'manual');
       return;
     }
-    clearTransientError(sequence);
+    if (completed) clearTransientError(sequence, 'manual');
   };
   const maintenance = organizer && memoryBackend ? createHyMaintenance({ store, organizer, backend: memoryBackend, canProcess, now,
     verifySources: async ({ entries, directory, signal }) => {
@@ -510,7 +511,9 @@ export const createConversationMemoryRuntime = ({
         if (request) {
           try { await processCapture(request); }
           catch (error) {
-            await store.update((next) => { next.pending = next.pending.filter((item) => item.sessionId !== request.sessionId); next.lastError = failureCode(error, 'capture_failed'); });
+            const code = failureCode(error, 'capture_failed');
+            await store.update((next) => { next.pending = next.pending.filter((item) => item.sessionId !== request.sessionId); next.lastError = code; });
+            recordTransientError(code);
           }
           continue;
         }
@@ -760,7 +763,7 @@ export const createConversationMemoryRuntime = ({
         + state.engine.records.filter((record) => record.collection === 'hy-withdrawal' && record.value.state === 'pending' && record.value.error).length,
       unknown: [...state.jobs, ...state.syntheses].filter((job) => job.state === 'unknown').length,
       entries: state.entries.filter((entry) => ['active', 'candidate'].includes(entry.status)).length,
-      lastError: isBlocked() ? 'enterprise_mode' : startError ?? couplingError ?? transientError?.code ?? currentFailureCode(state),
+      lastError: isBlocked() ? 'enterprise_mode' : currentFailureCode(state) ?? startError ?? couplingError ?? transientError?.code ?? null,
       candidates: state.entries.filter((entry) => entry.status === 'candidate').length,
       blocked: [...state.jobs, ...state.syntheses].filter((job) => job.state === 'failed' && /enterprise|policy|configuration|scope_unavailable|not_installed/.test(job.error ?? '')).length,
       deferred,

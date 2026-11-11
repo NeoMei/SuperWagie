@@ -43,6 +43,15 @@ OpenCode remains the conversation authority.
   records, then from startup, coupling and transient errors. Recovering a stored
   failure clears the visible error when the authoritative state has no remaining
   failed record.
+- Capture failures and transient processing errors record a current in-memory
+  failure, so status reports them until the next successful drain. A persisted
+  `lastError` without a current failure stays invisible across restarts.
+- A capture failure removes only its failed pending request. A later explicit
+  capture retries the source and a successful drain clears the current error.
+- Manual index synchronization owns its transient errors. A completed sync
+  clears its own older failure, while a newer concurrent failure and failures
+  from another operation remain visible. A sync that stops before its first
+  backend call leaves its previous failure visible.
 - A processing request received during an active drain schedules one trailing
   drain. Capture, confirmation and synthesis cannot lose their wakeup while the
   previous drain exits. Its final reads and recovery scheduling retain drain
@@ -167,6 +176,17 @@ One trailing request preserves work committed while a drain exits without
 starting a second owner or replacing indexing delays with immediate polling.
 Final state reads and retry scheduling finish before the synchronous handoff,
 so idle and stop cannot finish while the retired drain still schedules work.
+
+### Why transient errors carry an owner and sequence
+
+Manual sync, startup sweep and drain share the status field. Each operation
+captures a sequence when it starts and clears only an error at or before that
+sequence, so an error raised while it runs survives. Manual sync records an
+owner, so its recovery clears manual failures without clearing a concurrent
+drain or startup failure. Cleanup matches the recorded owner exactly, so an
+unowned drain or sweep cannot clear an unrecovered manual failure. Alternative
+rejected: clearing the whole transient error on any successful operation,
+which hid the newest failure.
 
 ### Why capture and indexing have separate durable transitions
 
