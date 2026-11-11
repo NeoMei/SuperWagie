@@ -11,7 +11,7 @@
 <p>A feature without a compatible model shows why it is unavailable. Models without configured prices are unavailable.</p>
 
 <h2>Continue setup with an activated key</h2>
-<p>If the key is activated but model configuration failed, update to 2.7.82 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
+<p>If the key is activated but model configuration failed, update to 2.7.83 and choose Continue setup. Setup reuses the saved key, restores its missing credential in the bundled OpenCode, then starts model tests. A conflicting key or model configuration is retained with an explanation.</p>
 
 <h2>Test passed, connection incomplete</h2>
 <p>A passed embedding test means the new connection can return vectors. Applying it to an existing library index also requires a compatibility check. The original configuration and index remain while that check is pending.</p>
@@ -29,7 +29,7 @@
 <div class="callout"><p>Never paste a key into an issue, a chat or a screenshot. Check logs for credentials before sharing them.</p></div>
 
 <h2>Library models</h2>
-<p>The library uses models configured in SuperWagie. A SuperWagie Key can configure available embedding, image understanding and document parsing capabilities. Each capability depends on its test and setup result. You can also configure another provider when needed.</p>
+<p>The library and Experiences tab use models configured in SuperWagie. A SuperWagie Key can configure available embedding, image understanding and document parsing capabilities. Each capability depends on its test and setup result. You can also configure another provider when needed. Experience extraction uses the configured small model. Long Chinese content is split at UTF-8 character boundaries, and each embedding request carries one short text.</p>
 
 <h2>User center and cost</h2>
 <p>Click your avatar to open the user center. The sidebar shows your portrait and identity and opens profile editing. Top navigation switches between membership and usage, API keys, consumption records, orders and personal details.</p>

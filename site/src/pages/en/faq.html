@@ -8,9 +8,21 @@
       <h3>Is it macOS only?</h3>
       <p>The unified release provides Apple silicon Mac and Windows x64 installers.</p>
       <h3>Why does macOS block the first launch?</h3>
-      <p>The app is ad-hoc signed and not notarised. For a trusted, unmodified 2.7.82 repair package, follow the <a href="/en/docs/troubleshooting/">first-launch instructions</a> to try opening it, then use Open Anyway in Privacy &amp; Security if available.</p>
+      <p>The app is ad-hoc signed and not notarised. For a trusted, unmodified package, follow the <a href="/en/docs/troubleshooting/">first-launch instructions</a> to try opening it, then use Open Anyway in Privacy &amp; Security if available.</p>
       <h3>How much disk space does it need?</h3>
       <p>See the <a href="/en/download/">download page</a> for current installer sizes. Your files stay where they are; the library index is local and grows with the number of files.</p>
+    </div>
+
+    <div class="faq-page-group">
+      <h2>Experience learning</h2>
+      <h3>Does the library need a separate learning switch?</h3>
+      <p>No. Turning on the library also enables experience learning. Turning the library off keeps the saved learning setting.</p>
+      <h3>Which conversations are captured automatically?</h3>
+      <p>Once the switch is enabled, later conversations in any project enter extraction automatically. Sessions from before enablement, or an older open session, can be imported explicitly.</p>
+      <h3>Can a failed extraction be retried?</h3>
+      <p>Yes. The Experiences tab shows a specific error, and transient failures keep retry available. Resolve model quota, credential or embedding service problems before retrying.</p>
+      <h3>Does long Chinese content exceed the embedding request limit?</h3>
+      <p>Version 2.7.83 splits long content at UTF-8 character boundaries and sends one short text per embedding request.</p>
     </div>
 
     <div class="faq-page-group">

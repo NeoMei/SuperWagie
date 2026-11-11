@@ -3,15 +3,15 @@
 
 <h2>The app will not open</h2>
 <ul>
-  <li>If 2.7.64 reports that the app is damaged, download 2.7.82 and replace the old copy in Applications. This version fixes incomplete bundle signatures and remains unnotarised.</li>
-  <li>Only for a trusted, unmodified 2.7.82 repair package: try opening the app first. If macOS blocks it because it is not notarised, open System Settings → Privacy &amp; Security, scroll down to Open Anyway, then confirm when prompted. See <a href="https://support.apple.com/en-gb/102445">Apple's instructions</a>.</li>
+  <li>If 2.7.64 reports that the app is damaged, download 2.7.83 and replace the old copy in Applications. The 2.7.82 repair fixed incomplete bundle signatures; the current build remains unnotarised.</li>
+  <li>Only for a trusted, unmodified package: try opening the app first. If macOS blocks it because it is not notarised, open System Settings → Privacy &amp; Security, scroll down to Open Anyway, then confirm when prompted. See <a href="https://support.apple.com/en-gb/102445">Apple's instructions</a>.</li>
   <li>Match the installer to your device. The Apple silicon arm64 build requires macOS 13 or later; Windows uses the x64 installer.</li>
   <li>If Open Anyway is unavailable or the app still will not launch, include the system message in an issue. Attach relevant app logs if any were created.</li>
 </ul>
 
 <h2>Startup or session errors</h2>
 <ul>
-  <li><strong>agent.list failed (403):</strong> update to 2.7.82. This version fixes the desktop page being rejected by the newer engine's origin check.</li>
+  <li><strong>agent.list failed (403):</strong> update to 2.7.83. Version 2.7.82 fixed the desktop page being rejected by the newer engine's origin check.</li>
   <li><strong>session.prompt failed (503):</strong> requests wait for the engine during startup or restart. If the failure continues, check the log for its cause. A missing session returns 404 separately.</li>
   <li><strong>Old session not found:</strong> SuperWagie uses its private session database and does not import system OpenCode history. Start a new session in SuperWagie; the original database is retained.</li>
   <li><strong>Key activated but configuration failed:</strong> after updating, choose Continue setup under API keys in the account panel. Setup reuses the existing key without another activation.</li>
@@ -20,7 +20,7 @@
 <h2>Model errors</h2>
 <p>Model messages follow the current interface language. Expand the response details for diagnostic information.</p>
 <ul>
-  <li><strong>Auto reports an unavailable model:</strong> open Settings → Routing and select the fallback again from the available models. Version 2.7.82 reports an unavailable fallback before sending; updating retains existing routing settings.</li>
+  <li><strong>Auto reports an unavailable model:</strong> open Settings → Routing and select the fallback again from the available models. Version 2.7.82 added the unavailable-fallback check before sending; updating retains existing routing settings.</li>
   <li><strong>Model not set up:</strong> use a bundled free model when no model is configured. To use another model, click your avatar to activate a SuperWagie Key, or add your own provider in Settings.</li>
   <li><strong>Model connection failed:</strong> check the connection settings and key. If your SuperWagie Key is already activated, continue setup in the account panel.</li>
   <li><strong>Free allowance used up:</strong> wait for the service to restore the allowance, or choose another configured model.</li>
@@ -52,12 +52,13 @@
 <p>The workbench lists unparsed lines below the tasks with the line number and reason. Fix the line or restore a backup; nothing is silently deleted.</p>
 
 <h2 id="memory">Memory and conversation learning</h2>
-<p>2.7.78 fixes memory startup recovery, queries and queued work. Conversation learning starts off; processing existing sessions still requires your explicit choice.</p>
+<p>Turning on the library also enables learning from new conversations. Once the switch is enabled, later conversations in any project enter extraction automatically. Sessions from before enablement, and an older open session, remain available through an explicit history import. Failures show a specific reason, and transient failures keep retry available.</p>
 <ul>
   <li><strong>Enabled but unavailable:</strong> the saved setting is retained. Memory reports unavailable until startup succeeds and can retry after the service recovers. If it keeps failing, check the displayed reason and app log.</li>
-  <li><strong>A memory query fails:</strong> update to 2.7.78 for the experience search fix.</li>
-  <li><strong>Learning or organization stays queued:</strong> update to 2.7.78 for the fix to work added while the previous task is finishing. If a model or indexing service is unavailable, follow the displayed guidance.</li>
+  <li><strong>The request does not finish:</strong> update to 2.7.83. The Experiences tab shows a specific extraction, persistence or model error, and transient failures can be retried. Resolve model quota or credential problems before retrying.</li>
+  <li><strong>An embedding request fails:</strong> update to 2.7.83. Long Chinese content is split at UTF-8 character boundaries, and each embedding request carries one short text. Use Retry indexing for existing failed entries.</li>
+  <li><strong>An older session has no experiences:</strong> check whether it happened after the switch was enabled. Sessions from before enablement need an explicit history import.</li>
 </ul>
 
 <h2>Windows</h2>
-<p>Windows x64 uses 2.7.82. The installer is unsigned, so SmartScreen may block the first run. It contains no keys.</p>
+<p>Windows x64 uses 2.7.83. The installer is unsigned, so SmartScreen may block the first run. It contains no keys.</p>

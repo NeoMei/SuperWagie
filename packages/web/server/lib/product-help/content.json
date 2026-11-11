@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "catalogVersion": "2026-11-05.5",
-  "revision": 5,
+  "catalogVersion": "2026-11-11.6",
+  "revision": 6,
   "minAppVersion": "2.7.59",
   "articles": [
     {
@@ -412,11 +412,11 @@
       "keywords": [],
       "en": {
         "title": "Review conversation learning and memory",
-        "text": "1. Open Knowledge library → Experiences, or Settings → Knowledge library → Conversation learning. Enable Learn from new conversations if you want automatic learning, and Refresh to check status.\n2. Select a project and its session before Process current session. Historical processing starts when you request it and can use the configured small model and embedding service. Check entry and index status after processing.\n3. Make active allows an experience entry to be recalled; Retry indexing retries its failed index; Forget removes it from recall and prevents regeneration from the same source while retaining the source conversation. Search project experiences filters the list.\n4. The separate Agent memory tool is controlled in Settings → General → OpenChamber tools. Its saved memories and conversation-learning entries have separate controls; disabling a tool does not itself erase stored content."
+        "text": "1. Open Knowledge library → Experiences, or Settings → Knowledge library → Conversation learning. Turning on the knowledge library also enables Learn from new conversations. Refresh to check status.\n2. After learning is enabled, later conversations in every project enter extraction automatically. Select a project and its session before Process current session to import older history or an already open session. Historical processing starts when you request it and can use the configured small model and embedding service. Check entry and index status after processing.\n3. Make active allows an experience entry to be recalled; Retry indexing retries its failed index; Forget removes it from recall and prevents regeneration from the same source while retaining the source conversation. Search project experiences filters the list. Extraction failures show a specific reason, and transient failures keep retry available.\n4. The separate Agent memory tool is controlled in Settings → General → OpenChamber tools. Its saved memories and conversation-learning entries have separate controls; disabling a tool does not itself erase stored content."
       },
       "zh-CN": {
         "title": "查看对话学习、经验与记忆",
-        "text": "1. 打开“资料库 → 经验”，或“设置 → 资料库 → 对话学习”。需要自动学习时开启“从新对话中学习”，通过“刷新”检查状态。\n2. 选择项目及该项目中的会话，再点击“处理当前会话”。历史处理由你主动发起，可能调用已配置的小模型和嵌入服务。处理后检查条目状态与索引状态。\n3. “启用条目”允许经验被召回，“重试索引”重试失败的索引，“遗忘”将条目移出召回并阻止从相同来源再次生成，来源对话仍然保留。“搜索项目经验”用于筛选列表。\n4. 独立的“智能体记忆工具”在“设置 → 通用 → 犇马工具”控制，它保存的记忆与对话学习条目分别管理；关闭工具不会自动清除已保存内容。"
+        "text": "1. 打开“资料库 → 经验”，或“设置 → 资料库 → 对话学习”。开启资料库会同时启用“从新对话中学习”，通过“刷新”检查状态。\n2. 启用后，各项目之后发生的对话会自动进入提炼。选择项目及该项目中的会话，再点击“处理当前会话”，可导入启用前的历史或已经打开的旧会话。历史处理由你主动发起，可能调用已配置的小模型和嵌入服务。处理后检查条目状态与索引状态。\n3. “启用条目”允许经验被召回，“重试索引”重试失败的索引，“遗忘”将条目移出召回并阻止从相同来源再次生成，来源对话仍然保留。“搜索项目经验”用于筛选列表。提炼失败会显示具体原因，临时失败的任务保留重试入口。\n4. 独立的“智能体记忆工具”在“设置 → 通用 → 犇马工具”控制，它保存的记忆与对话学习条目分别管理；关闭工具不会自动清除已保存内容。"
       },
       "target": "memory"
     },
