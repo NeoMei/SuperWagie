@@ -10,7 +10,7 @@ describe('shared memory state', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'shared-memory-'));
     try {
       const legacy = createConversationMemoryStore({ dataDir: root });
-      await legacy.update((state) => { state.enabled = true; state.enabledAt = 42; });
+      await legacy.update((state) => { state.enabled = true; state.enabledAt = 42; state.libraryCouplingMigrated = true; state.lastObservedKnowledgeLibraryEnabled = true; });
       let revision = 0; let records = []; let fail = false;
       const backend = async (action, input) => {
         if (action === 'state/read') return { revision, records: structuredClone(records) };
@@ -23,7 +23,7 @@ describe('shared memory state', () => {
         return { revision: ++revision };
       };
       const store = createSharedMemoryStore({ dataDir: root, backend });
-      expect((await store.read()).enabledAt).toBe(42);
+      expect(await store.read()).toMatchObject({ enabledAt: 42, libraryCouplingMigrated: true, lastObservedKnowledgeLibraryEnabled: true });
       fail = true;
       await expect(store.update((state) => { state.enabled = false; })).rejects.toThrow();
       expect((await legacy.read()).enabled).toBe(true);

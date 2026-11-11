@@ -34,6 +34,31 @@ describe('durable conversation learning state', () => {
     await expect(createConversationMemoryStore({ dataDir }).read()).rejects.toThrow();
   });
 
+  test('a legacy state without the library coupling marker reads as unmigrated', async () => {
+    const { dataDir, store } = await createStore();
+    await store.update((state) => { state.enabled = false; state.libraryCouplingMigrated = false; });
+    const stateFile = path.join(dataDir, 'conversation-memory', 'state.json');
+    const stored = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+    delete stored.libraryCouplingMigrated;
+    await fs.writeFile(stateFile, JSON.stringify(stored));
+    expect(await createConversationMemoryStore({ dataDir }).read()).toMatchObject({
+      libraryCouplingMigrated: false, lastObservedKnowledgeLibraryEnabled: null,
+    });
+  });
+
+  test('a legacy state keeps learned consent and defaults the library observation to unknown', async () => {
+    const { dataDir, store } = await createStore();
+    await store.update((state) => { state.enabled = true; state.enabledAt = 42; });
+    const stateFile = path.join(dataDir, 'conversation-memory', 'state.json');
+    const stored = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+    delete stored.libraryCouplingMigrated;
+    delete stored.lastObservedKnowledgeLibraryEnabled;
+    await fs.writeFile(stateFile, JSON.stringify(stored));
+    expect(await createConversationMemoryStore({ dataDir }).read()).toMatchObject({
+      enabled: true, enabledAt: 42, libraryCouplingMigrated: false, lastObservedKnowledgeLibraryEnabled: null,
+    });
+  });
+
   test('a rejected mutation leaves the last valid state intact', async () => {
     const { store } = await createStore();
     await expect(store.update((state) => { state.enabled = 'invalid'; })).rejects.toThrow();

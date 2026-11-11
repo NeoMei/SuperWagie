@@ -11,6 +11,7 @@ const createRuntime = async ({
   onManagedPluginSettingsChanged = undefined,
   onPermissionDefaultModeChanged = undefined,
   onLastDirectoryChanged = undefined,
+  onKnowledgeLibraryEnabledChanged = undefined,
   chatRoots = undefined,
   fs = fsPromises,
 } = {}) => {
@@ -37,6 +38,7 @@ const createRuntime = async ({
     onManagedPluginSettingsChanged,
     onPermissionDefaultModeChanged,
     onLastDirectoryChanged,
+    onKnowledgeLibraryEnabledChanged,
   });
 
   return {
@@ -99,6 +101,39 @@ describe('settings runtime', () => {
     } finally {
       await cleanup();
     }
+  });
+
+  it('reports each committed library switch value to its owner', async () => {
+    const seen = [];
+    const { runtime, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+      onKnowledgeLibraryEnabledChanged: (enabled, wasEnabled) => seen.push([enabled, wasEnabled]),
+    });
+    try {
+      await runtime.persistSettings({ knowledgeLibraryEnabled: false });
+      await runtime.persistSettings({ knowledgeLibraryEnabled: false });
+      await runtime.persistSettings({ knowledgeLibraryEnabled: true });
+      await runtime.persistSettings({ knowledgeLibraryEnabled: true });
+      expect(seen).toEqual([[false, true], [false, false], [true, false], [true, true]]);
+    } finally { await cleanup(); }
+  });
+
+  it('waits for the library switch owner and keeps the saved settings response when it fails', async () => {
+    const seen = [];
+    let fail = false;
+    const { runtime, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+      onKnowledgeLibraryEnabledChanged: async (enabled, wasEnabled) => {
+        seen.push([enabled, wasEnabled]);
+        if (fail) throw new Error('learning state unavailable');
+      },
+    });
+    try {
+      await runtime.persistSettings({ knowledgeLibraryEnabled: false });
+      fail = true;
+      await expect(runtime.persistSettings({ knowledgeLibraryEnabled: true })).resolves.toMatchObject({ knowledgeLibraryEnabled: true });
+      expect(seen).toEqual([[false, true], [true, false]]);
+    } finally { await cleanup(); }
   });
 
   it('refreshes the managed OpenCode config only when a managed plugin setting changed', async () => {

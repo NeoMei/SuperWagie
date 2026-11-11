@@ -34,6 +34,7 @@ const sourceEventSchema = z.object({
   data: z.object({ sessionID: z.string().min(1) }),
   location: z.object({ directory: z.string().min(1) }).optional(),
 });
+const engineFailureSchema = z.object({ state: z.string(), error: z.string().nullable().optional() });
 const listedSessionSchema = z.object({
   id: z.string().min(1),
   parentID: z.string().nullish(),
@@ -44,12 +45,15 @@ const listedPageSchema = z.object({
   data: z.array(z.unknown()),
   cursor: z.object({ next: z.string().nullish() }).nullish(),
 });
+const withdrawalFailureSchema = z.object({ state: z.string(), error: z.string().nullable().optional() });
+const legacyProjectionFailureSchema = z.object({ error: z.string().nullable().optional() });
 const SESSION_PAGE_SIZE = 200;
 
 export const createConversationMemoryRuntime = ({
   dataDir, resolveProjectId, createClient, readSegments, distill, renderMarkdown,
   knowledgeLibrary, globalEventHub = null, isBlocked = () => false, resolveSessionDirectory = null, readSessionSource = null, distillMethodology = null,
   persistKnowledgeLibraryEnabled = null,
+  readKnowledgeLibraryEnabled = null,
   now = () => Date.now(), debounceMs = 1500, indexPollMs = 2000, recallTimeoutMs = 1500, store: suppliedStore = null, organizer = null, memoryBackend = null,
   manualIndex = null, isManualEnabled = async () => false,
 }) => {
@@ -60,6 +64,10 @@ export const createConversationMemoryRuntime = ({
   let initialized = false;
   let starting = null;
   let startError = null;
+  let couplingError = null;
+  let startupMigration = null;
+  let transientError = null;
+  let transientErrorSequence = 0;
   let draining = null;
   let drainRequested = false;
   let pollTimer = null;
@@ -70,6 +78,45 @@ export const createConversationMemoryRuntime = ({
   let unsubscribe = null;
   let unsubscribeStatus = null;
   let lifecycleRevision = 0;
+  let couplingQueue = Promise.resolve();
+  const withCouplingLock = (work) => {
+    const result = couplingQueue.then(work);
+    couplingQueue = result.catch(() => {});
+    return result;
+  };
+  const recordTransientError = (code) => {
+    transientError = { code, sequence: ++transientErrorSequence };
+  };
+  const clearTransientError = (sequence) => {
+    if (transientError && transientError.sequence <= sequence) transientError = null;
+  };
+  const currentFailureCode = (state) => {
+    const job = [...state.jobs, ...state.syntheses].find((item) => item.state === 'failed' || item.state === 'unknown');
+    if (job) return job.error ?? 'memory_job_failed';
+    const entry = state.entries.find((item) => ['active', 'candidate'].includes(item.status)
+      && (item.indexState === 'failed' || item.error || item.cleanupPending && item.error));
+    if (entry) return entry.error ?? 'indexing_failed';
+    const projection = state.engine.projections.find((item) => item.state === 'failed');
+    if (projection) return projection.error ?? 'hy_commit_failed';
+    for (const record of state.engine.records) {
+      if (record.collection === 'hy-withdrawal') {
+        const parsed = withdrawalFailureSchema.safeParse(record.value);
+        if (parsed.success && parsed.data.state === 'pending' && parsed.data.error) return parsed.data.error;
+      }
+      if (record.collection === 'legacy-projection') {
+        const parsed = legacyProjectionFailureSchema.safeParse(record.value);
+        if (parsed.success && parsed.data.error) return parsed.data.error;
+      }
+    }
+    const engine = organizer ? engineFailureSchema.safeParse(organizer.status()) : null;
+    if (engine?.success && engine.data.error && engine.data.state !== 'ready') return engine.data.error;
+    return null;
+  };
+  const reportDurableError = async (error, fallback) => {
+    const code = failureCode(error, fallback);
+    await store.update((state) => { state.lastError = code; });
+    recordTransientError(code);
+  };
   const eventTimers = new Map();
   const sourceRevisions = new Map();
   const activeDirectories = new Set();
@@ -91,6 +138,7 @@ export const createConversationMemoryRuntime = ({
   };
   const synchronizeManual = async ({ projectId }) => {
     if (!manualIndex || stopped || isBlocked() || !await isManualEnabled()) return;
+    const sequence = transientErrorSequence;
     try {
       for (let batch = 0; batch < 32; batch++) {
         if (stopped || isBlocked() || !await isManualEnabled()) return;
@@ -98,8 +146,10 @@ export const createConversationMemoryRuntime = ({
         if (!result.pending) return;
       }
     } catch (error) {
-      await store.update((state) => { state.lastError = failureCode(error, 'manual_index_failed'); });
+      await reportDurableError(error, 'manual_index_failed');
+      return;
     }
+    clearTransientError(sequence);
   };
   const maintenance = organizer && memoryBackend ? createHyMaintenance({ store, organizer, backend: memoryBackend, canProcess, now,
     verifySources: async ({ entries, directory, signal }) => {
@@ -294,7 +344,6 @@ export const createConversationMemoryRuntime = ({
       }
       state.sessions[request.sessionId] = session;
       if (!result.complete) state.pending.push({ ...request, directory });
-      state.lastError = null;
     });
   };
   const processJob = async (job) => {
@@ -450,6 +499,7 @@ export const createConversationMemoryRuntime = ({
     clearTimeout(pollTimer);
     let rerun = false;
     let nextPollDelay = null;
+    const sequence = transientErrorSequence;
     draining = (async () => {
       const processed = new Set();
       for (;;) {
@@ -481,7 +531,7 @@ export const createConversationMemoryRuntime = ({
       for (const entry of (await store.read()).entries.filter((item) => item.cleanupPending && item.indexState !== 'failed')) await cleanup(entry);
       await withdrawal?.retryPending();
       await recovery?.retireLegacy();
-    })().catch(async (error) => { await store.update((state) => { state.lastError = failureCode(error, 'memory_processing_failed'); }); }).then(async () => {
+    })().catch((error) => reportDurableError(error, 'memory_processing_failed')).then(async () => {
       const state = await store.read();
       const retry = canProcess() ? await recovery?.schedule() : null;
       rerun = state.pending.length > 0 || (retry?.scheduled ?? 0) > 0;
@@ -490,8 +540,9 @@ export const createConversationMemoryRuntime = ({
       } else if (retry?.nextRetryAt && indexPollMs > 0) {
         nextPollDelay = Math.max(1, retry.nextRetryAt - now());
       }
+      clearTransientError(sequence);
     }).catch(async (error) => {
-      await store.update((state) => { state.lastError = failureCode(error, 'memory_processing_failed'); }).catch(() => {});
+      await reportDurableError(error, 'memory_processing_failed').catch(() => recordTransientError(failureCode(error, 'memory_processing_failed')));
     }).finally(() => {
       const requested = drainRequested;
       drainRequested = false;
@@ -543,6 +594,7 @@ export const createConversationMemoryRuntime = ({
     if (!createClient || !canProcess()) return { queued: 0 };
     const client = createClient('');
     if (!client?.session?.list) return { queued: 0 };
+    const sequence = transientErrorSequence;
     const listed = new Map();
     let cursor = null;
     try {
@@ -558,7 +610,7 @@ export const createConversationMemoryRuntime = ({
         cursor = next;
       }
     } catch (error) {
-      await store.update((state) => { state.lastError = failureCode(error, 'session_list_failed'); });
+      await reportDurableError(error, 'session_list_failed');
       return { queued: 0 };
     }
     const { enabledAt } = await store.read();
@@ -575,6 +627,7 @@ export const createConversationMemoryRuntime = ({
       await queueCapture({ sessionId: session.id, directory }).catch(() => {});
       queued += 1;
     }
+    clearTransientError(sequence);
     return { queued };
   };
   const attach = () => {
@@ -691,7 +744,7 @@ export const createConversationMemoryRuntime = ({
       ]);
     } finally { clearTimeout(timer); controller.abort(); }
   };
-  const status = async () => {
+  const currentStatus = async () => {
     const state = await store.read();
     const deferredStatusSchema = z.object({ deferredStatus: z.object({ pending: z.number().int().nonnegative(), rejected: z.number().int().nonnegative() }).passthrough().optional() }).passthrough();
     const deferred = state.syntheses.reduce((counts, job) => {
@@ -707,7 +760,7 @@ export const createConversationMemoryRuntime = ({
         + state.engine.records.filter((record) => record.collection === 'hy-withdrawal' && record.value.state === 'pending' && record.value.error).length,
       unknown: [...state.jobs, ...state.syntheses].filter((job) => job.state === 'unknown').length,
       entries: state.entries.filter((entry) => ['active', 'candidate'].includes(entry.status)).length,
-      lastError: isBlocked() ? 'enterprise_mode' : startError ?? state.lastError,
+      lastError: isBlocked() ? 'enterprise_mode' : startError ?? couplingError ?? transientError?.code ?? currentFailureCode(state),
       candidates: state.entries.filter((entry) => entry.status === 'candidate').length,
       blocked: [...state.jobs, ...state.syntheses].filter((job) => job.state === 'failed' && /enterprise|policy|configuration|scope_unavailable|not_installed/.test(job.error ?? '')).length,
       deferred,
@@ -715,12 +768,57 @@ export const createConversationMemoryRuntime = ({
     if (organizer) result.engine = { name: 'hy-memory', version: '2.0.8', ...organizer.status() };
     return result;
   };
-  const start = () => {
+  const commitEnabled = async (value, { followLibrary = false, recordedLibrary = null } = {}) => {
+    if (value) requireAllowed();
+    const requested = value === true;
+    const revision = ++lifecycleRevision;
+    const state = await store.update((next) => {
+      if (requested && !next.enabled) next.enabledAt = now();
+      next.enabled = requested;
+      next.libraryCouplingMigrated = true;
+      if (recordedLibrary !== null) next.lastObservedKnowledgeLibraryEnabled = recordedLibrary;
+    });
+    if (revision === lifecycleRevision && !stopped) enabled = state.enabled;
+    // Learning depends on the shared embedding backend. Keep that switch in
+    // sync without making a settings-write failure undo a committed enable.
+    if (state.enabled && !followLibrary && persistKnowledgeLibraryEnabled) {
+      void persistKnowledgeLibraryEnabled(true).catch(() => {});
+    }
+    if (state.enabled) { await startCore(); attach(); kick(); if (!stopped) void backfillSessions().catch(() => {}); }
+    else { detach(); generation?.abort(); methodologies.abort(); maintenance?.abort(); }
+    return currentStatus();
+  };
+  const setEnabled = (value, options) => withCouplingLock(async () => commitEnabled(value, options));
+  const handleCouplingFailure = (error) => {
+    couplingError = failureCode(error, 'library_coupling_failed');
+    throw error;
+  };
+  const applyKnowledgeLibraryEnabled = (libraryValue, wasEnabled, expectedRevision = null) => withCouplingLock(async () => {
+    if (expectedRevision !== null && (expectedRevision !== lifecycleRevision || stopped)) return false;
+    const requested = libraryValue === true;
+    const previous = wasEnabled !== false;
+    const state = await store.update((next) => {
+      const edge = requested && !previous && next.lastObservedKnowledgeLibraryEnabled === false;
+      const freshInstall = requested && !next.libraryCouplingMigrated && !next.enabled && next.lastObservedKnowledgeLibraryEnabled === null && next.enabledAt === 0;
+      if (requested && (edge || freshInstall)) { next.enabled = true; next.enabledAt = now(); }
+      next.libraryCouplingMigrated = true;
+      next.lastObservedKnowledgeLibraryEnabled = requested;
+      return next;
+    });
+    couplingError = null;
+    if (state.enabled) await commitEnabled(true, { followLibrary: true, recordedLibrary: requested });
+    else if (initialized && !state.enabled) { enabled = false; detach(); }
+    return state.enabled && requested;
+  }).catch(handleCouplingFailure);
+  const followKnowledgeLibraryEnabled = (libraryValue, wasEnabled) => applyKnowledgeLibraryEnabled(libraryValue, wasEnabled);
+  const startCore = () => {
     if (stopped || initialized) return Promise.resolve();
     if (starting) return starting;
     const revision = lifecycleRevision;
     starting = (async () => {
-      const state = await store.update((next) => { for (const job of [...next.jobs, ...next.syntheses]) if (job.state === 'extracting') { job.state = job.generated ? 'queued' : 'unknown'; job.error = job.generated ? null : 'generation_outcome_unknown'; } });
+      const state = await store.update((next) => {
+        for (const job of [...next.jobs, ...next.syntheses]) if (job.state === 'extracting') { job.state = job.generated ? 'queued' : 'unknown'; job.error = job.generated ? null : 'generation_outcome_unknown'; }
+      });
       if (stopped) return;
       if (revision === lifecycleRevision) enabled = state.enabled;
       // A fresh process has not made the library's memory demand yet. Claim it
@@ -741,6 +839,7 @@ export const createConversationMemoryRuntime = ({
       if (stopped) return;
       initialized = true;
       startError = null;
+      couplingError = null;
       attach(); kick();
       if (enabled) void backfillSessions().catch(() => {});
     })().catch((error) => {
@@ -750,6 +849,50 @@ export const createConversationMemoryRuntime = ({
       throw error;
     }).finally(() => { starting = null; });
     return starting;
+  };
+  const start = () => {
+    const core = startCore();
+    if (stopped || !readKnowledgeLibraryEnabled || isBlocked()) return core;
+    if (!startupMigration) {
+      const migrationRevision = lifecycleRevision;
+      let migration;
+      migration = Promise.all([
+        core.then(() => true).catch(() => false),
+        readKnowledgeLibraryEnabled().catch(() => null),
+      ]).then(async ([ready, libraryEnabled]) => {
+        if (!ready || stopped || migrationRevision !== lifecycleRevision) return;
+        if (libraryEnabled === false) {
+          await withCouplingLock(async () => {
+            if (stopped || migrationRevision !== lifecycleRevision) return;
+            await store.update((next) => {
+              if (next.libraryCouplingMigrated) return;
+              if (next.lastObservedKnowledgeLibraryEnabled !== null) return;
+              next.lastObservedKnowledgeLibraryEnabled = false;
+            });
+          });
+          return;
+        }
+        if (libraryEnabled !== true) return;
+        // Desktop upgrades can have an enabled library and a legacy shared
+        // state with no recorded learning decision. Reuse the serialized
+        // first-true migration after startup and the setting read succeed.
+        const state = await store.read();
+        if (state.libraryCouplingMigrated || state.enabled || state.enabledAt !== 0
+          || state.lastObservedKnowledgeLibraryEnabled !== null) return;
+        // A settings decision made while the setting read was in flight wins.
+        await applyKnowledgeLibraryEnabled(true, true, migrationRevision);
+      }).catch((error) => {
+        couplingError = failureCode(error, 'library_coupling_failed');
+      }).finally(() => {
+        if (startupMigration === migration) startupMigration = null;
+      });
+      startupMigration = migration;
+    }
+    return Promise.all([core, startupMigration]).then(() => {});
+  };
+  const status = async () => {
+    await start().catch(() => {});
+    return currentStatus();
   };
   return {
     retrieve: async ({ directory, query = '', title, id, documentIds, limit = 10, mode = 'eligible' }) => {
@@ -795,25 +938,9 @@ export const createConversationMemoryRuntime = ({
     start,
     status,
     isActive: canProcess,
+    setEnabled,
+    followKnowledgeLibraryEnabled,
     syncManual: synchronizeManual,
-    setEnabled: async (value) => {
-      if (value) requireAllowed();
-      const requested = value === true;
-      const state = await store.update((next) => { if (requested && !next.enabled) next.enabledAt = now(); next.enabled = requested; });
-      lifecycleRevision++;
-      enabled = state.enabled;
-      // Learning depends on the shared embedding backend. Keep that switch in
-      // sync without making a settings-write failure undo a committed enable.
-      if (enabled && persistKnowledgeLibraryEnabled) {
-        void persistKnowledgeLibraryEnabled(true).catch(() => {});
-      }
-      if (enabled) { await start(); attach(); kick(); } else { detach(); generation?.abort(); methodologies.abort(); maintenance?.abort(); }
-      // A switch turned on in a running process still needs the missed-event
-      // sweep: live events cover turns that finish afterwards, not the ones
-      // that started while the runtime was off or reconnecting.
-      if (enabled) void backfillSessions().catch(() => {});
-      return status();
-    },
     capture: ({ sessionId, directory }) => queueCapture({ sessionId, directory, includeHistory: true }),
     listEntries: searchEntries,
     consolidate: async (input) => { requireAllowed(); const result = await methodologies.consolidate(input); kick(); return result; },

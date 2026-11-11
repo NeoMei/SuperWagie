@@ -13,6 +13,10 @@ const retryableErrors = new Set([
   'hy_space_migration_pending',
   'hy_chat_llm_error', 'hy_chat_llm_unavailable', 'hy_chat_persist_failed',
   'hy_chat_reconcile_failed', 'hy_chat_agent_exception', 'memory_index_unavailable',
+  // Older engines used this code for every failed chat extraction. Recover
+  // only jobs with a stored receipt or cards; the rest need an explicit
+  // user action to authorize a fresh generation.
+  'hy_chat_extraction_failed',
 ]);
 const transientExtractionErrors = new Set([
   'hy_chat_llm_error', 'hy_chat_llm_unavailable', 'hy_chat_persist_failed',

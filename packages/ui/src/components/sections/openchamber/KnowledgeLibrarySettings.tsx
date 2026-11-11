@@ -17,7 +17,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { ConversationMemorySection } from '@/components/layout/panels/ConversationMemorySection';
-import { updateConversationMemorySettings } from '@/lib/conversationMemory';
 import {
   KnowledgeLibraryError,
   provisionKnowledgeLibrary,
@@ -121,12 +120,6 @@ const KnowledgeLibraryBackendSettings: React.FC = () => {
         setEnabled(!next);
         setFailure({ action: 'settings', code: 'settings_unavailable' });
         return;
-      }
-      if (next) {
-        // The experiences tab and the document library share the embedding
-        // backend. Turning the library on turns learning on; turning the
-        // library off leaves existing learning settings alone.
-        await updateConversationMemorySettings(true).catch(() => {});
       }
       await load();
       if (enabledIntent.current === intent) setPendingEnabled(null);
