@@ -1,5 +1,5 @@
 /**
- * Downloads and extracts local sherpa-onnx STT model archives.
+ * Downloads and extracts local sherpa-onnx TTS model archives.
  * Archives (.tar.bz2) come from the k2-fsa GitHub releases and are extracted
  * with the system `tar` into the speech-models directory.
  */
@@ -11,7 +11,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { spawn } from 'child_process';
 
-import { getLocalSttModelSpec } from './model-catalog.js';
+import { getLocalTtsModelSpec } from './model-catalog.js';
 
 async function hasRequiredFiles(modelDir, requiredFiles) {
   const results = await Promise.all(
@@ -116,8 +116,8 @@ async function isNonEmptyFile(filePath) {
  * @param {string} modelId
  * @returns {Promise<boolean>}
  */
-export async function isLocalSttModelInstalled(modelsDir, modelId) {
-  const spec = getLocalSttModelSpec(modelId);
+export async function isLocalTtsModelInstalled(modelsDir, modelId) {
+  const spec = getLocalTtsModelSpec(modelId);
   return hasRequiredFiles(path.join(modelsDir, spec.extractedDir), spec.requiredFiles);
 }
 
@@ -134,8 +134,8 @@ export async function isLocalSttModelInstalled(modelsDir, modelId) {
  *           onProgress?: (downloadedBytes: number, totalBytes: number | null) => void }} options
  * @returns {Promise<string>}
  */
-export async function ensureLocalSttModel({ modelsDir, modelId, onProgress }) {
-  const spec = getLocalSttModelSpec(modelId);
+export async function ensureLocalTtsModel({ modelsDir, modelId, onProgress }) {
+  const spec = getLocalTtsModelSpec(modelId);
   const modelDir = path.join(modelsDir, spec.extractedDir);
   if (await hasRequiredFiles(modelDir, spec.requiredFiles)) {
     return modelDir;

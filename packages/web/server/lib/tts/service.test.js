@@ -95,11 +95,11 @@ describe('OpenAI audio SDK compatibility', () => {
     });
 
     const result = await transcribeAudio({
-      audioBuffer: audio, mimeType: 'audio/webm', model: 'whisper-1', language: 'en', baseURL,
+      audioBuffer: audio, mimeType: 'audio/webm', model: 'whisper-1', baseURL,
     });
 
     expect(received).toEqual({
-      url: '/v1/audio/transcriptions', method: 'POST', model: 'whisper-1', language: 'en',
+      url: '/v1/audio/transcriptions', method: 'POST', model: 'whisper-1', language: null,
       format: 'json', filename: 'audio.webm', audio,
     });
     expect(result).toBe('Hello from transcription');

@@ -4,6 +4,7 @@ import { planAccountKeyTests, selectAccountKeyModels } from './account-key-test-
 const model = (id, operations, rest = {}) => ({ id, name: id, operations, ...rest });
 const configuration = { revision: 7, connections: [{ id: 'previous', providerId: 'private-provider', baseUrl: 'https://previous.example/v1' }], bindings: [] };
 const account = (purposeModels = []) => ({ connectionId: 'account-connection', providerId: 'account-provider', modelId: 'chat', models: [{ id: 'chat', name: 'Chat' }, { id: 'small', name: 'Small' }, { id: 'embed', name: 'Embed' }], purposeModels });
+const keyPurposes = ['ocr', 'vision', 'embedding', 'rerank', 'stt-short', 'stt-realtime', 'tts', 'image-generation'];
 
 describe('account key candidate test plan', () => {
   it('carries the authoritative speech operation into the shared account binding', () => {
@@ -18,14 +19,28 @@ describe('account key candidate test plan', () => {
   it('includes every supported Key purpose when a fresh chat-only catalog has no feature candidate', () => {
     const catalog = [model('chat', ['chat'])];
     const selected = selectAccountKeyModels(catalog, configuration, []);
-    expect(selected.purposeModels).toEqual(['ocr', 'vision', 'embedding', 'rerank', 'tts', 'image-generation'].map((purpose) => ({ purpose, modelId: null, parameters: {}, errorCode: 'account_key_model_unavailable' })));
+    expect(selected.purposeModels).toEqual(keyPurposes.map((purpose) => ({ purpose, modelId: null, parameters: {}, errorCode: 'account_key_model_unavailable' })));
     const plan = planAccountKeyTests({ ...account(), ...selected }, configuration, [], [], catalog);
-    expect(plan.map(({ purpose, modelId, status, errorCode }) => ({ purpose, modelId, status, errorCode }))).toEqual(['ocr', 'vision', 'embedding', 'rerank', 'tts', 'image-generation'].map((purpose) => ({ purpose, modelId: null, status: 'skipped', errorCode: 'account_key_model_unavailable' })));
+    expect(plan.map(({ purpose, modelId, status, errorCode }) => ({ purpose, modelId, status, errorCode }))).toEqual(keyPurposes.map((purpose) => ({ purpose, modelId: null, status: 'skipped', errorCode: 'account_key_model_unavailable' })));
+  });
+
+  it('selects the LLMRouter ASR model for both voice purposes from the account catalog', () => {
+    const catalog = [model('chat', ['chat']), model('qwen3-asr-flash', ['transcription'])];
+    const selected = selectAccountKeyModels(catalog, configuration, []);
+    expect(selected.purposeModels.filter(({ purpose }) => purpose.startsWith('stt-'))).toEqual([
+      { purpose: 'stt-short', modelId: 'qwen3-asr-flash', parameters: {}, errorCode: null },
+      { purpose: 'stt-realtime', modelId: 'qwen3-asr-flash', parameters: {}, errorCode: null },
+    ]);
+    const plan = planAccountKeyTests({ ...account(), ...selected, modelScope: 'llmrouter_available' }, configuration, [], [], catalog);
+    expect(plan.filter(({ purpose }) => purpose.startsWith('stt-')).map(({ status, binding }) => ({ status, binding }))).toEqual([
+      { status: 'queued', binding: { purpose: 'stt-short', connectionId: 'account-connection', model: 'qwen3-asr-flash', parameters: {} } },
+      { status: 'queued', binding: { purpose: 'stt-realtime', connectionId: 'account-connection', model: 'qwen3-asr-flash', parameters: {} } },
+    ]);
   });
 
   it('omits unconfigured purposes without a supported Key probe even when catalog operations exist', () => {
-    const selected = selectAccountKeyModels([model('chat', ['chat']), model('other', ['stt', 'speech-to-text', 'routing', 'video', 'image-editing', 'multimodal-embedding'])], configuration, []);
-    expect(selected.purposeModels.map(({ purpose }) => purpose)).toEqual(['ocr', 'vision', 'embedding', 'rerank', 'tts', 'image-generation']);
+    const selected = selectAccountKeyModels([model('chat', ['chat']), model('other', ['routing', 'video', 'image-editing', 'multimodal-embedding'])], configuration, []);
+    expect(selected.purposeModels.map(({ purpose }) => purpose)).toEqual(keyPurposes);
     expect(selected.models.map(({ id }) => id)).toEqual(['chat']);
   });
 
@@ -110,7 +125,7 @@ describe('account key candidate test plan', () => {
     const selected = selectAccountKeyModels([model('chat', ['chat']), model('embed', ['embedding'])], existing, []);
     const plan = planAccountKeyTests({ ...account(), ...selected }, existing, [], [], [model('embed', ['embedding'], { capabilitiesKnown: true })]);
     expect(plan.find((row) => row.purpose === 'embedding')).toEqual({ id: 'purpose:embedding', purpose: 'embedding', modelId: 'embed', status: 'queued', errorCode: null, binding: { purpose: 'embedding', connectionId: 'account-connection', model: 'embed', parameters: { dimensions: 1024 } }, revision: 7 });
-    expect(plan.filter((row) => row.purpose !== 'embedding')).toEqual(['ocr', 'vision', 'rerank', 'tts', 'image-generation'].map((purpose) => ({ id: `purpose:${purpose}`, purpose, modelId: null, status: 'skipped', errorCode: 'account_key_model_unavailable', binding: { purpose, connectionId: 'account-connection', model: null, parameters: {} }, revision: 7 })));
+    expect(plan.filter((row) => row.purpose !== 'embedding')).toEqual(keyPurposes.filter((purpose) => purpose !== 'embedding').map((purpose) => ({ id: `purpose:${purpose}`, purpose, modelId: null, status: 'skipped', errorCode: 'account_key_model_unavailable', binding: { purpose, connectionId: 'account-connection', model: null, parameters: {} }, revision: 7 })));
     expect(JSON.stringify(plan)).not.toMatch(/previous|private-provider|private-value/);
   });
 

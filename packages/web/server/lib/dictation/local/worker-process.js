@@ -1,34 +1,25 @@
 /**
- * Dictation local-speech worker process.
+ * Local read-aloud worker process.
  *
- * Hosts the sherpa-onnx native inference (Parakeet STT) in a separate process
- * so ONNX decoding never blocks the main OpenChamber server. Communicates
- * with the parent over child_process IPC (advanced serialization, so Buffers
- * survive the trip as Uint8Array).
+ * Hosts sherpa-onnx offline TTS inference in a separate process so synthesis
+ * never blocks the main OpenChamber server. Communicates with the parent over
+ * child_process IPC (advanced serialization, so Buffers survive the trip as
+ * Uint8Array). Transcription uses the server-resolved LLMRouter ASR binding
+ * and has no local recognizer in this worker.
  *
  * Request/response protocol (parent -> worker):
- *   { type: 'session.create', requestId, sessionId, modelsDir, modelId }
- *   { type: 'session.append', requestId, sessionId, audio }
- *   { type: 'session.commit' | 'session.clear' | 'session.close', requestId, sessionId }
+ *   { type: 'tts.synthesize', requestId, modelsDir, modelId, text, speakerId?, speed? }
  * Worker -> parent:
  *   { type: 'response', requestId, ok, result?, error? }
- *   { type: 'session.committed' | 'session.transcript' | 'session.error', sessionId, ... }
  */
 
-import {
-  SherpaOfflineRecognizerEngine,
-  SherpaSegmentTranscriptionSession,
-} from './sherpa-recognizer.js';
 import { SherpaTtsEngine } from './sherpa-tts.js';
-import { getLocalSttModelDir, getLocalSttModelSpec } from './model-catalog.js';
+import { getLocalTtsModelDir, getLocalTtsModelSpec } from './model-catalog.js';
 import { pcm16ToWav } from '../audio.js';
-import path from 'path';
 
 process.title = 'OpenChamber Dictation';
 
-const engines = new Map();
 const ttsEngines = new Map();
-const sessions = new Map();
 let ipcClosing = false;
 
 function sendToParent(message) {
@@ -50,58 +41,15 @@ function sendOk(requestId, result) {
   sendToParent({ type: 'response', requestId, ok: true, ...(result !== undefined ? { result } : {}) });
 }
 
-function getEngine(modelsDir, modelId) {
-  const key = `${modelsDir}:${modelId}`;
-  const existing = engines.get(key);
-  if (existing) {
-    return existing;
-  }
-  const modelDir = getLocalSttModelDir(modelsDir, modelId);
-  const spec = getLocalSttModelSpec(modelId);
-  const created = new SherpaOfflineRecognizerEngine({
-    type: spec.type,
-    encoder: path.join(modelDir, spec.files.encoder),
-    decoder: path.join(modelDir, spec.files.decoder),
-    ...(spec.files.joiner ? { joiner: path.join(modelDir, spec.files.joiner) } : {}),
-    tokens: path.join(modelDir, spec.files.tokens),
-    numThreads: 2,
-  });
-  engines.set(key, created);
-  return created;
-}
-
-function cleanupSession(sessionId) {
-  const session = sessions.get(sessionId);
-  sessions.delete(sessionId);
-  try {
-    session?.close();
-  } catch {
-    // ignore
-  }
-}
-
-function toBuffer(audio) {
-  if (Buffer.isBuffer(audio)) {
-    return audio;
-  }
-  if (audio instanceof Uint8Array) {
-    return Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength);
-  }
-  if (audio && typeof audio === 'object' && audio.type === 'Buffer' && Array.isArray(audio.data)) {
-    return Buffer.from(audio.data);
-  }
-  throw new Error('Unsupported audio payload in dictation worker');
-}
-
 function getTtsEngine(modelsDir, modelId) {
   const key = `${modelsDir}:${modelId}`;
   const existing = ttsEngines.get(key);
   if (existing) {
     return existing;
   }
-  const spec = getLocalSttModelSpec(modelId);
+  const spec = getLocalTtsModelSpec(modelId);
   const created = new SherpaTtsEngine({
-    modelDir: getLocalSttModelDir(modelsDir, modelId),
+    modelDir: getLocalTtsModelDir(modelsDir, modelId),
     type: spec.type,
     files: spec.files,
     lexicon: spec.lexicon,
@@ -125,72 +73,6 @@ async function handleRequest(message) {
       });
       return;
     }
-    case 'session.create': {
-      cleanupSession(message.sessionId);
-      const engine = getEngine(message.modelsDir, message.modelId);
-      const session = new SherpaSegmentTranscriptionSession({ engine });
-      session.on('committed', (payload) => {
-        sendToParent({ type: 'session.committed', sessionId: message.sessionId, payload });
-      });
-      session.on('transcript', (payload) => {
-        sendToParent({ type: 'session.transcript', sessionId: message.sessionId, payload });
-      });
-      session.on('error', (err) => {
-        sendToParent({
-          type: 'session.error',
-          sessionId: message.sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-      await session.connect();
-      sessions.set(message.sessionId, session);
-      sendOk(message.requestId, { requiredSampleRate: session.requiredSampleRate });
-      return;
-    }
-    case 'session.append': {
-      sessions.get(message.sessionId)?.appendPcm16(toBuffer(message.audio));
-      sendOk(message.requestId);
-      return;
-    }
-    case 'session.commit': {
-      const session = sessions.get(message.sessionId);
-      if (!session) {
-        sendOk(message.requestId);
-        return;
-      }
-      // The segment's decode is synchronous. Acknowledging only after it made
-      // the parent's worker-request timeout fire on long segments and blocked
-      // every following IPC packet (session.append) behind the decode. So:
-      // take the segment, ack the commit immediately, and decode on the next
-      // turn of the event loop — the transcript still arrives as a
-      // session.transcript event.
-      const pending = session.takePendingSegment();
-      sendOk(message.requestId);
-      if (pending) {
-        setImmediate(() => {
-          try {
-            session.decodeSegment(pending);
-          } catch (err) {
-            sendToParent({
-              type: 'session.error',
-              sessionId: message.sessionId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        });
-      }
-      return;
-    }
-    case 'session.clear': {
-      sessions.get(message.sessionId)?.clear();
-      sendOk(message.requestId);
-      return;
-    }
-    case 'session.close': {
-      cleanupSession(message.sessionId);
-      sendOk(message.requestId);
-      return;
-    }
     default: {
       throw new Error(`Unknown dictation worker request: ${message?.type}`);
     }
@@ -210,12 +92,6 @@ process.on('message', (message) => {
 
 process.once('disconnect', () => {
   ipcClosing = true;
-  for (const sessionId of Array.from(sessions.keys())) {
-    cleanupSession(sessionId);
-  }
-  for (const engine of engines.values()) {
-    engine.free();
-  }
   for (const tts of ttsEngines.values()) {
     tts.free();
   }

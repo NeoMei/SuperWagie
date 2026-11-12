@@ -17,17 +17,19 @@ const directories = [];
 const issuedKey = 'fixture-account-key-7890';
 const owner = { type: 'ui-session', token: 'fixture-runtime-owner' };
 const input = { accountId: 'account-1', identity: owner, owner };
-const supportedPurposes = ['ocr', 'vision', 'embedding', 'rerank', 'tts', 'image-generation'];
+const supportedPurposes = ['ocr', 'vision', 'embedding', 'rerank', 'stt-short', 'stt-realtime', 'tts', 'image-generation'];
 const purposeCatalog = [
   { id: 'ocr', name: 'OCR', operations: ['ocr'] },
   { id: 'vision', name: 'Vision', operations: ['vision'] },
   { id: 'embed', name: 'Embedding', operations: ['embedding'], dimensions: 2 },
   { id: 'rerank', name: 'Rerank', operations: ['rerank'] },
+  { id: 'asr', name: 'ASR', operations: ['transcription'] },
   { id: 'speech', name: 'Speech', operations: ['speech'] },
   { id: 'image', name: 'Image', operations: ['image_generation'] },
 ];
 const completeCatalog = [{ id: 'chat-pro', name: 'Chat Pro', operations: ['chat'] }, ...purposeCatalog];
-const verifiedPurposeRows = () => supportedPurposes.map((purpose, index) => expect.objectContaining({ purpose, modelId: purposeCatalog[index].id, status: 'verified', applied: true, errorCode: null }));
+const purposeModelIds = { ocr: 'ocr', vision: 'vision', embedding: 'embed', rerank: 'rerank', 'stt-short': 'asr', 'stt-realtime': 'asr', tts: 'speech', 'image-generation': 'image' };
+const verifiedPurposeRows = () => supportedPurposes.map((purpose) => expect.objectContaining({ purpose, modelId: purposeModelIds[purpose], status: 'verified', applied: true, errorCode: null }));
 const unavailablePurposeRows = () => supportedPurposes.map((purpose) => ({ id: `purpose:${purpose}`, purpose, modelId: null, status: 'skipped', testedAt: null, applied: false, errorCode: 'account_key_model_unavailable' }));
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBindingChange, nativeDiscoveryContract = false } = {}) => {
@@ -50,6 +52,7 @@ const fixture = async ({ secretStore, catalog, legacyModels = [], prepareBinding
       if (url.endsWith('/images/generations')) return Response.json({ data: [{ url: 'https://image.example/fixture.png' }] });
       if (url.endsWith('/chat/completions')) return Response.json({ choices: [{ message: { content: 'A blue circle.' } }] });
       if (url.endsWith('/audio/speech')) return new Response(Buffer.from('UklGRiYAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQIAAAAAAA==', 'base64'), { headers: { 'Content-Type': 'audio/wav' } });
+      if (url.endsWith('/audio/transcriptions')) return Response.json({ text: 'TEST' });
       if (url.endsWith('/ocr')) return Response.json({ id: 'uk_fixture-task', job_id: 'fixture-job', state: 'pending' }, { status: 202 });
       if (url.endsWith('/ocr/uk_fixture-task')) return Response.json({ id: 'uk_fixture-task', job_id: 'fixture-job', state: 'done', progress: { totalPages: 1, extractedPages: 1 } });
       if (url.endsWith('/ocr/uk_fixture-task/document')) return Response.json({ id: 'uk_fixture-task', pages: [{ text: 'TEST', layout: [] }] });
@@ -825,7 +828,8 @@ describe('persistent account key activation', () => {
     expect(f.controls.scopeRequests).toBeUndefined();
     expect(f.counts.issue).toBe(1);
     expect(f.probeCalls.map(({ url }) => new URL(url).pathname).sort()).toEqual([
-      '/v1/audio/speech', '/v1/chat/completions', '/v1/embeddings', '/v1/images/generations',
+      '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/audio/transcriptions',
+      '/v1/chat/completions', '/v1/embeddings', '/v1/images/generations',
       '/v1/ocr', '/v1/ocr/uk_fixture-task', '/v1/ocr/uk_fixture-task/document', '/v1/rerank',
     ]);
   });
@@ -1276,7 +1280,7 @@ describe('persistent account key activation', () => {
     expect(f.counts.probe + f.probeCalls.length).toBe(3);
     expect(running.status).toBe('testing');
     expect(running.tests.filter((row) => row.status === 'testing')).toHaveLength(3);
-    expect(running.tests.filter((row) => row.status === 'queued')).toHaveLength(4);
+    expect(running.tests.filter((row) => row.status === 'queued')).toHaveLength(6);
     f.controls.probeWait.resolve();
     for (let attempt = 0; attempt < 100 && f.probeCalls.length < 3; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
     const partial = (await f.create().read(input)).activation;
@@ -1285,7 +1289,7 @@ describe('persistent account key activation', () => {
     f.controls.modelProbeWait.resolve();
     const complete = (await pending).activation;
     expect(complete.status).toBe('ready');
-    expect(complete.tests.filter((row) => row.status === 'verified')).toHaveLength(7);
+    expect(complete.tests.filter((row) => row.status === 'verified')).toHaveLength(9);
   });
 
   it('keeps confirmed provider failure separate from lost-response uncertainty and changes run IDs only on explicit retest', async () => {

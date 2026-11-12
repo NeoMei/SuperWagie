@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_LOCAL_TTS_MODEL,
   LOCAL_TTS_MODEL_CATALOG,
-  getLocalSttModelSpec,
+  getLocalTtsModelSpec,
   getLocalTtsDefaultSpeaker,
   resolveLocalTtsModelForLanguage,
 } from './model-catalog.js';
@@ -32,7 +32,7 @@ describe('local TTS catalog', () => {
     for (const [id, spec] of Object.entries(LOCAL_TTS_MODEL_CATALOG)) {
       expect(spec.languages.length, id).toBeGreaterThan(0);
       expect(spec.archiveUrl, id).toMatch(/^https:\/\/github\.com\/k2-fsa\/sherpa-onnx\/releases\/download\/tts-models\//);
-      const resolved = getLocalSttModelSpec(id);
+      const resolved = getLocalTtsModelSpec(id);
       expect(resolved.requiredFiles, id).toContain(spec.files.model);
       for (const key of spec.lexicon ?? []) {
         expect(spec.files[key], `${id} lexicon ${key}`).toBeTruthy();

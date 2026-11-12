@@ -5,6 +5,8 @@ const operations = {
   vision: ['vision', 'image-input'], embedding: ['embedding', 'embeddings', 'text-embedding'],
   rerank: ['rerank', 'reranking', 'text-rerank'], tts: ['speech', 'tts', 'text-to-speech'],
   'image-generation': ['image-generation', 'image'], ocr: ['ocr'],
+  'stt-short': ['transcription', 'stt', 'speech-to-text', 'asr'],
+  'stt-realtime': ['transcription', 'stt', 'speech-to-text', 'asr'],
 };
 const supports = (model, purpose) => {
   const values = model.operations.map((operation) => operation.toLowerCase().replaceAll('_', '-'));

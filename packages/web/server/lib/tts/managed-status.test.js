@@ -33,7 +33,7 @@ describe('managed speech readiness', () => {
     expect(result.body.code).toBe('platform_media_recovery_unavailable');
     expect([identityReads, admissions, dispatches]).toEqual([0, 0, 0]);
   });
-  it('refuses managed transcription before identity, task admission or dispatch', async () => {
+  it('refuses a managed-media short transcription binding before contacting any server', async () => {
     let identityReads = 0; let admissions = 0; let dispatches = 0;
     const app = express();
     registerTtsRoutes(app, {
@@ -42,8 +42,8 @@ describe('managed speech readiness', () => {
       resolvePlatformIdentity: async () => { identityReads++; return {}; },
     });
     const result = await request(app).post('/api/stt/transcribe').set('content-type', 'audio/webm').send(Buffer.from('audio'));
-    expect(result.status).toBe(503);
-    expect(result.body.code).toBe('platform_media_recovery_unavailable');
+    expect(result.status).toBe(501);
+    expect(result.body.code).toBe('model_configuration_unsupported_protocol');
     expect([identityReads, admissions, dispatches]).toEqual([0, 0, 0]);
   });
   it('reports the real managed binding as available without exposing credentials', async () => {

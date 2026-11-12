@@ -2737,8 +2737,6 @@ export const dict = {
   'chat.chatInput.placeholder.selectSession': 'Select or create a session to start chatting',
   'chat.dictation.start': 'Start dictation',
   'chat.dictation.overlayAria': 'Dictation',
-  'chat.dictation.downloadingModel': 'Downloading speech model...',
-  'chat.dictation.downloadingModelProgress': 'Downloading speech model... {percent}%',
   'chat.dictation.listening': 'Listening...',
   'chat.dictation.processing': 'Transcribing...',
   'chat.dictation.failed': 'Transcription failed',

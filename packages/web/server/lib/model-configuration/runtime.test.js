@@ -73,7 +73,6 @@ describe('model configuration persistence and boundaries', () => {
     const managed = MODEL_PRESETS.filter((preset) => preset.protocol === 'managed-media');
     expect(managed.map(({ id, model }) => ({ id, model }))).toEqual([
       { id: 'alibaba-text-embedding-v4', model: 'text-embedding-v4' },
-      { id: 'alibaba-qwen3-asr-flash', model: 'qwen3-asr-flash' },
       { id: 'alibaba-qwen3-tts-flash', model: 'qwen3-tts-flash' },
       { id: 'alibaba-qwen-image-2-0', model: 'qwen-image-2.0' },
       { id: 'alibaba-wanx2-1-imageedit', model: 'wanx2.1-imageedit' },
@@ -92,6 +91,32 @@ describe('model configuration persistence and boundaries', () => {
         expect(await runtime.resolveBinding(preset.purposes[0], { supportedProtocols: ['managed-media'] })).toMatchObject({ providerId: 'unihub', protocol: 'managed-media', model: preset.model });
       }
     }
+  });
+  it('reads a removed ASR preset from disk without reviving its managed-media path', async () => {
+    const { runtime, dataDir } = await fixture();
+    const filePath = path.join(dataDir, 'model-configuration.json');
+    const legacyState = {
+      version: 1, revision: 1,
+      connections: [{ id: 'c1', name: 'UniHub', providerId: 'unihub', protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1' }],
+      bindings: [{ purpose: 'stt-short', connectionId: 'c1', presetId: 'alibaba-qwen3-asr-flash', model: 'qwen3-asr-flash', parameters: {}, verification: { status: 'untested' } }],
+    };
+    await fs.writeFile(filePath, JSON.stringify(legacyState));
+
+    const state = await runtime.getPublicConfiguration();
+    expect(state.bindings).toMatchObject([{ purpose: 'stt-short', presetId: 'alibaba-qwen3-asr-flash' }]);
+    expect(state.presets.some((preset) => preset.id === 'alibaba-qwen3-asr-flash')).toBe(false);
+    expect(await fs.readFile(filePath, 'utf8')).toBe(JSON.stringify(legacyState));
+
+    await expect(runtime.resolveBinding('stt-short', { supportedProtocols: ['openai-compatible'] }))
+      .rejects.toMatchObject({ code: 'model_configuration_unsupported_protocol', status: 501 });
+    await expect(runtime.testConnection('c1', { revision: state.revision, purpose: 'stt-short', model: 'qwen3-asr-flash', presetId: 'alibaba-qwen3-asr-flash', parameters: {} }))
+      .rejects.toMatchObject({ code: 'model_configuration_unsupported_protocol', status: 501 });
+    await expect(runtime.saveBinding('stt-short', { revision: state.revision, binding: { connectionId: 'c1', presetId: 'alibaba-qwen3-asr-flash', model: 'qwen3-asr-flash', parameters: {} } }))
+      .rejects.toMatchObject({ code: 'model_configuration_unsupported_protocol', status: 501 });
+
+    const cleared = await runtime.saveBinding('stt-short', { revision: state.revision, binding: null });
+    expect(cleared.bindings).toEqual([]);
+    expect((await runtime.getPublicConfiguration()).bindings).toEqual([]);
   });
   it('starts empty without creating a file and never publishes a key', async () => {
     const { runtime, dataDir } = await fixture();
@@ -277,14 +302,14 @@ describe('purpose-specific server probes', () => {
     expect(state.bindings[0].verification).toMatchObject({ status: 'failed', errorCode: 'model_configuration_dimension_mismatch' });
   });
 
-  it('leaves a valid binding untested when its probe belongs to the consuming component', async () => {
+  it('verifies a continuous-dictation ASR binding with the strict multipart probe', async () => {
     let providerCalls = 0;
-    const { runtime } = await fixture({ fetchImpl: async () => { providerCalls += 1; return Response.json({ text: 'test' }); } });
+    const { runtime } = await fixture({ fetchImpl: async () => { providerCalls += 1; return Response.json({ text: 'TEST' }); } });
     let state = await connect(runtime);
     state = await bind(runtime, state, { parameters: {} }, 'stt-realtime');
-    await expect(runtime.testBinding('stt-realtime', { revision: state.revision })).rejects.toMatchObject({ code: 'model_configuration_probe_unavailable', status: 501 });
-    expect(providerCalls).toBe(0);
-    expect((await runtime.getPublicConfiguration()).bindings[0].verification.status).toBe('untested');
+    state = await runtime.testBinding('stt-realtime', { revision: state.revision });
+    expect(providerCalls).toBe(1);
+    expect(state.bindings[0].verification).toMatchObject({ status: 'verified' });
   });
 
   it('parses mutations behind the production request middleware and never echoes malformed JSON', async () => {

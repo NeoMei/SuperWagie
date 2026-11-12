@@ -73,19 +73,27 @@ const parseInput = (schema, value) => {
   return parsed.data;
 };
 const emptyState = () => ({ version: 1, revision: 0, connections: [], bindings: [] });
+/** Removed recommendations stay recognizable on disk without reappearing in the public catalog. */
+const LEGACY_MODEL_PRESETS = [{
+  id: 'alibaba-qwen3-asr-flash', purposes: ['stt-short'], providerId: 'unihub',
+  protocol: 'managed-media', model: 'qwen3-asr-flash', status: 'requires-adapter',
+}];
+const findPreset = (id) => MODEL_PRESETS.find((entry) => entry.id === id)
+  ?? LEGACY_MODEL_PRESETS.find((entry) => entry.id === id);
 const assertIntegrity = (state) => {
   const connections = new Set(state.connections.map((entry) => entry.id));
   if (connections.size !== state.connections.length || new Set(state.bindings.map((entry) => entry.purpose)).size !== state.bindings.length) fail('model_configuration_malformed', 500);
   for (const binding of state.bindings) {
     if (!connections.has(binding.connectionId)) fail('model_configuration_malformed', 500);
-    try { checkPreset(binding, state.connections.find((entry) => entry.id === binding.connectionId)); }
+    try { checkPreset(binding, state.connections.find((entry) => entry.id === binding.connectionId), { allowLegacy: true }); }
     catch { fail('model_configuration_malformed', 500); }
   }
 };
-const checkPreset = (binding, connection) => {
+const checkPreset = (binding, connection, { allowLegacy = false } = {}) => {
   if (!binding.presetId) return;
-  const preset = MODEL_PRESETS.find((entry) => entry.id === binding.presetId);
+  const preset = findPreset(binding.presetId);
   if (!preset || !preset.purposes.includes(binding.purpose) || preset.providerId !== connection.providerId || preset.protocol !== connection.protocol || preset.model !== binding.model) fail('model_configuration_incompatible_preset', 400);
+  if (!allowLegacy && LEGACY_MODEL_PRESETS.includes(preset)) fail('model_configuration_unsupported_protocol', 501);
 };
 const resolved = (state, purpose) => {
   const binding = state.bindings.find((entry) => entry.purpose === purpose);
@@ -426,7 +434,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     const binding = state.bindings.find((entry) => entry.purpose === purpose);
     if (!binding) return null;
     if (MODEL_PURPOSES.find((entry) => entry.id === purpose).status !== 'available') return fail('model_configuration_not_connected', 501);
-    const preset = MODEL_PRESETS.find((entry) => entry.id === binding.presetId);
+    const preset = findPreset(binding.presetId);
     if (preset && preset.status !== 'compatible') return fail('model_configuration_unsupported_protocol', 501);
     guardEgress(resolved(state, purpose));
     const value = await resolveStateBinding(state, purpose);
@@ -480,7 +488,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     if (MODEL_PURPOSES.find((entry) => entry.id === purpose).status !== 'available') return fail('model_configuration_not_connected', 501);
     const candidate = { ...model, purpose, connectionId: id };
     checkPreset(candidate, connection);
-    const preset = MODEL_PRESETS.find((entry) => entry.id === candidate.presetId);
+    const preset = findPreset(candidate.presetId);
     if (preset && preset.status !== 'compatible') return fail('model_configuration_unsupported_protocol', 501);
     if (!MODEL_PROBE_PROTOCOLS[purpose]?.includes(connection.protocol)) return fail('model_configuration_probe_unavailable', 501);
     const probeState = { ...before, bindings: [candidate] };

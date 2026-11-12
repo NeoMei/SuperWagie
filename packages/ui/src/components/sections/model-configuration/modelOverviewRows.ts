@@ -29,7 +29,6 @@ export type ModelOverviewInputs = {
   };
   voice: {
     tts: { provider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say'; model?: string };
-    stt: { provider: 'local' | 'openai-compatible'; model?: string };
   };
   runtime: 'available' | 'unsupported';
 };
@@ -54,12 +53,15 @@ function inheritedRow(row: ModelOverviewRow, inputs: ModelOverviewInputs): Model
     if (!model) return { ...row, configuration: 'missing', test: 'untested', reason: undefined };
     return { ...row, model: model.model, configuration: 'inherited', test: 'component', reason: 'component' };
   }
-  if (row.purpose === 'tts' || row.purpose === 'stt-realtime') {
-    const selection = row.purpose === 'tts' ? inputs.voice.tts : inputs.voice.stt;
+  if (row.purpose === 'tts') {
+    const selection = inputs.voice.tts;
     const local = selection.provider === 'local' || selection.provider === 'browser' || selection.provider === 'say';
     const model = presentModel(selection.model);
     if (local) return { ...row, model, configuration: 'local', test: 'component', reason: 'component' };
     return { ...row, model, configuration: model ? 'inherited' : 'missing', test: model ? 'component' : 'untested', reason: model ? 'component' : undefined };
+  }
+  if (row.purpose === 'stt-short' || row.purpose === 'stt-realtime') {
+    return { ...row, configuration: 'missing', test: 'untested', reason: undefined };
   }
   return { ...row, configuration: 'missing', test: 'untested', reason: undefined };
 }

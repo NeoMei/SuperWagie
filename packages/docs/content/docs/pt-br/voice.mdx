@@ -20,13 +20,9 @@ Uma vez ativado, você ganha um botão de play nas mensagens para ouvi-las lidas
 
 ## Ditar mensagens (speech-to-text)
 
-Escolha como sua fala é transcrita:
+O ditado contínuo e a entrada de voz curta usam LLMRouter ASR qwen3-asr-flash pela chave da sua conta SuperWagie. O servidor coloca o áudio em buffer e envia segmentos WAV para https://llmrouter.quukk.com/v1/audio/transcriptions. Não é preciso baixar modelo, informar chave de API nem usar um servidor Whisper próprio. O compositor insere a transcrição quando você para a gravação. No modo empresarial, essa transcrição remota é recusada.
 
-- **browser** — o reconhecimento integrado do seu navegador, sem configuração
-- **server** — um serviço de transcrição compatível com OpenAI; insira sua URL e, se necessário, uma chave de API
-- **on-device** — um modelo de fala que roda no seu navegador e é baixado na primeira vez que você o usa
-
-As API keys que você digita para esses serviços ficam guardadas no servidor do OpenChamber, não no navegador. Digite uma chave e pressione Enter para salvá-la; o campo passa a mostrar que há uma chave salva, e o X a remove.
+As API keys que você digita para os serviços de leitura em voz alta ficam guardadas no servidor do OpenChamber, não no navegador. Digite uma chave e pressione Enter para salvá-la; o campo passa a mostrar que há uma chave salva, e o X a remove.
 
 ## Uma nota para celulares
 

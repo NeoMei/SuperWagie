@@ -11,17 +11,6 @@ import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
 import { type RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 
-export interface DictationStartOptions {
-    provider?: 'local' | 'openai-compatible';
-    language?: string;
-    localModel?: string;
-    openaiCompatible?: {
-        baseUrl?: string;
-        model?: string;
-        apiKey?: string;
-    };
-}
-
 interface DictationServerMessage {
     type: string;
     dictationId?: string;
@@ -49,10 +38,8 @@ const createStreamError = (message: string, retryable: boolean, reasonCode?: str
 };
 
 const CONNECT_TIMEOUT_MS = 10000;
-// The first start of a session also loads the local ONNX engine (measured ~3s
-// on an M1, more on slower machines and on first run after boot). 15s left too
-// little headroom and surfaced as "Dictation start timed out" before the worker
-// was ready.
+// Starting a stream resolves the server's ASR binding and opens a transcription
+// session. Keep a generous deadline for a cold authenticated connection.
 const START_TIMEOUT_MS = 30000;
 const IDLE_CLOSE_DELAY_MS = 30000;
 const DEFAULT_FINISH_TIMEOUT_MS = 60000;
@@ -208,7 +195,6 @@ export class DictationClient {
     async startDictationStream(
         dictationId: string,
         format: string,
-        options: DictationStartOptions,
     ): Promise<void> {
         await this.ensureConnected();
         this.activeDictations += 1;
@@ -233,7 +219,7 @@ export class DictationClient {
                 },
             timeout });
 
-            if (!this.send({ type: 'start', dictationId, format, options })) {
+            if (!this.send({ type: 'start', dictationId, format })) {
                 clearTimeout(timeout);
                 this.pendingStarts.delete(dictationId);
                 this.releaseDictation();

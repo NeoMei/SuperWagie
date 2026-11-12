@@ -92,25 +92,6 @@ export function pcm16leFrameRms(pcm16le, frameSamples) {
 }
 
 /**
- * Convert PCM16LE to Float32 samples in [-1, 1], with optional gain.
- * @param {Buffer} pcm16le
- * @param {number} [gain]
- * @returns {Float32Array}
- */
-export function pcm16leToFloat32(pcm16le, gain = 1) {
-  if (pcm16le.length % 2 !== 0) {
-    throw new Error(`PCM16 chunk byteLength must be even, got ${pcm16le.length}`);
-  }
-  const int16 = toInt16Samples(pcm16le);
-  const out = new Float32Array(int16.length);
-  for (let i = 0; i < int16.length; i += 1) {
-    const v = (int16[i] / 32768.0) * gain;
-    out[i] = Math.max(-1, Math.min(1, v));
-  }
-  return out;
-}
-
-/**
  * Wrap raw PCM16LE mono audio in a WAV container.
  * @param {Buffer} pcmBuffer
  * @param {number} sampleRate
