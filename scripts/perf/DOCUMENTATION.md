@@ -433,18 +433,19 @@ A headed run of the folded Activity header drew 60 frames/sec, about 61 style
 recalculations/sec and no layouts/sec. The static header drew 0-0.2 frames/sec
 and no style recalculations. Main-thread busy time was 2.45-2.98% for one
 header, 4.65-5.86% for eight and 9.84% for 32. Those figures were measured on
-the earlier repeated-gradient implementation. The final non-repeating gradient
-still uses the same animated property and one highlight per 2.8 s cycle.
+the earlier repeated-gradient implementation. The final repeating gradient
+uses the same animated property and a fixed 240 px period: one band passes
+each point during a 2.8 s cycle, and a long header shows several bands at
+once. No new headed measurement was taken for the fixed-period variant.
 
 `activity-header-static` and `activity-header-shimmer` reproduce the folded
 Activity header's font sizes, semantic colors, truncated command and duplicate
-text layer. `background-position` is the isolated property fixture; its
-non-repeating gradient also sweeps from left to right, so the direction a
-reader sees matches the header variant. The app mounts the shimmer only after
-the whole header has held still for one second and removes it on a text change,
-settled turn, permission wait, hidden page, minimized or tray-hidden native
-window, offscreen header, paused clock, inert subtree or reduced-motion
-preference.
+text layer with the fixed period. The isolated `background-position` property
+fixture has a non-repeating gradient that also sweeps left to right. The app
+mounts the shimmer only after the whole header has held still for one second
+and removes it on a text change, settled turn, permission wait, hidden page,
+minimized or tray-hidden native window, offscreen header, paused clock, inert
+subtree or reduced-motion preference.
 
 Composited does not mean free. With `--headed` the command also reports process
 CPU, and a composited animation that costs the main thread nothing still makes

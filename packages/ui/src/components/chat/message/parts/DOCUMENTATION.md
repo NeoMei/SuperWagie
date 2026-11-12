@@ -737,14 +737,24 @@ polling or model request selects copy.
 
 ### Why only the folded header shimmers
 
-The folded Activity header sweeps one 2.8 s luminance band from left to right
-through a visual copy of its own text. The copy keeps the original sizes and
-weights and uses the title color for the highlight. The shimmer starts only
-after the visible header identity has held still for one second, and resets on
-any identity, tool, target or language change. The gray status row and scroll
-pill stay still so their concrete work text reads cleanly. Permission waits,
-settled turns, hidden or offscreen headers, minimized or tray-hidden native
-windows, paused clocks, inert subtrees and reduced-motion preferences stand
-still. The new infinite CSS animation is listed in
+The folded Activity header sweeps 2.8 s luminance bands from left to right
+through a visual copy of its own text. Each band repeats every 240 px, so a
+short header shows one highlight and a long header shows several moving
+highlights instead of one slow wash across the full width. The copy keeps the
+original sizes and weights and uses the title color for the highlight. The
+shimmer starts only after the visible header identity has held still for one
+second, and resets on any identity, tool, target or language change. The gray
+status row and scroll pill stay still so their concrete work text reads
+cleanly. Permission waits, settled turns, hidden or offscreen headers,
+minimized or tray-hidden native windows, paused clocks, inert subtrees and
+reduced-motion preferences stand still. The infinite CSS animation is listed in
 `lib/infiniteAnimations.test.ts`; its measured cost is recorded in
 `scripts/perf/DOCUMENTATION.md`.
+
+### Why the shimmer uses a fixed period
+
+A `200%` background grows with the header and stretches one highlight across
+long text. A fixed 240 px tile keeps each band the same width and speed on
+short and long headers. Shifting the repeating background by exactly one tile
+during 2.8 s keeps the loop seamless while the highlights travel left to
+right.

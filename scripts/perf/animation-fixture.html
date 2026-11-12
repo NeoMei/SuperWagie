@@ -177,7 +177,8 @@
     The folded Activity header as the shared UI mounts it: a full-width ghost
     button with the real text fragments and a visually duplicated text layer.
     The static variant has the same DOM without animation. The shimmer variant
-    copies index.css's gradient, clip, fill and 2.8 s infinite timing exactly.
+    copies the fixed-period gradient, clip, fill and 2.8 s infinite timing
+    from index.css.
   */
   .v-activity-header-static .grid, .v-activity-header-shimmer .grid { display: block; padding: 8px; gap: 0; }
   .activity-header {
@@ -240,7 +241,7 @@
       color-mix(in srgb, currentColor 18%, transparent) 46%,
       color-mix(in srgb, currentColor 20%, white) 50%,
       color-mix(in srgb, currentColor 18%, transparent) 54%,
-      transparent 60% 100%) 100% 0 / 200% 100% no-repeat;
+      transparent 60% 100%) -240px 0 / 240px 100% repeat-x;
     -webkit-background-clip: text;
     background-clip: text;
   }
@@ -248,7 +249,8 @@
   .activity-layer svg, .activity-layer [aria-hidden='true'] { visibility: hidden; }
   .v-activity-header-static .activity-layer { animation: none; }
   .v-activity-header-shimmer .activity-layer { animation: oc-live-header-shimmer 2.8s linear infinite; }
-  @keyframes oc-live-header-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+  /* One 240 px period of travel loops seamlessly. */
+  @keyframes oc-live-header-shimmer { from { background-position: -240px 0; } to { background-position: 0 0; } }
   @media (prefers-reduced-motion: reduce) {
     .v-activity-header-shimmer .activity-layer { animation: none; display: none; }
   }

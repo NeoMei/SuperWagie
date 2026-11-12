@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.86 for macOS Apple silicon and
+The website targets release 2.7.89 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
@@ -25,6 +25,21 @@ available and supports the required purpose. Each supported function is tested
 with the same key before its connection is applied. Tests appear as they start,
 with up to three running together. A missing compatible model has an explicit
 unavailable result. Models without native prices remain unavailable.
+
+Version 2.7.89 gives long folded activity headers several highlights spaced
+240 px apart, moving from left to right after the visible text has stayed
+unchanged for one second. Short headers keep one highlight. Font size and
+weight, title color, the 2.8 s rhythm and the still gray status line stay as
+they are. Alipay checkout now opens its payment page in the browser instead of
+drawing an unscannable QR code from that page. This release also retains the
+2.7.88 sign-in recovery described below.
+
+Version 2.7.88 restores sign-in when a saved desktop device credential is no
+longer recognised: the app renews it once and reads the account again. An
+unreachable account service leaves the sign-in form available, an open
+workspace stays open and a network failure is no longer treated as a sign-out.
+The device-token store is written through a temporary file and renamed, so an
+interrupted write cannot truncate every saved device credential.
 
 Version 2.7.86 gives the folded activity header a highlight that sweeps from
 left to right when its visible text has stayed unchanged for more than one
@@ -133,7 +148,7 @@ background and indexed for project retrieval. The Experiences checkbox can pause
 or resume learning. Sessions from before enablement require explicit processing.
 Methodology candidates require confirmation.
 
-Installer links point to the v2.7.86 GitHub Release assets. The unified release
+Installer links point to the v2.7.89 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 

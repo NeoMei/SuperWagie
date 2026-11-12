@@ -2424,11 +2424,13 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 }
 
 /*
- * The folded Activity header sweeps one soft luminance band from left to right
- * through a duplicate of its own text. The duplicate carries the original
- * classes, so font size and weight stay as they are; the highlight uses the
- * title color. React mounts it only after the header has held still for one
- * second, and removes it when the visible identity changes or the turn settles.
+ * The folded Activity header sweeps soft luminance bands from left to right
+ * through a duplicate of its own text. The bands repeat every 240 px, so a
+ * long header shows several highlights at once while a short one shows one.
+ * The duplicate carries the original classes, so font size and weight stay as
+ * they are; the highlight uses the title color. React mounts it only after the
+ * header has held still for one second, and removes it when the visible
+ * identity changes or the turn settles.
  */
 .oc-live-header-shimmer {
   position: absolute;
@@ -2448,7 +2450,7 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
     color-mix(in srgb, currentColor 18%, transparent) 46%,
     color-mix(in srgb, currentColor 20%, white) 50%,
     color-mix(in srgb, currentColor 18%, transparent) 54%,
-    transparent 60% 100%) 100% 0 / 200% 100% no-repeat;
+    transparent 60% 100%) -240px 0 / 240px 100% repeat-x;
   -webkit-background-clip: text;
   background-clip: text;
   animation: oc-live-header-shimmer 2.8s linear infinite;
@@ -2464,8 +2466,9 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   visibility: hidden;
 }
 
+/* Travelling exactly one fixed period makes the repeating bands loop seamlessly. */
 @keyframes oc-live-header-shimmer {
-  from { background-position: 100% 0; }
+  from { background-position: -240px 0; }
   to { background-position: 0 0; }
 }
 

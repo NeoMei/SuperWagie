@@ -10,11 +10,12 @@ import { fileURLToPath } from 'node:url';
  * `BusyDots` or `useWaitingBlink`, all on one shared clock. The infinite CSS
  * animations left are bounded by the user: the short `animate-spin` of a button
  * or a quick load, the diff's expand spinner, the model name that scrolls while
- * hovered. The folded Activity header's 2.8 s left-to-right shimmer is another
- * user-requested exception: it starts only after the text is stable for one
- * second, and stops when the header changes,
- * settles, leaves the viewport or loses visibility. A new infinite animation
- * fails here until it is replaced or listed with a reason.
+ * hovered. The folded Activity header's repeating 2.8 s left-to-right shimmer
+ * is another user-requested exception: fixed 240 px bands keep long headers
+ * visibly animated. It starts only after the text is stable for one second, and
+ * stops when the header changes, settles, leaves the viewport or loses
+ * visibility. A new infinite animation fails here until it is replaced or
+ * listed with a reason.
  */
 const ALLOWED = [
   { file: 'index.css', declaration: 'animation: webkit-spin 1s linear infinite !important;' },
@@ -56,10 +57,10 @@ test('every allowed infinite animation still exists', () => {
   }
 });
 
-test('the folded Activity header shimmer sweeps from left to right', () => {
+test('the folded Activity header sweeps repeating bands from left to right', () => {
   const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
-  expect(css).toContain('transparent 60% 100%) 100% 0 / 200% 100% no-repeat;');
-  expect(css).toContain('@keyframes oc-live-header-shimmer {\n  from { background-position: 100% 0; }\n  to { background-position: 0 0; }');
+  expect(css).toContain('transparent 60% 100%) -240px 0 / 240px 100% repeat-x;');
+  expect(css).toContain('@keyframes oc-live-header-shimmer {\n  from { background-position: -240px 0; }\n  to { background-position: 0 0; }');
 });
 
 test('the isolated background-position fixture sweeps from left to right', () => {
