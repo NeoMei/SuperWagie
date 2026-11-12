@@ -109,13 +109,14 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
     let current = true;
     setQR(''); setQRFailed(false);
     if (!codeUrl) return undefined;
-    // Alipay reaches the account as a gateway redirect; the same link still
-    // opens from the Alipay scanner, so it is offered as a code plus a button.
+    // Alipay hands out a checkout page, and a page encoded as a code cannot be
+    // scanned: that provider gets no code, only the button that opens the page.
+    if (session?.kind !== 'qr') return undefined;
     void QRCode.toDataURL(codeUrl, { width: 224, margin: 2 })
       .then((image) => { if (current) setQR(image); })
       .catch(() => { if (current) setQRFailed(true); });
     return () => { current = false; };
-  }, [codeUrl]);
+  }, [codeUrl, session?.kind]);
 
   const actions = <>
     {session?.kind === 'redirect' && !compact && <Button size="sm" disabled={busy || expired} onClick={() => { setOpenFailed(false); void openExternalUrl(session.url).then((opened) => { if (!opened) setOpenFailed(true); }); }}>{t(provider === 'wechat' ? 'platformAccount.openWechat' : 'platformAccount.openAlipay')}</Button>}
@@ -169,16 +170,16 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
           <p className="typography-micro text-muted-foreground">{t('platformAccount.paymentChannel')}</p>
           <SettingsChipGroup value={provider} onChange={(next) => { if (next !== provider && !busy) onSwitchChannel(next); }} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy }))} />
         </div>}
-        {waiting && <p className={`${SETTINGS_HELPER_CLASS} max-w-[22rem]`}>{t(provider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.scanWithAlipay')}</p>}
+        {waiting && <p className={`${SETTINGS_HELPER_CLASS} max-w-[22rem]`}>{t(provider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.openAlipayHint')}</p>}
         {waiting && remaining !== null && <p className={`${SETTINGS_HELPER_CLASS} flex items-center gap-1.5`}>
           <Icon name="time" className="size-3.5" />
-          {expired ? t('platformAccount.qrExpired') : remaining > 86_400_000
+          {expired ? t(session?.kind === 'qr' ? 'platformAccount.qrExpired' : 'platformAccount.checkoutExpired') : remaining > 86_400_000
             ? t('platformAccount.qrValidUntil', { date: new Date(session?.expires_at ?? checkout.expires_at).toLocaleString() })
             : t('platformAccount.qrValidFor', { time: clock(remaining) })}
         </p>}
       </div>
       {waiting && (qr || qrFailed) && <div className="flex shrink-0 flex-col items-center gap-2 self-center">
-        {qr && <img src={qr} width={224} height={224} className="rounded-lg bg-white p-2 ring-1 ring-black/5" alt={t(provider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.scanWithAlipay')} />}
+        {qr && <img src={qr} width={224} height={224} className="rounded-lg bg-white p-2 ring-1 ring-black/5" alt={t('platformAccount.scanWithWechat')} />}
         {qrFailed && <p role="alert" className="text-[var(--status-error-text)]">{t('platformAccount.commerceFailed')}</p>}
       </div>}
     </div>
