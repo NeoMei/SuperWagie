@@ -10,9 +10,9 @@ for (const [name, value] of Object.entries({ window: browser, document: browser.
   savedGlobals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
   Object.defineProperty(globalThis, name, { value, configurable: true });
 }
-const emptyState = (accountId = 'account-a'): PlatformAccountKeySetupState => ({ accountId, enterpriseMode: false, activation: null });
+const emptyState = (accountId = 'account-a'): PlatformAccountKeySetupState => ({ accountId, enterpriseMode: false, fundingMode: 'credits', nativeCredits: { ready: true }, activation: null });
 const readyState = (accountId = 'account-a'): PlatformAccountKeySetupState => ({
-  accountId, enterpriseMode: false,
+  accountId, enterpriseMode: false, fundingMode: 'credits', nativeCredits: { ready: true },
   activation: {
     operationId: 'activation-operation', status: 'ready', stage: 'test',
     key: { id: 'credential-record-id', last4: 'A7q9', createdAt: '2026-11-06T00:00:00Z', expiresAt: null },
@@ -132,14 +132,14 @@ afterAll(async () => {
 test('opening the key panel only reads account state and waits for explicit activation', async () => {
   await render();
   expect(findButton('Activate and configure')?.disabled).toBe(false);
-  expect(requests).toEqual([{ path: '/api/model-configuration/bootstrap/account-key?accountId=account-a', method: 'GET', body: null }]);
+  expect(requests).toEqual([{ path: '/api/model-configuration/bootstrap/account-key?accountId=account-a&fundingMode=credits', method: 'GET', body: null }]);
   expect(configured).toEqual([]);
   expect(host?.textContent).not.toContain('Connection test passed');
 });
 
 test('one activation configures the model and shows the real masked key only after a verified result', async () => {
   await render(); await click('Activate and configure');
-  expect(mutations()).toEqual([{ path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: JSON.stringify({ accountId: 'account-a', action: 'activate' }) }]);
+  expect(mutations()).toEqual([{ path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: JSON.stringify({ accountId: 'account-a', action: 'activate', fundingMode: 'credits' }) }]);
   expect(host?.textContent).toContain('•••• A7q9');
   expect(host?.textContent).toContain('Connection test passed');
   expect(host?.textContent).not.toContain('credential-record-id');
@@ -241,7 +241,7 @@ test('a pending retest hides the previous success even when polling returns the 
   await waitForRead(1);
   expect(setupPanel().textContent).not.toContain('Connection test passed');
   expectStep('Test connection', 'In progress');
-  expect(mutations().map(request => request.body)).toEqual([JSON.stringify({ accountId: 'account-a', action: 'retest' })]);
+  expect(mutations().map(request => request.body)).toEqual([JSON.stringify({ accountId: 'account-a', action: 'retest', fundingMode: 'credits' })]);
 
   const unknown = readyState();
   if (!unknown.activation) throw new Error('Missing activation fixture');
@@ -265,8 +265,8 @@ test('configuration failure keeps the issued key and resumes without another act
   expect(configured).toEqual([]);
   writePayload = readyState(); await click('Continue setup');
   expect(mutations().map(request => request.body)).toEqual([
-    JSON.stringify({ accountId: 'account-a', action: 'activate' }),
-    JSON.stringify({ accountId: 'account-a', action: 'resume' }),
+    JSON.stringify({ accountId: 'account-a', action: 'activate', fundingMode: 'credits' }),
+    JSON.stringify({ accountId: 'account-a', action: 'resume', fundingMode: 'credits' }),
   ]);
   expect(host?.textContent).toContain('Connection test passed');
   expect(configured).toEqual(['account-a']);
@@ -286,8 +286,8 @@ test('failed connectivity preserves saved configuration and tests again only on 
   expect(configured).toEqual(['account-a']);
   writePayload = readyState(); await click('Test and apply to features');
   expect(mutations().map(request => request.body)).toEqual([
-    JSON.stringify({ accountId: 'account-a', action: 'activate' }),
-    JSON.stringify({ accountId: 'account-a', action: 'retest' }),
+    JSON.stringify({ accountId: 'account-a', action: 'activate', fundingMode: 'credits' }),
+    JSON.stringify({ accountId: 'account-a', action: 'retest', fundingMode: 'credits' }),
   ]);
   expect(host?.textContent).toContain('Connection test passed');
 });
@@ -462,7 +462,7 @@ test('an activation completed for the previous account cannot refresh the new ac
   expect(findButton('Activate and configure')?.disabled).toBe(false);
   expect(host?.textContent).not.toContain('•••• A7q9');
   expect(configured).toEqual([]);
-  expect(mutations().map(request => request.body)).toEqual([JSON.stringify({ accountId: 'account-a', action: 'activate' })]);
+  expect(mutations().map(request => request.body)).toEqual([JSON.stringify({ accountId: 'account-a', action: 'activate', fundingMode: 'credits' })]);
 });
 
 test('a previous runtime activation cannot populate the new runtime or call onConfigured', async () => {
@@ -766,34 +766,31 @@ test('a legacy receipt requires explicit application without losing its recorded
   expect(mutations()).toHaveLength(0);
 });
 
-test('choosing credits only reads readiness and an explicit activation posts the credit mode', async () => {
-  readPayload = readyState();
-  await render();
+test('setup reads and activates credits without offering a cash choice', async () => {
   readPayload = { ...emptyState(), fundingMode: 'credits', nativeCredits: { ready: true } };
-  await click('Credits');
-  expect(mutations()).toHaveLength(0);
+  await render();
+  expect(findButton('Cash balance')).toBeUndefined();
   expect(requests.at(-1)?.path).toContain('fundingMode=credits');
+  expect(mutations()).toHaveLength(0);
   writePayload = { ...readyState(), fundingMode: 'credits', nativeCredits: { ready: true } };
   await click('Activate and configure');
   expect(JSON.parse(String(mutations()[0]?.body))).toEqual({ accountId: 'account-a', action: 'activate', fundingMode: 'credits' });
 });
 
-test('credits stay disabled when authoritative readiness is absent', async () => {
+test('activation stays disabled when authoritative credit readiness is absent', async () => {
+  readPayload = { ...emptyState(), fundingMode: 'credits', nativeCredits: { ready: false } };
   await render();
-  readPayload = { ...emptyState(), fundingMode: 'credits' };
-  await click('Credits');
   expect(findButton('Activate and configure')?.disabled).toBe(true);
   expect(host?.textContent).toContain('Credits are not available for model calls yet.');
   expect(mutations()).toHaveLength(0);
 });
 
 test('an authoritative credits pre-admission refusal clears pending issuance and explains readiness', async () => {
-  await render();
   readPayload = { ...emptyState(), fundingMode: 'credits', nativeCredits: { ready: true } };
-  await click('Credits');
+  await render();
   pendingWrite = Promise.resolve(Response.json({ error: 'native_credits_unavailable' }, { status: 409 }));
   await click('Activate and configure');
   expect(host?.textContent).toContain('Credits are not available for model calls yet.');
-  expect(findButton('Cash balance')?.disabled).toBe(false);
+  expect(findButton('Cash balance')).toBeUndefined();
   expect(mutations()).toHaveLength(1);
 });

@@ -1,9 +1,11 @@
 ---
-title: Password recovery opens UniHub's own form
+title: Credits-only model billing
 ---
 
 ## App
 
-- **Account:** "Forgot password?" now opens UniHub's verified-email recovery form instead of Casdoor's branded shell, which could not recover a UniHub account. Sign in, enter the account email, and the single-use link arrives by mail.
+### Fixes
+
+- **Billing:** Model calls are billed in credits only. Key setup and quick setup no longer offer a cash balance option, and a funding refusal opens credit top-up instead of a cash key or model balance.
 
 ## VS Code

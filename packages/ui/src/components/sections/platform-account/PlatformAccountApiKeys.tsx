@@ -2,7 +2,7 @@ import React from 'react';
 import { RiCheckLine, RiCloseLine, RiQuestionLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { SettingsSection, SettingsFieldRow, SettingsChipGroup, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsFieldRow, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { ModelTestMotion } from '@/components/sections/model-configuration/ModelTestFeedback';
 import { MODEL_PURPOSE_LABELS, modelTestErrorKey } from '@/components/sections/model-configuration/modelConfigurationView';
 import { useI18n } from '@/lib/i18n';
@@ -21,7 +21,7 @@ type SetupErrorKey = 'platformAccount.apiKeysDenied' | 'platformAccount.keySetup
 
 export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?: () => void }> = ({ accountId, onConfigured }) => {
   const { t, locale } = useI18n();
-  const [fundingMode, setFundingMode] = React.useState<PlatformKeyFundingMode>('prepaid_cash');
+  const fundingMode: PlatformKeyFundingMode = 'credits';
   const [state, setState] = React.useState<PlatformAccountKeySetupState | null>(null);
   const [error, setError] = React.useState<SetupErrorKey | null>(null);
   const [reading, setReading] = React.useState(true);
@@ -55,7 +55,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     const current = () => owner === generation.current && sequence === readSequence.current && runtimeCurrent();
     setReading(true);
     try {
-      const next = await readPlatformAccountKeySetup(accountId, fundingMode === 'credits' ? fundingMode : undefined);
+      const next = await readPlatformAccountKeySetup(accountId, fundingMode);
       if (current()) publish(next);
     } catch (cause) {
       if (current()) {
@@ -65,7 +65,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
           ?? (denied ? 'platformAccount.apiKeysDenied' : 'platformAccount.keySetup.readFailed'));
       }
     } finally { if (current()) setReading(false); }
-  }, [accountId, fundingMode, publish]);
+  }, [accountId, publish]);
   React.useEffect(() => {
     const owner = generation;
     mutationActive.current = false;
@@ -103,7 +103,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     ++readSequence.current;
     setReading(false); setPendingAction(action); setError(null);
     try {
-      const next = await runPlatformAccountKeySetup(accountId, action, fundingMode === 'credits' ? fundingMode : undefined);
+      const next = await runPlatformAccountKeySetup(accountId, action, fundingMode);
       if (current()) { ++readSequence.current; setReading(false); publish(next, true); }
     } catch (cause) {
       if (current()) {
@@ -119,7 +119,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     }
   };
   const busy = acting || Boolean(working);
-  const creditsUnavailable = fundingMode === 'credits' && state?.nativeCredits?.ready !== true;
+  const creditsUnavailable = state?.nativeCredits?.ready !== true;
   const tests = activation?.stage === 'test' && !awaitingRun ? activation.tests : [];
   const ready = !busy && !error && !awaitingRun && activation?.status === 'ready' && activation.test?.status === 'verified';
   const verified = ready && tests.length > 0 && tests.every((test) => test.status === 'verified' && test.applied);
@@ -146,10 +146,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
   const stageLabel = (stage: SetupStage) => t(stage === 'issue' ? 'platformAccount.keySetup.issue' : stage === 'configure' ? 'platformAccount.keySetup.configure' : 'platformAccount.keySetup.test');
   return <SettingsSection description={t('platformAccount.keySetup.description')} divider={false} contentClassName="space-y-4" headerAction={<Button size="sm" variant="outline" disabled={reading || acting} onClick={() => void read()}>{t('platformAccount.refresh')}</Button>}>
     <SettingsFieldRow label={t('platformAccount.keySetup.fundingMode')} info={t('platformAccount.keySetup.fundingSwitchHint')}>
-      <SettingsChipGroup options={[
-        { value: 'prepaid_cash', label: t('platformAccount.keySetup.cash'), disabled: busy || awaitingRun },
-        { value: 'credits', label: t('platformAccount.keySetup.credits'), disabled: busy || awaitingRun },
-      ]} value={fundingMode} onChange={(value) => { if (value === 'credits' || value === 'prepaid_cash') setFundingMode(value); }} />
+      <span className="typography-ui-label text-foreground">{t('platformAccount.keySetup.credits')}</span>
     </SettingsFieldRow>
     {creditsUnavailable && !reading && <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.creditsUnavailable')}</p>}
     <ModelTestMotion><section role="region" aria-label={t('platformAccount.keySetup.panelTitle')} className="oc-tile min-w-0 space-y-4 rounded-lg p-4">

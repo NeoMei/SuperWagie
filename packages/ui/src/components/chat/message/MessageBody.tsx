@@ -1,5 +1,5 @@
 import { ManagedModelFundingNotice } from '@/components/chat/ManagedModelFundingNotice';
-import { isManagedModelFundingRequired, isManagedModelRequestTooLarge, managedModelFundingMode } from '@/components/chat/managedModelError';
+import { isManagedModelFundingRequired, isManagedModelRequestTooLarge } from '@/components/chat/managedModelError';
 import React from 'react';
 import type { FilePart, Part } from '@/lib/opencode/model';
 
@@ -2454,7 +2454,7 @@ const AssistantMessageBody = React.memo(({
                     {renderedParts}
                     {showErrorMessage && (
                         <FadeInOnReveal key="assistant-error">
-                            {fundingRequired ? <ManagedModelFundingNotice fundingMode={managedModelFundingMode(errorMessage ?? '', errorResponseBody)} /> : (
+                            {fundingRequired ? <ManagedModelFundingNotice /> : (
                                 <div className="group/assistant-text relative mt-3 max-w-full break-words rounded-2xl bg-[var(--status-info-background)] px-4 py-3 text-base leading-relaxed">
                                     <div className="flex items-center gap-3">
                                         <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
