@@ -78,8 +78,9 @@ describe('unified speech model bindings', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ text: 'selected transcription' }));
     });
-    const app = appWithBinding(async (purpose) => {
+    const app = appWithBinding(async (purpose, options) => {
       expect(purpose).toBe('stt-short');
+      expect(options.supportedProtocols).toEqual(['openai-compatible']);
       return { protocol: 'openai-compatible', baseUrl, apiKey: 'fixture-stt', model: 'selected-transcribe', parameters: {} };
     });
     const result = await request(app).post('/api/stt/transcribe').set('content-type', 'audio/webm').send(Buffer.from('audio'));
@@ -88,35 +89,39 @@ describe('unified speech model bindings', () => {
     expect(received).toEqual({ url: '/v1/audio/transcriptions', key: 'Bearer fixture-stt', model: 'selected-transcribe' });
   });
 
-  it('journeys managed short transcription through the platform runtime without supplier keys', async () => {
-    const admitted = [];
-    const dispatched = [];
+  it('requires an openai-compatible short transcription binding and ignores legacy request data', async () => {
+    let received;
+    const baseUrl = await fixture(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = await new Response(Buffer.concat(chunks), { headers: { 'content-type': req.headers['content-type'] } }).formData();
+      received = { fields: [...body.keys()].sort(), model: body.get('model'), key: req.headers.authorization };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ text: 'selected transcription' }));
+    });
     const app = appWithBinding(async (purpose, options) => {
       expect(purpose).toBe('stt-short');
-      expect(options.supportedProtocols).toEqual(['openai-compatible', 'managed-media']);
-      return { protocol: 'managed-media', model: 'qwen3-asr-flash', parameters: {} };
-    }, {
-      getPlatformModelRuntime: () => ({
-        isMediaOperationConfigured: () => true,
-        admitMediaTask: async (identity, request) => {
-          admitted.push({ identity, model: request.model.id });
-          return { sessionID: 'media_stt_session' };
-        },
-        mediaDispatch: async (context) => {
-          dispatched.push(context);
-          return { transcript: 'managed transcription', seconds: 1 };
-        },
-      }),
-      resolvePlatformIdentity: async () => ({ type: 'client', token: 'fixture-identity' }),
+      expect(options.supportedProtocols).toEqual(['openai-compatible']);
+      return { protocol: 'openai-compatible', baseUrl, apiKey: 'fixture-stt', model: 'selected-transcribe', parameters: {} };
     });
-    const audio = Buffer.from('audio');
-    const result = await request(app).post('/api/stt/transcribe').set('content-type', 'audio/webm').send(audio);
+    const result = await request(app).post('/api/stt/transcribe')
+      .set('content-type', 'audio/webm')
+      .set('X-Base-URL', 'http://127.0.0.1:1/v1')
+      .set('X-Model', 'stale-model')
+      .set('X-Language', 'en')
+      .send(Buffer.from('audio'));
     expect(result.status).toBe(200);
-    expect(result.body).toEqual({ transcript: 'managed transcription' });
-    expect(admitted).toEqual([{ identity: { type: 'client', token: 'fixture-identity' }, model: 'qwen3-asr-flash' }]);
-    expect(dispatched).toHaveLength(1);
-    expect(dispatched[0]).toMatchObject({ model: 'qwen3-asr-flash', operation: 'transcription', sessionID: 'media_stt_session' });
-    expect(dispatched[0].inputs.audioDataUri).toBe('data:audio/webm;base64,' + audio.toString('base64'));
+    expect(result.body).toEqual({ transcript: 'selected transcription' });
+    expect(received).toEqual({ fields: ['file', 'model', 'response_format'], model: 'selected-transcribe', key: 'Bearer fixture-stt' });
+  });
+
+  it('keeps binding resolution failures visible instead of masking them as a provider failure', async () => {
+    const app = appWithBinding(async () => {
+      throw Object.assign(new Error('model_configuration_unsupported_protocol'), { code: 'model_configuration_unsupported_protocol', status: 501 });
+    });
+    const result = await request(app).post('/api/stt/transcribe').set('content-type', 'audio/webm').send(Buffer.from('audio'));
+    expect(result.status).toBe(501);
+    expect(result.body.code).toBe('model_configuration_unsupported_protocol');
   });
 
   it('rejects unsupported saved protocols without using legacy credentials', async () => {
@@ -205,7 +210,7 @@ describe('unified speech model bindings', () => {
     expect(speech.body.code).toBe('model_configuration_provider_failed');
     expect(short.body.code).toBe('model_configuration_provider_failed');
     const service = createDictationService({ modelsDir: '/unused', resolveModelBinding });
-    const { session } = await service.createSttSession({ provider: 'openai-compatible' });
+    const { session } = await service.createSttSession();
     const failure = new Promise((resolve) => session.once('error', resolve));
     session.appendPcm16(Buffer.alloc(3200));
     session.commit();
@@ -216,17 +221,19 @@ describe('unified speech model bindings', () => {
     service.shutdown();
   });
 
-  it('uses the configured dictation model over legacy local preferences and restores local after clear', async () => {
+  it('keeps the configured dictation model authoritative and reports unbound status after clear', async () => {
     let resolutions = 0;
     let configured = true;
-    const service = createDictationService({ modelsDir: '/unused', resolveModelBinding: async () => {
+    const service = createDictationService({ modelsDir: '/unused', resolveModelBinding: async (purpose, options) => {
       resolutions += 1;
+      expect(purpose).toBe('stt-realtime');
+      expect(options.supportedProtocols).toEqual(['openai-compatible']);
       return configured ? { baseUrl: 'http://127.0.0.1:1/v1', model: 'configured-stt', apiKey: 'fixture-key', parameters: {} } : null;
     } });
     expect(await service.getStatus()).toMatchObject({ provider: 'openai-compatible', available: true, activeModel: 'configured-stt' });
-    expect(await service.getStatus({ provider: 'local' })).toMatchObject({ provider: 'openai-compatible', available: true, activeModel: 'configured-stt' });
+    expect(await service.getStatus()).toMatchObject({ provider: 'openai-compatible', available: true, activeModel: 'configured-stt' });
     configured = false;
-    expect(await service.getStatus({ provider: 'local' })).toMatchObject({ provider: 'local', available: false });
+    expect(await service.getStatus()).toMatchObject({ provider: 'openai-compatible', available: false, reasonCode: 'stt_not_configured' });
     expect(resolutions).toBe(3);
     service.shutdown();
   });
@@ -245,7 +252,7 @@ describe('unified speech model bindings', () => {
       expect(purpose).toBe('stt-realtime');
       return { baseUrl, apiKey: 'dictation-key', model: 'dictation-model', parameters: {} };
     } });
-    const result = await service.createSttSession({ provider: 'local', openaiCompatible: { baseUrl: 'http://127.0.0.1:1', model: 'stale' } });
+    const result = await service.createSttSession();
     expect(result.error).toBeUndefined();
     const text = new Promise((resolve, reject) => {
       result.session.once('transcript', resolve);

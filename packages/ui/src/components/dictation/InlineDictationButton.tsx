@@ -50,7 +50,6 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
   const {
     status,
     error,
-    errorReason,
     duration,
     subscribeLevel,
     partialTranscript,
@@ -90,7 +89,6 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
   }
 
   if (status === 'recording') {
-    const downloadingModel = errorReason === 'model_download_in_progress';
     return (
       <>
         {/* The composer's recording signs: a live dot, the mic level and the
@@ -99,11 +97,7 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
           <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
             <span className={cn('relative inline-flex size-1.5 rounded-full bg-[var(--status-error)]', recordingBlink)} />
           </span>
-          {downloadingModel ? (
-            <span className="truncate typography-meta text-muted-foreground">{t('chat.dictation.downloadingModel')}</span>
-          ) : (
-            <DictationWaveform subscribeLevel={subscribeLevel} className="block h-4 w-12 min-w-0" />
-          )}
+          <DictationWaveform subscribeLevel={subscribeLevel} className="block h-4 w-12 min-w-0" />
           <span className="shrink-0 tabular-nums typography-meta text-muted-foreground">
             {`${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`}
           </span>

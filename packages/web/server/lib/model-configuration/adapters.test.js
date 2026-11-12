@@ -137,4 +137,47 @@ describe('model protocol probes', () => {
     });
     expect(requests.map((request) => request.headers['Idempotency-Key'])).toEqual(['probe-tts-1', 'probe-jev-1']);
   });
+
+  it.each(['stt-short', 'stt-realtime'])('probes %s with the strict LLMRouter ASR multipart fields', async (purpose) => {
+    const requests = [];
+    await testModelBinding({
+      purpose, protocol: 'openai-compatible', model: 'qwen3-asr-flash',
+      baseUrl: 'https://llmrouter.quukk.com/v1', apiKey: 'fixture-key', parameters: {},
+    }, {
+      idempotencyKey: 'probe-asr-1',
+      fetchImpl: async (url, init) => {
+        requests.push({ url, init });
+        return Response.json({ text: 'TEST' });
+      },
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe('https://llmrouter.quukk.com/v1/audio/transcriptions');
+    expect(requests[0].init.headers).toMatchObject({ Authorization: 'Bearer fixture-key', 'Idempotency-Key': 'probe-asr-1' });
+    expect(requests[0].init.headers['Content-Type']).toBeUndefined();
+    const form = requests[0].init.body;
+    expect([...form.keys()].sort()).toEqual(['file', 'model', 'response_format']);
+    expect(form.get('model')).toBe('qwen3-asr-flash');
+    expect(form.get('response_format')).toBe('json');
+    const wav = Buffer.from(await form.get('file').arrayBuffer());
+    expect(wav.subarray(0, 4).toString('ascii')).toBe('RIFF');
+    expect(wav.readUInt32LE(24)).toBe(16000);
+    expect(wav.length).toBeGreaterThan(44);
+  });
+
+  it.each([
+    ['an invalid transcript shape', {}],
+    ['a non-string transcript', { text: 5 }],
+  ])('rejects %s from the ASR endpoint', async (_name, payload) => {
+    await expect(testModelBinding({
+      purpose: 'stt-realtime', protocol: 'openai-compatible', model: 'qwen3-asr-flash',
+      baseUrl: 'https://llmrouter.quukk.com/v1', apiKey: 'fixture-key', parameters: {},
+    }, { fetchImpl: async () => Response.json(payload) })).rejects.toMatchObject({ code: 'model_configuration_invalid_provider_response' });
+  });
+
+  it('maps an ASR endpoint HTTP error to a provider failure', async () => {
+    await expect(testModelBinding({
+      purpose: 'stt-short', protocol: 'openai-compatible', model: 'qwen3-asr-flash',
+      baseUrl: 'https://llmrouter.quukk.com/v1', apiKey: 'fixture-key', parameters: {},
+    }, { fetchImpl: async () => new Response('', { status: 429 }) })).rejects.toMatchObject({ code: 'model_configuration_provider_http_429' });
+  });
 });

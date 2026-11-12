@@ -17,7 +17,6 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
@@ -61,52 +60,6 @@ const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${String(secs).padStart(2, '0')}`;
-};
-
-/**
- * Polls the dictation status route while the local model is downloading and
- * returns the download percent (null while unknown / not downloading).
- */
-const useModelDownloadProgress = (active: boolean): number | null => {
-    const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
-    const [percent, setPercent] = React.useState<number | null>(null);
-
-    React.useEffect(() => {
-        if (!active) {
-            setPercent(null);
-            return;
-        }
-        let cancelled = false;
-        const poll = async () => {
-            try {
-                const response = await runtimeFetch('/api/dictation/status', {
-                    query: { provider: 'local', localModel: sttLocalModel },
-                });
-                if (!response.ok || cancelled) {
-                    return;
-                }
-                const data = await response.json();
-                const model = Array.isArray(data?.models)
-                    ? data.models.find((m: { id: string }) => m.id === sttLocalModel)
-                    : null;
-                if (!cancelled) {
-                    setPercent(typeof model?.downloadProgress === 'number' ? model.downloadProgress : null);
-                }
-            } catch {
-                // Display-only; keep the previous value.
-            }
-        };
-        void poll();
-        const interval = setInterval(() => {
-            void poll();
-        }, 2000);
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-        };
-    }, [active, sttLocalModel]);
-
-    return active ? percent : null;
 };
 
 export const ComposerDictation: React.FC<ComposerDictationProps> = ({
@@ -161,7 +114,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         subscribeLevel,
         duration,
         error,
-        errorReason,
         startDictation,
         confirmDictation,
         cancelDictation,
@@ -170,9 +122,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         discardFailedDictation,
     } = dictation;
     const recordingBlink = useWaitingBlink(status === 'recording');
-
-    const isModelDownloading = status === 'recording' && errorReason === 'model_download_in_progress';
-    const downloadPercent = useModelDownloadProgress(isModelDownloading);
 
     const statusRef = React.useRef(status);
     React.useEffect(() => {
@@ -375,11 +324,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         if (status === 'uploading') {
             return t('chat.dictation.processing');
         }
-        if (isModelDownloading) {
-            return downloadPercent !== null
-                ? t('chat.dictation.downloadingModelProgress', { percent: String(downloadPercent) })
-                : t('chat.dictation.downloadingModel');
-        }
         return t('chat.dictation.listening');
     })();
 
@@ -475,7 +419,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                                     {error || t('chat.dictation.failed')}
                                 </p>
                             ) : null}
-                            {status === 'recording' && error && !isModelDownloading ? (
+                            {status === 'recording' && error ? (
                                 <p className="typography-meta mt-1" style={{ color: currentTheme.colors.status.warning }}>
                                     {error}
                                 </p>

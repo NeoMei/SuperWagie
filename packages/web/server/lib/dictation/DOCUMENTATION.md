@@ -3,21 +3,28 @@
 Server-authoritative speech-to-text for the chat composer, plus local
 text-to-speech. The client streams 16 kHz mono PCM16 chunks (base64) over a
 WebSocket while the user speaks; the server buffers them and transcribes each
-segment exactly once, when the segment is committed.
+segment exactly once, when the segment is committed. Continuous dictation and
+short voice input resolve the `stt-realtime` purpose, which the model
+configuration binds to LLMRouter ASR `qwen3-asr-flash` through the
+SuperWagie account key at `https://llmrouter.quukk.com/v1`. Each committed
+segment is wrapped as WAV and submitted to
+`/v1/audio/transcriptions`; there is no local STT model download and no
+custom Whisper fallback.
 
-Transcription is deliberately not incremental. Parakeet is an offline model
-trained on whole utterances, so re-decoding the growing buffer to animate a
-live transcript costs O(n^2) work for a result the final decode replaces. The
+Transcription is deliberately not incremental. LLMRouter ASR transcribes a
+finished audio segment, so re-decoding the growing buffer to animate a live
+transcript would repeatedly resubmit audio that the final result replaces. The
 composer shows no text while recording and inserts the full transcript on
-stop.
+stop. A configured binding supplies the endpoint, model and key together;
+client-selected provider options cannot override the server-resolved
+destination.
 
 Local TTS (Kokoro and Piper/VITS via sherpa-onnx OfflineTts) runs in the same
 worker process and is exposed as `POST /api/dictation/tts/speak` (JSON
 `{text, speakerId?, speed?, model?, language?, languageSample?}` → WAV bytes; 503 with
-`reasonCode` while the model is downloading). TTS models live in the same
-catalog/downloader as STT models (`local/model-catalog.js`
-`LOCAL_TTS_MODEL_CATALOG`) and are managed by the same status/download/delete
-routes.
+`reasonCode` while the model is downloading). Local TTS models live in
+`local/model-catalog.js` (`LOCAL_TTS_MODEL_CATALOG`) and are managed by the
+status/download/delete routes; STT no longer uses a local model catalog.
 
 Each TTS catalog entry declares the `languages` it speaks. With
 `language: 'auto'` the service detects the language of `languageSample` — the
@@ -43,21 +50,20 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
   Chunk reordering by `seq` + ack, resampling to the provider rate, segment
   splitting inside pauses, silence suppression by PCM peak, partial-transcript
   concatenation, adaptive finalization timeout.
-- `service.js` — provider resolution and readiness. Providers:
-  - `local` (default): sherpa-onnx Parakeet TDT in a forked worker process.
-    Models auto-download in the background on first use; while missing, the
-    stream fails with `reasonCode: 'model_download_in_progress'` and the
-    status route reports per-model install/download state.
-  - `openai-compatible`: buffered per-segment transcription against any
-    OpenAI-compatible `/v1/audio/transcriptions` endpoint
-    (`openai-compatible-session.js`, reuses `../tts/stt.js`). `connect()`
-    runs the same URL check as every transcription
-    (`normalizeCustomOpenAIBaseURL`), so a refused host — any remote one in
-    enterprise mode — fails before the user dictates.
-- `local/` — worker process + client (IPC, idle shutdown TTL), sherpa
-  recognizer engine and segment session (one decode per committed segment),
-  model catalog and downloader. The native `sherpa-onnx-node` addon is only
-  ever loaded inside the worker process.
+- `service.js` — resolves `stt-realtime` at invocation, refuses enterprise
+  mode, returns `stt_not_configured` when no binding exists, and opens one
+  `OpenAICompatibleTranscriptionSession` per dictation with `configured:
+  true`. It owns local TTS model download state and readiness only.
+- `openai-compatible-session.js` — buffered per-segment transcription against
+  the resolved LLMRouter ASR `/v1/audio/transcriptions` endpoint (reuses
+  `../tts/stt.js`). `connect()` runs the same URL check as every
+  transcription (`normalizeCustomOpenAIBaseURL`), so a refused host — any
+  remote one in enterprise mode — fails before the user dictates.
+- `local/` — worker process + client (IPC, idle shutdown TTL), local TTS
+  engine, model catalog and downloader. The native `sherpa-onnx-node` addon
+  is only ever loaded inside the worker process, where local read-aloud models
+  run. There is no local STT catalog, recognizer or session: transcription
+  resolves the LLMRouter ASR binding in the main server process.
 - `audio.js` — PCM16 helpers: format parsing, peak, per-frame RMS, WAV
   wrapping, streaming linear resampler.
 
@@ -71,9 +77,9 @@ Server → client: `ready`, `ack {ackSeq}`, `partial {text}`,
 `finish_accepted {timeoutMs}`, `final {text}`,
 `error {error, retryable, reasonCode?}`, `pong`.
 
-`options` in `start` carries the client-selected provider config:
-`{ provider: 'local' | 'openai-compatible', language?, localModel?,
-openaiCompatible?: { baseUrl, model, apiKey } }`.
+The `start` frame carries no provider config. The server resolves the
+`stt-realtime` binding for every session; client frames cannot supply an
+endpoint, model or credential.
 
 ## Segmentation
 
@@ -94,13 +100,10 @@ Bytes before the cut end the committed segment, bytes after it start the next
 one; the client's `seq` and ack are untouched because the whole chunk is
 consumed either way.
 
-The bounds exist because Parakeet is a full-attention conformer: decode cost
-and peak memory grow quadratically with segment length. Measured on Parakeet
-v3 int8 with 2 threads: 15 s ≈ 0.6 s, 60 s ≈ 2.9 s / 1.17 GB, 90 s ≈ 4.9 s /
-1.60 GB, and a single ~165 s+ segment aborts the worker (native `onnxruntime`
-`SIGTRAP` in `BFCArena::Extend`). Short segments keep a long dictation far from
-that cliff: 24 × 25 s stayed flat at ~1.17 GB. Committed segments decode while
-the user is still speaking, so only the tail is left to transcribe on stop.
+The bounds keep each LLMRouter ASR request small and bounded: a shorter WAV is
+cheaper to upload and transcribe, and a long dictation does not depend on one
+oversized request. Committed segments are submitted while the user is still
+speaking, so only the tail is left to transcribe on stop.
 
 ## Invariants
 
@@ -111,18 +114,49 @@ the user is still speaking, so only the tail is left to transcribe on stop.
   can be salvaged instead of losing minutes of speech.
 - The stream manager acks only the highest contiguous seq; the client is
   expected to retain unacked segments for retry/replay.
-- Silence-only segments (peak < 300) are cleared, never committed, so
-  Whisper-style providers do not hallucinate on silence.
-- Model files live under `~/.config/openchamber/speech-models`.
+- Silence-only segments (peak < 300) are cleared, never committed, so the ASR
+  endpoint is not asked to transcribe silence.
+- Local TTS model files live under `~/.config/openchamber/speech-models`.
 
 ## Unified model bindings
 
 The runtime injects `resolveModelBinding` into the service. Every session
-and its readiness check resolve `stt-realtime` at invocation. A configured
-OpenAI-compatible endpoint still uses the documented buffered per-segment
-transcription contract; it does not become an incremental realtime API. An
-existing local preference resumes when the binding is cleared; saving a binding
-does not rewrite that preference. New native realtime APIs
-remain unsupported until a matching session adapter exists. Saved resolver
-errors disable readiness and return a stable reason instead of using an
-unrelated legacy key.
+and its readiness check resolve `stt-realtime` at invocation against the
+LLMRouter ASR `qwen3-asr-flash` binding through the SuperWagie account key.
+The endpoint uses the documented buffered per-segment transcription contract;
+it does not become an incremental realtime API. Native realtime streaming
+remains unsupported until a matching session adapter exists. Enterprise mode
+refuses external resolution, so a remote ASR binding cannot be used while it
+is active. Saved resolver errors disable readiness and return a stable reason
+instead of using an unrelated legacy key.
+
+## Decisions
+
+### Why buffered LLMRouter ASR and not a local model or custom Whisper server
+
+The settled voice design uses one managed binding for both short voice input
+and continuous dictation. LLMRouter ASR `qwen3-asr-flash` accepts a finished
+WAV segment through `audio/transcriptions`, so the server's existing
+segmentation, ack and partial-transcript salvage already fit the contract. A
+local sherpa STT download would add a model the account key already replaces,
+and a custom Whisper endpoint would put destination and credential selection
+back in the client. Local TTS read-aloud stays on this machine, so the worker
+and `sherpa-onnx-node` remain in use for synthesis only.
+
+### Why the start frame and status route ignore client provider options
+
+The `start` frame carries `dictationId` and `format` only, and
+`GET /api/dictation/status` resolves `stt-realtime` without reading
+`provider` or `localModel` query parameters. Older Voice settings still send
+those parameters while polling local read-aloud download progress; honoring
+them would let a browser choose the transcription destination or select a local
+STT model that this module no longer downloads.
+
+### Why stt-realtime stays the purpose id and not a buffered name
+
+The id names the consumer, which is the live dictation session in the chat
+composer, and the account-key catalog and activation map both STT purposes to
+the same LLMRouter ASR binding. LLMRouter transcribes a finished WAV segment,
+so the id does not promise a native realtime stream; renaming it would break
+saved bindings, probes and activation rows without changing what the session
+does.

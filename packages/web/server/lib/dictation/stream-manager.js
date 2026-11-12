@@ -27,15 +27,10 @@ import {
 } from './audio.js';
 
 const DEFAULT_FINAL_TIMEOUT_MS = 10000;
-// Parakeet decode cost and peak memory grow quadratically with segment length,
-// and a long enough segment aborts the worker inside the native runtime, not
-// just slowly (the curve and the crash are in DOCUMENTATION.md#segmentation).
-// Segmenting keeps a long dictation off that curve, and committed segments
-// decode while the user is still speaking, so only the tail is left on stop.
-//
-// The minimum is low because a 15s segment decodes in well under a second.
-// The hard cap stays small (25s) so even pauseless speech never piles up a
-// segment that can hit the allocation abort.
+// The LLMRouter ASR endpoint accepts a finished WAV segment, so each request
+// stays small and bounded. Committing segments while the user is still speaking
+// leaves only the tail to transcribe on stop and keeps one long dictation from
+// depending on a single oversized upload.
 const DEFAULT_SEGMENT_MIN_SECONDS = 15;
 const DEFAULT_SEGMENT_MAX_SECONDS = 25;
 const FINAL_TIMEOUT_MAX_MS = 5 * 60 * 1000;
@@ -159,7 +154,7 @@ export class DictationStreamManager {
   /**
    * @param {object} params
    * @param {(msg: { type: string, payload: object }) => void} params.emit
-   * @param {(startOptions: object) => Promise<{ session: object } | { error: string, retryable: boolean, reasonCode?: string }>} params.createSttSession
+   * @param {() => Promise<{ session: object } | { error: string, retryable: boolean, reasonCode?: string }>} params.createSttSession
    *   Resolves a connected streaming transcription session for one dictation.
    *   The streaming transcription session contract:
    *   { requiredSampleRate, appendPcm16(buf), commit(), clear(), close(), on(event, handler) }
@@ -185,9 +180,8 @@ export class DictationStreamManager {
   /**
    * @param {string} dictationId
    * @param {string} format e.g. "audio/pcm;rate=16000;bits=16"
-   * @param {object} startOptions provider/config options forwarded to createSttSession
    */
-  async handleStart(dictationId, format, startOptions = {}) {
+  async handleStart(dictationId, format) {
     this.cleanupStream(dictationId);
 
     const inputRate = parsePcmRateFromFormat(format, 16000) ?? 16000;
@@ -198,7 +192,7 @@ export class DictationStreamManager {
 
     let resolved;
     try {
-      resolved = await this.createSttSession(startOptions);
+      resolved = await this.createSttSession();
     } catch (error) {
       this.failStream(dictationId, error?.message || String(error), true);
       return;

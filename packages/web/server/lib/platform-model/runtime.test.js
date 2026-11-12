@@ -848,12 +848,12 @@ describe('UniHub model transport', () => {
     expect(result.taskId).toBe('provider-task'); expect(f.requests()).toBe(1);
   });
 
-  it('refuses configured UI TTS and STT before creating a task', async () => {
+  it('refuses configured UI TTS and a managed-media STT binding before creating a task', async () => {
     const f=await fixture(); await f.runtime().admit(alice,session(),'msg_test'); f.finished();
     const app=express(); app.use(express.json());
     registerTtsRoutes(app,{resolvePlatformIdentity:async()=>alice,getPlatformModelRuntime:()=>f.runtime(),resolveModelBinding:async purpose=>purpose==='tts' ? {protocol:'managed-media',model:'qwen3-tts-flash',parameters:{voice:'Cherry'}} : purpose==='stt-short' ? {protocol:'managed-media',model:'qwen3-asr-flash',parameters:{}} : null});
     const spoken=await request(app).post('/api/tts/speak').send({text:'你好'}); expect(spoken.status).toBe(503); expect(spoken.body.code).toBe('platform_media_recovery_unavailable');
-    const heard=await request(app).post('/api/stt/transcribe').set('content-type','audio/webm').send(Buffer.from('audio')); expect(heard.status).toBe(503); expect(heard.body.code).toBe('platform_media_recovery_unavailable');
+    const heard=await request(app).post('/api/stt/transcribe').set('content-type','audio/webm').send(Buffer.from('audio')); expect(heard.status).toBe(501); expect(heard.body.code).toBe('model_configuration_unsupported_protocol');
     expect(f.requests()).toBe(0);
   });
 

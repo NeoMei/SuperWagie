@@ -9,9 +9,12 @@ This module provides server-side Text-to-Speech services using OpenAI-compatible
 - `packages/web/server/lib/tts/capability-runtime.js`: runtime helper for probing local macOS `say` TTS voice capability.
 - `packages/web/server/lib/tts/service.js`: TTS service implementation with OpenAI integration.
 - `packages/web/server/lib/text/summarization.js`: Shared text summarization stub and sanitization utilities. It performs no external Zen calls.
-- `packages/web/server/lib/tts/stt.js`: STT proxy for OpenAI-compatible transcription endpoints.
-- `packages/web/server/lib/tts/voice-keys.js`: the API keys typed in Voice settings (`openai`, `openaiCompatible`, `stt`), stored in `voice-keys.json` in the data dir, mode 0600. `GET /api/voice/keys` answers only which are set; `PUT /api/voice/keys` sets (string) or removes (null) them. `/api/tts/speak`, the STT route and dictation fill a request's key from here, so the UI never holds or sends one. A key in a request body still wins: older clients sent theirs that way. Keys earlier builds kept in the browser's localStorage are moved here by the UI on first read (`packages/ui/src/lib/voiceKeysApi.ts`).
-- The server's own `OPENAI_API_KEY` is used only for OpenAI itself, never sent to a custom server URL (`service.js`, `stt.js`).
+- `packages/web/server/lib/tts/stt.js`: strict STT proxy for the server-resolved
+  LLMRouter ASR transcription endpoint. For a `configured` binding it sends
+  only `model`, `response_format` and a WAV `file`; LLMRouter's ASR validator
+  rejects extra fields, so no `language` hint is included.
+- `packages/web/server/lib/tts/voice-keys.js`: the API keys typed in Voice settings (`openai`, `openaiCompatible`, `stt`), stored in `voice-keys.json` in the data dir, mode 0600. `GET /api/voice/keys` answers only which are set; `PUT /api/voice/keys` sets (string) or removes (null) them. `/api/tts/speak` fills a request's read-aloud key from here, so the UI never holds or sends one. A key in a request body still wins: older clients sent theirs that way. Keys earlier builds kept in the browser's localStorage are moved here by the UI on first read (`packages/ui/src/lib/voiceKeysApi.ts`). Transcription resolves its credential from the model binding instead; the persisted `stt` kind remains readable for older saved state.
+- The server's own `OPENAI_API_KEY` is used only for OpenAI read-aloud in `service.js`, never sent to a custom server URL. `stt.js` sends only the resolved binding's key to its own endpoint.
 - `packages/web/server/lib/tts/base-url.js`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
 - `packages/web/server/lib/tts/language-detect.js`: dependency-free language detection for voice selection (`detectTextLanguage`, `pickVoiceForLanguage`, `languageOfLocale`). Used by the macOS `say` route (`language: 'auto'` switches to an installed voice whose locale matches the text; the response carries `X-Speech-Voice` — percent-encoded, because macOS voice names may be localized — and `X-Speech-Language`) and by the dictation module's local TTS model choice.
 
@@ -85,7 +88,15 @@ Returns object with:
 Returns Buffer containing MP3 audio data.
 
 ## Enterprise mode
-With enterprise mode on (`../enterprise-mode.js`), speech and transcription stay on this machine: `normalizeCustomOpenAIBaseURL` refuses any non-local host whatever `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS` or the desktop runtime would allow, `/api/tts/speak` without a custom server (OpenAI's cloud) and `/api/voice/token` answer 403, and `/api/tts/status` reports `available: false, enterpriseMode: true` so Settings can say why. macOS `say` and the local dictation models are unaffected.
+With enterprise mode on (`../enterprise-mode.js`), remote speech and
+transcription are refused, including the LLMRouter ASR binding used for
+dictation. `normalizeCustomOpenAIBaseURL` refuses any non-local host whatever
+`OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS` or the desktop runtime would
+allow, the dictation service refuses an external `stt-realtime` resolution,
+`/api/tts/speak` without a custom server (OpenAI's cloud) and
+`/api/voice/token` answer 403, and `/api/tts/status` reports `available:
+false, enterpriseMode: true` so Settings can say why. Local read-aloud voices
+and macOS `say` keep working.
 
 ## API key resolution
 OpenAI API keys are resolved in order:
@@ -155,11 +166,12 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 ## Unified model bindings
 
 `registerTtsRoutes` accepts `resolveModelBinding`. It resolves `tts` for server
-playback and `stt-short` for the audio upload route at invocation. An explicit
-binding supplies the endpoint, model and key together; legacy request fields and
-`voice-keys.json` apply only when the purpose is unbound. The adapters
-accept `openai-compatible` audio speech/transcription, account-key Bailian speech
-and native MiniMax speech. Qwen Audio, Gemini Interactions and ElevenLabs native
+playback, `stt-short` for the audio upload route, and `managed-media` for managed
+speech at invocation. An explicit `tts` binding supplies the endpoint, model and
+key together; without one the saved voice provider, its legacy request fields and
+the read-aloud key in `voice-keys.json` control playback. The adapters accept
+`openai-compatible` audio speech/transcription, account-key Bailian speech and
+native MiniMax speech. Qwen Audio, Gemini Interactions and ElevenLabs native
 protocols remain unsupported. The exact account catalog operation marks Bailian
 bindings with `parameters.speechOperation`; playback uses the account gateway's
 native endpoint and binary WAV response, with `Cherry` as the default voice.
@@ -169,6 +181,21 @@ Native playback, purpose probes and bundled narration share the adapter in
 or Bailian binary WAV, and never forwards cloud error bodies. Resolver errors are
 visible failures and never fall back to another provider.
 
+The short transcription route `POST /api/stt/transcribe` resolves `stt-short`
+with `supportedProtocols: ['openai-compatible']` and fails closed when no binding
+exists: `503 stt_not_configured`, or `403 enterprise_mode` in enterprise mode.
+A binding with any other protocol returns `501
+model_configuration_unsupported_protocol`. A transcription request against a
+configured binding that fails returns `502 model_configuration_provider_failed`
+with the upstream error text discarded. Resolver and enterprise errors keep their
+own status and code. The request carries only `model`, `response_format` and a
+WAV `file`, matching LLMRouter's strict ASR validator; there is no `language`
+field, no legacy `X-Base-URL`, `X-Model` or `X-Language` header, no client
+bearer or API-key header, no `readVoiceKey('stt')` fallback, and no default
+`deepdml/faster-whisper` model. The resolved binding's account key is the only
+credential, applied by the SDK at the binding's own endpoint; an unbound purpose
+never reaches a transcription provider.
+
 A managed binding is the user's opt-in to its remote server in web and desktop.
 The TTS status route resolves `managed-media` bindings and reports their
 configured voice. Without an explicit binding, the saved voice provider and its
@@ -176,9 +203,10 @@ legacy endpoint remain in control; an available managed default does not select
 a TTS provider. For a managed binding it reports local availability only
 while the managed runtime is enabled, its admission and dispatch interfaces are
 present, and the selected model is locally allowlisted for an enabled transport
-operation. Managed speech and short transcription are currently disabled until
-interrupted paid requests can be recovered without dispatching them again. Both
-routes refuse these bindings before creating a task. `accountAuthorization` and `modelCapability` are `not_checked`:
+operation. Managed speech is disabled until interrupted paid requests can be
+recovered without dispatching them again; a managed-media `tts` binding is
+refused before a task is created. Short transcription uses the server-resolved
+LLMRouter ASR binding. `accountAuthorization` and `modelCapability` are `not_checked`:
 this check proves neither account entitlement nor the model's provider-side
 capability, tariff, health or a successful paid call. Resolution failure remains
 configured-but-unavailable so the UI does not fall back to a legacy provider.
@@ -202,3 +230,15 @@ dictation events or logging. Authentication errors can echo the supplied key,
 so neither unified bindings nor legacy server voice/environment keys expose
 upstream error text. Safe native-adapter input/policy errors retain their own
 status through the owning adapter's error class.
+
+## Decisions
+
+### Why short transcription fails closed and not through a legacy fallback
+
+An unbound `stt-short` returns `503 stt_not_configured` (or `403
+enterprise_mode`) instead of falling back to `voice-keys.json`, request headers,
+a default `deepdml/faster-whisper` model or a custom Whisper server. LLMRouter's
+ASR validator accepts only `model`, `response_format` and a WAV `file`, so a
+legacy path would send a destination and payload the account-key binding no
+longer defines, and would let client-supplied fields choose where conversation
+audio goes.

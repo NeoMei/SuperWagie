@@ -12,10 +12,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { dictationClient, type DictationStartOptions } from '@/lib/dictation/dictation-client';
+import { dictationClient } from '@/lib/dictation/dictation-client';
 import { DictationStreamSender } from '@/lib/dictation/dictation-stream-sender';
 import { useDictationAudioSource, type DictationLevelListener } from '@/lib/dictation/use-dictation-audio-source';
-import { useConfigStore } from '@/stores/useConfigStore';
 
 export type DictationStatus = 'idle' | 'recording' | 'uploading' | 'failed';
 
@@ -35,7 +34,6 @@ export interface UseDictationResult {
     subscribeLevel: (listener: DictationLevelListener) => () => void;
     duration: number;
     error: string | null;
-    errorReason: string | null;
     startDictation: () => Promise<void>;
     confirmDictation: () => Promise<string | null>;
     cancelDictation: () => Promise<void>;
@@ -49,26 +47,6 @@ const DURATION_TICK_MS = 1000;
 const toError = (value: unknown): Error =>
     value instanceof Error ? value : new Error(String(value));
 
-const getDictationStartOptions = (): DictationStartOptions => {
-    const state = useConfigStore.getState();
-    const language = state.sttLanguage?.trim();
-    if (state.sttProvider === 'openai-compatible') {
-        return {
-            provider: 'openai-compatible',
-            ...(language ? { language } : {}),
-            openaiCompatible: {
-                baseUrl: state.sttServerUrl,
-                model: state.sttModel,
-            },
-        };
-    }
-    return {
-        provider: 'local',
-        ...(language ? { language } : {}),
-        localModel: state.sttLocalModel,
-    };
-};
-
 export function useDictation(options: UseDictationOptions = {}): UseDictationResult {
     const { onTranscript, onError, canStart } = options;
 
@@ -76,7 +54,6 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
     const [partialTranscript, setPartialTranscript] = useState('');
     const [duration, setDuration] = useState(0);
     const [error, setError] = useState<string | null>(null);
-    const [errorReason, setErrorReason] = useState<string | null>(null);
 
     const statusRef = useRef(status);
     useEffect(() => {
@@ -98,7 +75,6 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
     if (!senderRef.current) {
         senderRef.current = new DictationStreamSender({
             client: dictationClient,
-            getStartOptions: getDictationStartOptions,
         });
     }
 
@@ -121,14 +97,11 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
     const reportError = useCallback((err: unknown) => {
         const normalized = toError(err);
         setError(normalized.message);
-        const reason = (normalized as Error & { reasonCode?: string }).reasonCode;
-        setErrorReason(typeof reason === 'string' ? reason : null);
         onErrorRef.current?.(normalized);
     }, []);
 
     const clearError = useCallback(() => {
         setError(null);
-        setErrorReason(null);
     }, []);
 
     const clearStreamingState = useCallback(() => {
@@ -228,12 +201,9 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         try {
             await audio.start();
             startDurationTracking();
-            // Open the stream eagerly so audio uploads while the user speaks
-            // and only the tail is left to transcribe on stop.
+            // Open the stream eagerly so audio uploads while the user speaks.
+            // A failed start keeps buffered segments for finish() to retry.
             await senderRef.current?.restartStream().catch((err) => {
-                // Non-fatal: segments buffer locally and finish() retries the
-                // start, but surface the reason (e.g. model downloading) so
-                // the overlay can show it.
                 reportError(err);
             });
         } catch (err) {
@@ -367,26 +337,6 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         clearStreamingState();
     }, [clearError, clearStreamingState]);
 
-    // While recording without an open stream (e.g. the model is still
-    // downloading), retry the stream start so live partials kick in as soon
-    // as the provider becomes ready. Buffered segments replay on success.
-    useEffect(() => {
-        if (status !== 'recording' || errorReason !== 'model_download_in_progress') {
-            return;
-        }
-        const interval = setInterval(() => {
-            if (statusRef.current !== 'recording' || senderRef.current?.getDictationId()) {
-                return;
-            }
-            senderRef.current?.restartStream().then(() => {
-                clearError();
-            }).catch((err) => {
-                reportError(err);
-            });
-        }, 3000);
-        return () => clearInterval(interval);
-    }, [status, errorReason, clearError, reportError]);
-
     useEffect(() => {
         return () => {
             stopDurationTracking();
@@ -403,7 +353,6 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         subscribeLevel: audio.subscribeLevel,
         duration,
         error,
-        errorReason,
         startDictation,
         confirmDictation,
         cancelDictation,

@@ -19,7 +19,7 @@ Web, Electron, hosted mobile and Capacitor mobile use the authenticated active s
 - Provider-entry writes are refused in enterprise mode. Existing binding switching/removal remains possible, but actual external resolution/probes are blocked; loopback destinations remain local. Policy is checked again before recording a probe result.
 - Binding and associated connection mutations clear verification. A probe records `verified` only after parsing the relevant protocol result. Dimension mismatch, invalid payload and provider errors record `failed` with a sanitized code. A late probe cannot overwrite any newer revision. Source-backed verification has a private credential fingerprint that is stripped from public results; a rotated, missing or unreadable native or bootstrap key projects `untested`, and rotation during a probe refuses its result. Bootstrap verification and `hasApiKey` use the same private credential read, constrained to the current inference destination. Saving an unsupported recommendation does not verify it.
 - `POST /api/model-configuration/connections/:id/test` accepts `{ revision, purpose, model, presetId?, parameters }` for a saved connection. It returns only `{ status: 'verified' | 'failed', testedAt, errorCode? }`, never creates or changes a binding, and never changes stored verification or the revision. The purpose must be available, its protocol must have an actual probe, and any preset must be compatible. The saved credential is resolved afresh; a newer configuration revision, native credential rotation or changed enterprise policy refuses a late result. Final checks share the mutation lock without writing configuration.
-- Probes are server-side protocol checks, not proof of all downstream skill/runtime environments. Embedding, vision, rerank, compatible speech, images and native Jev classify actual results. Image generation has a 600-second provider deadline; smaller probes have a 30-second deadline except Jev's existing routing deadline. The compatible OCR probe submits one fixed image through the account-key jobs route and polls its terminal progress under a bounded deadline. A completed job must then return the same job ID and exactly one page with nonempty text from a same-key `GET /v1/ocr/:id/document`. An unavailable document route fails the probe. Protocols without a suitable probe remain unverified; a `/models` response never counts as a successful purpose probe.
+- Probes are server-side protocol checks, not proof of all downstream skill/runtime environments. Embedding, vision, rerank, compatible speech, images and native Jev classify actual results. Image generation has a 600-second provider deadline; smaller probes have a 30-second deadline except Jev's existing routing deadline. The compatible OCR probe submits one fixed image through the account-key jobs route and polls its terminal progress under a bounded deadline. A completed job must then return the same job ID and exactly one page with nonempty text from a same-key `GET /v1/ocr/:id/document`. An unavailable document route fails the probe. The `stt-short` and `stt-realtime` probes submit one bounded PCM WAV segment to `audio/transcriptions` and require a response carrying a `{ text }` transcript; the strict ASR validator accepts only `model`, `response_format` and `file`, so no language field is sent. Protocols without a suitable probe remain unverified; a `/models` response never counts as a successful purpose probe.
 - Rerank connection probes submit one document with `top_n: 1` and require its corresponding score. This checks the protocol without exceeding a single-document account limit or claiming ranking quality. Ordinary reranking requests retain their existing inputs.
 - `prepareBindingChange(purpose, nextResolved, previousResolved)` runs before persistence for a binding and for every binding affected by connection changes. It validates only and must not mutate remote backend state. Knowledge consumers reconcile before their next actual operation. Known index-compatibility errors pass through as stable errors; unexpected failures never expose underlying bodies or secrets.
 - File transcription, optional image repair, multimodal embedding and independent video generation remain planned because this checkout has no complete consumer. Private masked-image and video-submit broker actions are scaffolding; they do not make those purposes available until the gateway and artifact consumer are complete. Optional editable-slide repair keeps its safe-background fallback.
@@ -232,6 +232,49 @@ the runtime's global provider/configuration scope or create multi-user invocatio
 isolation.
 
 ## Decisions
+
+### Why STT resolves to LLMRouter ASR and not a local model
+
+`stt-short` and `stt-realtime` resolve to LLMRouter ASR
+`qwen3-asr-flash` through the SuperWagie account-key connection at
+`https://llmrouter.quukk.com/v1`. Continuous dictation buffers audio and
+sends WAV segments to `audio/transcriptions`; the endpoint transcribes a
+finished segment rather than a live stream, so native realtime streaming
+remains unsupported. No local sherpa STT model is downloaded and no custom
+Whisper fallback is selected by the client. Account-key activation now
+covers both STT purposes, mapping `transcription`, `stt`,
+`speech-to-text` and `asr` capabilities to them. Enterprise mode refuses
+external resolution and probes for these bindings, including the LLMRouter ASR
+binding; local read-aloud TTS stays available.
+
+### Why the ASR probe omits language and not a language hint
+
+Both STT probes submit `model`, `response_format` and a WAV `file` only.
+LLMRouter `ValidateDomesticAudio` rejects a `language` field, so a hint
+would make the probe fail on the validator before it tests whether the binding
+can return a transcript. The same fields are what every runtime transcription
+sends, so a probe that uses them checks the real request shape.
+
+### Why stt-realtime stays the purpose id and not a buffered name
+
+The id identifies the continuous dictation consumer, which is still a live
+session in the composer, and the account-key catalog and activation already
+map it to LLMRouter ASR. The upstream endpoint transcribes a finished WAV
+segment, so the name does not promise a native realtime stream; renaming it
+would invalidate saved bindings, probes and activation receipts without
+changing any behavior.
+
+### Why a removed ASR preset stays readable and not silently migrated
+
+An earlier version can leave `alibaba-qwen3-asr-flash` saved as an `stt-short`
+binding. Disk integrity checks recognize that id through a private legacy
+table, so the file stays readable, the row stays visible for removal, and the
+public preset catalog stays free of the retired recommendation. Resolution,
+connection probes and new writes reject it with
+`model_configuration_unsupported_protocol`, and reading never rewrites the
+file. Migrating or deleting the row during read would change persisted state
+without an explicit user action; keeping the id selectable would bring the
+removed `managed-media` ASR path back.
 
 ### Why a separate credential store and not existing general settings
 

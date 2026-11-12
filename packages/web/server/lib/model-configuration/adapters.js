@@ -22,7 +22,7 @@ const modelEndpoint = (binding, operation) => {
   }
   const paths = {
     embedding: 'embeddings', vision: 'chat/completions', rerank: 'rerank', tts: 'audio/speech',
-    'image-generation': 'images/generations', 'stt-file': 'audio/transcriptions', 'stt-short': 'audio/transcriptions',
+    'image-generation': 'images/generations', 'stt-file': 'audio/transcriptions', 'stt-short': 'audio/transcriptions', 'stt-realtime': 'audio/transcriptions',
   };
   if (!paths[operation]) return fail('model_configuration_unsupported_protocol');
   return append(binding.baseUrl, paths[operation]);
@@ -32,6 +32,7 @@ const chatResponse = z.object({ choices: z.array(z.object({ message: z.object({ 
 const rankingResult = z.object({ index: z.literal(0), relevance_score: z.number().finite() });
 const rankingResponse = z.object({ results: z.array(rankingResult).length(1) });
 const aliyunRankingResponse = z.object({ output: rankingResponse });
+const transcriptionResponse = z.object({ text: z.string() });
 const imageResponse = z.object({
   data: z.array(z.object({
     url: z.string().url().or(z.literal('')).optional(),
@@ -52,6 +53,55 @@ const ocrTask = z.object({ id: taskIdentifier, job_id: taskIdentifier, state: z.
 const ocrProgress = ocrTask.extend({ progress: z.object({ totalPages: z.number().int().nonnegative(), extractedPages: z.number().int().nonnegative() }) });
 
 const ocrDocument = z.object({ id: taskIdentifier, pages: z.array(z.object({ text: z.string().trim().min(1) })).length(1) });
+
+// LLMRouter's strict ASR validator accepts only model, response_format and a
+// PCM WAV file. A tiny 1 kHz sine is a valid positive-duration WAV, and the
+// probe checks only that the endpoint returns a transcript-shaped response.
+const sttProbeWav = () => {
+  const sampleRate = 16000;
+  const samples = sampleRate / 10;
+  const pcm = Buffer.alloc(samples * 2);
+  for (let i = 0; i < samples; i += 1) pcm.writeInt16LE(Math.round(Math.sin((i / sampleRate) * 1000 * 2 * Math.PI) * 2000), i * 2);
+  const wav = Buffer.alloc(44 + pcm.length);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36 + pcm.length, 4);
+  wav.write('WAVE', 8);
+  wav.write('fmt ', 12);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(pcm.length, 40);
+  pcm.copy(wav, 44);
+  return wav;
+};
+
+const testTranscription = async (binding, { fetchImpl, idempotencyKey, assertCurrent }) => {
+  const headers = {};
+  if (binding.apiKey) headers.Authorization = `Bearer ${binding.apiKey}`;
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  const form = new FormData();
+  form.set('model', binding.model);
+  form.set('file', new Blob([sttProbeWav()], { type: 'audio/wav' }), 'connection-test.wav');
+  form.set('response_format', 'json');
+  await assertCurrent();
+  let response;
+  try {
+    response = await fetchImpl(modelEndpoint(binding, binding.purpose), {
+      method: 'POST', headers, body: form, redirect: 'error', signal: AbortSignal.timeout(30000),
+    });
+  } catch { return fail('model_configuration_provider_unreachable'); }
+  await assertCurrent();
+  if (!response.ok) return fail(`model_configuration_provider_http_${response.status}`);
+  let json;
+  try { json = await response.json(); } catch { return fail('model_configuration_invalid_provider_response'); }
+  await assertCurrent();
+  parse(transcriptionResponse, json);
+};
 
 const testOcr = async (binding, { fetchImpl, idempotencyKey, assertCurrent }) => {
   const headers = { Authorization: `Bearer ${binding.apiKey}`, 'X-Should-Retry': 'false' };
@@ -96,6 +146,7 @@ export const testModelBinding = async (binding, { fetchImpl = fetch, idempotency
   const { purpose, protocol, model, parameters, apiKey } = binding;
   await assertCurrent();
   if (purpose === 'ocr' && protocol === 'openai-compatible') return testOcr(binding, { fetchImpl, idempotencyKey, assertCurrent });
+  if (['stt-short', 'stt-realtime'].includes(purpose) && protocol === 'openai-compatible') return testTranscription(binding, { fetchImpl, idempotencyKey, assertCurrent });
   if (purpose === 'tts' && (protocol === 'minimax' || isBailianSpeechBinding(binding))) {
     await generateConfiguredSpeech(binding, { text: 'Model configuration test.' }, { fetchImpl, idempotencyKey });
     return;

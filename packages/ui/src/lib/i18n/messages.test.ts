@@ -108,6 +108,19 @@ describe('i18n dictionaries', () => {
     }
   });
 
+  test('LLMRouter ASR voice copy is present and translated in both locales', () => {
+    const keys = [
+      'settings.voice.page.tooltip.sttLocal',
+      'settings.voice.page.tooltip.sttServer',
+      'modelConfiguration.note.buffered-dictation',
+    ] as const;
+    for (const key of keys) {
+      expect(enDict[key]).toContain('LLMRouter ASR');
+      expect(zhCnDict[key]).toContain('LLMRouter ASR');
+      expect(zhCnDict[key]).not.toBe(enDict[key]);
+    }
+  });
+
   test('all locales expose language label keys', () => {
     for (const dictionary of Object.values(localeDictionaries)) {
       expect(dictionary['common.language.english']).toBeTruthy();

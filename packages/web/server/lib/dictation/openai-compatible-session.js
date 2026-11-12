@@ -1,11 +1,10 @@
 /**
- * Pseudo-streaming transcription session for OpenAI-compatible Whisper
- * endpoints (faster-whisper, whisper.cpp, OpenAI, ...).
+ * Pseudo-streaming transcription session for the server-resolved LLMRouter ASR
+ * endpoint.
  *
- * The Whisper HTTP API cannot stream, so audio is buffered per segment and
- * transcribed on commit(). This matches how the local session behaves: the
- * DictationStreamManager splits long dictations at pauses, and everything
- * shorter is one request on stop.
+ * The HTTP API cannot stream, so audio is buffered per segment and transcribed
+ * on commit(). DictationStreamManager splits long dictations at pauses, and
+ * everything shorter is one request on stop.
  *
  * Implements the StreamingTranscriptionSession contract used by
  * DictationStreamManager.
@@ -23,7 +22,7 @@ const OPENAI_COMPATIBLE_SAMPLE_RATE = 16000;
 
 export class OpenAICompatibleTranscriptionSession extends EventEmitter {
   /**
-   * @param {{ baseURL: string, model: string, apiKey?: string, language?: string, prompt?: string }} config
+   * @param {{ baseURL: string, model: string, apiKey?: string, configured?: boolean }} config
    */
   constructor(config) {
     super();
@@ -82,7 +81,6 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
           model: this.config.model,
           baseURL: this.config.baseURL,
           apiKey: this.config.apiKey,
-          language: this.config.language,
           configured: this.config.configured === true,
         });
         this.emit('transcript', {

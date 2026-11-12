@@ -75,6 +75,32 @@ describe('read-only saved connection probes', () => {
     expect((await runtime.getPublicConfiguration()).revision).toBe(state.revision);
   });
 
+  it('probes a continuous-dictation ASR binding with a strict multipart WAV request', async () => {
+    const requests = [];
+    const { runtime } = await fixture({
+      fetchImpl: async (url, init) => {
+        requests.push({ url, init });
+        return Response.json({ text: 'TEST' });
+      },
+    });
+    const state = await connect(runtime);
+    const result = await runtime.testConnection(state.connections[0].id, input(1, { purpose: 'stt-realtime', model: 'qwen3-asr-flash', parameters: {} }));
+    expect(result.status).toBe('verified');
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe('https://api.example.test/v1/audio/transcriptions');
+    expect(requests[0].init.headers.Authorization).toBe('Bearer fixture-private-key');
+    const form = requests[0].init.body;
+    expect(form).toBeInstanceOf(FormData);
+    expect([...form.keys()].sort()).toEqual(['file', 'model', 'response_format']);
+    expect(form.get('model')).toBe('qwen3-asr-flash');
+    expect(form.get('response_format')).toBe('json');
+    const wav = Buffer.from(await form.get('file').arrayBuffer());
+    expect(wav.subarray(0, 4).toString('ascii')).toBe('RIFF');
+    expect(wav.subarray(8, 12).toString('ascii')).toBe('WAVE');
+    expect(wav.length).toBeGreaterThan(44);
+    expect(JSON.stringify(result)).not.toContain('fixture-private-key');
+  });
+
   it('checks the activation owner before provider dispatch and again before accepting its result', async () => {
     let current = true; let calls = 0;
     const { runtime } = await fixture({ fetchImpl: async () => { calls++; current = false; return embeddingResponse(); } });
@@ -119,7 +145,7 @@ describe('read-only saved connection probes', () => {
     for (const purpose of ['agent', 'video-generation']) {
       await expect(runtime.testConnection(id, input(1, { purpose }))).rejects.toMatchObject({ code: 'model_configuration_not_connected', status: 501 });
     }
-    await expect(runtime.testConnection(id, input(1, { purpose: 'stt-realtime' }))).rejects.toMatchObject({ code: 'model_configuration_probe_unavailable', status: 501 });
+    await expect(runtime.testConnection(id, input(1, { purpose: 'stt-file' }))).rejects.toMatchObject({ code: 'model_configuration_not_connected', status: 501 });
     await expect(runtime.testConnection(id, input(1, { presetId: 'qwen-embedding' }))).rejects.toMatchObject({ code: 'model_configuration_incompatible_preset', status: 400 });
     await expect(runtime.testConnection(id, input(1, { presetId: 'openai-embedding', model: 'other-model' }))).rejects.toMatchObject({ code: 'model_configuration_incompatible_preset', status: 400 });
     expect(calls).toBe(0);

@@ -20,13 +20,9 @@ Po włączeniu na wiadomościach pojawia się przycisk odtwarzania, aby je odsł
 
 ## Dyktowanie wiadomości (speech-to-text)
 
-Wybierz, jak Twoja mowa jest transkrybowana:
+Ciągłe dyktowanie i krótkie wprowadzanie głosowe używają LLMRouter ASR qwen3-asr-flash przez klucz konta SuperWagie. Serwer buforuje dźwięk i wysyła segmenty WAV do https://llmrouter.quukk.com/v1/audio/transcriptions. Nie trzeba pobierać modelu, podawać klucza API ani uruchamiać własnego serwera Whisper. Po zatrzymaniu nagrywania composer wstawia transkrypt. W trybie enterprise ta zdalna transkrypcja jest odrzucana.
 
-- **browser** — wbudowane rozpoznawanie Twojej przeglądarki, bez konfiguracji
-- **server** — usługa transkrypcji zgodna z OpenAI; wprowadź jej adres URL oraz, w razie potrzeby, klucz API
-- **on-device** — model mowy, który działa w Twojej przeglądarce i pobiera się przy pierwszym użyciu
-
-Klucze API wpisane dla tych usług przechowuje serwer OpenChamber, a nie przeglądarka. Wpisz klucz i naciśnij Enter, aby go zapisać; pole pokaże potem, że klucz jest zapisany, a krzyżyk go usuwa.
+Klucze API wpisane dla usług odczytywania na głos przechowuje serwer OpenChamber, a nie przeglądarka. Wpisz klucz i naciśnij Enter, aby go zapisać; pole pokaże potem, że klucz jest zapisany, a krzyżyk go usuwa.
 
 ## Uwaga dla telefonów
 

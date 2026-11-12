@@ -104,7 +104,7 @@ describe('DictationStreamManager', () => {
     const session = new FakeSttSession();
     const { manager, messages } = createManager(session);
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
     manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64() });
     manager.handleFinish('d1', 1);
@@ -124,7 +124,7 @@ describe('DictationStreamManager', () => {
     const session = new FakeSttSession();
     const { manager, messages } = createManager(session);
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64() });
     expect(session.appended.length).toBe(0);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
@@ -138,7 +138,7 @@ describe('DictationStreamManager', () => {
     const session = new FakeSttSession();
     const { manager, messages } = createManager(session);
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: silentChunkBase64() });
     manager.handleFinish('d1', 0);
 
@@ -154,7 +154,7 @@ describe('DictationStreamManager', () => {
     const session = new FakeSttSession();
     const { manager, messages } = createManager(session);
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleFinish('d1', 3);
 
     const error = messages.find((m) => m.type === 'error');
@@ -163,20 +163,20 @@ describe('DictationStreamManager', () => {
     expect(session.closed).toBe(true);
   });
 
-  it('reports provider readiness errors from createSttSession', async () => {
+  it('reports an unbound ASR error from createSttSession', async () => {
     const messages = [];
     const manager = new DictationStreamManager({
       emit: (msg) => messages.push(msg),
       createSttSession: async () => ({
-        error: 'Dictation model is downloading',
+        error: 'Dictation STT not configured',
         retryable: true,
-        reasonCode: 'model_download_in_progress',
+        reasonCode: 'stt_not_configured',
       }),
     });
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     const error = messages.find((m) => m.type === 'error');
-    expect(error.payload.reasonCode).toBe('model_download_in_progress');
+    expect(error.payload.reasonCode).toBe('stt_not_configured');
     expect(error.payload.retryable).toBe(true);
   });
 
@@ -188,7 +188,7 @@ describe('DictationStreamManager', () => {
     // Force a hard-cap split inside each ~0.1s chunk so several segments form.
     manager.segmentMaxSeconds = 0.05;
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(1600) });
     await waitFor(() => session.commits >= 1);
     manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64(1600) });
@@ -207,7 +207,7 @@ describe('DictationStreamManager', () => {
     const session = new FakeSttSession();
     const { manager } = createManager(session);
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(16000) });
     manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: silentChunkBase64(16000) });
     manager.handleChunk({ dictationId: 'd1', seq: 2, audioBase64: loudChunkBase64(16000) });
@@ -223,7 +223,7 @@ describe('DictationStreamManager', () => {
     const { manager } = createManager(session);
     manager.segmentMinSeconds = 3;
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     // 2s of audio: below the minimum, so this pause must not split.
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(16000) });
     manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: silentChunkBase64(16000) });
@@ -242,7 +242,7 @@ describe('DictationStreamManager', () => {
     manager.segmentMinSeconds = 60;
     manager.segmentMaxSeconds = 2;
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(16000) });
     expect(session.commits).toBe(0);
     manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64(16000) });
@@ -254,7 +254,7 @@ describe('DictationStreamManager', () => {
     const { manager } = createManager(session);
     manager.segmentMinSeconds = 1;
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(16000) });
     // 300 ms speech, 400 ms gap, 300 ms speech: the cut belongs in the gap.
     manager.handleChunk({
@@ -276,7 +276,7 @@ describe('DictationStreamManager', () => {
     const { manager } = createManager(session);
     manager.segmentMinSeconds = 1;
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(16000) });
     // 100 ms of quiet at the end of one chunk, 250 ms at the start of the next:
     // neither alone is a pause, together they are, and the middle of the
@@ -303,7 +303,7 @@ describe('DictationStreamManager', () => {
     const { manager } = createManager(session);
     manager.segmentMinSeconds = 12;
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     // A gated mic opens with digital zeros; every later pause carries room noise.
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: silentChunkBase64(16000) });
     for (let seq = 1; seq <= 12; seq += 1) {
@@ -326,7 +326,7 @@ describe('DictationStreamManager', () => {
     manager.segmentMinSeconds = 60;
     manager.segmentMaxSeconds = 2;
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(16000) });
     // A 50 ms dip 600 ms in: too short to be a pause, but the best place to cut.
     manager.handleChunk({
@@ -344,7 +344,7 @@ describe('DictationStreamManager', () => {
     const { manager } = createManager(session);
     manager.segmentMaxSeconds = 1;
 
-    await manager.handleStart('d1', FORMAT, {});
+    await manager.handleStart('d1', FORMAT);
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: silentChunkBase64(16000) });
 
     expect(session.commits).toBe(0);

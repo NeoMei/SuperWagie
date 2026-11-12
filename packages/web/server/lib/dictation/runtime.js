@@ -4,8 +4,7 @@
  *
  * WebSocket protocol (JSON text frames) on /api/dictation/ws:
  *   client -> server:
- *     { type: 'start',  dictationId, format, options? }
- *       options: { provider?, language?, localModel?, openaiCompatible? }
+   *     { type: 'start',  dictationId, format }
  *     { type: 'chunk',  dictationId, seq, audio }   // audio: base64 PCM16LE
  *     { type: 'finish', dictationId, finalSeq }
  *     { type: 'cancel', dictationId }
@@ -88,9 +87,7 @@ export function createDictationRuntime({
 
   app.get('/api/dictation/status', async (req, res) => {
     try {
-      const provider = typeof req.query.provider === 'string' ? req.query.provider : undefined;
-      const localModel = typeof req.query.localModel === 'string' ? req.query.localModel : undefined;
-      const status = await service.getStatus({ provider, localModel });
+      const status = await service.getStatus();
       res.json(status);
     } catch (error) {
       res.status(500).json({ error: error?.message || 'Failed to read dictation status' });
@@ -142,7 +139,7 @@ export function createDictationRuntime({
 
     const manager = new DictationStreamManager({
       emit: ({ type, payload }) => send({ type, ...payload }),
-      createSttSession: (options) => service.createSttSession(options),
+      createSttSession: () => service.createSttSession(),
     });
 
     send({ type: 'ready' });
@@ -177,9 +174,7 @@ export function createDictationRuntime({
           if (typeof message.dictationId !== 'string' || typeof message.format !== 'string') {
             return;
           }
-          const options =
-            message.options && typeof message.options === 'object' ? message.options : {};
-          void manager.handleStart(message.dictationId, message.format, options);
+          void manager.handleStart(message.dictationId, message.format);
           return;
         }
         case 'chunk': {

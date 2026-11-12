@@ -20,13 +20,9 @@ Une fois activé, un bouton de lecture apparaît sur les messages pour les écou
 
 ## Dicter des messages (speech-to-text)
 
-Choisissez comment votre parole est transcrite :
+La dictée continue et la saisie vocale courte utilisent LLMRouter ASR qwen3-asr-flash via votre clé de compte SuperWagie. Le serveur met l’audio en mémoire tampon et envoie des segments WAV à https://llmrouter.quukk.com/v1/audio/transcriptions. Aucun téléchargement de modèle, aucune clé API ni serveur Whisper personnalisé ne sont nécessaires. Le compositeur insère la transcription lorsque vous arrêtez l’enregistrement. En mode entreprise, cette transcription à distance est refusée.
 
-- **browser** — la reconnaissance intégrée de votre navigateur, sans configuration
-- **server** — un service de transcription compatible OpenAI ; saisissez son URL et, si nécessaire, une clé API
-- **on-device** — un modèle vocal qui s’exécute dans votre navigateur et se télécharge à la première utilisation
-
-Les clés API saisies pour ces services sont conservées par le serveur OpenChamber, pas par votre navigateur. Tapez une clé et appuyez sur Entrée pour l’enregistrer ; le champ indique ensuite qu’une clé est enregistrée, et la croix la supprime.
+Les clés API saisies pour les services de lecture à voix haute sont conservées par le serveur OpenChamber, pas par votre navigateur. Tapez une clé et appuyez sur Entrée pour l’enregistrer ; le champ indique ensuite qu’une clé est enregistrée, et la croix la supprime.
 
 ## Note pour les téléphones
 

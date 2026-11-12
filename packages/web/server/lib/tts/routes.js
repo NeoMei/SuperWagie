@@ -1,6 +1,5 @@
 import express from 'express';
 import { z } from 'zod';
-import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -331,90 +330,59 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
     }
   });
 
-  // Server-side STT: receive raw audio, proxy to OpenAI-compatible transcription endpoint
+  // Short voice input: submit raw audio to the server-resolved LLMRouter ASR binding.
   app.post(
     '/api/stt/transcribe',
     express.raw({ type: (req) => (req.headers['content-type'] || '').startsWith('audio/'), limit: '20mb' }),
     async (req, res) => {
-      let usesConfiguredProvider = false;
       try {
         const mimeType = (req.headers['content-type'] || 'audio/webm').split(',')[0].trim();
-        const binding = await resolveModelBinding('stt-short', { supportedProtocols: ['openai-compatible', 'managed-media'] });
-        usesConfiguredProvider = Boolean(binding);
+        const binding = await resolveModelBinding('stt-short', { supportedProtocols: ['openai-compatible'] });
         if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
           return res.status(400).json({ error: 'Audio data is required' });
         }
-        if (binding?.protocol === 'managed-media') {
-          const runtime = getPlatformModelRuntime?.();
-          if (!runtime?.mediaDispatch || typeof resolvePlatformIdentity !== 'function') {
-            return res.status(503).json({ error: 'Managed media transport unavailable' });
+        if (!binding) {
+          if (isEnterpriseMode()) {
+            return res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' });
           }
-          if (runtime.isMediaOperationConfigured?.(binding.model, 'transcription') !== true) {
-            return res.status(503).json({ code: 'platform_media_recovery_unavailable', error: 'Managed transcription is temporarily unavailable until interrupted requests can be recovered safely.' });
-          }
-          try {
-            const identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false });
-            const admitted = await runtime.admitMediaTask(identity, { model: { providerID: 'unihub', id: binding.model } });
-            const audioDataUri = 'data:' + mimeType + ';base64,' + req.body.toString('base64');
-            const result = await runtime.mediaDispatch({
-              identity,
-              sessionID: admitted.sessionID,
-              callID: 'stt_' + crypto.randomUUID(),
-              model: binding.model,
-              operation: 'transcription',
-              inputs: { audioDataUri },
-            });
-            return res.json({ transcript: result.transcript ?? '' });
-          } catch (error) {
-            console.error('[STT] Managed media dispatch failed:', error.code ?? error.message);
-            return res.status(error.status ?? 502).json({ error: error.code === 'platform_model_scope_restart_required' ? error.code : 'Managed media transport failed' });
-          }
+          return res.status(503).json({ error: 'Speech-to-text is not configured. Connect the LLMRouter ASR model in Model configuration.', code: 'stt_not_configured' });
+        }
+        // Only the LLMRouter ASR binding may receive conversation audio. The
+        // model configuration egress guard already enforces this; keep it
+        // explicit here so a mismatched resolver cannot send audio elsewhere.
+        if (binding.protocol !== 'openai-compatible') {
+          return res.status(501).json({ error: 'model_configuration_unsupported_protocol', code: 'model_configuration_unsupported_protocol' });
         }
         const { transcribeAudio } = await import('./stt.js');
-
-        const baseURL = binding?.baseUrl || (typeof req.headers['x-base-url'] === 'string' ? req.headers['x-base-url'].trim() : '');
-        const model = binding?.model || (typeof req.headers['x-model'] === 'string' && req.headers['x-model'].trim().length > 0
-          ? req.headers['x-model'].trim()
-          : 'deepdml/faster-whisper-large-v3-turbo-ct2');
-        const language = typeof req.headers['x-language'] === 'string' && req.headers['x-language'].trim().length > 0
-          ? req.headers['x-language'].trim()
-          : undefined;
-        const authHeader = typeof req.headers['authorization'] === 'string' ? req.headers['authorization'].trim() : '';
-        const apiKey = binding ? binding.apiKey : (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined) || readVoiceKey('stt');
-
-        if (!baseURL) {
-          return res.status(400).json({ error: 'X-Base-URL header is required' });
-        }
 
         console.log('[STT] Transcribing audio:', {
           bytes: req.body.length,
           mimeType,
-          model,
-          baseURL,
-          language,
-          hasApiKey: !!apiKey,
+          model: binding.model,
+          hasApiKey: !!binding.apiKey,
         });
 
-        const transcript = await transcribeAudio({
-          audioBuffer: req.body,
-          mimeType,
-          model,
-          baseURL,
-          apiKey,
-          language: binding?.parameters.language || language,
-          configured: Boolean(binding),
-        });
-
-        res.json({ transcript: transcript ?? '' });
-      } catch (error) {
-        const failure = usesConfiguredProvider ? configuredProviderError('transcription') : error;
-        console.error('[STT] Transcription failed:', failure.code || 'transcription_failed');
-        if (!res.headersSent) {
-          res.status(failure.status || 500).json({
-            error: failure instanceof Error ? failure.message : 'Transcription failed',
-            ...(failure.code ? { code: failure.code } : {}),
+        try {
+          const transcript = await transcribeAudio({
+            audioBuffer: req.body,
+            mimeType,
+            model: binding.model,
+            baseURL: binding.baseUrl,
+            apiKey: binding.apiKey,
+            configured: true,
           });
+          res.json({ transcript: transcript ?? '' });
+        } catch {
+          const failure = configuredProviderError('transcription');
+          console.error('[STT] Transcription failed:', failure.code);
+          if (!res.headersSent) res.status(failure.status).json({ error: failure.message, code: failure.code });
         }
+      } catch (error) {
+        // Binding resolution failures keep their own status and code; they are
+        // not a configured provider rejecting a transcription request.
+        const status = Number.isInteger(error.status) ? error.status : 500;
+        console.error('[STT] Request failed:', error.code || status);
+        if (!res.headersSent) res.status(status).json({ error: error.code || 'Transcription failed', ...(error.code ? { code: error.code } : {}) });
       }
     }
   );

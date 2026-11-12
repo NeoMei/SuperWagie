@@ -62,6 +62,19 @@ describe('account key executable catalog', () => {
     expect(JSON.stringify(result)).not.toContain('fixture-key');
   });
 
+  it('recognizes the strict ASR transcription operation for voice purposes', async () => {
+    const result = await request(async () => Response.json(catalog([
+      model('asr', [operation('audio.transcriptions.create', '/v1/audio/transcriptions')]),
+      model('wrong-path', [operation('audio.transcriptions.create', '/v1/audio/translations')]),
+      model('wrong-protocol', [operation('audio.transcriptions.create', '/v1/audio/transcriptions', { protocol: 'bailian' })]),
+    ])));
+    expect(result.map(({ id, operations }) => ({ id, operations }))).toEqual([
+      { id: 'asr', operations: ['transcription'] },
+      { id: 'wrong-path', operations: [] },
+      { id: 'wrong-protocol', operations: [] },
+    ]);
+  });
+
   it('does not infer protocol support or aliases from names and billing metadata', async () => {
     const result = await request(async () => Response.json(catalog([
       model('looks-like-vision', [operation('chat.completions.create', '/wrong-path'), operation('claude.messages.create', '/v1/messages', { protocol: 'claude', billing_operation: 'chat' })], { input_modalities: ['image'] }),

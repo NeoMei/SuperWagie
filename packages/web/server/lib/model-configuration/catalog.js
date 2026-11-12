@@ -14,6 +14,7 @@ export const MODEL_PROBE_PROTOCOLS = {
   embedding: ['openai-compatible', 'aliyun'], vision: ['openai-compatible', 'aliyun'],
   rerank: ['aliyun', 'cohere', 'voyage', 'openai-compatible'], tts: ['openai-compatible', 'minimax'],
   'image-generation': ['openai-compatible', 'aliyun', 'volcengine'], routing: ['jev'],
+  'stt-short': ['openai-compatible'], 'stt-realtime': ['openai-compatible'],
 };
 const purpose = (id, consumerIds, status = 'available', required = false) => ({ id, labelKey: `modelConfiguration.purpose.${id}`, consumerIds, status, required, probeProtocols: MODEL_PROBE_PROTOCOLS[id] ?? [] });
 export const MODEL_PURPOSES = [
@@ -48,6 +49,7 @@ const providers = {
   minimax: { protocol: 'minimax', baseUrl: 'https://api.minimax.cn/v1', keyUrl: 'https://platform.minimax.cn/console/access?tab=api-keys' },
   jev: { protocol: 'jev', baseUrl: 'https://api.typesafe.ai/v1/systemone', keyUrl: 'https://console.typesafe.ai/' },
   unihub: { protocol: 'managed-media', baseUrl: 'https://llmrouter.quukk.com/platform/v1', keyUrl: 'https://unihub.quukk.com' },
+  llmrouter: { protocol: 'openai-compatible', baseUrl: 'https://llmrouter.quukk.com/v1', keyUrl: 'https://llmrouter.quukk.com' },
 };
 const preset = (id, providerId, name, origin, purposes, model, docsUrl, options = {}) => ({
   id, providerId, name, origin, purposes, model, docsUrl, ...providers[providerId],
@@ -87,7 +89,7 @@ export const MODEL_PRESETS = [
   preset('cohere-rerank', 'cohere', 'Cohere Rerank v5 Pro', 'international', ['rerank'], 'rerank-v5.0-pro', 'https://docs.cohere.com/docs/rerank-overview', { status: 'requires-adapter' }),
   preset('voyage-rerank', 'voyage', 'Voyage Rerank 3', 'international', ['rerank'], 'rerank-3', 'https://docs.voyageai.com/docs/reranker', { status: 'requires-adapter' }),
   preset('qwen-stt-short', 'aliyun', 'Qwen Audio 3.1 ASR Message', 'china', ['stt-short'], 'qwen-audio-3.1-asr-flash-message', 'https://help.aliyun.com/zh/model-studio/automatic-speech-recognition', { status: 'requires-adapter' }),
-  preset('alibaba-qwen3-asr-flash', 'unihub', 'Alibaba / qwen3-asr-flash', 'china', ['stt-short'], 'qwen3-asr-flash', 'https://llmrouter.quukk.com', { status: 'compatible' }),
+  preset('llmrouter-qwen3-asr-flash', 'llmrouter', 'LLMRouter / qwen3-asr-flash', 'china', ['stt-short', 'stt-realtime'], 'qwen3-asr-flash', 'https://llmrouter.quukk.com', { notes: ['Continuous dictation submits buffered WAV segments, not a native realtime stream.'], noteCodes: ['buffered-dictation'] }),
   preset('qwen-stt-realtime', 'aliyun', 'Qwen Audio 3.1 ASR Streaming', 'china', ['stt-realtime'], 'qwen-audio-3.1-asr-flash-streaming', 'https://help.aliyun.com/zh/model-studio/automatic-speech-recognition', { status: 'requires-adapter' }),
   preset('qwen-stt-file', 'aliyun', 'Qwen Audio 3.1 ASR File', 'china', ['stt-file'], 'qwen-audio-3.1-asr-flash-filetrans', 'https://help.aliyun.com/zh/model-studio/audio-file-recognition', { status: 'requires-adapter' }),
   preset('openai-stt', 'openai', 'OpenAI Transcribe', 'international', ['stt-short', 'stt-realtime', 'stt-file'], 'gpt-transcribe', 'https://developers.openai.com/api/docs/guides/speech-to-text', { notes: ['Continuous dictation submits buffered audio segments, not a native realtime stream.'], noteCodes: ['buffered-dictation'] }),

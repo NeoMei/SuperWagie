@@ -1,8 +1,9 @@
 /**
  * Server-side Speech-to-Text Service
  *
- * Proxies audio to any OpenAI-compatible transcription endpoint
- * (e.g. faster-whisper, whisper.cpp) using the OpenAI Node SDK.
+ * Submits audio to the server-resolved LLMRouter ASR transcription endpoint
+ * using the OpenAI Node SDK. The gateway accepts only model, response_format
+ * and a WAV file, so no language hint or other field is sent.
  */
 
 import { loadOpenAI } from './openai-sdk.js';
@@ -18,10 +19,11 @@ import { configuredProviderError } from './provider-errors.js';
  * @param {string} opts.model        - Model name accepted by the remote server
  * @param {string} [opts.baseURL]    - Base URL of the compatible server (including /v1)
  * @param {string} [opts.apiKey]     - Optional API key for the compatible server
- * @param {string} [opts.language]   - Optional BCP-47 language hint (e.g. 'en')
+ * @param {boolean} [opts.configured] - A server-resolved binding; remote URLs
+ *   are allowed only for this path.
  * @returns {Promise<string>} Transcribed text
  */
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, configured = false }) {
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, configured = false }) {
   const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL, { allowConfiguredRemote: configured });
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
@@ -32,9 +34,7 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
     throw new Error('Custom server URL is required');
   }
 
-  // Only the key the user typed for this server goes to it. The server's own
-  // OPENAI_API_KEY belongs to whoever runs it and must not follow a URL that
-  // any signed-in user can set (TTS draws the same line in service.js).
+  // Only the server-resolved binding's key goes to its own endpoint.
   const clientOpts = {
     apiKey: apiKey || 'not-required',
   };
@@ -43,19 +43,16 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
   const OpenAI = await loadOpenAI();
   const client = new OpenAI(clientOpts);
 
-  // Derive a sensible filename extension from the MIME type so the server
-  // can infer the codec when it isn't explicit in the stream header.
-  const ext = mimeTypeToExt(mimeType);
-  const filename = `audio.${ext}`;
-
-  const file = await OpenAI.toFile(audioBuffer, filename, { type: mimeType });
-
   try {
+    // Derive a sensible filename extension from the MIME type so the server
+    // can infer the codec when it isn't explicit in the stream header.
+    const ext = mimeTypeToExt(mimeType);
+    const filename = `audio.${ext}`;
+    const file = await OpenAI.toFile(audioBuffer, filename, { type: mimeType });
     const result = await client.audio.transcriptions.create({
       file,
       model,
       response_format: 'json',
-      ...(language ? { language } : {}),
     });
     return result.text ?? '';
   } catch {
@@ -64,7 +61,7 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
 }
 
 /**
- * Map a MIME type to a file extension understood by Whisper servers.
+ * Map a MIME type to a file extension understood by OpenAI-compatible transcription endpoints.
  * @param {string} mimeType
  * @returns {string}
  */

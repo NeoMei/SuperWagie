@@ -56,7 +56,9 @@ import { z } from 'zod';
  * - The private relay runs only on a pinned self-hosted endpoint
  *   (`relay/service.js`).
  * - Speech and transcription go only to servers on this machine (`tts`,
- *   `dictation`).
+ *   `dictation`); the LLMRouter ASR binding is refused at the model
+ *   configuration egress guard, and an unbound dictation or short voice input
+ *   fails closed at its own server boundary.
  * - Push notifications carry no message text or session name (`notifications`).
  * - Update checks still run but never report usage (`package-manager.js`).
  * - Product help downloads public content without questions, history, project

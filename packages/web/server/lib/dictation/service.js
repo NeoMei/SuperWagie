@@ -1,36 +1,27 @@
-import { readVoiceKey } from '../tts/voice-keys.js';
 import { configuredProviderError } from '../tts/provider-errors.js';
+import { isEnterpriseMode, ENTERPRISE_MODE_ERROR } from '../enterprise-mode.js';
 import { detectTextLanguage } from '../tts/language-detect.js';
 /**
- * Dictation service: resolves STT providers, tracks local model download
- * state, and exposes a readiness snapshot for the status route.
- *
- * Providers:
- * - 'local' (default): sherpa-onnx Parakeet running in a worker process.
- *   Models auto-download in the background on first use.
- * - 'openai-compatible': any OpenAI-compatible /v1/audio/transcriptions
- *   endpoint (faster-whisper, whisper.cpp, OpenAI).
+ * Dictation service: resolves the LLMRouter ASR binding for continuous
+ * dictation and owns local TTS model download state and readiness.
+ * Continuous dictation submits buffered WAV segments to the configured
+ * /v1/audio/transcriptions endpoint; there is no local STT model.
  */
 
 import { rm } from 'fs/promises';
 
-import { DictationWorkerClient, WorkerBackedTranscriptionSession } from './local/worker-client.js';
+import { DictationWorkerClient } from './local/worker-client.js';
 import { OpenAICompatibleTranscriptionSession } from './openai-compatible-session.js';
 import {
-  DEFAULT_LOCAL_STT_MODEL,
   DEFAULT_LOCAL_TTS_MODEL,
   getLocalTtsDefaultSpeaker,
   resolveLocalTtsModelForLanguage,
-  LOCAL_STT_MODEL_CATALOG,
-  LOCAL_STT_MODEL_IDS,
   LOCAL_TTS_MODEL_CATALOG,
   LOCAL_TTS_MODEL_IDS,
-  getLocalSttModelDir,
-  isLocalModelId,
-  isLocalSttModelId,
+  getLocalTtsModelDir,
   isLocalTtsModelId,
 } from './local/model-catalog.js';
-import { ensureLocalSttModel, isLocalSttModelInstalled } from './local/model-downloader.js';
+import { ensureLocalTtsModel, isLocalTtsModelInstalled } from './local/model-downloader.js';
 
 export function createDictationService({ modelsDir, resolveModelBinding = async () => null }) {
   const workerClient = new DictationWorkerClient();
@@ -43,6 +34,8 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
   /** modelId -> 0..100 download percent (null while size unknown) */
   const downloadProgress = new Map();
 
+  const notConfigured = () => ({ error: 'Speech-to-text is not configured. Connect the LLMRouter ASR model in Model configuration.', reasonCode: 'stt_not_configured' });
+  const enterpriseRefusal = () => ({ error: ENTERPRISE_MODE_ERROR, reasonCode: 'enterprise_mode' });
   const startModelDownload = (modelId) => {
     const existing = downloadPromises.get(modelId);
     if (existing) {
@@ -51,7 +44,7 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
     downloadStates.set(modelId, 'downloading');
     downloadErrors.delete(modelId);
     downloadProgress.set(modelId, 0);
-    const promise = ensureLocalSttModel({
+    const promise = ensureLocalTtsModel({
       modelsDir,
       modelId,
       onProgress: (downloadedBytes, totalBytes) => {
@@ -76,104 +69,46 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
     return promise;
   };
 
-  const resolveLocalModelId = (requested) => {
-    return isLocalSttModelId(requested) ? requested : DEFAULT_LOCAL_STT_MODEL;
-  };
-
   /**
    * Create a connected StreamingTranscriptionSession for one dictation.
-   * Returns { session } on success or { error, retryable, reasonCode } when
-   * the provider is not ready.
-   *
-   * @param {{ provider?: string, language?: string, localModel?: string,
-   *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string } }} options
+   * The server resolves the binding; client options cannot supply an endpoint
+   * or credential. Returns { session } or a stable visible failure.
    */
-  const createSttSession = async (options = {}) => {
+  const createSttSession = async () => {
     let binding;
     try {
       binding = await resolveModelBinding('stt-realtime', { supportedProtocols: ['openai-compatible'] });
     } catch (error) {
       return { error: error.message, retryable: false, reasonCode: error.code || 'stt_not_configured' };
     }
-    const provider = binding || options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
-
-    if (provider === 'openai-compatible') {
-      const config = options.openaiCompatible || {};
-      const session = new OpenAICompatibleTranscriptionSession({
-        baseURL: binding?.baseUrl || config.baseUrl,
-        model: binding?.model || config.model,
-        // The key stored in Settings; one sent with the request comes from a
-        // client older than the server-side store.
-        apiKey: binding ? binding.apiKey : config.apiKey || readVoiceKey('stt'),
-        language: binding?.parameters.language || options.language || undefined,
-        configured: Boolean(binding),
-      });
-      try {
-        await session.connect();
-      } catch (error) {
-        const failure = binding ? configuredProviderError('transcription') : error;
-        return {
-          error: failure?.message || String(failure),
-          retryable: false,
-          reasonCode: failure.code || 'stt_not_configured',
-        };
-      }
-      return { session };
+    if (!binding) {
+      const unbound = isEnterpriseMode() ? enterpriseRefusal() : notConfigured();
+      return { ...unbound, retryable: false };
     }
-
-    const modelId = resolveLocalModelId(options.localModel);
-    const installed = await isLocalSttModelInstalled(modelsDir, modelId);
-    if (!installed) {
-      const state = downloadStates.get(modelId);
-      if (state === 'error') {
-        const message = downloadErrors.get(modelId) || 'Model download failed';
-        // Allow a retry on the next attempt.
-        downloadStates.delete(modelId);
-        return {
-          error: `Failed to download dictation model: ${message}`,
-          retryable: true,
-          reasonCode: 'model_download_failed',
-        };
-      }
-      void startModelDownload(modelId);
-      return {
-        error: 'Dictation model is downloading',
-        retryable: true,
-        reasonCode: 'model_download_in_progress',
-      };
-    }
-
-    const session = new WorkerBackedTranscriptionSession(workerClient, { modelsDir, modelId });
+    const session = new OpenAICompatibleTranscriptionSession({
+      baseURL: binding.baseUrl,
+      model: binding.model,
+      apiKey: binding.apiKey,
+      configured: true,
+    });
     try {
       await session.connect();
-    } catch (error) {
-      const message = error?.message || String(error);
-      // A model that passes the file-presence check but fails to load is
-      // corrupt on disk (e.g. truncated by an interrupted extraction). Remove
-      // it so the next attempt re-downloads instead of crashing forever.
-      if (/Load model|Protobuf parsing failed/i.test(message)) {
-        await rm(getLocalSttModelDir(modelsDir, modelId), { recursive: true, force: true })
-          .catch(() => undefined);
-        return {
-          error: 'Dictation model files were corrupt and have been removed; retry to re-download',
-          retryable: true,
-          reasonCode: 'model_corrupt',
-        };
-      }
+    } catch {
+      const failure = configuredProviderError('transcription');
       return {
-        error: message,
-        retryable: true,
-        reasonCode: 'stt_unavailable',
+        error: failure?.message || String(failure),
+        retryable: false,
+        reasonCode: failure.code || 'stt_not_configured',
       };
     }
     return { session };
   };
 
   /**
-   * Readiness snapshot for the status route and UI gating.
-   * @param {{ provider?: string, localModel?: string }} [options]
+   * Readiness snapshot for the status route and UI gating. Local TTS model
+   * download state is still reported for the read-aloud controls.
    */
-  const getStatus = async (options = {}) => {
+  const getStatus = async () => {
     let binding;
     let bindingError;
     try {
@@ -181,63 +116,23 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
     } catch (error) {
       bindingError = { error: error.message, reasonCode: error.code || 'stt_not_configured' };
     }
-    const provider = binding || options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
-    const modelId = resolveLocalModelId(options.localModel);
-
-    const describeModel = async (id, catalog) => ({
+    const describeModel = async (id) => ({
       id,
-      description: catalog[id].description,
-      installed: await isLocalSttModelInstalled(modelsDir, id),
+      description: LOCAL_TTS_MODEL_CATALOG[id].description,
+      installed: await isLocalTtsModelInstalled(modelsDir, id),
       downloading: downloadStates.get(id) === 'downloading',
       downloadProgress: downloadProgress.get(id) ?? null,
       downloadError: downloadErrors.get(id) || null,
     });
-
-    const models = await Promise.all(
-      LOCAL_STT_MODEL_IDS.map((id) => describeModel(id, LOCAL_STT_MODEL_CATALOG)),
-    );
     const ttsModels = await Promise.all(
-      LOCAL_TTS_MODEL_IDS.map((id) => describeModel(id, LOCAL_TTS_MODEL_CATALOG)),
+      LOCAL_TTS_MODEL_IDS.map(describeModel),
     );
-
-    if (bindingError) return { provider: 'openai-compatible', available: false, ...bindingError, models, ttsModels };
-    if (provider === 'openai-compatible') {
-      return { provider, available: true, ...(binding ? { activeModel: binding.model } : {}), models, ttsModels };
+    if (bindingError) return { provider: 'openai-compatible', available: false, ...bindingError, ttsModels };
+    if (!binding) {
+      const unbound = isEnterpriseMode() ? enterpriseRefusal() : notConfigured();
+      return { provider: 'openai-compatible', available: false, ...unbound, ttsModels };
     }
-
-    const model = models.find((entry) => entry.id === modelId) || null;
-    if (model?.installed) {
-      return { provider, available: true, activeModel: modelId, models, ttsModels };
-    }
-    if (model?.downloading) {
-      return {
-        provider,
-        available: false,
-        reasonCode: 'model_download_in_progress',
-        activeModel: modelId,
-        models,
-        ttsModels,
-      };
-    }
-    if (model?.downloadError) {
-      return {
-        provider,
-        available: false,
-        reasonCode: 'model_download_failed',
-        error: model.downloadError,
-        activeModel: modelId,
-        models,
-        ttsModels,
-      };
-    }
-    return {
-      provider,
-      available: false,
-      reasonCode: 'models_missing',
-      activeModel: modelId,
-      models,
-      ttsModels,
-    };
+    return { provider: 'openai-compatible', available: true, activeModel: binding.model, ttsModels };
   };
 
   /**
@@ -267,7 +162,7 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
         speakerId = getLocalTtsDefaultSpeaker(modelId, resolvedLanguage);
       }
     }
-    const installed = await isLocalSttModelInstalled(modelsDir, modelId);
+    const installed = await isLocalTtsModelInstalled(modelsDir, modelId);
     if (!installed) {
       const state = downloadStates.get(modelId);
       if (state === 'error') {
@@ -302,10 +197,10 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
    * download action so Settings can pre-download models).
    */
   const requestModelDownload = async (modelId) => {
-    if (!isLocalModelId(modelId)) {
+    if (!isLocalTtsModelId(modelId)) {
       return { ok: false, error: 'Unknown model id' };
     }
-    if (await isLocalSttModelInstalled(modelsDir, modelId)) {
+    if (await isLocalTtsModelInstalled(modelsDir, modelId)) {
       return { ok: true, installed: true };
     }
     void startModelDownload(modelId);
@@ -319,13 +214,13 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
    * on the next use if the model is selected again.
    */
   const deleteModel = async (modelId) => {
-    if (!isLocalModelId(modelId)) {
+    if (!isLocalTtsModelId(modelId)) {
       return { ok: false, error: 'Unknown model id' };
     }
     if (downloadStates.get(modelId) === 'downloading') {
       return { ok: false, error: 'Model is downloading' };
     }
-    await rm(getLocalSttModelDir(modelsDir, modelId), { recursive: true, force: true });
+    await rm(getLocalTtsModelDir(modelsDir, modelId), { recursive: true, force: true });
     downloadErrors.delete(modelId);
     return { ok: true };
   };

@@ -20,13 +20,9 @@ Açtıktan sonra, mesajların üzerinde onları sesli dinlemek için bir oynat d
 
 ## Mesaj dikte etme (speech-to-text)
 
-Konuşmanızın nasıl metne dönüştürüleceğini seçin:
+Sürekli dikte ve kısa sesli giriş, SuperWagie hesap anahtarınız üzerinden LLMRouter ASR qwen3-asr-flash kullanır. Sunucu sesi arabelleğe alır ve WAV parçalarını https://llmrouter.quukk.com/v1/audio/transcriptions adresine gönderir. Model indirme, API anahtarı veya özel Whisper sunucusu gerekmez. Kaydı durdurduğunuzda composer transkripti ekler. Kurumsal modda bu uzak transkripsiyon reddedilir.
 
-- **browser** — tarayıcınızın yerleşik tanıma özelliği, kurulum gerekmez
-- **server** — OpenAI uyumlu bir transkripsiyon servisi; URL'sini ve gerekirse API anahtarını girin
-- **on-device** — tarayıcınızda çalışan ve ilk kullanımda indirilen bir konuşma modeli
-
-Bu servisler için girdiğiniz API anahtarlarını tarayıcınız değil OpenChamber sunucusu saklar. Bir anahtar yazıp Enter'a basarak kaydedin; ardından alan bir anahtarın kayıtlı olduğunu gösterir, çarpı işareti onu kaldırır.
+Sesli okuma servisleri için girdiğiniz API anahtarlarını tarayıcınız değil OpenChamber sunucusu saklar. Bir anahtar yazıp Enter'a basarak kaydedin; ardından alan bir anahtarın kayıtlı olduğunu gösterir, çarpı işareti onu kaldırır.
 
 ## Telefonlar için not
 

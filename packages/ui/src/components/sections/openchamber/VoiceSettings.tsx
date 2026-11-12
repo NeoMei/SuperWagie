@@ -10,7 +10,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Radio } from '@/components/ui/radio';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Icon } from "@/components/icon/Icon";
@@ -40,41 +39,6 @@ import { Spinner } from '@/components/ui/spinner';
 
 const VOICE_TEXT_INPUT_CLASS = 'oc-surface-elevated oc-raised oc-field w-full min-w-0 h-8 rounded-md bg-surface-elevated px-3 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none';
 
-const LOCAL_STT_MODELS = [
-    {
-        id: 'parakeet-tdt-0.6b-v2-int8',
-        labelKey: 'settings.voice.page.stt.model.parakeetV2',
-        badgeKey: 'settings.voice.page.stt.badge.bestForEnglish',
-        accuracy: 5,
-        speed: 5,
-        size: '460 MB',
-    },
-    {
-        id: 'parakeet-tdt-0.6b-v3-int8',
-        labelKey: 'settings.voice.page.stt.model.parakeetV3',
-        badgeKey: 'settings.voice.page.stt.badge.bestForMultilingual',
-        accuracy: 5,
-        speed: 4,
-        size: '465 MB',
-    },
-    {
-        id: 'whisper-base-int8',
-        labelKey: 'settings.voice.page.stt.model.whisperBase',
-        badgeKey: null,
-        accuracy: 3,
-        speed: 3,
-        size: '200 MB',
-    },
-    {
-        id: 'whisper-tiny-int8',
-        labelKey: 'settings.voice.page.stt.model.whisperTiny',
-        badgeKey: null,
-        accuracy: 2,
-        speed: 4,
-        size: '115 MB',
-    },
-] as const;
-
 interface DictationModelState {
     id: string;
     description?: string;
@@ -83,198 +47,6 @@ interface DictationModelState {
     downloadProgress: number | null;
     downloadError: string | null;
 }
-
-const RatingBar = ({ value, label }: { value: number; label: string }) => (
-    <span className="flex items-center gap-1.5" title={`${label}: ${value}/5`}>
-        <span className="typography-micro text-muted-foreground">{label}</span>
-        <span
-            className="h-1.5 w-8 flex-shrink-0 overflow-hidden rounded-full bg-[var(--interactive-border)]"
-            aria-hidden="true"
-        >
-            <span
-                className="block h-full rounded-full bg-[var(--primary-base)]"
-                style={{ width: `${(value / 5) * 100}%` }}
-            />
-        </span>
-    </span>
-);
-
-const LocalModelPicker = ({
-    selectedModelId,
-    onSelect,
-}: {
-    selectedModelId: string;
-    onSelect: (modelId: string) => void;
-}) => {
-    const { t } = useI18n();
-    const tUnsafe = useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
-    const [models, setModels] = useState<Map<string, DictationModelState>>(new Map());
-    const [requestingId, setRequestingId] = useState<string | null>(null);
-
-    const refresh = useCallback(async () => {
-        try {
-            const response = await runtimeFetch('/api/dictation/status', {
-                query: { provider: 'local' },
-            });
-            if (!response.ok) {
-                return;
-            }
-            const data = await response.json();
-            if (Array.isArray(data?.models)) {
-                setModels(new Map(data.models.map((m: DictationModelState) => [m.id, m])));
-            }
-        } catch {
-            // Display-only status; keep the previous state on fetch failure.
-        }
-    }, []);
-
-    useEffect(() => {
-        void refresh();
-    }, [refresh]);
-
-    const anyDownloading = Array.from(models.values()).some((m) => m.downloading);
-    useEffect(() => {
-        if (!anyDownloading) {
-            return;
-        }
-        const interval = setInterval(() => {
-            void refresh();
-        }, 2000);
-        return () => clearInterval(interval);
-    }, [anyDownloading, refresh]);
-
-    const handleDownload = async (modelId: string) => {
-        setRequestingId(modelId);
-        try {
-            await runtimeFetch(`/api/dictation/models/${encodeURIComponent(modelId)}/download`, {
-                method: 'POST',
-            });
-            await refresh();
-        } catch {
-            // Status refresh reports errors.
-        } finally {
-            setRequestingId(null);
-        }
-    };
-
-    const handleDelete = async (modelId: string) => {
-        setRequestingId(modelId);
-        try {
-            await runtimeFetch(`/api/dictation/models/${encodeURIComponent(modelId)}`, {
-                method: 'DELETE',
-            });
-            await refresh();
-        } catch {
-            // Status refresh reports errors.
-        } finally {
-            setRequestingId(null);
-        }
-    };
-
-    return (
-        <div
-            role="radiogroup"
-            aria-label={t('settings.voice.page.field.model')}
-            className="grid w-full grid-cols-1 gap-2 @3xl:grid-cols-2"
-        >
-            {LOCAL_STT_MODELS.map((entry) => {
-                const selected = selectedModelId === entry.id;
-                const state = models.get(entry.id) ?? null;
-                return (
-                    // A tile by tone, the chosen one in the selection colours:
-                    // the cards are options, not boxes around options.
-                    <div
-                        key={entry.id}
-                        className={cn(
-                            'flex items-start gap-2 rounded-lg px-3 py-2.5',
-                            selected ? 'bg-interactive-selection text-interactive-selection-foreground' : 'oc-tile',
-                        )}
-                    >
-                        <div
-                            className="flex min-w-0 flex-1 cursor-pointer items-start gap-2"
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => onSelect(entry.id)}
-                            onKeyDown={(e) => {
-                                if (e.key === ' ' || e.key === 'Enter') {
-                                    e.preventDefault();
-                                    onSelect(entry.id);
-                                }
-                            }}
-                        >
-                            <div className="pt-0.5">
-                                <Radio
-                                    checked={selected}
-                                    onChange={() => onSelect(entry.id)}
-                                    ariaLabel={tUnsafe(entry.labelKey)}
-                                />
-                            </div>
-                            <div className="min-w-0 flex-1 space-y-1">
-                                <div className="typography-ui-label truncate text-foreground" title={tUnsafe(entry.labelKey)}>
-                                    {tUnsafe(entry.labelKey)}
-                                </div>
-                                {entry.badgeKey ? (
-                                    <span className="inline-block rounded-full bg-[var(--status-success)]/15 px-2 py-px text-[0.625rem] font-medium text-[var(--status-success)]">
-                                        {tUnsafe(entry.badgeKey)}
-                                    </span>
-                                ) : null}
-                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                                    <RatingBar value={entry.accuracy} label={t('settings.voice.page.stt.meta.accuracy')} />
-                                    <RatingBar value={entry.speed} label={t('settings.voice.page.stt.meta.speed')} />
-                                    <span className="typography-micro tabular-nums text-muted-foreground">{entry.size}</span>
-                                </div>
-                                {state?.downloadError ? (
-                                    <p className="typography-meta text-[var(--status-error)]">{state.downloadError}</p>
-                                ) : null}
-                            </div>
-                        </div>
-                        <div className="flex h-6 shrink-0 items-center gap-1">
-                            {state?.installed ? (
-                                <>
-                                    <Icon
-                                        name="checkbox-circle"
-                                        className="h-4 w-4 flex-shrink-0 text-[var(--status-success)]"
-                                        aria-label={t('settings.voice.page.stt.modelInstalled')}
-                                    />
-                                    <Button
-                                        variant="ghost"
-                                        size="xs"
-                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-[var(--status-error)]"
-                                        disabled={requestingId === entry.id}
-                                        onClick={() => { void handleDelete(entry.id); }}
-                                        title={t('settings.voice.page.stt.modelDelete')}
-                                        aria-label={t('settings.voice.page.stt.modelDelete')}
-                                    >
-                                        <Icon name="delete-bin" className="h-4 w-4" />
-                                    </Button>
-                                </>
-                            ) : state?.downloading ? (
-                                <span className="flex items-center gap-1.5">
-                                    <Spinner className="h-3.5 w-3.5 text-muted-foreground" />
-                                    <span className="typography-ui-compact tabular-nums text-muted-foreground">
-                                        {typeof state.downloadProgress === 'number' ? `${state.downloadProgress}%` : ''}
-                                    </span>
-                                </span>
-                            ) : (
-                                <Button
-                                    variant="ghost"
-                                    size="xs"
-                                    className="h-6 w-6 p-0"
-                                    disabled={requestingId === entry.id}
-                                    onClick={() => { void handleDownload(entry.id); }}
-                                    title={t('settings.voice.page.stt.modelDownload')}
-                                    aria-label={t('settings.voice.page.stt.modelDownload')}
-                                >
-                                    <Icon name="download" className="h-4 w-4" />
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-};
 
 /** Kokoro en_v0_19 speaker ids in sherpa-onnx order. */
 const KOKORO_VOICE_OPTIONS = [
@@ -665,17 +437,6 @@ export const VoiceSettings: React.FC = () => {
     const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
     const ttsChunkedMode = useConfigStore((state) => state.ttsChunkedMode);
     const setTtsChunkedMode = useConfigStore((state) => state.setTtsChunkedMode);
-    // STT settings
-    const sttProvider = useConfigStore((state) => state.sttProvider);
-    const setSttProvider = useConfigStore((state) => state.setSttProvider);
-    const sttServerUrl = useConfigStore((state) => state.sttServerUrl);
-    const setSttServerUrl = useConfigStore((state) => state.setSttServerUrl);
-    const sttModel = useConfigStore((state) => state.sttModel);
-    const setSttModel = useConfigStore((state) => state.setSttModel);
-    const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
-    const setSttLocalModel = useConfigStore((state) => state.setSttLocalModel);
-    const sttLanguage = useConfigStore((state) => state.sttLanguage);
-    const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
     const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
     const setAutoReadAloudEnabled = useConfigStore((state) => state.setAutoReadAloudEnabled);
     // Voice pickers and previews follow either entry point: the message button
@@ -1329,7 +1090,7 @@ export const VoiceSettings: React.FC = () => {
                 contentClassName="space-y-3"
             >
                 <div className="space-y-1 rounded-md bg-[var(--status-info-background)] p-3 typography-meta text-[var(--status-info-text)]">
-                    <p>{t('modelConfiguration.voiceFallbackNotice')}</p>
+                    <p>{t('settings.voice.page.tooltip.sttLocal')}</p>
                     <Button variant="link" size="sm" onClick={() => useUIStore.getState().requestSettingsJump('models', 'models.stt-realtime')}>{t('modelConfiguration.purpose.stt-realtime')}</Button>
                 </div>
                 <SettingsCheckboxRow
@@ -1337,97 +1098,9 @@ export const VoiceSettings: React.FC = () => {
                     onChange={setDictationEnabled}
                     label={t('settings.voice.page.field.enableVoiceInput')}
                     ariaLabel={t('settings.voice.page.field.enableVoiceInputAria')}
+                    info={t('settings.voice.page.tooltip.sttServer')}
                 />
 
-                {dictationEnabled && (
-                    <>
-                        <SettingsFieldRow
-                            label={t('settings.voice.page.field.provider')}
-                            info={(
-                                <ul className="space-y-1">
-                                    <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
-                                    <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
-                                </ul>
-                            )}
-                        >
-                            <SettingsChipGroup
-                                value={sttProvider}
-                                onChange={setSttProvider}
-                                aria-label={t('settings.voice.page.field.provider')}
-                                options={[
-                                    { value: 'local', label: t('settings.voice.page.provider.local') },
-                                    { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
-                                ]}
-                            />
-                        </SettingsFieldRow>
-
-                        {sttProvider === 'local' && (
-                            <SettingsStackedField label={t('settings.voice.page.field.model')} controlClassName="max-w-none">
-                                <LocalModelPicker selectedModelId={sttLocalModel} onSelect={setSttLocalModel} />
-                            </SettingsStackedField>
-                        )}
-
-                        {sttProvider === 'openai-compatible' && (
-                            <div className="space-y-3">
-                                <SettingsStackedField
-                                    label={(
-                                        <span className={cn(!sttServerUrl.trim() && 'text-[var(--status-error)]')}>
-                                            {t('settings.voice.page.field.serverUrl')}
-                                        </span>
-                                    )}
-                                    info={t('settings.voice.page.field.sttServerUrlHint')}
-                                >
-                                    <div className="relative w-full">
-                                        <input
-                                            type="text"
-                                            value={sttServerUrl}
-                                            onChange={(e) => setSttServerUrl(e.target.value)}
-                                            placeholder="http://localhost:8001/v1"
-                                            className={VOICE_TEXT_INPUT_CLASS}
-                                        />
-                                        {sttServerUrl && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setSttServerUrl('')}
-                                                className="absolute inset-e-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                            >
-                                                <Icon name="close" className="w-3.5 h-3.5" />
-                                            </button>
-                                        )}
-                                    </div>
-                                </SettingsStackedField>
-                                <SettingsStackedField
-                                    label={t('settings.voice.page.field.apiKey')}
-                                    description={t('settings.voice.page.field.apiKeyOptional')}
-                                >
-                                    <VoiceApiKeyField kind="stt" />
-                                </SettingsStackedField>
-                                <SettingsStackedField label={t('settings.voice.page.field.model')}>
-                                    <input
-                                        type="text"
-                                        value={sttModel}
-                                        onChange={(e) => setSttModel(e.target.value)}
-                                        placeholder="deepdml/faster-whisper-large-v3-turbo-ct2"
-                                        className={VOICE_TEXT_INPUT_CLASS}
-                                    />
-                                </SettingsStackedField>
-                                <SettingsStackedField
-                                    label={t('settings.voice.page.field.language')}
-                                    info={t('settings.voice.page.field.sttLanguageHint')}
-                                    controlClassName="max-w-[8rem]"
-                                >
-                                    <input
-                                        type="text"
-                                        value={sttLanguage}
-                                        onChange={(e) => setSttLanguage(e.target.value)}
-                                        placeholder="auto"
-                                        className={VOICE_TEXT_INPUT_CLASS}
-                                    />
-                                </SettingsStackedField>
-                            </div>
-                        )}
-                    </>
-                )}
             </SettingsSection>
         </>
     );

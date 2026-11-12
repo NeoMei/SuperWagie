@@ -11,7 +11,7 @@ function inputs(): ModelOverviewInputs {
     knowledge: { status: 'ready', configuration: { status: 'available', models: [] } },
     routing: { status: 'ready', configuration: routingState() },
     native: { status: 'ready', defaultModel: 'provider/chat-model', smallModelUseDefault: true },
-    voice: { tts: { provider: 'browser' }, stt: { provider: 'local', model: 'local-whisper' } },
+    voice: { tts: { provider: 'browser' } },
     runtime: 'available',
   };
 }
@@ -195,14 +195,14 @@ describe('model configuration overview projection', () => {
       inherited.voice.tts = { provider, model: provider === 'local' ? 'local-tts' : undefined };
       expect(row(configuration(), 'tts', inherited)).toMatchObject({ configuration: 'local', test: 'component', canTest: false });
     }
-    expect(row(configuration(), 'stt-realtime')).toMatchObject({ configuration: 'local', model: 'local-whisper', test: 'component' });
+    expect(row(configuration(), 'stt-realtime')).toMatchObject({ configuration: 'missing', model: null, test: 'untested' });
   });
 
-  test('legacy cloud voice choices stay component-owned until a unified binding replaces them', () => {
+  test('legacy cloud read-aloud choices stay component-owned while unbound STT stays missing', () => {
     const inherited = inputs();
-    inherited.voice = { tts: { provider: 'openai-compatible', model: 'legacy-speech' }, stt: { provider: 'openai-compatible', model: 'legacy-transcribe' } };
+    inherited.voice = { tts: { provider: 'openai-compatible', model: 'legacy-speech' } };
     expect(row(configuration(), 'tts', inherited)).toMatchObject({ configuration: 'inherited', model: 'legacy-speech', test: 'component' });
-    expect(row(configuration(), 'stt-realtime', inherited)).toMatchObject({ configuration: 'inherited', model: 'legacy-transcribe', test: 'component' });
+    expect(row(configuration(), 'stt-realtime', inherited)).toMatchObject({ configuration: 'missing', model: null, test: 'untested' });
     const snapshot = configuration();
     snapshot.bindings = [binding('verified', 'tts')];
     expect(row(snapshot, 'tts', inherited)).toMatchObject({ configuration: 'configured', model: 'tts-model', test: 'verified' });

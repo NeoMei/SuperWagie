@@ -111,9 +111,6 @@ const PurposeEditor: React.FC<{
     model: state.voiceProvider === 'local' ? state.localTtsModelId : state.voiceProvider === 'openai-compatible' ? state.openaiCompatibleTtsModel : '',
     url: state.voiceProvider === 'openai-compatible' ? state.openaiCompatibleUrl : '',
     voice: state.voiceProvider === 'browser' ? state.browserVoice : state.voiceProvider === 'say' ? state.sayVoice : state.voiceProvider === 'openai' ? state.openaiVoice : state.voiceProvider === 'openai-compatible' ? state.openaiCompatibleVoice : '',
-    sttProvider: state.sttProvider,
-    sttModel: state.sttProvider === 'local' ? state.sttLocalModel : state.sttModel,
-    sttUrl: state.sttProvider === 'openai-compatible' ? state.sttServerUrl : '',
   })));
   const binding = configuration.bindings.find((candidate) => candidate.purpose === purpose.id);
   const [origin, setOrigin] = React.useState<ModelOriginFilter>('all');
@@ -142,10 +139,9 @@ const PurposeEditor: React.FC<{
   const knowledgeModelsUnavailable = knowledgeModels === 'failed' ? true : knowledgeModels?.status === 'unavailable'
     || (knowledgeModels?.status === 'available' && knowledgeModels.unavailablePurposes?.some((id) => id === purpose.id));
   const legacyTts = purpose.id === 'tts' && !binding;
-  const legacyStt = (purpose.id === 'stt-short' || purpose.id === 'stt-realtime') && !binding;
   const ttsProviderLabels = { browser: 'settings.voice.page.provider.browser', local: 'settings.voice.page.provider.local', openai: 'settings.voice.page.provider.openai', 'openai-compatible': 'settings.voice.page.provider.custom', say: 'settings.voice.page.provider.say' } as const satisfies Record<typeof currentVoice.provider, I18nKey>;
-  const legacyVoiceModel = legacyTts ? currentVoice.model : legacyStt ? currentVoice.sttModel : '';
-  const legacyVoiceUrl = publicModelEndpoint(legacyTts ? currentVoice.url : legacyStt ? currentVoice.sttUrl : '');
+  const legacyVoiceModel = legacyTts ? currentVoice.model : '';
+  const legacyVoiceUrl = legacyTts ? publicModelEndpoint(currentVoice.url) : '';
   const preset = configuration.presets.find((candidate) => candidate.id === presetId);
   const visiblePresets = visibleModelPresets(configuration.presets, purpose.id, origin, presetId);
   const eligibleConnections = configuration.connections.filter((connection) => !preset || (
@@ -266,8 +262,8 @@ const PurposeEditor: React.FC<{
       </div>
       {preset ? <PresetDetails preset={preset} /> : null}
       <p className={SETTINGS_HELPER_CLASS}>{t('modelConfiguration.consumers')}: {[...new Set(purpose.consumerIds.map((id) => consumerName(id, t)))].join(', ')}</p>
-      {legacyTts || legacyStt ? <SettingsFieldRow label={t('settings.voice.page.field.provider')}>
-        <span className="typography-meta text-muted-foreground">{legacyTts ? t(ttsProviderLabels[currentVoice.provider]) : t(currentVoice.sttProvider === 'local' ? 'settings.voice.page.provider.local' : 'settings.voice.page.provider.server')}</span>
+      {legacyTts ? <SettingsFieldRow label={t('settings.voice.page.field.provider')}>
+        <span className="typography-meta text-muted-foreground">{t(ttsProviderLabels[currentVoice.provider])}</span>
       </SettingsFieldRow> : null}
       {legacyVoiceModel ? <SettingsFieldRow label={t('modelConfiguration.model')}><span dir="ltr" className="typography-meta break-all text-muted-foreground">{legacyVoiceModel}</span></SettingsFieldRow> : null}
       {legacyVoiceUrl ? <SettingsFieldRow label={t('modelConfiguration.baseUrl')}><span dir="ltr" className="typography-meta break-all text-muted-foreground">{legacyVoiceUrl}</span></SettingsFieldRow> : null}
@@ -371,8 +367,6 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
     defaultModel: state.opencodeDefaultModel,
     voiceProvider: state.voiceProvider,
     ttsModel: state.voiceProvider === 'local' ? state.localTtsModelId : state.voiceProvider === 'openai-compatible' ? state.openaiCompatibleTtsModel : undefined,
-    sttProvider: state.sttProvider,
-    sttModel: state.sttProvider === 'local' ? state.sttLocalModel : state.sttModel,
   })));
 
   React.useEffect(() => {
@@ -477,7 +471,7 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
     native: overviewNative.status === 'ready' ? { ...overviewNative, defaultModel: overviewNative.defaultModel || overviewPreferences.defaultModel } : overviewNative,
     knowledge: overviewKnowledge,
     routing: overviewRouting,
-    voice: { tts: { provider: overviewPreferences.voiceProvider, model: overviewPreferences.ttsModel }, stt: { provider: overviewPreferences.sttProvider, model: overviewPreferences.sttModel } },
+    voice: { tts: { provider: overviewPreferences.voiceProvider, model: overviewPreferences.ttsModel } },
     runtime: isVSCode ? 'unsupported' : 'available',
   };
   const overviewRows = buildModelOverviewRows(loadState === 'ready' ? configuration : null, overviewInputs).map<ModelOverviewRow>((row) =>
