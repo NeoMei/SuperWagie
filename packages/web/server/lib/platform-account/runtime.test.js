@@ -393,6 +393,15 @@ describe('platform account OIDC and runtime isolation', () => {
     const login = await f.begin(); f.runtime.logout(identity);
     await expect(f.runtime.callback(login)).rejects.toMatchObject({ code: 'platform_login_expired' });
   });
+  // Offline is not a sign-out. A reachable local backend whose account service
+  // cannot be reached keeps the identity it already verified, so a signed-in
+  // window keeps working against the access gate instead of being sent back to
+  // a sign-in screen whose requests would fail the same way.
+  it('keeps a verified identity when the account service cannot be reached', async () => {
+    const f = await fixture(); await f.runtime.callback(await f.begin());
+    f.app.get('/v1/me', (_req, _res) => { throw new Error('offline'); });
+    expect(await f.runtime.identitySession(identity)).toMatchObject({ status: 'signed-in', user: { id: 'actor-a' } });
+  });
   it('rotates a UniHub refresh token before access expiry and restores it across restart', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-platform-refresh-'));
     try {

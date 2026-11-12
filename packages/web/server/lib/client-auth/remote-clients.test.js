@@ -111,6 +111,23 @@ describe('remote client auth runtime', () => {
     }
   });
 
+  it('replaces the token store through a temporary file', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const first = await runtime.createClient({ label: 'Laptop' });
+      const storePath = path.join(dir, 'remote-clients.json');
+      await runtime.createClient({ label: 'Phone' });
+      // Every record survives a write, and no half-written temporary file is left
+      // behind for the next read to treat as the store.
+      const written = JSON.parse(await fs.readFile(storePath, 'utf8'));
+      expect(written.clients.map((client) => client.label)).toEqual(['Laptop', 'Phone']);
+      expect((await fs.readdir(dir)).filter((name) => name.includes('.tmp-'))).toEqual([]);
+      expect((await runtime.authenticateBearerToken(first.token))?.ok).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('self-heals usesRelay when a request arrives through the relay tunnel', async () => {
     const { dir, runtime } = await createRuntime();
     try {

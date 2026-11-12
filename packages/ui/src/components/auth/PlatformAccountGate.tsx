@@ -8,7 +8,8 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { ensureHomeDirectoryResolved } from '@/stores/useDirectoryStore';
-import { getDesktopQuitAction } from '@/lib/desktop';
+import { getDesktopQuitAction, isDesktopShell } from '@/lib/desktop';
+import { ensureDesktopClientIdentity } from '@/lib/desktopClientIdentity';
 import { PlatformAccountAuth } from '@/components/sections/platform-account/PlatformAccountAuth';
 import { platformAccountErrorKey } from '@/components/sections/platform-account/platformAccountErrors';
 import {
@@ -22,6 +23,26 @@ import {
 const unexpiredState = (state: PlatformIdentitySession): PlatformIdentitySession => state.status === 'signed-in' && !(Date.parse(state.expiresAt) > Date.now())
   ? { status: 'expired' }
   : state;
+
+// A rejected runtime device credential says nothing about the account. The
+// desktop mints a fresh one and reads again; a server whose client store lost
+// this window's record would otherwise keep refusing the bearer it started
+// with, and the gate could only offer "refresh" forever.
+const RUNTIME_CREDENTIAL_ERROR = 'platform_runtime_auth_required';
+// No answer from the account service: offline, backend still starting, or the
+// gateway is down. None of these is a statement about the signed-in user.
+const unreachablePlatform = (cause: unknown): boolean => cause instanceof PlatformAccountError
+  && ['platform_unavailable', 'platform_access_unavailable'].includes(cause.code);
+
+const readIdentity = async (): Promise<PlatformIdentitySession> => {
+  try {
+    return await readPlatformIdentitySession();
+  } catch (cause) {
+    if (!(cause instanceof PlatformAccountError) || cause.code !== RUNTIME_CREDENTIAL_ERROR || !isDesktopShell()) throw cause;
+    if (!await ensureDesktopClientIdentity()) throw cause;
+    return readPlatformIdentitySession();
+  }
+};
 
 const AuthenticatedRuntimeBootstrap: React.FC<React.PropsWithChildren<{ bootstrap: boolean; onBootstrap: () => void }>> = ({ children, bootstrap, onBootstrap }) => {
   const { t } = useI18n();
@@ -66,7 +87,7 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
     setBusy(true);
     setError(null);
     try {
-      const next = await readPlatformIdentitySession();
+      const next = await readIdentity();
       if (runtimeKey === getRuntimeKey() && revision === generation.current) {
         const resolved = unexpiredState(next);
         if (resolved.status === 'signed-in') hasMountedAuthenticatedApp.current = true;
@@ -76,7 +97,15 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
       if (runtimeKey === getRuntimeKey() && revision === generation.current) {
         const recoverableSession = cause instanceof PlatformAccountError && ['platform_session_changed', 'platform_session_expired', 'unauthenticated'].includes(cause.code);
         const expiredSession = cause instanceof PlatformAccountError && cause.code === 'platform_session_expired';
-        setState(recoverableSession ? { status: expiredSession ? 'expired' : 'signed-out' } : null);
+        const platformUnreachable = unreachablePlatform(cause);
+        // The workspace is already running on a session the backend verified.
+        // Losing the account service must not take it away; the access gate
+        // still answers every API request on its own.
+        if (platformUnreachable && hasMountedAuthenticatedApp.current) return;
+        // Without an identity answer there is no state to show, and the gate
+        // hides the sign-in form when the state is unknown. Keep it open so a
+        // user can still sign in while the service or network recovers.
+        setState(recoverableSession ? { status: expiredSession ? 'expired' : 'signed-out' } : platformUnreachable ? { status: 'signed-out' } : null);
         setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.failed'));
       }
     } finally {

@@ -150,6 +150,69 @@ test('keeps the application blocked when account sign-in is not configured', asy
   expect(host.textContent).toContain('Account login is not configured');
 });
 
+// A server whose device store lost this desktop's record answers 401 to every
+// request the window already had a bearer for. The gate re-mints the credential
+// once and reads again, so the account still resolves instead of parking the
+// user on a screen whose only action repeats the same failed request.
+test('renews a rejected desktop device credential before giving up', async () => {
+  const desktopGlobals = window as typeof window & { __OPENCHAMBER_ELECTRON__?: { runtime?: string; arch?: string } };
+  const savedDesktop = desktopGlobals.__OPENCHAMBER_ELECTRON__;
+  desktopGlobals.__OPENCHAMBER_ELECTRON__ = { runtime: 'electron', arch: 'arm64' };
+  const sessionFixture = async (path: string) => {
+    if (path.endsWith('/api/platform-account/session')) return Response.json(response);
+    throw new Error(`Unexpected request: ${path}`);
+  };
+  let reads = 0;
+  let mints = 0;
+  fetchFixture.mockImplementation(async (input, _init) => {
+    const path = String(input instanceof Request ? input.url : input);
+    if (path.endsWith('/api/platform-account/session')) {
+      reads += 1;
+      return reads === 1 ? Response.json({ error: 'platform_runtime_auth_required' }, { status: 401 }) : Response.json(signedIn);
+    }
+    if (path.endsWith('/api/client-auth/clients')) {
+      mints += 1;
+      return Response.json({ token: 'oc_client_renewed' }, { status: 201 });
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  try {
+    await render();
+    // The first read is rejected, the renewal is minted once, and installing the
+    // new bearer re-reads the identity. No further renewal follows.
+    expect(reads).toBeGreaterThanOrEqual(2);
+    expect(mints).toBe(1);
+    expect(host.textContent).toContain('Application mounted');
+  } finally {
+    fetchFixture.mockImplementation(async (input, init) => {
+      const path = String(input instanceof Request ? input.url : input);
+      requests.push({ path, method: init?.method ?? 'GET' });
+      if (path.endsWith('/api/platform-account/session')) return readResponse ? readResponse() : Response.json(response);
+      if (path.endsWith('/api/platform-account/password')) {
+        passwordWrites.push(String(init?.body));
+        return Response.json({ status: 'signed-out' });
+      }
+      if (path.endsWith('/api/platform-account/logout')) return logoutResponse ? logoutResponse() : Response.json({ status: 'signed-out' });
+      if (path.endsWith('/api/platform-account/password-login')) return Response.json(signedIn);
+      if (path.endsWith('/api/platform-account/auth-methods')) return Response.json({ passwordLogin: true, registration: true, browserLogin: false });
+      return sessionFixture(path);
+    });
+    if (savedDesktop === undefined) Reflect.deleteProperty(desktopGlobals, '__OPENCHAMBER_ELECTRON__');
+    else desktopGlobals.__OPENCHAMBER_ELECTRON__ = savedDesktop;
+  }
+});
+
+// Offline is not a sign-out. A reachable local backend that cannot reach the
+// account service must still show the sign-in form, and typing credentials
+// must submit them.
+test('keeps the sign-in form usable while the account service is unreachable', async () => {
+  readResponse = async () => Response.json({ error: 'platform_unavailable' }, { status: 502 });
+  await render();
+  expect(host.textContent).not.toContain('Application mounted');
+  expect(host.querySelector('#unihub-username')).not.toBeNull();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Could not read your account');
+});
+
 test('blocks unsupported runtimes without checking platform identity', async () => {
   readResponse = async () => { throw new Error('Unsupported runtime must not read identity'); };
   await act(async () => {

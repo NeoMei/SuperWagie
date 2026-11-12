@@ -775,7 +775,20 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     });
     if (!session) return { status: 'expired' };
     if (session.expiresAt <= now()) { removeSessionByKey(key); return { status: 'expired' }; }
-    const user = userSchema.parse(await sessionRequest(key, session, '/v1/me'));
+    let user;
+    try {
+      user = userSchema.parse(await sessionRequest(key, session, '/v1/me'));
+    } catch (error) {
+      // The account service could not answer. This local session is still the
+      // credential the backend access gate checks on every request, so a
+      // network failure is reported as such instead of becoming a login
+      // requirement. Only an authoritative answer changes the identity.
+      if (error instanceof PlatformAccountError && error.code === 'platform_unavailable'
+        && sameLoginSession(sessions.get(key), session) && session.expiresAt > now()) {
+        return { status: 'signed-in', user: session.user, expiresAt: new Date(session.expiresAt).toISOString() };
+      }
+      throw error;
+    }
     const current = assertCurrentIdentity(key, session);
     if (user.id !== session.user.id) { if (sameLoginSession(sessions.get(key), session)) removeSessionByKey(key); reject('platform_session_changed', 409); }
     persistSession(identity, { ...current, user });

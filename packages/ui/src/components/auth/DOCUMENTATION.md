@@ -29,6 +29,19 @@ authorization owns access enforcement independently of these React gates.
 - Packaged Electron establishes a persistent runtime device bearer before mounting
   the product gate. The `openchamber-ui://` page cannot keep a loopback SameSite
   cookie identity across requests. Token creation failure leaves the gate closed.
+- A rejected device bearer is not an account answer. The packaging desktop
+  re-mints its credential through `packages/ui/src/lib/desktopClientIdentity.ts`
+  and reads the identity once more; a server whose client store lost the record
+  therefore recovers the window instead of refusing it until someone signs in
+  again. The renewal is scoped to the runtime instance that was rejected.
+- Losing the account service, offline included, never turns a verified identity
+  into a signed-out one. Before the first mount the gate shows the sign-in form
+  so credentials can still be submitted; after the first mount the workspace
+  stays, because the backend access gate keeps checking the runtime session on
+  every request. Only an authoritative identity answer changes the account state.
+- The backend keeps the identity it already verified when UniHub cannot be
+  reached for `/v1/me`, and reports the failure for other account reads. A
+  network failure never removes the stored session; a rejected token still does.
 - Packaged desktop password and passkey sign-in trusts the device on first login
   when no preference exists. The saved desktop bearer uses the longer device
   lifetime, while clearing the checkbox keeps the shorter session lifetime.

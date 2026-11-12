@@ -17,8 +17,14 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { installAuthSessionFocusWatch, useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { AuthExpiredBanner } from './AuthExpiredBanner';
 import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
-import { captureRuntimeInstance, getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
-import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
+import { captureRuntimeInstance, getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import {
+  applyDesktopClientToken,
+  desktopClientAuthMetadata,
+  ensureDesktopClientIdentity,
+  isLocalDesktopRuntime,
+  issueDesktopClientToken,
+} from '@/lib/desktopClientIdentity';
 import { runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {
   authenticateWithPasskey,
@@ -44,62 +50,8 @@ const HOME_RESOLUTION_WAIT_MS = 10_000;
 const TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
 const TRANSIENT_RETRY_BASE_DELAY_MS = 1_500;
 const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
-const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
-const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
-
-const readLocalOrigin = (): string => {
-  if (typeof window === 'undefined') return '';
-  const injected = (window as typeof window & { __OPENCHAMBER_LOCAL_ORIGIN__?: string }).__OPENCHAMBER_LOCAL_ORIGIN__;
-  return typeof injected === 'string' ? injected.trim() : '';
-};
-
-const sameOrigin = (left: string, right: string): boolean => {
-  const normalizedLeft = normalizeHostUrl(left);
-  const normalizedRight = normalizeHostUrl(right);
-  if (!normalizedLeft || !normalizedRight) return false;
-  try {
-    return new URL(normalizedLeft).origin === new URL(normalizedRight).origin;
-  } catch {
-    return false;
-  }
-};
-
 const shouldIssueDesktopClientToken = (): boolean => {
   return isDesktopShell();
-};
-
-const isLoopbackHostname = (hostname: string): boolean => {
-  const clean = hostname.replace(/^\[|\]$/g, '');
-  return clean === 'localhost' || clean === '127.0.0.1' || clean === '::1';
-};
-
-const isLocalDesktopRuntime = (): boolean => {
-  if (!isDesktopShell()) return false;
-  const localOrigin = readLocalOrigin();
-  if (!localOrigin) return false;
-  // An empty api base means same-origin requests against the page itself —
-  // which on desktop IS the embedded local server. Requiring an exact origin
-  // match here used to leave local client tokens untagged (no desktop-local
-  // clientKind), and the server's client-create gate then 403'd them.
-  const apiBaseUrl = getRuntimeApiBaseUrl();
-  const effectiveTarget = apiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
-  if (sameOrigin(localOrigin, effectiveTarget)) return true;
-  // Loopback aliases (localhost vs 127.0.0.1) still address this machine's
-  // own server.
-  try {
-    const normalized = normalizeHostUrl(effectiveTarget);
-    return Boolean(normalized && isLoopbackHostname(new URL(normalized).hostname));
-  } catch {
-    return false;
-  }
-};
-
-const desktopClientAuthMetadata = (): { clientKind?: string; dedupeKey?: string } => {
-  if (!isLocalDesktopRuntime()) return {};
-  return {
-    clientKind: LOCAL_DESKTOP_CLIENT_KIND,
-    dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY,
-  };
 };
 
 const fetchSessionStatus = async (): Promise<Response> => {
@@ -139,28 +91,6 @@ const submitPassword = async (password: string, trustDevice: boolean): Promise<R
     }),
   });
   return response;
-};
-
-const issueDesktopClientToken = async (): Promise<string> => {
-  if (!isDesktopShell()) {
-    return '';
-  }
-
-  const response = await runtimeFetch('/api/client-auth/clients', {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({ label: `${APP_NAME_EN} Desktop`, ...desktopClientAuthMetadata() }),
-  }).catch(() => null);
-  if (!response?.ok) {
-    return '';
-  }
-
-  const payload = await response.json().catch(() => null) as { token?: unknown } | null;
-  return typeof payload?.token === 'string' ? payload.token.trim() : '';
 };
 
 const shouldUseDesktopShellPasswordLogin = (): boolean => {
@@ -213,80 +143,6 @@ const issueDesktopClientTokenViaShell = async (
     token: typeof token === 'string' ? token.trim() : '',
     ...(typeof status === 'number' ? { status } : {}),
   };
-};
-
-const persistDesktopClientToken = async (runtime: CapturedRuntimeIdentity, clientToken: string): Promise<boolean> => {
-  if (!isDesktopShell() || !clientToken || !isRuntimeIdentityActive(runtime)) return false;
-  const cfg = await desktopHostsGet().catch(() => null);
-  if (!cfg || !isRuntimeIdentityActive(runtime)) return false;
-  if (cfg.localOrigin && sameOrigin(cfg.localOrigin, runtime.apiBaseUrl)) {
-    try {
-      await desktopHostsSet({
-        hosts: cfg.hosts,
-        defaultHostId: cfg.defaultHostId,
-        initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
-        localClientToken: clientToken,
-      });
-    } catch {
-      return false;
-    }
-    return isRuntimeIdentityActive(runtime);
-  }
-  let changed = false;
-  const hosts = cfg.hosts.map((host) => {
-    if (!sameOrigin(getDesktopHostApiUrl(host), runtime.apiBaseUrl)) {
-      return host;
-    }
-    if (host.clientToken === clientToken) {
-      return host;
-    }
-    changed = true;
-    return { ...host, clientToken };
-  });
-  if (!changed) return true;
-  if (!isRuntimeIdentityActive(runtime)) return false;
-  try {
-    await desktopHostsSet({
-      hosts,
-      defaultHostId: cfg.defaultHostId,
-      initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
-    });
-  } catch {
-    return false;
-  }
-  return isRuntimeIdentityActive(runtime);
-};
-
-const applyDesktopClientToken = async (
-  clientToken: string,
-  runtime: CapturedRuntimeIdentity,
-  requestHeaders: Record<string, string>,
-): Promise<boolean> => {
-  if (!clientToken || !isRuntimeIdentityActive(runtime)) return false;
-  if (!await persistDesktopClientToken(runtime, clientToken)) return false;
-  if (!isRuntimeIdentityActive(runtime)) return false;
-  switchRuntimeEndpoint({
-    apiBaseUrl: runtime.apiBaseUrl,
-    clientToken,
-    requestHeaders: Object.keys(requestHeaders).length > 0 ? requestHeaders : null,
-    runtimeKey: runtime.runtimeKey,
-  });
-  return true;
-};
-
-const desktopClientBootstrapRequests = new Map<string, Promise<boolean>>();
-const ensureDesktopClientIdentity = async (runtime: CapturedRuntimeIdentity): Promise<boolean> => {
-  const requestKey = `${runtime.runtimeKey}\u0000${runtime.apiBaseUrl}`;
-  const pending = desktopClientBootstrapRequests.get(requestKey);
-  if (pending) return pending;
-  const request = (async () => {
-    const clientToken = await issueDesktopClientToken();
-    if (!clientToken || !isRuntimeIdentityActive(runtime)) return false;
-    return applyDesktopClientToken(clientToken, runtime, getRuntimeExtraHeadersSync());
-  })();
-  desktopClientBootstrapRequests.set(requestKey, request);
-  try { return await request; }
-  finally { if (desktopClientBootstrapRequests.get(requestKey) === request) desktopClientBootstrapRequests.delete(requestKey); }
 };
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -515,7 +371,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
           // Packaged pages cannot rely on loopback SameSite cookies. Establish
           // the stable device identity before the UniHub session is created.
           if (isDesktopShell() && !getRuntimeBearerTokenSync()) {
-            const ready = await ensureDesktopClientIdentity(runtime);
+            const ready = await ensureDesktopClientIdentity();
             if (!isRuntimeIdentityActive(runtime)) return;
             if (!ready) {
               setState('error');
@@ -737,7 +593,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         if (shellLogin?.token) {
           setPassword('');
           setIsTunnelLocked(false);
-          if (!await applyDesktopClientToken(shellLogin.token, runtime, requestHeaders)) return;
+          if (!await applyDesktopClientToken(shellLogin.token)) return;
           setState('authenticated');
           return;
         }
@@ -776,7 +632,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         setPassword('');
         setIsTunnelLocked(false);
         if (clientToken) {
-          if (!await applyDesktopClientToken(clientToken, runtime, requestHeaders)) return;
+          if (!await applyDesktopClientToken(clientToken)) return;
         }
         if (enrollPasskey && supportsPasskeys) {
           try {
@@ -828,7 +684,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       if (shellLogin?.token) {
         setPassword('');
         setIsTunnelLocked(false);
-        if (!await applyDesktopClientToken(shellLogin.token, runtime, requestHeaders)) return;
+        if (!await applyDesktopClientToken(shellLogin.token)) return;
         setState('authenticated');
         return;
       }
@@ -868,7 +724,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     setActivePasskeyAction('auth');
     setErrorMessage('');
     const runtime = captureRuntimeIdentity();
-    const requestHeaders = getRuntimeExtraHeadersSync();
 
     try {
       const payload = await authenticateWithPasskey(trustDevice, {
@@ -881,7 +736,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         : '';
       if (!isRuntimeIdentityActive(runtime)) return;
       if (clientToken) {
-        if (!await applyDesktopClientToken(clientToken, runtime, requestHeaders)) return;
+        if (!await applyDesktopClientToken(clientToken)) return;
       }
 
       setPassword('');

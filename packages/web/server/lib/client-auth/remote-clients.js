@@ -104,9 +104,21 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     }
   };
 
+  // Replace, never rewrite in place: this file holds every paired device's
+  // only credential, and an interrupted in-place write leaves it truncated.
+  // A zero-length store reads as "no clients", so the desktop's saved bearer
+  // is refused until someone mints a new one.
   const writeStore = async (store) => {
     await fsPromises.mkdir(path.dirname(storePath), { recursive: true, mode: 0o700 });
-    await fsPromises.writeFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
+    const tmp = `${storePath}.tmp-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    try {
+      await fsPromises.writeFile(tmp, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
+      await fsPromises.chmod(tmp, 0o600).catch(() => {});
+      await fsPromises.rename(tmp, storePath);
+    } catch (error) {
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
+      throw error;
+    }
     if (typeof fsPromises.chmod === 'function') {
       await fsPromises.chmod(storePath, 0o600).catch(() => {});
     }
