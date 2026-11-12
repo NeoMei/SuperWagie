@@ -2,6 +2,14 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.88] - 2026-11-12
+
+### Fixes
+
+- **Sign-in:** A desktop whose saved device credential was no longer recognised now renews it and reads the account again, so the login screen no longer offers only a refresh that repeats the same rejected request.
+- **Offline:** Losing the account service no longer hides the sign-in form, and a signed-in window keeps its workspace instead of being sent back to a login screen.
+- **Credentials:** The server writes its device-token store through a temporary file and rename, so an interrupted write can no longer leave it truncated and lock every saved device out.
+
 ## [2.7.82] - 2026-11-10
 
 ### Fixes
