@@ -13,7 +13,7 @@ describe('public UniHub identity configuration', () => {
         return Response.json({ registration_id: 'registered-user', status: 'CREATED' });
       },
     });
-    expect(runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: `${PUBLIC_UNIHUB_DEFAULTS.issuer}/forget` });
+    expect(runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: `${PUBLIC_UNIHUB_DEFAULTS.issuer}/auth/recovery/request` });
     expect(await runtime.identitySession(identity)).toEqual({ status: 'signed-out' });
     await runtime.register(identity, { username: 'public-user', idempotencyKey: 'public-default-key' });
     expect(requests).toEqual([{ url: `${PUBLIC_UNIHUB_DEFAULTS.apiUrl}/v1/identity/registrations`, body: { client_id: PUBLIC_UNIHUB_DEFAULTS.headlessClientId, username: 'public-user' } }]);
