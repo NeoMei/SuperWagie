@@ -537,7 +537,7 @@ describe('headless platform identity', () => {
   });
   it('uses the explicitly configured headless client and keeps credentials in the backend', async () => {
     const f = await fixture();
-    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: `${f.origin}/forget` });
+    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: `${f.origin}/auth/recovery/request` });
     expect(await f.runtime.publicSession(identity)).toEqual({ status: 'signed-out' });
     const state = await f.runtime.passwordLogin(identity, { username: 'alice', password });
     expect(state).toMatchObject({ status: 'signed-in', user: { id: 'actor-a' } });
@@ -551,14 +551,14 @@ describe('headless platform identity', () => {
     const f = await fixture();
     delete f.env.OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID;
     f.env.OPENCHAMBER_UNIHUB_CLIENT_ID = 'legacy-client';
-    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: false, registration: false, browserLogin: true, passwordRecoveryUrl: `${f.origin}/forget` });
+    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: false, registration: false, browserLogin: true, passwordRecoveryUrl: `${f.origin}/auth/recovery/request` });
     await expect(f.runtime.passwordLogin(identity, { username: 'alice', password })).rejects.toMatchObject({ code: 'platform_headless_unconfigured' });
     expect(f.requests).toHaveLength(0);
   });
   it('accepts an explicitly registered JSON redirect while retaining the browser callback path', async () => {
     const f = await fixture();
     f.env.OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI = 'http://127.0.0.1:57992/callback';
-    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: `${f.origin}/forget` });
+    expect(f.runtime.authMethods(identity)).toEqual({ passwordLogin: true, registration: true, browserLogin: false, passwordRecoveryUrl: `${f.origin}/auth/recovery/request` });
     f.env.OPENCHAMBER_UNIHUB_CLIENT_ID = 'browser-client';
     f.env.OPENCHAMBER_UNIHUB_REDIRECT_URI = 'http://127.0.0.1:57992/callback';
     expect(() => f.runtime.authMethods(identity)).toThrow('platform_configuration_invalid');

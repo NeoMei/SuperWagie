@@ -941,9 +941,11 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       passwordLogin: Boolean(c?.headless),
       registration: Boolean(c?.headless),
       browserLogin: Boolean(c?.browser),
-      // Casdoor owns password recovery. Keep the link in the same configured
-      // issuer so the UI never guesses an identity endpoint or stores a password.
-      passwordRecoveryUrl: c ? new URL('/forget', c.issuer).toString() : null,
+      // UniHub owns password recovery through its verified-email form. The
+      // issuer is UniHub itself, so the link stays on the configured origin;
+      // /auth/recovery/request is the anonymous request page, while Casdoor's
+      // /forget is a branded shell that cannot recover a UniHub account.
+      passwordRecoveryUrl: c ? new URL('/auth/recovery/request', c.issuer).toString() : null,
     };
   };
   const headlessConfig = (identity) => {
