@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import type { ModelConfiguration } from '@/lib/modelConfiguration';
-import type { ModelBootstrapClient, ModelBootstrapTestRun } from '@/lib/modelConfigurationBootstrap';
+import { ModelConfigurationBootstrapError, type ModelBootstrapClient, type ModelBootstrapTestRun } from '@/lib/modelConfigurationBootstrap';
 
 const browser = new Window({ url: 'http://localhost/' });
 const saved = new Map<string, PropertyDescriptor | undefined>();
@@ -63,33 +63,30 @@ describe('ModelQuickSetupWizard', () => {
     } finally { window.history.replaceState({}, '', '/'); }
   });
 
-  test('an explicit credits choice reaches discovery without issuing a Key', async () => {
+  test('discovery uses credits and issues no Key before the user asks', async () => {
     const scenario = batchScenario(async () => { throw new Error('Unexpected model request'); }, async () => { throw new Error('Unexpected status request'); });
     const calls: Array<Parameters<ModelBootstrapClient['discover']>[0]> = [];
     scenario.client.discover = async (input) => { calls.push(input); return { discoveryId: 'd1', source: 'session', fundingMode: 'credits', models: [] }; };
     await act(async () => root.render(<I18nProvider><ModelQuickSetupWizard open {...scenario} onClose={() => {}} onApplied={() => {}} /></I18nProvider>));
-    await click('Credits');
+    expect([...document.querySelectorAll('button')].filter((button) => ['Credits', 'Cash balance'].includes(button.textContent ?? '')).length).toBeLessThanOrEqual(1);
+    expect(document.body.textContent).toContain('Credits');
+    expect(document.body.textContent).not.toContain('Cash balance');
     expect(calls).toEqual([]);
     await click('Discover models');
     expect(calls).toEqual([{ source: 'session', fundingMode: 'credits', key: undefined }]);
   });
 
-  test('the cash choice stays explicit for a credit-default account without membership', async () => {
+  test('a credit refusal surfaces without a cash fallback or a Key issuance', async () => {
     const writes: string[] = [];
     const scenario = batchScenario(async () => { writes.push('probe'); throw new Error('Unexpected model request'); }, async () => { throw new Error('Unexpected status request'); });
     scenario.client.issueKey = async () => { writes.push('issue'); throw new Error('Unexpected key issuance'); };
     const calls: Array<Parameters<ModelBootstrapClient['discover']>[0]> = [];
-    scenario.client.discover = async (input) => {
-      calls.push(input);
-      if ((input.fundingMode ?? 'credits') === 'credits') throw new Error('subscription_required');
-      return { discoveryId: 'cash', source: 'session', fundingMode: 'prepaid_cash', models: [{ id: 'cash-chat', operations: ['chat'], inputModalities: ['text'], outputModalities: ['text'], probe: true }] };
-    };
+    scenario.client.discover = async (input) => { calls.push(input); throw new ModelConfigurationBootstrapError('native_credits_unavailable'); };
     await act(async () => root.render(<I18nProvider><ModelQuickSetupWizard open {...scenario} onClose={() => {}} onApplied={() => {}} /></I18nProvider>));
-    await click('Credits'); await click('Cash balance');
     expect(calls).toEqual([]);
     await click('Discover models');
-    expect(calls).toEqual([{ source: 'session', fundingMode: 'prepaid_cash', key: undefined }]);
-    expect(document.body.textContent).not.toContain('subscription_required');
+    expect(calls).toEqual([{ source: 'session', fundingMode: 'credits', key: undefined }]);
+    expect(document.body.textContent).toContain('Credits are not available for model calls yet.');
     expect(writes).toEqual([]);
   });
 
