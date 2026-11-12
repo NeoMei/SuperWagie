@@ -47,6 +47,9 @@ test('direct checkout renders QR, preserves original recovery, and opens only th
     }
     await evaluate('window.appearance(false,"en");window.alipay()');
     await until('document.body.innerText.includes("Open Alipay checkout")');
+    // Alipay hands out a checkout page, not a scan string: no code is drawn for it.
+    assert.equal(await evaluate('document.querySelector("img") !== null'),false);
+    assert.equal(await evaluate('document.body.innerText.includes("scan the code")'),false);
     assert.deepEqual(await evaluate('window.opened'),[]);
     await click('Open Alipay checkout');
     assert.deepEqual(await evaluate('window.opened'),['https://openapi.alipay.com/gateway.do?sign=fixture']);
