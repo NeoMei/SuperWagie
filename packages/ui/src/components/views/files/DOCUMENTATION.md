@@ -800,3 +800,12 @@ The data Worker adapter keeps the literal `new Worker(new URL(..., import.meta.u
 syntax; an alias can inline raw TypeScript instead of emitting a compiled Worker.
 Capability checks run before construction without replacing the recognized form.
 Source-level Worker tests do not replace final built-asset browser acceptance.
+
+### Why preview retry remounts its loader owner
+
+The keyed error boundary contains a separate loader owner, whose memoized lazy
+component sits above its own Suspense boundary. Retrying remounts that owner and
+creates a fresh lazy component. A dependency used only as a retry signal can be
+optimized out; placing the owner below Suspense can recreate it on every initial
+suspension. The real bundled-browser check blocks one preview chunk, unblocks
+it, and verifies retry recovery without navigation or loss of the composer draft.

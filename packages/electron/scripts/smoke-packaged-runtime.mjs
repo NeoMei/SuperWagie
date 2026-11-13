@@ -63,10 +63,11 @@ try {
   assert.equal(seedInfo.version, receipt.expectedEngineVersion);
   const title = 'Packaged cold start history fixture', note = 'Local synthetic history retained without a model request';
   const session = await seedSdk.session.create({ title, location: { directory: project } });
-  await seedSdk.session.synthetic({ sessionID: session.id, text: note, resume: false });
+  const seedCommand = process.platform === 'win32' ? `Write-Output '${note}'` : `printf '%s' '${note}'`;
+  await seedSdk.session.shell({ sessionID: session.id, command: seedCommand });
   await until(async () => JSON.stringify((await seedSdk.message.list({ sessionID: session.id })).data).includes(note));
   await stop(seedChild); seedChild = null;
-  receipt.historySeedEngineVersion = seedInfo.version;
+  receipt.historySeedEngineVersion = seedInfo.version; receipt.historySeedKind = 'shell-command';
   fixture = await startPlatformAccountFixture();
   const port = await reservePort(), debugPort = await reservePort();
   writeFileSync(path.join(data, 'settings.json'), JSON.stringify({ desktopLocalPort: port, embeddedKnowledgePort: await reservePort(), desktopLanAccessEnabled: false, desktopCloseAction: 'quit', lastDirectory: project }));
