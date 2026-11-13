@@ -976,10 +976,11 @@ polling or model request selects copy.
 The folded Activity header sweeps 2.8 s luminance bands from left to right
 through a visual copy of its own text. Each band repeats every 240 px, so a
 short header shows one highlight and a long header shows several moving
-highlights instead of one slow wash across the full width. Each band stays
-bright for 48 px, wide enough for three Chinese characters at the largest
-supported header font size. The copy keeps the original sizes and weights and
-uses the title color for the highlight. The
+highlights instead of one slow wash across the full width. Each band fades in
+and out through the same luminance without a hard edge; its bright span is 48
+px, wide enough for three Chinese characters at the largest supported header
+font size. The copy keeps the original sizes and weights and uses the title
+color for the highlight. The
 shimmer starts only after the visible header identity has held still for one
 second, and resets on any identity, tool, target or language change. The gray
 status row and scroll pill stay still so their concrete work text reads
@@ -997,9 +998,12 @@ short and long headers. Shifting the repeating background by exactly one tile
 during 2.8 s keeps the loop seamless while the highlights travel left to
 right.
 
-### Why each band has a bright plateau
+### Why each band has a broad, graded peak
 
-A narrow peak left only 19.2 px at full brightness, below the 42 px of three
-Chinese glyphs at the largest 14 px header size. Holding the bright color from
-40% through 60% of each 240 px tile gives a 48 px plateau. The 36 px ramps on
-each side keep its edges soft.
+A narrow peak left only 19.2 px above the resting luminance, below the 42 px of
+three Chinese glyphs at the largest 14 px header size. A flat plateau reached
+that width, but its equal-brightness middle and sudden steps read as a moving
+rectangle. The band stays above the resting luminance from 26% through 74% of
+each 240 px tile, while its brightness rises and falls across that span through
+five steps. The edges reach transparent at 0% and 100%, so adjacent tiles join
+without a seam.

@@ -2,7 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * The busy composer's stop control: a neutral coin with a red square and a
+ * The busy composer's stop control: a neutral coin with a brand square and a
  * highlight travelling clockwise around the rim. The rim rotates in CSS; the
  * button and its label stay still.
  */
@@ -51,7 +51,7 @@ export const ComposerStopCoin: React.FC<{ className?: string }> = ({ className }
                 }}
             />
             <span data-composer-stop-coin-orbit="" className="oc-stop-coin-orbit absolute inset-0 rounded-full" />
-            <span data-composer-stop-coin-square="" className="relative h-1/3 w-1/3 rounded-[2px] bg-[var(--status-error)]" />
+            <span data-composer-stop-coin-square="" className="relative h-1/3 w-1/3 rounded-[2px] bg-[var(--oc-brand-signal)]" />
         </span>
     );
 };

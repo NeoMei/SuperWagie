@@ -59,20 +59,21 @@ test('every allowed infinite animation still exists', () => {
 
 test('the folded Activity header sweeps repeating bands from left to right', () => {
   const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
-  expect(css).toContain('color-mix(in srgb, currentColor 20%, white) 40% 60%,');
-  expect(css).toContain('transparent 75% 100%) -240px 0 / 240px 100% repeat-x;');
+  expect(css).toContain('color-mix(in srgb, currentColor 48%, white) 50%,');
+  expect(css).toContain('transparent 100%) -240px 0 / 240px 100% repeat-x;');
   expect(css).toContain('@keyframes oc-live-header-shimmer {\n  from { background-position: -240px 0; }\n  to { background-position: 0 0; }');
 });
 
 test('each folded header highlight covers three full-width Chinese glyphs', () => {
   const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
-  const gradient = css.match(/color-mix\(in srgb, currentColor 20%, white\) (\d+)% (\d+)%,/);
+  const gradient = css.match(/color-mix\(in srgb, currentColor 19%, transparent\) (\d+)%,[\s\S]*?color-mix\(in srgb, currentColor 19%, transparent\) (\d+)%,/);
   const tile = css.match(/-240px 0 \/ (\d+)px 100% repeat-x;/);
   expect(gradient).not.toBeNull();
   expect(tile).not.toBeNull();
-  const brightWidthPx = Number(tile?.[1]) * (Number(gradient?.[2]) - Number(gradient?.[1])) / 100;
+  const broadWidthPx = Number(tile?.[1]) * (Number(gradient?.[2]) - Number(gradient?.[1])) / 100;
   // The mobile typography scale raises the title to 14 px.
-  expect(brightWidthPx).toBeGreaterThanOrEqual(3 * 14);
+  expect(broadWidthPx).toBeGreaterThanOrEqual(3 * 14);
+  expect(css).not.toContain('39.9998%');
 });
 
 test('the isolated background-position fixture sweeps from left to right', () => {
@@ -81,6 +82,6 @@ test('the isolated background-position fixture sweeps from left to right', () =>
   expect(fixture).toContain('background-repeat: no-repeat;');
   expect(fixture).toContain('background-position: 100% 0;');
   expect(fixture).toContain('background-size: 200% 100%;');
-  expect(fixture).toContain('color-mix(in srgb, currentColor 20%, white) 40% 60%,');
-  expect(fixture).toContain('transparent 75% 100%) -240px 0 / 240px 100% repeat-x;');
+  expect(fixture).toContain('color-mix(in srgb, currentColor 48%, white) 50%,');
+  expect(fixture).toContain('transparent 100%) -240px 0 / 240px 100% repeat-x;');
 });

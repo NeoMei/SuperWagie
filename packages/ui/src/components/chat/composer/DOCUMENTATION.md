@@ -155,14 +155,16 @@ looks like the ordinary send button.
 ### Why the stop coin orbits on the shared animation budget
 
 Both busy composer surfaces render the same `ComposerStopCoin`: a neutral
-circular base, a red square from `--status-error`, and one highlight travelling
-clockwise around the outer rim. The rim rotates a single composited
+circular base, a square and one highlight travelling clockwise around the outer
+rim. The square and highlight use `--oc-brand-signal`, the product logo's
+dominant opaque orange, so the control keeps its shape while the separate chat
+status dot carries execution state. The rim rotates a single composited
 `transform`; its conic-gradient highlight is measured in the headed
 `stop-coin-orbit` variant of `scripts/perf/animation-fixture.html` and is the
 one long-running CSS animation listed in `lib/infiniteAnimations.test.ts` for
 this reason. The control mounts only while `canAbort` is true, so an idle
 composer pays nothing. Reduced motion, a hidden document and an `inert`
-subtree stop the orbit while the coin and its red square stay visible. The
+subtree stop the orbit while the coin and its square stay visible. The
 shared four-frames-per-second spinner clock was rejected here because a single
 highlight stepping 45 degrees at a time reads as choppy; the continuous orbit
 is an explicit, measured exception to that clock rule.

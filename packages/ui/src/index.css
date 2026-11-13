@@ -688,6 +688,11 @@ svg.animate-spin {
   to { transform: rotate(360deg); }
 }
 
+/* The brand signal orange is the product logo's dominant opaque color. */
+:root {
+  --oc-brand-signal: #fd4d06;
+}
+
 .oc-stop-coin-orbit {
   animation: oc-stop-coin-orbit 1.8s linear infinite;
 }
@@ -699,8 +704,8 @@ svg.animate-spin {
   border-radius: 50%;
   background: conic-gradient(from 0deg,
     transparent 0deg 250deg,
-    color-mix(in srgb, var(--foreground) 12%, transparent) 270deg,
-    color-mix(in srgb, var(--foreground) 85%, transparent) 350deg,
+    color-mix(in srgb, var(--oc-brand-signal) 18%, transparent) 270deg,
+    var(--oc-brand-signal) 350deg,
     transparent 360deg);
   -webkit-mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
   mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
@@ -2506,11 +2511,12 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
  * The folded Activity header sweeps soft luminance bands from left to right
  * through a duplicate of its own text. The bands repeat every 240 px, so a
  * long header shows several highlights at once while a short one shows one.
- * Each band stays bright across at least three full-width Chinese characters.
- * The duplicate carries the original classes, so font size and weight stay as
- * they are; the highlight uses the title color. React mounts it only after the
- * header has held still for one second, and removes it when the visible
- * identity changes or the turn settles.
+ * Every band fades in and out through the same luminance, and its bright span
+ * covers at least three full-width Chinese characters. The duplicate carries
+ * the original classes, so font size and weight stay as they are; the
+ * highlight uses the title color. React mounts it only after the header has
+ * held still for one second, and removes it when the visible identity changes
+ * or the turn settles.
  */
 .oc-live-header-shimmer {
   position: absolute;
@@ -2526,11 +2532,15 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   pointer-events: none;
   color: var(--tools-title);
   background: linear-gradient(90deg,
-    transparent 0 25%,
-    color-mix(in srgb, currentColor 18%, transparent) 35%,
-    color-mix(in srgb, currentColor 20%, white) 40% 60%,
-    color-mix(in srgb, currentColor 18%, transparent) 65%,
-    transparent 75% 100%) -240px 0 / 240px 100% repeat-x;
+    transparent 0%,
+    color-mix(in srgb, currentColor 7%, transparent) 13%,
+    color-mix(in srgb, currentColor 19%, transparent) 26%,
+    color-mix(in srgb, currentColor 38%, white) 40%,
+    color-mix(in srgb, currentColor 48%, white) 50%,
+    color-mix(in srgb, currentColor 38%, white) 60%,
+    color-mix(in srgb, currentColor 19%, transparent) 74%,
+    color-mix(in srgb, currentColor 7%, transparent) 87%,
+    transparent 100%) -240px 0 / 240px 100% repeat-x;
   -webkit-background-clip: text;
   background-clip: text;
   animation: oc-live-header-shimmer 2.8s linear infinite;
