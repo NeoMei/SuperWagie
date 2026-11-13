@@ -85,3 +85,19 @@ test('the isolated background-position fixture sweeps from left to right', () =>
   expect(fixture).toContain('color-mix(in srgb, currentColor 48%, white) 50%,');
   expect(fixture).toContain('transparent 100%) -240px 0 / 240px 100% repeat-x;');
 });
+
+test('every supported CSS branch keeps the soft highlight and brand coin', () => {
+  const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
+  expect(css).toContain('rgb(255 255 255 / 0.48) 50%,');
+  expect(css).toContain('color-mix(in srgb, currentColor 48%, white) 50%,');
+  expect(css).toContain('--oc-brand-signal: #fd4d06;');
+  expect(css).toContain('var(--oc-brand-signal) 350deg,');
+  expect(css).toContain('@supports (color: color-mix(in lab, red, red)) {');
+  expect(css).not.toContain('currentColor 35% 40%');
+});
+
+test('the stop coin uses the chat surface and the brand signal', () => {
+  const coin = readFileSync(join(SOURCE_ROOT, 'components/chat/composer/ui/ComposerStopCoin.tsx'), 'utf8');
+  expect(coin).toContain("backgroundColor: 'var(--surface-background)'");
+  expect(coin).toContain('bg-[var(--oc-brand-signal)]');
+});

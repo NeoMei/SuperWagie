@@ -702,13 +702,25 @@ svg.animate-spin {
   position: absolute;
   inset: 0;
   border-radius: 50%;
+  /* The first gradient is the fallback for engines without color-mix(). It
+     repeats the brand colour across the head instead of leaving a solid arc. */
   background: conic-gradient(from 0deg,
     transparent 0deg 250deg,
-    color-mix(in srgb, var(--oc-brand-signal) 18%, transparent) 270deg,
+    var(--oc-brand-signal) 270deg,
     var(--oc-brand-signal) 350deg,
     transparent 360deg);
   -webkit-mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
   mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+}
+
+@supports (color: color-mix(in lab, red, red)) {
+  .oc-stop-coin-orbit::before {
+    background: conic-gradient(from 0deg,
+    transparent 0deg 250deg,
+    color-mix(in srgb, var(--oc-brand-signal) 18%, transparent) 270deg,
+    var(--oc-brand-signal) 350deg,
+    transparent 360deg);
+  }
 }
 
 [data-composer-stop-coin-paused] .oc-stop-coin-orbit,
@@ -2531,6 +2543,26 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   padding-inline: inherit;
   pointer-events: none;
   color: var(--tools-title);
+  /* Without color-mix(), a transparent stop written as a colour keyword stays
+     transparent, but the stopping points would show a flat band. This
+     fallback keeps the same soft envelope with fixed-opacity white bands. */
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgb(255 255 255 / 0.07) 13%,
+    rgb(255 255 255 / 0.19) 26%,
+    rgb(255 255 255 / 0.38) 40%,
+    rgb(255 255 255 / 0.48) 50%,
+    rgb(255 255 255 / 0.38) 60%,
+    rgb(255 255 255 / 0.19) 74%,
+    rgb(255 255 255 / 0.07) 87%,
+    transparent 100%) -240px 0 / 240px 100% repeat-x;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: oc-live-header-shimmer 2.8s linear infinite;
+}
+
+@supports (color: color-mix(in lab, red, red)) {
+  .oc-live-header-shimmer {
   background: linear-gradient(90deg,
     transparent 0%,
     color-mix(in srgb, currentColor 7%, transparent) 13%,
@@ -2544,6 +2576,7 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   -webkit-background-clip: text;
   background-clip: text;
   animation: oc-live-header-shimmer 2.8s linear infinite;
+  }
 }
 
 .oc-live-header-shimmer,

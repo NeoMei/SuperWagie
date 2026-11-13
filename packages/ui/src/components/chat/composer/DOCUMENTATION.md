@@ -154,9 +154,11 @@ looks like the ordinary send button.
 
 ### Why the stop coin orbits on the shared animation budget
 
-Both busy composer surfaces render the same `ComposerStopCoin`: a neutral
-circular base, a square and one highlight travelling clockwise around the outer
-rim. The square and highlight use `--oc-brand-signal`, the product logo's
+Both busy composer surfaces render the same `ComposerStopCoin`: a circular
+base on the current surface, a square and one highlight travelling clockwise
+around the outer rim. The base uses `--surface-background`, so it stays white
+over the light chat surface and keeps the matching surface in dark themes. The
+square and highlight use `--oc-brand-signal`, the product logo's
 dominant opaque orange, so the control keeps its shape while the separate chat
 status dot carries execution state. The rim rotates a single composited
 `transform`; its conic-gradient highlight is measured in the headed
