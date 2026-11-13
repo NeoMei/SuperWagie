@@ -42,11 +42,8 @@ test('keeps unrelated or malformed size errors outside the managed gateway expla
   }
 });
 
-test('credit funding evidence selects credits while legacy cash and unrelated errors retain their targets', async () => {
+test('every managed funding refusal leads to credits', async () => {
   expect(isManagedModelFundingRequired('platform_model_credits_required')).toBe(true);
   const { managedModelFundingMode } = await import('./managedModelError');
-  expect(managedModelFundingMode('platform_model_credits_required')).toBe('credits');
-  expect(managedModelFundingMode('', '{"error":{"code":"platform_model_funding_required","asset":"CREDIT/6"}}')).toBe('credits');
-  expect(managedModelFundingMode('platform_model_funding_required')).toBe('prepaid_cash');
-  expect(managedModelFundingMode('platform_model_credits_required_extra')).toBe('prepaid_cash');
+  expect(managedModelFundingMode()).toBe('credits');
 });

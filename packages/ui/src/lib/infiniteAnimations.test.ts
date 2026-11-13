@@ -101,6 +101,7 @@ test('every supported CSS branch keeps the soft highlight and brand coin', () =>
 test('the stop coin uses the chat surface and the brand signal', () => {
   const coin = readFileSync(join(SOURCE_ROOT, 'components/chat/composer/ui/ComposerStopCoin.tsx'), 'utf8');
   expect(coin).toContain("backgroundColor: 'var(--surface-background)'");
+  expect(coin).toContain("boxShadow: 'inset 0 0 0 1px var(--oc-brand-signal)'");
   expect(coin).toContain('bg-[var(--oc-brand-signal)]');
 });
 
