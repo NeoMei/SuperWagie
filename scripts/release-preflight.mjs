@@ -8,6 +8,7 @@
 //   2. 小于本版的最大 tag 必须是 HEAD 的祖先（本版包含上一版的全部内容）。
 //
 // 用法：bun run release:preflight（RELEASE_PREFLIGHT_SKIP=1 可临时跳过）
+// 打 tag 前加 --require-main：本版提交必须已进 origin/main，拦住"在旁支发版"。
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -54,6 +55,10 @@ export const checkRelease = ({ version, tags, isAncestor }) => {
   return [];
 };
 
+export const checkMainLine = (headOnMain) => headOnMain
+  ? []
+  : ['当前提交还没进 origin/main：先在 main 上合并再打 tag。旁支上发的版会在下一次从 main 发版时整条丢掉。'];
+
 const git = (args) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
 const run = () => {
@@ -70,6 +75,7 @@ const run = () => {
   }
   let tags;
   let isAncestor;
+  let headOnMain = () => true;
   try {
     tags = git(['tag', '-l']).split('\n').filter(Boolean);
     isAncestor = (tag) => {
@@ -80,11 +86,20 @@ const run = () => {
         return false;
       }
     };
+    headOnMain = () => {
+      try {
+        git(['merge-base', '--is-ancestor', 'HEAD', 'origin/main']);
+        return true;
+      } catch {
+        return false;
+      }
+    };
   } catch {
     console.warn('release:preflight：当前目录不是 git 仓库，跳过');
     return;
   }
   const problems = checkRelease({ version, tags, isAncestor });
+  if (process.argv.includes('--require-main')) problems.push(...checkMainLine(headOnMain()));
   if (problems.length) {
     console.error(`release:preflight 未通过（版本 ${version}）：`);
     for (const problem of problems) console.error(`  - ${problem}`);
