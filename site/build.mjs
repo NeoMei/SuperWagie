@@ -43,9 +43,8 @@ const LANGS = {
       ['产品', '/'],
       ['文档', '/docs/'],
       ['常见问题', '/faq/'],
-      ['GitHub 源码', REPO_URL],
-      ['更新日志', 'https://github.com/NeoMei/SuperWagie/releases'],
-      ['问题反馈', 'https://github.com/NeoMei/SuperWagie/issues'],
+      ['更新日志', '/release-notes/'],
+      ['问题反馈', 'mailto:quukk2026@agent.qq.com?subject=%E7%8A%87%E9%A9%AC%20SuperWagie%20%E9%97%AE%E9%A2%98%E5%8F%8D%E9%A6%88'],
       ['隐私', '/privacy/'],
       ['图片版权', '/credits/'],
       ['品牌与标志', '/brand/'],
@@ -89,9 +88,8 @@ const LANGS = {
       ['Product', '/en/'],
       ['Docs', '/en/docs/'],
       ['FAQ', '/en/faq/'],
-      ['GitHub source', REPO_URL],
-      ['Changelog', 'https://github.com/NeoMei/SuperWagie/releases'],
-      ['Feedback', 'https://github.com/NeoMei/SuperWagie/issues'],
+      ['Changelog', '/en/release-notes/'],
+      ['Feedback', 'mailto:quukk2026@agent.qq.com?subject=SuperWagie%20feedback'],
       ['Privacy', '/en/privacy/'],
       ['Photo credits', '/en/credits/'],
       ['Brand & logo', '/en/brand/'],
@@ -131,6 +129,7 @@ const PAGES = {
     ['about', 'about', 'about', '关于犇马 SuperWagie · 办公室里的 AI 工作台', '犇马是什么、它解决哪些办公问题，以及第三方组件与致谢。'],
     ['privacy', 'privacy', 'privacy', '隐私说明：数据留在本机 · 犇马 SuperWagie', '任务、资料库索引和模型 Key 都在自己的电脑上；这里逐项说明数据存在哪里、什么会离开本机。'],
     ['credits', 'credits', 'about', '图片版权 · 犇马 SuperWagie', '产品页使用的两张书桌照片的来源、作者与许可证。'],
+    ['brand', 'brand', 'about', '品牌与标志：犇马、超级牛马与 SuperWagie · 犇马 SuperWagie', '犇马的名字怎么来：三头牛并跑的奔腾牛马，也是“超级牛马”的自嘲；SuperWagie 是这句话的英文说法。含标志构成、尺寸与下载。'],
     ['docs', 'docs', 'docs', '使用文档：安装、模型、资料库与创作 · 犇马 SuperWagie', '从下载安装到日常使用：模型 Key、工作台、资料库、创作流程和常见故障。', 'docs'],
     ['docs/getting-started', 'docs-getting-started', 'docs', '快速上手：下载安装与第一个任务 · 犇马 SuperWagie', '下载、安装、第一次打开、填模型 Key，然后写下第一件事；含 macOS 首次打开被拦截的处理。', 'docs'],
     ['docs/models', 'docs-models', 'docs', '模型与 Key：供应商配置与更换 · 犇马 SuperWagie', '添加模型供应商、Key 存在哪里、如何更换默认模型，以及资料库的可选 DeepSeek Key。', 'docs'],
@@ -140,16 +139,17 @@ const PAGES = {
     ['docs/troubleshooting', 'docs-troubleshooting', 'docs', '常见故障：打不开、索引与模型报错 · 犇马 SuperWagie', '应用打不开、首次启动被拦截、索引失败、模型报错、资料库后端没起来时先看这里。', 'docs'],
   ],
   en: [
-    ['', 'home', 'home', 'SuperWagie · the local AI agent for office work and code', 'Office tasks, a local library, documents, decks and web pages, plus reading code, running commands and tests, in one desktop app. Files and keys stay on your machine.'],
+    ['', 'home', 'home', 'SuperWagie · the local AI agent for office work and code', 'Office tasks, a local library, documents, decks and pages, plus reading code, running commands and tests in one desktop app. Files and keys stay on your machine'],
     ['workbench', 'workbench', 'workbench', 'AI workbench: tasks, calendar and deliverables · SuperWagie', 'Open the app and see today: due tasks, a calendar, sticky notes and recent output. Tasks are plain Markdown you can edit anywhere.'],
-    ['library', 'library', 'library', 'Local library: folder indexing and semantic search · SuperWagie', 'Point SuperWagie at a folder. It indexes contracts, reports and references in place, searches names and meaning together, and lets the agent read without writing.'],
-    ['creation', 'creation', 'creation', 'AI creation: documents, decks, video and web pages · SuperWagie', 'Start a document, deck, video or web page from one sentence. Output lands in a local work folder you can open and keep editing.'],
+    ['library', 'library', 'library', 'Local library: folder indexing and search · SuperWagie', 'Point SuperWagie at a folder. It indexes contracts, reports and references in place, searches names and meaning, and lets the agent read without writing.'],
+    ['creation', 'creation', 'creation', 'AI creation: documents, decks, video, pages · SuperWagie', 'Start a document, deck, video or web page from one sentence. Output lands in a local work folder you can open and keep editing.'],
     ['download', 'download', 'download', 'Download SuperWagie for macOS and Windows', 'Download the unified Apple silicon Mac and Windows x64 installers.'],
     ['faq', 'faq', 'faq', 'FAQ: install, model keys and privacy · SuperWagie', 'System requirements, where model keys live, whether the library uploads files, task files, licensing and pricing.'],
     ['about', 'about', 'about', 'About SuperWagie · the AI workbench for office work', 'What SuperWagie is, the office work it covers, and the third-party components and credits.'],
     ['privacy', 'privacy', 'privacy', 'Privacy: your data stays on your machine · SuperWagie', 'Tasks, the library index and model keys stay on your computer. Where each piece of data lives and what leaves the machine.'],
     ['credits', 'credits', 'about', 'Photo credits · SuperWagie', 'The two desk photographs on the product pages: source, author and licence.'],
-    ['docs', 'docs', 'docs', 'Documentation: install, models, library and creation · SuperWagie', 'From download to daily use: model keys, the workbench, the library, creation and troubleshooting.', 'docs'],
+    ['brand', 'brand', 'about', 'Brand and mark: Ben Ma, super beast of burden, and SuperWagie · SuperWagie', 'How the name works: three oxen running together, the running beast of burden, and the joke of a super one. SuperWagie says the same thing in English. Plus the parts of the mark, its sizes and a PNG download.'],
+    ['docs', 'docs', 'docs', 'Documentation: install, models, library · SuperWagie', 'From download to daily use: model keys, the workbench, the library, creation and troubleshooting.', 'docs'],
     ['docs/getting-started', 'docs-getting-started', 'docs', 'Getting started: install and your first task · SuperWagie', 'Download, install, open it once, add a model key and write the first task, including the first-launch prompt on macOS.', 'docs'],
     ['docs/models', 'docs-models', 'docs', 'Models and keys: providers and switching · SuperWagie', 'Add providers, where keys are stored, how to switch the default model, and the optional DeepSeek key for the library.', 'docs'],
     ['docs/workbench', 'docs-workbench', 'docs', 'Workbench: tasks, sticky notes and calendar · SuperWagie', 'Tasks, sticky notes, the calendar and deliverables; where task files live, how to edit them and use them across machines.', 'docs'],
@@ -159,6 +159,47 @@ const PAGES = {
   ],
 };
 
+const KEYWORDS = {
+  zh: {
+    '': '犇马,SuperWagie,AI 办公,本地 AI,AI 工作台,编程智能体,资料库检索,AI 创作,PPT 生成,数据留在本机',
+    workbench: 'AI 工作台,任务管理,日历,即时贴,Markdown 任务,本地任务',
+    library: '本地资料库,文件夹索引,语义检索,文件搜索,Wiki 合成,关系图谱',
+    creation: 'AI 创作,AI 写文档,AI 做 PPT,AI 做视频,AI 生成网页',
+    download: '下载 SuperWagie,macOS 安装包,Windows x64,Apple 芯片',
+    faq: '常见问题,模型 Key,隐私,系统要求,收费',
+    about: '关于 SuperWagie,产品说明,第三方组件',
+    privacy: '隐私说明,数据本地,模型 Key 存储',
+    credits: '图片版权,照片许可',
+    brand: '品牌,标志,犇马含义,超级牛马,奔腾的牛马,SuperWagie 名字,PNG 下载',
+    docs: '使用文档,安装,模型配置,资料库,创作',
+  },
+  en: {
+    '': 'SuperWagie,AI workbench,local AI,offline AI,AI office,AI coding agent,library search,AI creation',
+    workbench: 'AI workbench,task management,calendar,sticky notes,local Markdown tasks',
+    library: 'local library,folder index,semantic search,wiki synthesis,relation graph',
+    creation: 'AI creation,AI documents,AI deck,AI video,AI web page',
+    download: 'download SuperWagie,macOS build,Windows x64,Apple silicon',
+    faq: 'FAQ,model keys,privacy,system requirements,pricing',
+    about: 'about SuperWagie,product notes,third-party components',
+    privacy: 'privacy,data stays local,model key storage',
+    credits: 'photo credits,licences',
+    brand: 'brand,logo,Ben Ma meaning,super beast of burden,SuperWagie name,ox mark,PNG download',
+    docs: 'documentation,install,model setup,library,creation',
+  },
+};
+const DOC_KEYWORDS = {
+  zh: { 'getting-started': '快速上手,下载安装,模型 Key', models: '模型供应商,API Key,默认模型', workbench: '工作台,任务文件,日历', library: '资料库,索引规则,语义搜索', creation: '创作,工作目录,技能', troubleshooting: '故障排查,启动失败,索引失败' },
+  en: { 'getting-started': 'getting started,install,model key', models: 'providers,API key,default model', workbench: 'workbench,task files,calendar', library: 'library,indexing,semantic search', creation: 'creation,work folder,skills', troubleshooting: 'troubleshooting,launch failure,indexing' },
+};
+const keywordsFor = (lang, slug) => {
+  const map = KEYWORDS[lang] || {};
+  if (!slug) return map[''] || '';
+  if (slug.startsWith('docs/')) {
+    const leaf = slug.slice(5);
+    return [(DOC_KEYWORDS[lang] || {})[leaf] || '', map.docs || ''].filter(Boolean).join(',');
+  }
+  return map[slug] || '';
+};
 const escapeAttr = (value) => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 const stripTags = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -209,7 +250,6 @@ const structuredData = ({ lang, slug, canonical, title, description, body }) => 
     alternateName: '犇马',
     url: SITE,
     logo: { '@type': 'ImageObject', url: `${SITE}/assets/brand-logo.png` },
-    sameAs: [REPO_URL],
   };
   const graph = [organization];
 
@@ -238,6 +278,36 @@ const structuredData = ({ lang, slug, canonical, title, description, body }) => 
       inLanguage,
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY', availability: 'https://schema.org/InStock' },
       publisher: { '@id': `${SITE}/#organization` },
+    });
+  }
+
+  if (slug === 'brand') {
+    graph.push({
+      '@type': 'AboutPage',
+      '@id': canonical + '#webpage',
+      url: canonical,
+      name: title,
+      description,
+      inLanguage,
+      isPartOf: { '@id': SITE + '/#website' },
+      about: { '@id': SITE + '/#organization' },
+      primaryImageOfPage: {
+        '@type': 'ImageObject',
+        url: SITE + '/assets/brand-logo.png',
+        width: 1013,
+        height: 933,
+      },
+      // Name etymology, so search engines can read what 犇马 and SuperWagie mean.
+      mainEntity: {
+        '@type': 'Brand',
+        name: lang === 'zh' ? '犇马 SuperWagie' : 'SuperWagie',
+        alternateName: lang === 'zh' ? ['SuperWagie', '超级牛马'] : ['犇马', 'Ben Ma'],
+        description: lang === 'zh'
+          ? '犇由三个牛字组成，读作奔腾的牛马，也指“超级牛马”。SuperWagie 是同一句话的英文说法：super 加 wagie（干活的人）。'
+          : 'Ben Ma is written 犇马: three oxen running together, the running beast of burden, and a joke about a super one. SuperWagie says the same thing in English.',
+        logo: { '@type': 'ImageObject', url: SITE + '/assets/brand-logo.png' },
+        slogan: lang === 'zh' ? '一头牛，在替你干活。' : 'An ox that does the work.',
+      },
     });
   }
 
@@ -404,6 +474,7 @@ const page = async (lang, entry) => {
   const ogAlt = lang === 'zh'
     ? '犇马 SuperWagie：办公室里的 AI 工作台'
     : 'SuperWagie: the AI workbench for office work';
+  const keywords = keywordsFor(lang, slug);
   const jsonLd = JSON.stringify(structuredData({ lang, slug, canonical, title, description, body }))
     .replace(/</g, '\\u003c');
 
@@ -431,6 +502,7 @@ const page = async (lang, entry) => {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
 <meta name="description" content="${escapeAttr(description)}">
+${keywords ? '<meta name="keywords" content="' + escapeAttr(keywords) + '">' : ''}
 <meta name="theme-color" content="#f7f9fa">
 <link rel="icon" href="/assets/brand-logo.png">
 <link rel="canonical" href="${canonical}">
