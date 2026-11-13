@@ -2096,6 +2096,7 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'shared'));
       await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
       await copyFile(new URL('./byte-range.js', import.meta.url), path.join(directory, 'fs/byte-range.js'));
+      await copyFile(new URL('./xlsx-copy.js', import.meta.url), path.join(directory, 'fs/xlsx-copy.js'));
       await copyFile(new URL('./preview-bridge.js', import.meta.url), path.join(directory, 'fs/preview-bridge.js'));
       await copyFile(new URL('./workspace-file-names.js', import.meta.url), path.join(directory, 'fs/workspace-file-names.js'));
       await copyFile(new URL('./content-search.js', import.meta.url), path.join(directory, 'fs/content-search.js'));

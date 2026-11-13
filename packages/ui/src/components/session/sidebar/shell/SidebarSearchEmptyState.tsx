@@ -20,7 +20,7 @@ export function SidebarSearchEmptyState({ query, showArchive, resetSessionSearch
   };
   return (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noMatches.title')}</p>
+      <p className="typography-ui-label font-semibold">{t('sessions.search.titles.empty')}</p>
       <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noMatches.description')}</p>
       {showArchive ? (
         <Button variant="link" size="xs" className="mt-2 h-auto p-0 typography-meta" onClick={searchArchive}>

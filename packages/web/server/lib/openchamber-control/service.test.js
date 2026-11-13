@@ -1018,14 +1018,14 @@ describe('render.page', () => {
       expect(onPageWaitChange).toHaveBeenCalledWith({ type: 'waiting', sessionId: 'ses_1', callId: 'call_1', title: 'Pick a layout', directory: '/repo' });
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
       await pending;
-      expect(onPageWaitChange).toHaveBeenLastCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
+      expect(onPageWaitChange).toHaveBeenLastCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1', directory: '/repo' });
 
       const controller = new AbortController();
       const aborted = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
       await settle();
       controller.abort();
       await expect(aborted).rejects.toBeTruthy();
-      expect(onPageWaitChange).toHaveBeenLastCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
+      expect(onPageWaitChange).toHaveBeenLastCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1', directory: '/repo' });
     });
 
     it('answers once: a second answer, or one for another call, finds nothing waiting', async () => {

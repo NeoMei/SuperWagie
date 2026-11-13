@@ -71,6 +71,8 @@ const HOST_ONLY_ROUTES = Object.freeze([
   '/api/tts',
   '/api/dictation',
   '/api/guests',
+  '/api/mobile-official',
+  '/api/official-selections',
   '/api/projects',
   '/api/client-auth',
   '/api/system',

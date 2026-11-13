@@ -21,6 +21,7 @@ import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
 import { runtimeFetch } from "@/lib/runtime-fetch"
+import { markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
@@ -145,35 +146,32 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
-/**
- * The model and agent a send has to switch the session to, or nothing.
- *
- * OpenCode 2.x keeps the selection on the session: `session.model` and
- * `session.agent` are what the next turn runs on. Passing the composer's
- * current pick on every prompt would re-switch the session constantly and
- * write a switch record into the transcript, so only a difference from the
- * session's own record travels.
- */
-/**
- * The model/agent a send has to switch the session to, or nothing when the
- * session already runs on the desired selection. Sending them on every turn
- * would make OpenCode record a switch (and two round trips) each time.
- */
-export function resolveSendSelection(
+/** A fresh record prevents a stale synced match from suppressing a user switch. */
+export async function resolveSendSelection(
   sessionId: string,
   directory: string | undefined,
   desired: { providerID: string; modelID: string; variant?: string | null; agent?: string },
-): { model?: ModelRef; agent?: string } {
-  const sessions = getDirectoryState(directory)?.session ?? getAllSyncSessions()
-  const session = sessions.find((candidate) => candidate.id === sessionId)
-  // Compared in wire form: an explicit `Default` (null) switches the session
-  // off an effort once, then matches the `"default"` OpenCode records for it.
+): Promise<{ model?: ModelRef; agent?: string }> {
   const model = toModelRef({ providerID: desired.providerID, id: desired.modelID, variant: desired.variant })
-  const modelChanged = !session?.model || !isSameModelRef(session.model, model)
-  const agentChanged = Boolean(desired.agent) && session?.agent !== desired.agent
+  const isCurrentRuntime = captureRuntimeInstance()
+  let serverSession: Session
+  try {
+    serverSession = await opencodeClient.getSession(sessionId, directory)
+  } catch (error) {
+    if (desired.agent) {
+      if (error instanceof Error) markDefiniteTransportFailure(error)
+      throw error
+    }
+    if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
+    return { model }
+  }
+  if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
+  const session = getDirectoryState(directory)?.session.find((candidate) => candidate.id === sessionId)
+    ?? getAllSyncSessions().find((candidate) => candidate.id === sessionId)
+  const runsOn = (record: Session | undefined) => Boolean(record?.model && isSameModelRef(record.model, model))
   return {
-    model: modelChanged ? model : undefined,
-    agent: agentChanged ? desired.agent : undefined,
+    model: !runsOn(serverSession) || !runsOn(session) ? model : undefined,
+    agent: desired.agent && serverSession.agent !== desired.agent ? desired.agent : undefined,
   }
 }
 
@@ -318,7 +316,7 @@ export async function routeMessage(params: {
         ...((await lateContext) ?? []),
         ...skillInstructionContext(),
       ]
-      const selection = sendSelection()
+      const selection = await sendSelection()
       await opencodeClient.sendCommand({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
@@ -360,7 +358,7 @@ export async function routeMessage(params: {
     markBusy: params.markBusy,
     appendSubmissions: params.appendSubmissions,
     send: async (messageID, context) => {
-      const selection = sendSelection()
+      const selection = await sendSelection()
       const lateContext = (await lateContextRead) ?? []
       return opencodeClient.sendMessage({
         runtimeKey: params.runtimeKey,
@@ -2324,6 +2322,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const configAgentName = useConfigStore.getState().currentAgentName
       const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
 
+      const settleModelPick = targetSessionId
+        ? useSelectionStore.getState().captureSessionModelPickSettlement(targetSessionId, providerID, modelID, capturedRuntimeKey)
+        : undefined
       if (targetSessionId) {
         useSelectionStore.getState().saveSessionModelSelection(targetSessionId, providerID, modelID)
       }
@@ -2426,6 +2427,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           })),
         })),
       })
+      if (isCurrentRuntime()) settleModelPick?.()
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
     })

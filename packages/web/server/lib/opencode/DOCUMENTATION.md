@@ -22,7 +22,7 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Standard engine API contract
 
 The standard runtime pins the official client, schema and packaged CLI to
-2.2.5. External and standalone engines must be 2.2.4 or newer within 2.x;
+2.3.0. External and standalone engines must be 2.2.4 or newer within 2.x;
 `compatibility.js` owns this minimum and the VS Code CLI preflight uses the
 same predicate. The frozen Intel local source retains its separate 2.1.4
 engine and compatibility guard until it is ported independently.
@@ -239,6 +239,9 @@ in that user's sessions. On the fallback path the same rules are merged into
   JSON includes and token references stay inside the package. Each failed variant
   is reported separately so valid siblings remain available. No extension code runs.
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
+  Its exported `applyOwnedArchiveState` applies the same archive-store overlay
+  to served records and the message search index. Explicit null restores;
+  missing entries preserve the upstream lifecycle.
 - `request-readiness.js` owns the bounded wait shared by the OpenCode proxy and
   the platform prompt's prerequisite session read. It checks live lifecycle
   state every 75 ms for up to six seconds, preserving the configured readiness
@@ -506,6 +509,36 @@ Installer output is discarded, not forwarded to clients or logs.
 ## Public exports (session-activity.js)
 - `hasWorkingDescendants(id, statuses)` is the queue delivery check returned by the probe. It follows the running sessions' parent links through at most 8 ancestors. Reads share one timeout and each session record is read once per check. Failed or malformed records and cycles return `null` unless another chain proves a running descendant; a chain deeper than 8 counts as unrelated, matching the UI's `MAX_SUBAGENT_DEPTH`. Parent links are refreshed on the next check. The direct-child check used by other consumers keeps its existing behavior.
 - `createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs })`: whether a session's turn really ended. A parent goes idle while a background subagent works and runs again when OpenCode hands the result back. `fetchActiveSessionStatuses()` reads `/api/session/active`, `fetchChildSessionIds(id)` pages `GET /api/session?parentID=`, `hasWorkingChildren(id, statuses)` combines them. Every read answers `null` when OpenCode could not be asked. Used by the goal loop (waits) and the notification runtime (stays silent on the pause).
+- `fetchRunningBackgroundJobs(id)` reads the global 2.2.6+ job list with
+  `sessionID`, `descendants=true` and `status=running`. It returns validated
+  running jobs with their kind, owning session, optional command and start
+  time. `[]` is authoritative empty work for that tree, `null` is unknown,
+  and `undefined` means an explicitly absent route or adapter capability.
+  Job status must be one of the engine's `running`, `completed`, `error` or
+  `cancelled`; an unknown status makes the entire read unknown before any
+  terminal jobs are excluded.
+  Only an empty/plain `Not Found` 404 establishes absent route support;
+  tagged session-not-found, ambiguous 404 bodies, other failures and malformed
+  data remain unknown. It starts no directory and stores no capability or
+  activity cache across calls or runtimes.
+- `supportsBackgroundJobs` is an optional boolean factory capability, true by
+  default. The isolated-space notification adapter sets it false because its
+  authorized transport exposes only session reads. Its fallback stays inside
+  that space; no host activity list can determine space completion.
+
+### Why job failures keep activity unknown
+
+The job list is the live authority for native subagents and images, including
+descendants that can continue while their parent is idle. Falling back after a
+failed read could report that work finished. Legacy child and shell queries
+are used only when the job interface is explicitly unavailable. A running
+image remains active until the engine changes its status, regardless of age.
+
+App-created workflow sessions are not native jobs. Consumers also check the
+active map's bounded parent lineages through `hasWorkingDescendants`, so a
+successful empty native-job list cannot settle an active workflow. Empty
+active maps perform no lineage reads. Unrelated active trees do not hold the
+session; unknown ancestry retains unknown activity.
 
 ## Public exports (turn-start.js)
 - `createTurnStartReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs?, fetchImpl? })` returns `readTurnStart(sessionId)`: the running turn's start read back from `GET /api/session/:id/message`, newest first. OpenCode 2 writes an `idle` record when a turn ends, so the turn began with the first message after the last one; settings records (`agent-switched`, `model-switched`, `location-switched`) are skipped because the user makes them while idle. Null when the read fails, the latest record ends a turn, or no `idle` record appears within 10 pages of 50.
@@ -768,6 +801,14 @@ boolean takes precedence, so a user's opt-out remains effective.
   - `sanitizeProjects(input)`
 
 Persistence path normalization (`normalizePathForPersistence` / `normalizeSettingsPaths` / `sanitizeProjects`, reached via the `readSettingsFromDiskMigrated` migration and `persistSettings`) resolves symlinks with `realpathSync` and, on case-insensitive filesystems (`win32`, `darwin`), also recovers the on-disk casing of each path component via `readdirSync` (exact-name match preferred so case-sensitive volumes are never rewritten). `realpathSync` alone does not report on-disk casing on these volumes, so without the readdir step a project stored with the wrong case would never match the real-case `directory` opencode reports for its sessions (issue #1913). A corrected path is flagged `changed` and written back to `settings.json`. A path `realpathSync` cannot resolve (missing, no permission) is kept exactly as stored, so case recovery can never swap in a different existing sibling. On macOS only `/` separates components; a backslash is a legal name character.
+
+### Why project parent listings live for one normalization pass
+
+`sanitizeProjects` shares each parent directory listing, including unreadable
+results, across its synchronous pass. The next call reads every parent again
+so renamed folders, new projects and recovered permissions appear without a
+watcher or long-lived invalidation state. Symlink resolution and exact-name
+case preference keep their existing behavior.
 
 ## Public exports (theme-runtime.js)
 - `createThemeRuntime(dependencies)`: creates custom theme runtime for on-disk theme discovery and JSON normalization/validation.
@@ -1274,6 +1315,13 @@ within a ten-minute overall deadline.
   - Skill list responses include authoritative `renamable` derived from the same managed-root policy used by rename
   - `GET /api/config/skills` leaves `sources.md.supportingFiles` out: listing every file of every skill cost seconds when a skill bundles a `.venv` or `node_modules`, and no list consumer reads it. `GET /api/config/skills/:name` still returns it
   - Recursive skill walks, markdown reads, and per-skill source probes use `fs.promises`. The list enriches one skill at a time so filesystem waits yield to other requests. Discovery still uses synchronous config and root checks.
+  - A directory containing a regular or valid linked `SKILL.md` is one skill;
+    its supporting tree is not searched for more skills. Recursive discovery
+    skips hidden directories and `node_modules`. An explicitly scanned root
+    or installed link can still point there. Directory links and Windows
+    junctions remain supported, with ancestor realpaths preventing cycles and
+    filesystem concurrency bounded to eight calls per walk. A dangling skill
+    file link does not hide valid child skills.
   - The list shares discovery's parsed markdown by exact file path within the request. OpenCode's selected path wins even when local discovery picks another copy with the same name; a path absent from the parse map is read normally. Each request gets a new map, and source lookup still checks whether the selected file exists.
   - Create, edit and rename run one at a time per process, so an existence check cannot go stale before its own write; create also writes `SKILL.md` with `wx` and reports an existing file as "already exists" instead of overwriting it
   - `disableModelInvocation` (detail `sources.md`, create/update body) is "run only when called": it writes both `disable-model-invocation: true` and `metadata.opencode/autoinvoke: false` so every supported OpenCode 2.x and Claude Code honour it, reads back the way OpenCode resolves the pair (`opencode/autoinvoke` wins), and clearing it removes both keys while keeping other `metadata`. The VS Code runtime mirrors this in `opencodeConfig.ts`
@@ -1288,6 +1336,13 @@ within a ten-minute overall deadline.
 ### Why parsed markdown is shared within a request
 
 Discovery already reads each skill's frontmatter and body. Source lookup uses that same read so listing does not open and parse the file again. The map holds a request's snapshot, so an edit during a list appears on the next request. Keeping entries across requests would need invalidation for external file edits.
+
+### Why discovery stops at a skill's supporting tree
+
+Dependencies and reference examples can include their own `SKILL.md` files.
+Listing those as installed skills changes the user's skill inventory. The
+boundary keeps the installed skill and its files intact while explicit
+installed links remain discoverable.
 
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.

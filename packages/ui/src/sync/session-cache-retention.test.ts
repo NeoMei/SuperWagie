@@ -125,6 +125,7 @@ describe("session cache retention", () => {
       const env = setup(surface)
       await env.select("a")
       await env.loader.loadComplete(env.target("a"))
+      expect(env.loader.coversHistory(env.target("a"))).toBe(true)
       const original = env.messages("a") ?? []
       expect(original).toHaveLength(104)
       await env.select("b")
@@ -148,7 +149,9 @@ describe("session cache retention", () => {
       expect(env.childStores.getChild("/repo")?.getState().part[original[0].id]).toBeUndefined()
       expect(env.releases.some((target) => target.sessionID === "a")).toBe(true)
       expect(env.loader.getSnapshot(env.target("a")).resolved).toBe(false)
+      expect(env.loader.coversHistory(env.target("a"))).toBe(false)
       await env.select("a")
+      expect(env.loader.coversHistory(env.target("a"))).toBe(true)
       expect(env.requests.length).toBeGreaterThan(calls)
       expect(env.messages("a")?.length).toBeGreaterThan(0)
     })

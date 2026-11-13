@@ -78,6 +78,12 @@ type LoaderEntry = {
   optimistic: Map<string, OptimisticItem>
   /** History was dropped by retention; events since then are not coverage. */
   evicted: boolean
+  /** A confirmed empty creation or server-read window still held by its owner. */
+  historyCoverage: {
+    store: Pick<ReturnType<ChildStoreManager["ensureChild"]>, "getState">
+    epoch: number
+    isCurrentRuntime: () => boolean
+  } | null
   /**
    * The loader's history epoch at the start of the last authoritative read
    * that confirmed this transcript. Older than the current epoch means a
@@ -459,6 +465,7 @@ export class SessionMessageLoader {
     this.bumpGeneration(entry)
     entry.inflight = null
     entry.verifiedEpoch = this.historyEpoch
+    entry.historyCoverage = { store, epoch: this.historyEpoch, isCurrentRuntime: captureRuntimeInstance() }
     store.setState({ message: { ...current.message, [normalized.sessionID]: [] } })
     this.patchEntry(entry, {
       status: "ready",
@@ -480,7 +487,9 @@ export class SessionMessageLoader {
     if (!normalized || this.disposed) return Promise.resolve()
     const entry = this.getEntry(normalized)
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
-    const materialization = getSessionMaterializationStatus(store.getState(), normalized.sessionID)
+    const materialization = getSessionMaterializationStatus(store.getState(), normalized.sessionID, {
+      historyCovered: this.coversHistory(normalized),
+    })
     if (options?.reason !== "prefetch") this.touchSessionCache(normalized)
     // Messages that arrived by event after an eviction are renderable but are
     // not history coverage: the earlier transcript must be fetched again.
@@ -563,6 +572,7 @@ export class SessionMessageLoader {
       entry.gapAnchorID = confirmed.at(-1)?.id ?? null
     }
     this.historyEpoch += 1
+    for (const entry of this.entries.values()) this.notify(entry)
   }
 
   /**
@@ -738,6 +748,7 @@ export class SessionMessageLoader {
       const committed = this.commitPage(normalized, entry, store, page, replacesCache ? "replace" : "merge", isCurrent)
       if (!committed || !isCurrent()) return
       entry.verifiedEpoch = Math.max(entry.verifiedEpoch, epoch)
+      entry.historyCoverage = { store, epoch, isCurrentRuntime: captureRuntimeInstance() }
       // A tail that joins the cache uses a deliberately small window: its
       // cursor describes only that window and must not replace the
       // established coverage, unless the tail holds the whole history.
@@ -760,6 +771,17 @@ export class SessionMessageLoader {
   getSnapshot(target: SessionMessageTarget): SessionMessageLoadState {
     const normalized = this.normalizeTarget(target)
     return normalized ? this.getEntry(normalized).snapshot : EMPTY_SESSION_MESSAGE_LOAD_STATE
+  }
+
+  /** A server-read window or confirmed empty creation retained by this exact owner. */
+  coversHistory(target: SessionMessageTarget): boolean {
+    const normalized = this.normalizeTarget(target)
+    if (!normalized) return false
+    const entry = this.entries.get(this.keyFor(normalized))
+    const coverage = entry?.historyCoverage
+    return Boolean(!this.disposed && coverage && !entry?.evicted
+      && coverage.epoch === this.historyEpoch && coverage.isCurrentRuntime()
+      && this.childStores.getChild(normalized.directory) === coverage.store)
   }
 
   subscribe(target: SessionMessageTarget, listener: () => void): () => void {
@@ -832,6 +854,7 @@ export class SessionMessageLoader {
     }
     const windowSurvives = entry.snapshot.resolved
       && preservedMessages.some((message) => !entry.optimistic.has(message.id))
+    if (!windowSurvives) entry.historyCoverage = null
     entry.snapshot = windowSurvives
       ? { ...entry.snapshot, status: "ready", loadingKind: null, error: null }
       : createDefaultState(entry.snapshot.generation)
@@ -909,6 +932,7 @@ export class SessionMessageLoader {
       queuedRefreshLimit: 0,
       optimistic: new Map(),
       evicted: false,
+      historyCoverage: null,
       // Unknown provenance: confirmed only as of the loader's first epoch.
       verifiedEpoch: 0,
       gapAnchorID: null,
@@ -1011,6 +1035,7 @@ export class SessionMessageLoader {
     if (!committed || !isCurrent()) return
     entry.evicted = false
     entry.verifiedEpoch = Math.max(entry.verifiedEpoch, epoch)
+    entry.historyCoverage = { store, epoch, isCurrentRuntime: captureRuntimeInstance() }
     this.patchEntry(entry, {
       status: "ready",
       loadingKind: null,

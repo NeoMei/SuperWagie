@@ -95,6 +95,19 @@ afterEach(() => {
 });
 
 describe('web notifications API', () => {
+  it('withdraws exactly the matching event and runtime while preserving an unrelated banner', async () => {
+    installWindowMock(); installFocusedDocument(); installEmptyNavigator();
+    const captured: CapturedNotification[] = [];
+    installNotificationMock(() => {}, captured);
+    const { createWebNotificationsAPI } = await import('./notifications');
+    const api = createWebNotificationsAPI();
+    await api.notifyAgentCompletion({ title: 'Target', tag: 'event-a', runtimeKey: 'local' });
+    await api.notifyAgentCompletion({ title: 'Unrelated', tag: 'event-b', runtimeKey: 'local' });
+    expect(await api.withdraw?.({ tag: 'event-a', runtimeKey: 'host:other' })).toEqual({ status: 'unsupported' });
+    expect(await api.withdraw?.({ tag: 'event-a', runtimeKey: 'local' })).toEqual({ status: 'withdrawn', count: 1 });
+    expect(captured[0].instance.close).toHaveBeenCalledTimes(1);
+    expect(captured[1].instance.close).not.toHaveBeenCalled();
+  });
   it('switches from another session without reloading when the app router is mounted', async () => {
     const assign = vi.fn();
     const focus = vi.fn();

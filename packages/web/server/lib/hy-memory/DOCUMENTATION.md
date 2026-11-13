@@ -182,3 +182,80 @@ ledger encoding would insert schema defaults and strip unknown fields. The
 manifest supplies source keys, digests and authority IDs; the native transaction
 reads content, payload and vector bytes itself. No runtime maintenance guard is
 bypassed and ordinary `ensure` and manual synchronization remain unchanged.
+
+## Explicit memory review
+
+### Ownership
+
+`tidy.js` owns project-scoped review proposals, selected entry updates, durable
+per-entry undo revisions and the separate AGENTS.md export decision. It reads
+manual rows and retained conversation cards from the existing shared ledger.
+Conversation memory continues to own live source validation, deletion and
+recall eligibility. The worker owns generated organization and indexes.
+
+### Invariants
+
+- Opening review is explicit. Proposals trim surrounding whitespace and collapse
+  exact repeated prose paragraphs of at least 40 characters. Code, tables,
+  lists and quotations are excluded from paragraph consolidation. Unchanged
+  entries remain selectable for rule export.
+- Global manual memory is outside this project review. Up to 200 project
+  entries enter a preview. Unverified or unavailable sources are reported
+  separately; they do not authorize a successful empty replacement.
+- Every item includes its ID, kind, original type, verification, retained source
+  message references, original content, proposed content and reason codes.
+  Review cannot promote a candidate or turn an inference into a manual record.
+- Preview IDs are process-local, expire after 15 minutes and retain at most 32
+  review snapshots and 32 file previews. A restart requires another preview.
+  The client cannot supply replacement text to apply.
+- Apply compares each entry's complete version and captured project/source
+  version inside the serialized ledger update. Undo compares the applied
+  version independently for each revision. A conflict preserves the current
+  entry and does not block another selected entry.
+- Revision rows use `hy-tidy-revision`. Source invalidation, forget and manual
+  deletion prune their retained prose. Withdrawal also removes revisions in its
+  affected source closure. Receipt bodies never authorize recall.
+- Review source checks reuse current session location, checkpoint and anchor
+  validation with history reconciliation disabled. Preview, apply, undo and
+  export neither call a model/embedding service nor enqueue a generation job.
+  Existing indexing and capture remain separate runtime owners.
+- Rule export accepts at most 30 selected memories and only targets AGENTS.md
+  in the displayed working directory. It includes original kind, verification
+  and source attribution in the displayed appendix. It never targets a skill.
+- Export preview writes no file. Confirmation is a separate authenticated
+  request, rechecks project, entries and sources, verifies target identity and
+  content, stages the candidate beside the target and rechecks before rename.
+  The final alias must still resolve to the previewed canonical root and exact
+  target. A separate read of that fixed publication target must match the saved
+  root, path and version; a retargeted alias cannot validate another file.
+  Cancellation writes nothing. A changed file needs a fresh diff and another
+  confirmation. Symlink, hardlink, non-file and oversized targets are refused.
+- The final rename publishes a complete candidate. Version checks cover changes
+  observed before that rename; a noncooperating external process can still race
+  the last filesystem check. This route has no filesystem-wide CAS primitive.
+- Isolated-space directories are refused before resolving host project memory.
+  The UI disables the same pilot in spaces. No container or host file transfer
+  permission is added.
+- Web and Electron use the authenticated OpenChamber routes. Hosted mobile and
+  Capacitor use the same connected server and source checks through the shared
+  project-context panel. VS Code disables the entry, and its explicit local
+  route handler answers `501` with `runtime_unsupported` before proxy fallback.
+- Runtime/project changes abort and clear the review UI. The HTTP adapter also
+  checks the runtime instance after each response, including endpoint round
+  trips. A server write already accepted before cancellation may complete on
+  that original server; its revision remains readable there.
+- All review work remains inside the current server and its OpenCode source
+  reader. Enterprise mode can manage retained records through these local
+  operations; no new egress, provider entry, listener or share grant is added.
+
+### Why review uses local normalization
+
+The pilot can produce inspectable changes without another paid model call.
+Semantic rewrites, cross-entry merging/deletion, global memory, unattended
+cleanup and skill export require separate decisions and are excluded.
+
+### Why undo compares individual revisions
+
+A whole-store backup would overwrite later manual edits. Each revision retains
+only one entry's before/after proposal and requires that entry's applied version
+and source authority to remain current.

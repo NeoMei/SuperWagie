@@ -450,6 +450,24 @@ jobs:
           console.log(`Verified ${verified.length} packaged resource files for ${arch}`);
           NODE
 
+      - name: Exercise the packaged runtime and multiline PowerShell
+        timeout-minutes: 6
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $product = (Get-Content packages/electron/package.json -Raw | ConvertFrom-Json).build.productName
+          $application = Join-Path (Resolve-Path packages/electron/dist/win-unpacked).Path ($product + '.exe')
+          node packages/electron/scripts/smoke-packaged-runtime.mjs --app $application --receipt packages/electron/dist/windows-x64-runtime.json
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged cold startup, history readback or multiline PowerShell failed' }
+
+      - name: Upload packaged runtime receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-${{ matrix.arch }}-runtime
+          path: packages/electron/dist/windows-x64-runtime.json
+          if-no-files-found: warn
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

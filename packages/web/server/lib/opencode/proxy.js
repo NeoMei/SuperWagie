@@ -100,6 +100,18 @@ const formatProxyFailure = (req, handler, error, timedOut = false) => {
   return `method=${method} route=${route} function=${handler} class=${failureClass} message="${message}"${cause && cause !== message ? ` cause="${cause}"` : ''}`;
 };
 
+/** Archive overlays are shared by session records and the derived search index. */
+export const applyOwnedArchiveState = (session, archivedById) => {
+  if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
+  if (!archivedById || !Object.prototype.hasOwnProperty.call(archivedById, session.id)) return session;
+  const archivedAt = archivedById[session.id];
+  const time = session.time && typeof session.time === 'object' ? session.time : {};
+  if (typeof archivedAt === 'number') return { ...session, time: { ...time, archived: archivedAt } };
+  if (!('archived' in time)) return session;
+  const { archived: _dropped, ...rest } = time;
+  return { ...session, time: rest };
+};
+
 const isHttpsProxyTarget = (target) => {
   if (typeof target !== 'string') {
     return false;
@@ -457,18 +469,6 @@ export const registerOpenCodeProxy = (app, deps) => {
   // A number archives, `null` is an explicit unarchive (drops the stamp OpenCode
   // carries), and a session the file does not mention keeps whatever OpenCode
   // says.
-  const withArchivedAt = (session, archived) => {
-    if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
-    if (!Object.prototype.hasOwnProperty.call(archived, session.id)) return session;
-    const archivedAt = archived[session.id];
-    const time = session.time && typeof session.time === 'object' ? session.time : {};
-    if (typeof archivedAt === 'number') {
-      return { ...session, time: { ...time, archived: archivedAt } };
-    }
-    if (!('archived' in time)) return session;
-    const { archived: _dropped, ...rest } = time;
-    return { ...session, time: rest };
-  };
 
   /**
    * A legacy entry is the newest metadata its session has, including {}, so it
@@ -483,7 +483,7 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   const overlaySession = (session, { archived, stored, unreadSince }) => {
     let result = session;
-    if (archived) result = withArchivedAt(result, archived);
+    if (archived) result = applyOwnedArchiveState(result, archived);
     if (stored) result = withStoredMetadata(result, stored);
     if (unreadSince !== null) result = withUnreadBaseline(result, unreadSince);
     return result;

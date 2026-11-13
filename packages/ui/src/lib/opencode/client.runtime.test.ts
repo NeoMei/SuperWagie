@@ -36,3 +36,56 @@ describe('provider catalog instance ownership', () => {
     expect(requests).toEqual(roundTrip ? catalogRequests : [...catalogRequests, ...catalogRequests]);
   });
 });
+
+describe('send selection instance ownership', () => {
+  test('a model write cannot continue into an agent write after an instance round trip', async () => {
+    const requests: string[] = [];
+    const transport = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === '/auth/url-token') return new Response(null, { status: 404 });
+      requests.push(url.pathname);
+      if (url.pathname.endsWith('/model')) {
+        switchRuntimeEndpoint({ apiBaseUrl: 'http://selection-b.test', runtimeKey: 'selection-b' });
+        switchRuntimeEndpoint({ apiBaseUrl: 'http://selection-a.test', runtimeKey: 'selection-a' });
+        opencodeClient.reconnectToRuntimeBaseUrl();
+      }
+      return new Response(null, { status: 204 });
+    });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://selection-a.test', runtimeKey: 'selection-a' });
+    opencodeClient.reconnectToRuntimeBaseUrl();
+    try {
+      await expect(opencodeClient.applySendSelection('selection-session', {
+        model: { providerID: 'byok', id: 'model-b' }, agent: 'build',
+      }, '/selection/project', 'selection-a')).rejects.toThrow('runtime changed');
+      expect(requests).toEqual(['/api/session/selection-session/model']);
+    } finally {
+      transport.mockRestore();
+    }
+  });
+});
+
+
+describe('single command stop instance ownership', () => {
+  test('a switch during the synthetic note never removes a command on the new instance', async () => {
+    const requests: string[] = [];
+    const transport = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === '/auth/url-token') return new Response(null, { status: 404 });
+      requests.push(url.pathname);
+      if (url.pathname.endsWith('/synthetic')) {
+        switchRuntimeEndpoint({ apiBaseUrl: 'http://stop-b.test', runtimeKey: 'stop-b' });
+        switchRuntimeEndpoint({ apiBaseUrl: 'http://stop-a.test', runtimeKey: 'stop-a' });
+        opencodeClient.reconnectToRuntimeBaseUrl();
+      }
+      return Response.json({});
+    });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://stop-a.test', runtimeKey: 'stop-a' });
+    opencodeClient.reconnectToRuntimeBaseUrl();
+    try {
+      await expect(opencodeClient.stopBackgroundShells({ sessionID: 'stop-session', sessionDirectory: '/project',
+        shells: [{ shellID: 'shell-one', shellDirectory: '/project', command: 'sleep 1' }],
+      })).rejects.toThrow('runtime changed');
+      expect(requests).toEqual(['/api/session/stop-session/synthetic']);
+    } finally { transport.mockRestore(); }
+  });
+});

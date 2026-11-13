@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { PROJECT_TODO_TEXT_MAX_LENGTH, type ProjectTodoChange, type ProjectTodoItem } from '@/lib/projectContextApi';
+import { PROJECT_TODO_TEXT_MAX_LENGTH, type ProjectTodoChange, type ProjectTodoItem, type ProjectRef } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
 import { KnowledgeComposer } from './KnowledgeComposer';
 import { KNOWLEDGE_ICON_BUTTON_CLASS, useKnowledgeRevealClass } from './knowledgeRowStyle';
@@ -82,6 +82,7 @@ const SortableTodoItem: React.FC<{
 };
 
 export const TodosSection: React.FC<{
+  projectRef: ProjectRef;
   todos: ProjectTodoItem[];
   /** Panel-wide filter. Mutations still act on the full list. */
   query: string;
@@ -92,11 +93,12 @@ export const TodosSection: React.FC<{
    * Shows `next` and persists it through the container's store write: one
    * todo when `change` names it, otherwise the whole list.
    */
-  onPersistTodos: (next: ProjectTodoItem[], change?: ProjectTodoChange) => void;
+  onPersistTodos: (next: ProjectTodoItem[], change?: ProjectTodoChange) => Promise<boolean>;
   onSendToCurrentSession: (todoText: string) => void;
   onSendToNewSession: (todoId: string, todoText: string) => void;
   onSendToNewWorktreeSession: (todoId: string, todoText: string) => void;
 }> = ({
+  projectRef,
   todos,
   query,
   disabled,
@@ -115,13 +117,12 @@ export const TodosSection: React.FC<{
   const handleAddTodo = React.useCallback((trimmed: string) => {
     const id = createTodoId();
     const text = trimmed.slice(0, PROJECT_TODO_TEXT_MAX_LENGTH);
-    onPersistTodos(insertTodoBeforeCompleted(todos, {
+    return onPersistTodos(insertTodoBeforeCompleted(todos, {
       id,
       text,
       completed: false,
       createdAt: Date.now(),
     }), { kind: 'create', id, text });
-    return true;
   }, [onPersistTodos, todos]);
 
   const handleToggleTodoExpanded = React.useCallback((id: string) => {
@@ -144,7 +145,7 @@ export const TodosSection: React.FC<{
       }
       const remaining = todos.filter((item) => item.id !== id);
       const updated = { ...todo, completed };
-      onPersistTodos(
+      void onPersistTodos(
         completed ? [...remaining, updated] : insertTodoBeforeCompleted(remaining, updated),
         { kind: 'complete', id, completed },
       );
@@ -154,7 +155,7 @@ export const TodosSection: React.FC<{
 
   const handleDeleteTodo = React.useCallback(
     (id: string) => {
-      onPersistTodos(todos.filter((todo) => todo.id !== id), { kind: 'delete', id });
+      void onPersistTodos(todos.filter((todo) => todo.id !== id), { kind: 'delete', id });
     },
     [onPersistTodos, todos]
   );
@@ -164,7 +165,7 @@ export const TodosSection: React.FC<{
     if (next.length === todos.length) {
       return;
     }
-    onPersistTodos(next);
+    void onPersistTodos(next);
   }, [onPersistTodos, todos]);
 
   const handleTodoReorder = React.useCallback(
@@ -178,7 +179,7 @@ export const TodosSection: React.FC<{
       if (oldIndex === -1 || newIndex === -1) {
         return;
       }
-      onPersistTodos(sortTodosWithCompletedLast(arrayMove(todos, oldIndex, newIndex)));
+      void onPersistTodos(sortTodosWithCompletedLast(arrayMove(todos, oldIndex, newIndex)));
     },
     [onPersistTodos, todos]
   );
@@ -198,6 +199,8 @@ export const TodosSection: React.FC<{
   return (
     <div className="space-y-2">
       <KnowledgeComposer
+        projectRef={projectRef}
+        form="todos"
         placeholder={t('rightSidebar.contextNotesTodo.todo.inputPlaceholder')}
         addLabel={t('rightSidebar.contextNotesTodo.todo.addAria')}
         maxLength={PROJECT_TODO_TEXT_MAX_LENGTH}

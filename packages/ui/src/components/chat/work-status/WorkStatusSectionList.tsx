@@ -2,6 +2,8 @@ import React from 'react';
 
 import { WorkStatusGoalRow } from './WorkStatusGoalRow';
 import { WorkStatusPrimaryGroup } from './WorkStatusPrimaryGroup';
+import { WorkStatusTasksSection } from './WorkStatusTasksSection';
+import { useLoadSessionTodos } from './useLoadSessionTodos';
 import { WorkStatusUsageSection } from './WorkStatusUsageSection';
 import { WorkStatusTelemetrySection } from './WorkStatusTelemetrySection';
 import { WorkStatusSubagentsSection } from './WorkStatusSubagentsSection';
@@ -25,12 +27,14 @@ export const WorkStatusSectionList: React.FC<{
   visible?: boolean;
 }> = ({ sessionId, directory, repositoryEnabled, layout, visible = true }) => {
   const { extensionSections, sectionOrder, hiddenSections } = layout;
+  useLoadSessionTodos(sessionId, directory, visible && !hiddenSections.includes('tasks'));
   const sectionVisible = (id: Parameters<typeof isWorkStatusSectionVisible>[1]) => isWorkStatusSectionVisible(hiddenSections, id);
 
   // Keep these elements owned here so primary readout updates do not rerender
   // unrelated sections through the composition callback.
   const secondarySections = {
     usage: <WorkStatusUsageSection visible={visible} />,
+    tasks: <WorkStatusTasksSection sessionId={sessionId} />,
     telemetry: <WorkStatusTelemetrySection sessionId={sessionId} directory={directory} />,
     subagents: <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} />,
     workflows: <WorkStatusWorkflowsSection sessionId={sessionId} directory={directory} />,

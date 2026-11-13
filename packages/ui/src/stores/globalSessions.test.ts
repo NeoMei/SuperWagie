@@ -176,16 +176,24 @@ describe('listGlobalSessionPages', () => {
     expect(pages).toEqual([['ses_1'], ['ses_2']])
   })
 
-  test('dedupes by id and stops when a page repeats known ids', async () => {
+  test('rejects a partial list when a continuation page makes no progress', async () => {
     const calls: SessionListOptions[] = []
     const repeated = { sessions: [makeSession({ id: 'ses_1' }), makeSession({ id: 'ses_2' })], cursor: { next: 'c1' } }
     const listPage = pager([repeated, { ...repeated, cursor: { next: 'c2' } }], calls)
 
-    const sessions = await listGlobalSessionPages(listPage, { pageSize: 2 })
+    await expect(listGlobalSessionPages(listPage, { pageSize: 2 })).rejects.toThrow('Session pagination did not complete')
 
     expect(calls).toHaveLength(2)
-    expect(sessions.map((session) => session.id)).toEqual(['ses_1', 'ses_2'])
   })
+
+  test('rejects a cursor cycle even when each page contains a new session', async () => {
+    const listPage = pager([
+      { sessions: [makeSession({ id: 'a' })], cursor: { next: 'one' } },
+      { sessions: [makeSession({ id: 'b' })], cursor: { next: 'two' } },
+      { sessions: [makeSession({ id: 'c' })], cursor: { next: 'one' } },
+    ]);
+    await expect(listGlobalSessionPages(listPage, { pageSize: 1 })).rejects.toThrow('Session pagination did not complete');
+  });
 
   test('retries a failed page before treating the load as failed', async () => {
     let calls = 0

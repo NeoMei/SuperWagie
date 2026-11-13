@@ -12,17 +12,28 @@ import { getDeviceInfo } from '@/lib/device';
 import { markAppBootReady } from './appBootReady';
 import { initializeSharedPreferences } from './initializeSharedPreferences';
 import { installMobileWidgetSnapshotBridge } from './mobileWidgetSnapshot';
-import { I18nProvider } from '@/lib/i18n';
+import { I18nProvider, initializeLocale } from '@/lib/i18n';
 import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoader';
-import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
-import { PlatformAccountGate } from '@/components/auth/PlatformAccountGate';
-import { MobileApp } from './MobileApp';
+import { MobileApplicationBoundary } from './MobileApplicationBoundary';
+import { mobileOfficialMode } from './mobileOfficialRoute';
+import { MobileBusinessApplication } from './MobileBusinessApplication';
+import { isCapacitorApp } from '@/lib/platform';
 
 export function renderMobileApp(apis: RuntimeAPIs) {
   // Stamp the surface before anything else reads it: perf tuning, sync paging,
   // and device info all key off isMobileSurfaceRuntime(), and without the stamp
   // a wide native device (iPad landscape) would fall out of the mobile branch.
   window.__OPENCHAMBER_SURFACE__ = 'mobile';
+  const isNativeShell = isCapacitorApp();
+  // The selected-material reader mounts no workspace, model, widget or diff bootstrap.
+  if (!isNativeShell && mobileOfficialMode(window.location.search)) {
+    initializeLocale(); getDeviceInfo(); markAppBootReady();
+    const element = document.getElementById('root');
+    if (!element) throw new Error('Root element not found');
+    createRoot(element).render(<StrictMode><I18nProvider><MobileApplicationBoundary native={false} search={window.location.search} /></I18nProvider></StrictMode>);
+    return;
+  }
+
   preloadMarkdownRenderer();
   initializeSharedPreferences({
     logLabel: '[mobile-main]',
@@ -51,8 +62,6 @@ export function renderMobileApp(apis: RuntimeAPIs) {
   // notifications API: scheduling local notifications can't tell foreground from background
   // in a WKWebView and leaked while the app was open. (The Web Notifications API the web
   // runtime uses also doesn't display inside a WKWebView.)
-  const capacitor = (window as typeof window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  const isNativeShell = capacitor?.isNativePlatform?.() === true || window.location.protocol === 'capacitor:';
   const resolvedApis = isNativeShell
     ? { ...apis, notifications: { notifyAgentCompletion: async () => false, canNotify: () => false } }
     : apis;
@@ -61,7 +70,7 @@ export function renderMobileApp(apis: RuntimeAPIs) {
   // its own instance-connect flow (MobileConnectionWelcome asks for the
   // password per instance), while the plain mobile BROWSER against a
   // --ui-password server must keep the classic SessionAuthGate unlock page.
-  const app = <PlatformAccountGate unsupported><MobileApp apis={resolvedApis} /></PlatformAccountGate>;
+  const app = <MobileApplicationBoundary native={isNativeShell} search={window.location.search}><MobileBusinessApplication apis={resolvedApis} /></MobileApplicationBoundary>;
 
   createRoot(rootElement).render(
     <StrictMode>
@@ -69,7 +78,7 @@ export function renderMobileApp(apis: RuntimeAPIs) {
         <ThemeSystemProvider>
           <ThemeProvider>
             <DiffWorkerProvider>
-              {isNativeShell ? app : <SessionAuthGate deferRuntimeBootstrap>{app}</SessionAuthGate>}
+              {app}
             </DiffWorkerProvider>
           </ThemeProvider>
         </ThemeSystemProvider>

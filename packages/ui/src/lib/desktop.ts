@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import type { RuntimeAPIs } from '@/lib/api/types';
+import { creationApprovalResultSchema } from '@/lib/guests/creation-approval';
+import { officialSelectionSchema, type OfficialSelectionRequest } from '@/lib/guests/mobile-official';
+import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import type { NotificationWithdrawalResult, RuntimeAPIs } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
@@ -171,6 +174,54 @@ export const acquireDesktopShortcutRecording = (): (() => void) => {
 
 
 export const getDesktopQuitAction = (): (() => Promise<void>) | null => isElectronShell() ? getDesktopBridge()?.quitApp ?? null : null;
+
+/** Every call takes a cancellable native lease tied to the active runtime and caller lifetime. */
+export const createDesktopOfficialSelectionsAPI = (): RuntimeAPIs['officialSelections'] => {
+  const invoke = async <Result>(command: 'desktop_official_select' | 'desktop_official_revoke', args: { input: OfficialSelectionRequest } | { id: string }, response: z.ZodType<Result>, signal?: AbortSignal): Promise<Result> => {
+    const bridge = getDesktopBridge();
+    if (!isElectronShell() || !bridge?.invoke || !isDesktopLocalOriginActive()) throw new Error('mobile_selector_unsupported');
+    signal?.throwIfAborted();
+    const operationId = crypto.randomUUID();
+    let retired = false;
+    const cancel = () => { retired = true; void bridge.invoke?.('desktop_official_selection_cancel', { operationId }).catch(() => {}); };
+    const unsubscribe = subscribeRuntimeEndpointWillChange(cancel);
+    signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      const result = await bridge.invoke(command, { operationId, apiBaseUrl: getRuntimeApiBaseUrl(), accountToken: getRuntimeBearerTokenSync() || undefined, ...args });
+      signal?.throwIfAborted();
+      if (retired) throw new Error('mobile_selection_cancelled');
+      return response.parse(result);
+    } finally { unsubscribe(); signal?.removeEventListener('abort', cancel); }
+  };
+  return {
+    select: (input, signal) => invoke('desktop_official_select', { input }, officialSelectionSchema, signal),
+    revoke: async (id, signal) => { await invoke('desktop_official_revoke', { id }, z.object({ revoked: z.literal(true) }), signal); },
+  };
+};
+
+export const withdrawDesktopEventNotification = async (input: { tag: string; runtimeKey?: string }): Promise<NotificationWithdrawalResult | null> => {
+  const bridge = getDesktopBridge();
+  if (!bridge?.invoke) return null;
+  try {
+    return z.union([z.object({ status: z.literal('withdrawn'), count: z.number().int().nonnegative() }), z.object({ status: z.enum(['unsupported', 'unknown']) })]).parse(await bridge.invoke('desktop_withdraw_event_notification', { tag: input.tag, runtimeKey: input.runtimeKey || 'local' }));
+  } catch { return { status: 'unknown' }; }
+};
+
+export const createDesktopCreationApprovalsAPI = (): RuntimeAPIs['creationApprovals'] => ({
+  async perform(input) {
+    const bridge = getDesktopBridge();
+    if (!isElectronShell() || !bridge?.invoke || !isDesktopLocalOriginActive()) throw new Error('creation_coordination_unavailable');
+    const operationId = crypto.randomUUID();
+    let retired = false;
+    const cancel = () => { retired = true; void bridge.invoke?.('desktop_official_selection_cancel', { operationId }).catch(() => {}); };
+    const unsubscribe = subscribeRuntimeEndpointWillChange(cancel);
+    try {
+      const value = await bridge.invoke('desktop_creation_approval', { operationId, apiBaseUrl: getRuntimeApiBaseUrl(), accountToken: getRuntimeBearerTokenSync() || undefined, input });
+      if (retired) throw new Error('creation_owner_changed');
+      return creationApprovalResultSchema.parse(value);
+    } finally { unsubscribe(); }
+  },
+});
 
 export const createDesktopThemeFileAPI = (): RuntimeAPIs['themeFiles'] => {
   // Preload exposes this capability only to trusted local UI pages. Unlike the

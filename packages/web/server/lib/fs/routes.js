@@ -4,15 +4,22 @@ import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
 import { createGitCheckIgnoreTimeoutMs } from './search.js';
+import { inspectXlsxCopy, saveXlsxCopy } from './xlsx-copy.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
   CONTENT_SEARCH_MAX_LIMIT,
   CONTENT_SEARCH_MAX_QUERY_LENGTH,
   createContentSearchRuntime,
 } from './content-search.js';
-import { isString } from '../shared/guards.js';
+import { isBoolean, isPlainObject, isString } from '../shared/guards.js';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
+
+const parseMkdirRequest = (request) => {
+  if (!isPlainObject(request) || !isString(request.path) || request.path !== String(request.path) || !request.path.trim()) return null;
+  if (request.allowOutsideWorkspace !== undefined && !isBoolean(request.allowOutsideWorkspace)) return null;
+  return { path: request.path, allowOutsideWorkspace: request.allowOutsideWorkspace };
+};
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
@@ -883,11 +890,12 @@ export const registerFsRoutes = (app, dependencies) => {
 
   app.post('/api/fs/mkdir', async (req, res) => {
     try {
-      const { path: dirPath, allowOutsideWorkspace } = req.body ?? {};
-      if (typeof dirPath !== 'string' || !dirPath.trim()) {
+      const request = parseMkdirRequest(req.body ?? {});
+      if (!request) {
         return res.status(400).json({ error: 'Path is required' });
       }
 
+      const { path: dirPath, allowOutsideWorkspace } = request;
       let resolvedPath = '';
       if (allowOutsideWorkspace) {
         console.warn('Rejected outside-workspace mkdir without trusted directory grant');
@@ -1546,6 +1554,30 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.status(500).json({ error: error.message || 'Failed to create file' });
     }
   });
+
+  // Copy editing is server-owned and workspace-only, including when a caller
+  // bypasses the viewer. The destination is a new sibling of the source.
+  for (const operation of ['inspect', 'save']) {
+    app.post(`/api/fs/xlsx-copy/${operation}`, async (req, res) => {
+      const filePath = req.body?.path;
+      if (typeof filePath !== 'string' || !filePath) return res.status(400).json({ error: 'Path is required', reason: 'invalid-path' });
+      try {
+        const resolved = await resolveWorkspacePathFromContext({ fsPromises, req, targetPath: filePath, resolveProjectDirectory, path, os, normalizeDirectoryPath, managedRoots, chatsRoots });
+        if (!resolved.ok) return res.status(403).json({ error: 'Access denied', reason: 'workspace' });
+        const canonicalBase = await canonicalDirectoryPath(resolved.base, fsPromises, path);
+        const canonicalSource = await fsPromises.realpath(resolved.resolved);
+        if (!isPathWithinRoot(canonicalSource, canonicalBase, path, os)) return res.status(403).json({ error: 'Access denied', reason: 'workspace' });
+        const result = operation === 'inspect'
+          ? await inspectXlsxCopy(canonicalSource)
+          : await saveXlsxCopy(canonicalSource, req.body);
+        return res.json(result);
+      } catch (error) {
+        if (isOsPermissionError(error)) return sendOsPermissionDenied(res, 'Access denied');
+        if (error.code === 'ENOENT') return res.status(404).json({ error: 'File not found', reason: 'not-found' });
+        return res.status(error.status ?? 500).json({ error: error.reason ? error.message : 'The XLSX copy operation failed', reason: error.reason ?? 'failed' });
+      }
+    });
+  }
 
   app.post('/api/fs/write', async (req, res) => {
     const { path: filePath, content } = req.body || {};

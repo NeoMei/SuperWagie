@@ -343,7 +343,11 @@ export function createDispatchResultsRuntime({
     if (statuses[sessionId]) return { kind: 'running' };
     // A turn is over only when its subagents are done too: the session idles
     // while a background subagent works and runs again on its result.
-    const subagentsWorking = await activityProbe.hasWorkingChildren(sessionId, statuses);
+    const jobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    const subagentsWorking = jobs === undefined
+      ? await activityProbe.hasWorkingChildren(sessionId, statuses)
+      : jobs === null ? null : jobs.some((job) => job.kind !== 'shell')
+        || await activityProbe.hasWorkingDescendants(sessionId, statuses);
     if (subagentsWorking === null) return null;
     if (subagentsWorking) return { kind: 'subagents' };
     const encoded = encodeURIComponent(sessionId);

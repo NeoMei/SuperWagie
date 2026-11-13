@@ -1035,6 +1035,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
+        const pendingPick = useSelectionStore.getState().getSessionModelPick(currentSessionId);
+        if (pendingPick) {
+            tryApplyModelSelection(pendingPick.providerId, pendingPick.modelId);
+            return;
+        }
+
         const restoreKey = [
             currentSessionId,
             latestLoadedUserChoice.id,
@@ -1589,6 +1595,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 }
                 return;
             }
+            const pickedSessionId = controlledSessionId ?? currentSessionId;
+            if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, providerId, modelId);
             if (!selection && !options?.applyVariant && !isAutoModel(providerId, modelId)) {
                 // Add to recent models on successful selection. Auto is pinned, not recent.
                 addRecentModel(providerId, modelId);

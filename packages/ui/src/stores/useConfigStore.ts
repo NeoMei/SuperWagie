@@ -3531,6 +3531,19 @@ export const useConfigStore = create<ConfigStore>()(
                             return { override: undefined, inherited };
                         };
 
+                        const pendingModel = currentSessionId
+                            ? useSelectionStore.getState().getSessionModelPick(currentSessionId)
+                            : null;
+                        if (pendingModel) {
+                            applyResolvedModelSelection(
+                                pendingModel.providerId,
+                                pendingModel.modelId,
+                                resolveVariantSelectionForModel(pendingModel.providerId, pendingModel.modelId),
+                                "manual",
+                            );
+                            return;
+                        }
+
                         // Prefer a session-level manual override for this agent over the
                         // agent's configured default. Re-applying setAgent after subtask
                         // completion / rematerialization must not clobber the override

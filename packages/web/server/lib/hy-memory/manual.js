@@ -1,3 +1,4 @@
+import { pruneHyTidyRevisions } from './tidy.js';
 import { z } from 'zod';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -122,6 +123,7 @@ export function createSharedAgentMemoryPersistence({ store: owner, onChanged = (
           const entries = memorySchema.parse({ version: 1, entries: result.entries }).entries;
           state.engine.records = state.engine.records.filter((row) => row.collection !== 'manual' || row.projectId !== target.projectId);
           for (const entry of entries) state.engine.records.push({ collection: 'manual', id: entry.id, projectId: target.projectId, value: { ...entry, scope: target.scope } });
+          pruneHyTidyRevisions(state);
           dirty(state, target.projectId);
         });
         onChanged(target.projectId);

@@ -7,6 +7,7 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
+  XlsxCellEdit,
 } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 import {
@@ -106,6 +107,25 @@ const contentSearchErrorSchema = z.object({
 });
 
 const fileCreationResponseSchema = z.object({ success: z.literal(true), path: z.string().min(1) });
+const xlsxInspectionSchema = z.object({
+  version: z.string().min(1),
+  sheets: z.array(z.object({ name: z.string().min(1), truncated: z.boolean(), cells: z.array(z.object({ address: z.string(), value: z.string(), editable: z.boolean() })) })),
+});
+
+async function xlsxCopyRequest(operation: 'inspect' | 'save', path: string, body: { version?: string; name?: string; edits?: XlsxCellEdit[] }, signal: AbortSignal, getDirectory?: () => string | undefined) {
+  const response = await runtimeFetch(`/api/fs/xlsx-copy/${operation}`, {
+    method: 'POST', signal, headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory, undefined, path) },
+    body: JSON.stringify({ ...body, path }),
+  });
+  const payload: unknown = await response.json();
+  if (!response.ok) {
+    const parsed = contentSearchErrorSchema.safeParse(payload);
+    // The component translates stable reason codes; server diagnostics do not
+    // become untranslated UI text.
+    throw new Error(parsed.success ? parsed.data.reason ?? 'failed' : 'failed');
+  }
+  return payload;
+}
 
 export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFiles }: WebFilesAPIOptions): FilesAPI => ({
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
@@ -302,6 +322,15 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
       throw new FilesystemError('File creation returned an invalid response', { reason: 'invalid-response' });
     }
     return { success: true, path: normalizePath(result.data.path) };
+  },
+
+  async inspectXlsxCopy(path, signal) {
+    return xlsxInspectionSchema.parse(await xlsxCopyRequest('inspect', normalizePath(path), {}, signal, getDirectory));
+  },
+
+  async saveXlsxCopy(path, request, signal) {
+    const result = fileCreationResponseSchema.parse(await xlsxCopyRequest('save', normalizePath(path), request, signal, getDirectory));
+    return { success: true, path: normalizePath(result.path) };
   },
 
   async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {

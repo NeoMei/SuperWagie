@@ -24,8 +24,15 @@ const runningShellsSchema = z.array(z.object({
   metadata: z.object({ sessionID: z.string().optional() }).nullish(),
   time: z.object({ started: z.number() }),
 }));
+const backgroundJobsSchema = z.array(z.object({
+  kind: z.string().min(1),
+  sessionID: z.string().min(1),
+  status: z.enum(['running', 'completed', 'error', 'cancelled']),
+  command: z.string().optional(),
+  time: z.object({ started: z.number() }),
+}));
 
-export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch }) => {
+export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch, supportsBackgroundJobs = true }) => {
   const openCodeGet = async (fetchPath, query, signal = AbortSignal.timeout(timeoutMs)) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const search = new URLSearchParams(query || {}).toString();
@@ -147,5 +154,35 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     });
   };
 
-  return { fetchActiveSessionStatuses, fetchChildSessionIds, hasWorkingChildren, hasWorkingDescendants, fetchRunningShells };
+  // job.list (2.2.6+) is global and includes the requested session's descendants.
+  // Only a bare unsupported-route 404 permits legacy activity reads. A tagged
+  // missing session, ambiguous response or transport failure remains unknown.
+  const fetchRunningBackgroundJobs = async (sessionId) => {
+    if (!supportsBackgroundJobs) return undefined;
+    const base = buildOpenCodeUrl('/api/experimental/job', '');
+    const query = new URLSearchParams({ sessionID: sessionId, descendants: 'true', status: 'running' });
+    const response = await fetchImpl(`${base}?${query}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      signal: AbortSignal.timeout(timeoutMs),
+    }).catch(() => null);
+    if (!response) return null;
+    const text = await response.text().catch(() => null);
+    if (text === null) return null;
+    if (response.status === 404 && (!text.trim() || text.trim() === 'Not Found')) return undefined;
+    if (!response.ok) return null;
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    const parsed = backgroundJobsSchema.safeParse(unwrapOpenCodeResponse(body));
+    if (!parsed.success) return null;
+    return parsed.data.filter((job) => job.status === 'running').map((job) => ({
+      kind: job.kind, sessionID: job.sessionID, command: job.command, startedAt: job.time.started,
+    }));
+  };
+
+  return { fetchActiveSessionStatuses, fetchChildSessionIds, hasWorkingChildren, hasWorkingDescendants, fetchRunningShells, fetchRunningBackgroundJobs };
 };

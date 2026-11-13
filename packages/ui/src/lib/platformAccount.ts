@@ -59,7 +59,12 @@ export const requestPlatformAccount = async <T>(path: string, schema: z.ZodType<
 export const readPlatformAccount = () => requestPlatformAccount('/api/platform-account', stateSchema);
 export const readPlatformIdentitySession = () => requestPlatformAccount('/api/platform-account/session', identitySessionSchema);
 export const loginPlatformAccount = () => requestPlatformAccount('/api/platform-account/login', z.object({ authorizationUrl: z.string().url() }), 'POST');
-export const selectPlatformAccount = (accountId: string) => requestPlatformAccount('/api/platform-account/account', stateSchema, 'PUT', JSON.stringify({ accountId }));
+export const selectPlatformAccount = async (accountId: string) => {
+  const runtimeKey = getRuntimeKey();
+  const state = await requestPlatformAccount('/api/platform-account/account', stateSchema, 'PUT', JSON.stringify({ accountId }));
+  notifyPlatformAccountState(state, runtimeKey);
+  return state;
+};
 export const logoutPlatformAccount = async () => {
   const runtimeKey = getRuntimeKey();
   const state = await requestPlatformAccount('/api/platform-account/logout', stateSchema, 'POST');

@@ -11,6 +11,7 @@ import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useI18n } from '@/lib/i18n';
+import { Button } from '@/components/ui/button';
 
 type Props = {
   selectedCount: number;
@@ -25,6 +26,9 @@ type Props = {
   onArchive: () => void;
   onDelete: () => void;
   onDone: () => void;
+  canMarkWorkDone: boolean;
+  markingWorkDone: boolean;
+  onMarkWorkDone: () => void;
 };
 
 export const BulkActionBar: React.FC<Props> = ({
@@ -40,6 +44,9 @@ export const BulkActionBar: React.FC<Props> = ({
   onArchive,
   onDelete,
   onDone,
+  canMarkWorkDone,
+  markingWorkDone,
+  onMarkWorkDone,
 }) => {
   const { t } = useI18n();
   const hasSelection = selectedCount > 0;
@@ -54,6 +61,16 @@ export const BulkActionBar: React.FC<Props> = ({
       </span>
 
       <div className="ms-auto flex items-center gap-0.5">
+        {canMarkWorkDone && !archivedBucket ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" disabled={markingWorkDone} onClick={onMarkWorkDone} aria-label={t('sessions.sidebar.session.work.markDone')}>
+                <Icon name="check" className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.markDoneHint')}</p></TooltipContent>
+          </Tooltip>
+        ) : null}
         {canMoveToFolder ? (
           <DropdownMenu>
             <Tooltip>

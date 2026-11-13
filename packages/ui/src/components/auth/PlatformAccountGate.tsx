@@ -70,7 +70,7 @@ const AuthenticatedRuntimeBootstrap: React.FC<React.PropsWithChildren<{ bootstra
   return ready ? <>{children}</> : <div className="flex h-full items-center justify-center bg-background text-muted-foreground" role="status">{t('platformAccount.loading')}</div>;
 };
 
-export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRuntime?: boolean; unsupported?: boolean }>> = ({ children, bootstrapRuntime = false, unsupported = false }) => {
+export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRuntime?: boolean; unsupported?: boolean; unsupportedActions?: React.ReactNode }>> = ({ children, bootstrapRuntime = false, unsupported = false, unsupportedActions }) => {
   const { t } = useI18n();
   const [state, setState] = React.useState<PlatformIdentitySession | null>(unsupported ? { status: 'unsupported' } : null);
   const [error, setError] = React.useState<I18nKey | null>(null);
@@ -210,6 +210,7 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground text-balance">
           {unavailable ? t(state.status === 'unsupported' ? 'platformAccount.unsupported' : 'platformAccount.unconfigured') : t('platformAccount.loginRequiredDescription')}
         </p>
+        {unsupported && unsupportedActions}
         {error && <p className="mt-5 rounded-md bg-[var(--status-error-background)] px-3 py-2 text-sm text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
         {!unavailable && state && <div className="mt-5 w-full"><PlatformAccountAuth key={getRuntimeKey()} onSignedIn={(next) => { if (next.status === 'signed-in') hasMountedAuthenticatedApp.current = true; setState(unexpiredState(next)); }} /></div>}
         <div className="mt-3 flex items-center justify-center gap-2">

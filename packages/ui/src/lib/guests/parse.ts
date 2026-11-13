@@ -20,6 +20,7 @@ import {
   isGuestRequestPath,
 } from '@openchamber/sdk';
 import { z } from 'zod';
+import { guestToolCardSchema } from '@openchamber/sdk/schemas';
 
 import type { GuestCatalog, InstalledGuest } from './types.ts';
 
@@ -94,7 +95,8 @@ const guestToolSchema = z.object({
   output: z.enum(GUEST_TOOL_OUTPUTS).optional(),
   language: z.string().trim().min(1).optional(),
   columns: z.array(z.string().trim().min(1)).optional(),
-});
+  card: guestToolCardSchema.optional(),
+}).refine((value) => (value.output === 'card') === (value.card !== undefined));
 
 const guestFileEditorSchema = z.object({
   id: z.string().regex(PANEL_ID),

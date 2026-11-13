@@ -64,6 +64,11 @@ export {
   GUEST_COMMAND_DESCRIPTION_MAX,
   GUEST_COMMAND_NAME,
   GUEST_TOOLS_MAX,
+  GUEST_TOOL_CARD_FIELDS_MAX,
+  GUEST_TOOL_CARD_TONES_MAX,
+  GUEST_TOOL_CARD_TONE_KEY_MAX,
+  GUEST_TOOL_CARD_URL_MAX,
+  GUEST_TONES,
   GUEST_TOOL_COLUMNS_MAX,
   GUEST_TOOL_COLUMN_MAX,
   GUEST_TOOL_LANGUAGE_MAX,
@@ -125,6 +130,8 @@ export type {
   GuestCommandContribution,
   GuestToolContribution,
   GuestToolOutput,
+  GuestToolCard,
+  GuestTone,
   AttachContribution,
   AttachContributionObject,
   AttachMode,
@@ -535,3 +542,6 @@ export type {
   SurfaceTextEvent,
   SurfaceWheelEvent,
 } from './service-surface.ts';
+
+export type { GuestResultCard, GuestResultCardsRequest } from './result-cards.ts';
+export { GUEST_RESULT_CARDS_MAX } from './result-cards.ts';

@@ -1,3 +1,4 @@
+import { HyMemoryReview } from './HyMemoryReview';
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
@@ -423,6 +424,7 @@ export const MemorySection: React.FC<{
             </Button>
           ))}
         </div>
+        <HyMemoryReview projectPath={projectPath} />
         <MemoryTidyButton projectPath={projectPath} />
       </div>
 

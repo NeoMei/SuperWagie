@@ -1,5 +1,16 @@
 # Performance Measurement Tooling
 
+`platform-account-fixture.mjs` supplies a synthetic account service for isolated
+browser and packaged-desktop acceptance. It binds only `127.0.0.1` on an ephemeral
+port and uses the existing password-login, PKCE, nonce and JWKS checks. Its random
+password, signing key and tokens remain in memory. Callers receive credentials
+programmatically and must not print or save them. The first synthetic actor has a
+personal and a team account. A second actor has a separate personal account, so
+acceptance can verify actor isolation and account changes. All subscriptions and
+credits are empty. Every model and unsupported route
+is refused. It adds no product auth override and cannot contact a real account or
+model service. Call `stop()` to close it after the owned application processes.
+
 Owns the unattended performance capture commands and their shared Chrome
 DevTools Protocol plumbing. Read this before measuring OpenChamber performance
 or extending these scripts. The methodology rules they enforce come from

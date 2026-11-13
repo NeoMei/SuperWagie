@@ -4,6 +4,8 @@ import type { GuestToolContribution } from '@openchamber/sdk';
 import { useGuestsStore } from './store.ts';
 import {
   compileGuestToolRules,
+  resolveGuestToolCard,
+  safeHttpsAddress,
   guestToolTableRows,
   matchGuestToolRule,
   readPath,
@@ -127,5 +129,22 @@ describe('guestToolTableRows', () => {
     expect(guestToolTableRows({ items: [{ id: 1 }], total: 1 })).toEqual([{ id: 1 }]);
     expect(guestToolTableRows({ rows: [] })).toBeNull();
     expect(guestToolTableRows('text')).toBeNull();
+  });
+});
+
+describe('passive tool cards', () => {
+  test('renders output as escaped text, hides invalid links and falls back for unrecognized output', () => {
+    const rule = compileGuestToolRules([guest('creation', [{ match: 'result', output: 'card', card: {
+      title: '{output.title}', status: { value: '{output.status}', tones: { ready: 'info' } },
+      fields: [{ label: 'File', value: '{output.path}' }], link: { label: 'View', url: '{output.url}' },
+    } }])])[0];
+    expect(resolveGuestToolCard(rule, { title: '<script>send()</script>', status: 'ready', path: '样稿.png', url: 'javascript:run()' })).toMatchObject({
+      kind: 'card', card: { title: '<script>send()</script>', status: { text: 'ready', tone: 'info' }, fields: [{ label: 'File', value: '样稿.png' }], link: null },
+    });
+    expect(resolveGuestToolCard(rule, { unexpected: true })).toBe(null);
+    expect(resolveGuestToolCard(rule, 'plain output')).toBe(null);
+    expect(safeHttpsAddress('https://user:secret@example.com')).toBe(null);
+    expect(safeHttpsAddress('http://example.com')).toBe(null);
+    expect(resolveGuestToolCard(rule, { title: 'Sample', url: 'https://example.com/sample' })).toMatchObject({ kind: 'card', card: { link: { label: 'View', url: 'https://example.com/sample' } } });
   });
 });

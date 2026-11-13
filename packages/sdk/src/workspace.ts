@@ -32,6 +32,11 @@ export type GuestSessionRecord = {
   items: { id: string; data?: JsonValue }[];
   /** Every link on the session, read-only. Absent from hosts older than this field. */
   links?: GuestSessionLink[];
+  /** Missing on older hosts. Null means this host cannot verify the state. */
+  unread?: boolean | null;
+  pendingReply?: boolean | null;
+  /** Observed live tool only; no command text, arguments or external path. */
+  tool?: { name: string; target: null } | null;
 };
 export type GuestDirectoryCoverage = { directory: string; state: GuestLoadState };
 export type GuestProjectsSnapshot = { kind: 'projects'; state: GuestLoadState; projects: GuestProject[] };

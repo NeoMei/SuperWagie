@@ -6,6 +6,7 @@ import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { canDriveBrowserPage } from './browser/hostCapability';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
+import { sessionTodosEventSchema, type SessionTodosEvent } from '@/stores/useSessionTodosStore';
 import { sessionWarmingSnapshotSchema, type SessionWarmingSnapshot } from '@/stores/useSessionWarmingStore';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
@@ -253,6 +254,7 @@ const notificationPropertiesSchema = z.object({
 });
 
 type OpenChamberEvent =
+  | { type: 'notification-withdrawn'; tag: string }
   | { type: 'terminal-sessions-changed' }
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
   /** `connectionId` names this connection on the server; absent from servers before tracked items. */
@@ -269,6 +271,7 @@ type OpenChamberEvent =
   | ControlStreamSyncEnvelope
   /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
+  | { type: 'session-todos'; event: SessionTodosEvent }
   /** The host follows this space's queue again; what changed in a gap is read from the space. */
   | { type: 'space-queue-stream'; spaceId: string }
   /** The host follows this space's permission modes again; what changed in a gap is read from the space. */
@@ -448,6 +451,11 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
+  if (envelope.type === 'openchamber:notification-withdrawn') {
+    const parsed = z.object({ tag: z.string().min(1).max(200) }).safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'notification-withdrawn', tag: parsed.data.tag });
+    return;
+  }
   if (envelope.type === 'openchamber:terminal-sessions-changed') {
     for (const listener of listeners) listener({ type: 'terminal-sessions-changed' });
     return;
@@ -505,6 +513,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
       if (!isControlStreamSyncEvent(event)) continue;
       for (const listener of listeners) listener({ type: 'control-sync', event });
     }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:session-todos') {
+    const parsed = sessionTodosEventSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'session-todos', event: parsed.data });
     return;
   }
 

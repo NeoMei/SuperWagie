@@ -268,6 +268,13 @@ metadata-only changes update rows. See `lib/multirun/DOCUMENTATION.md`.
 
 ## In work
 
+Selection mode offers Mark done when selected sessions include work items.
+It removes each selected work item through the existing per-session write.
+Running turns continue. A failure names the affected sessions and leaves only
+failed ids selected, so retry does not repeat successful writes. Session menus
+also expose Mark read and Mark unread for active top-level sessions. Their
+shared state and runtime behavior are owned by `sync/session-unread.ts`.
+
 Sessions in work (`metadata.openchamber.work.state === 'open'`, see
 `packages/web/server/lib/session-work/DOCUMENTATION.md`) render in their own
 `work` activity zone under Chats and above the projects, in both
@@ -515,7 +522,16 @@ show-more state. Closing search therefore restores the exact prior Chats,
 In work, project, group, and folder projection.
 ID search does not include archived sessions. `ArchiveView` applies the same
 exact-ID rule to its own archived list. Other queries keep each view's existing
-matching and ordering. Search does not fetch sessions or broaden list membership.
+matching and ordering. Title projection does not fetch sessions or broaden
+list membership. A separate `SessionContentSearch` block reads indexed body
+matches through the shared search hook. It searches every active indexed
+conversation on the current server, including conversations outside the
+client's loaded title list. Source labels distinguish bodies and titles;
+opening a body result selects the matched message in its owning directory.
+The Archive uses the same block with archived lifecycle filtering. A disabled
+index or VS Code runtime shows the available title-only scope. Two-character
+queries show the 3-character body requirement. Indexing and read failures
+remain visible, and content results never replace the sidebar's title model.
 
 ## Loading rules
 

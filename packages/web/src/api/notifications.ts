@@ -1,11 +1,15 @@
 import type { NotificationPayload, NotificationsAPI } from '@openchamber/ui/lib/api/types';
 import { navigateFromNotification } from '@openchamber/ui/lib/router/notificationNavigation';
+import { withdrawDesktopEventNotification } from '@openchamber/ui/lib/desktop';
+import { z } from 'zod';
 
 const SW_READY_TIMEOUT_MS = 1500;
 const NOTIFICATION_DEDUPE_TTL_MS = 5000;
 const NOTIFICATION_DEDUPE_STORAGE_PREFIX = 'openchamber-notification-claim:';
 
 const notificationClaims = new Map<string, number>();
+const liveNotifications = new Map<string, Set<Notification>>();
+const notificationOwnerKey = (tag: string, runtimeKey?: string) => JSON.stringify([runtimeKey || 'local', tag]);
 
 const isClientFocused = (): boolean => {
   if (typeof document === 'undefined') return true;
@@ -22,6 +26,7 @@ const buildSessionTargetUrl = (sessionId?: string): string | null => {
 type NotificationTarget = {
   url: string;
   sessionId: string;
+  runtimeKey?: string;
 };
 
 const getNotificationTarget = (payload?: NotificationPayload): NotificationTarget | undefined => {
@@ -29,11 +34,13 @@ const getNotificationTarget = (payload?: NotificationPayload): NotificationTarge
   if (!sessionId) return undefined;
   const url = buildSessionTargetUrl(sessionId);
   if (!url) return undefined;
-  return { url, sessionId };
+  const target: NotificationTarget = { url, sessionId };
+  if (payload?.runtimeKey) target.runtimeKey = payload.runtimeKey;
+  return target;
 };
 
 type NotificationOptionsWithTarget = NotificationOptions & {
-  data?: NotificationTarget;
+  data?: { url?: string; sessionId?: string; runtimeKey?: string };
 };
 
 const withNotificationTarget = (
@@ -46,7 +53,7 @@ const withNotificationTarget = (
   };
   if (target) {
     options.data = target;
-  }
+  } else if (payload?.runtimeKey) options.data = { runtimeKey: payload.runtimeKey };
   return options;
 };
 
@@ -68,7 +75,7 @@ const focusOrOpenNotificationTarget = (target?: NotificationTarget): void => {
 
 const getNotificationClaimKey = (payload?: NotificationPayload): string => {
   const tag = typeof payload?.tag === 'string' ? payload.tag.trim() : '';
-  if (tag) return tag;
+  if (tag) return JSON.stringify([payload?.runtimeKey || 'local', tag]);
 
   return [payload?.sessionId, payload?.kind, payload?.title, payload?.body]
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
@@ -229,6 +236,13 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
       payload?.title ?? '犇马',
       withNotificationTarget(payload, target),
     );
+    if (payload?.tag) {
+      const owner = notificationOwnerKey(payload.tag, payload.runtimeKey);
+      const active = liveNotifications.get(owner) ?? new Set<Notification>();
+      active.add(notification);
+      liveNotifications.set(owner, active);
+      notification.onclose = () => { active.delete(notification); if (!active.size) liveNotifications.delete(owner); };
+    }
     notification.onclick = (event) => {
       event.preventDefault();
       focusOrOpenNotificationTarget(target);
@@ -273,6 +287,32 @@ const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean
 };
 
 export const createWebNotificationsAPI = (): NotificationsAPI => ({
+  async withdraw(input) {
+    const parsed = z.object({ tag: z.string().min(1).max(200), runtimeKey: z.string().optional() }).parse(input);
+    const desktop = await withdrawDesktopEventNotification(parsed);
+    if (desktop) return desktop;
+    let count = 0;
+    let supported = false;
+    const owner = notificationOwnerKey(parsed.tag, parsed.runtimeKey);
+    const active = liveNotifications.get(owner);
+    if (active) {
+      supported = true;
+      for (const notification of active) { notification.close(); count++; }
+      liveNotifications.delete(owner);
+    }
+    const registration = await getNotificationRegistration();
+    const getNotifications = z.function().safeParse(registration?.getNotifications);
+    if (getNotifications.success && registration) {
+      supported = true;
+      try {
+        for (const notification of await registration.getNotifications({ tag: parsed.tag })) {
+          if (notification.tag !== parsed.tag || notification.data?.runtimeKey !== parsed.runtimeKey) continue;
+          notification.close(); count++;
+        }
+      } catch { return { status: 'unknown' }; }
+    }
+    return count ? { status: 'withdrawn', count } : { status: supported ? 'unknown' : 'unsupported' };
+  },
   async notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean> {
     return (await notifyWithDesktop(payload)) || (await notifyWithWebAPI(payload));
   },

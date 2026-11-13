@@ -7,9 +7,11 @@ import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
  * A surface with a tab of its own (a file open in Files) registers here; the
  * desktop shell is told whether one is registered, and while one is, the
  * shortcut arrives as an `openchamber:close-tab` event instead of closing the
- * window. The last registered surface wins.
+ * window. A higher-priority covering page wins over file tabs; among equal
+ * priorities the last registered surface wins.
  */
-const handlers: Array<() => void> = [];
+type CloseTarget = { close: () => void; priority: number };
+const handlers: CloseTarget[] = [];
 let listening = false;
 
 const report = (): void => {
@@ -18,18 +20,23 @@ const report = (): void => {
 };
 
 const handleCloseTab = (): void => {
-  handlers[handlers.length - 1]?.();
+  let target: CloseTarget | undefined;
+  for (const candidate of handlers) {
+    if (!target || candidate.priority >= target.priority) target = candidate;
+  }
+  target?.close();
 };
 
-export const registerCloseTabTarget = (close: () => void): (() => void) => {
+export const registerCloseTabTarget = (close: () => void, priority = 0): (() => void) => {
   if (!listening) {
     window.addEventListener('openchamber:close-tab', handleCloseTab);
     listening = true;
   }
-  handlers.push(close);
+  const target = { close, priority };
+  handlers.push(target);
   report();
   return () => {
-    const index = handlers.lastIndexOf(close);
+    const index = handlers.lastIndexOf(target);
     if (index >= 0) handlers.splice(index, 1);
     report();
   };

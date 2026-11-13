@@ -14,6 +14,7 @@ import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { DraftSendError, useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
+import { useRetryModelPick } from '@/hooks/useRetryModelPick';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -35,6 +36,7 @@ import * as sessionActions from '@/sync/session-actions';
 const GuestAttachDialog = React.lazy(() => import('@/components/layout/GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
 import type { AttachIssueRequest } from '@openchamber/sdk';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
+import { usePublishMainComposerDraftTarget } from './composer/comment/mainComposerDraftTarget';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { loadMagicPrompts } from '@/lib/magicPrompts';
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
@@ -89,6 +91,9 @@ import { isAutoModel } from '@/lib/routing/autoModel';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { ReferencePickerDialog } from '@/components/references/ReferencePickerDialog';
+import { usePastedReferences } from './composer/usePastedReferences';
+import { PastedReferencePreview } from './composer/PastedReferencePreview';
+import { findWebLinks, withReferencesFromText } from './composer/referenceLinks';
 import { useAttachReferences } from '@/components/references/useAttachReferences';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import {
@@ -619,6 +624,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const configCatalogLoaded = useConfigStore((state) => state.providersLoaded && state.agentsLoaded);
     const currentProviderId = pinnedComposerSelection?.model?.providerId ?? configProviderId;
     const currentModelId = pinnedComposerSelection?.model?.modelId ?? configModelId;
+    useRetryModelPick(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
     const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
     // Subscribe to both sources read by getModelMetadata so async metadata and provider updates are observed.
     useConfigStore((state) => state.modelsMetadata);
@@ -875,6 +881,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         [attachedFiles],
     );
 
+    const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+    const pastedReferences = usePastedReferences({
+        directory: referencePickerDirectory,
+        scopeKey: chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null,
+        enabled: !isVSCodeRuntime() && inputMode === 'normal' && !isBtwActive,
+        text: () => composerRef.current?.getValue() ?? messageRef.current,
+        remove: (link) => {
+            const editor = composerRef.current;
+            const value = editor?.getValue() ?? messageRef.current;
+            const ranges = findWebLinks(value).filter((range) => range.link === link).reverse();
+            let next = value;
+            for (const range of ranges) next = next.slice(0, range.start) + next.slice(range.end);
+            if (editor) editor.replaceRange(0, value.length, next);
+            else setMessage(next);
+        },
+    });
+
     /**
      * Everything the prompt language needs to resolve references. Rebuilt only
      * when a registry changes, so typing does not churn the tokenizer input.
@@ -889,7 +912,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         pendingAttachmentFilenames: pendingPastedAttachmentFilenamesRef.current,
         knownSkillNames,
         fileIconVariant: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
-    }), [attachmentFilenames, currentTheme.metadata.variant, inputMode, knownAgentNames, knownSkillNames, knownSlashNamesWithGuests, knownSnippetTriggers]);
+        referenceLinkChips: pastedReferences.chips,
+    }), [pastedReferences.chips, attachmentFilenames, currentTheme.metadata.variant, inputMode, knownAgentNames, knownSkillNames, knownSlashNamesWithGuests, knownSnippetTriggers]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
@@ -1080,6 +1104,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : null,
         [inlineDraftDirectory, inlineDraftSessionKey],
     );
+    usePublishMainComposerDraftTarget(inlineDraftTarget, activeRuntimeKey, active && !columnPinned && !draftPresentationExiting && !hasPendingForm);
     const inlineDraftKey = inlineDraftTarget
         ? getInlineCommentDraftKey(activeRuntimeKey, inlineDraftTarget.directory, inlineDraftTarget.sessionKey)
         : null;
@@ -1359,6 +1384,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             void handleSubmitRef.current();
             return;
         }
+        if (!isBtwActive && !isVSCodeRuntime() && inputMode === 'normal' && !await pastedReferences.manager.beforeSend(inputSnapshot.message)) return;
         const queueRuntimeKey = getRuntimeKey();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
@@ -1408,7 +1434,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const syntheticParts = consumePendingSyntheticParts(mailboxTarget) ?? [];
         const draftTarget = inlineDraftTarget;
         const drafts = draftTarget ? consumeDrafts(draftTarget) : [];
-        const linked = linkedReferences;
+        const linked = withReferencesFromText(linkedReferences, pastedReferences.manager.inText(messageToQueue));
         // Queued context is delivered as captured, so comment snippets expand now.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
         const context = buildComposerContext({
@@ -1488,7 +1514,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [pastedReferences.manager, isBtwActive, getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1583,7 +1609,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const openGitHubPicker = React.useCallback(() => {
         setReferencePicker({ source: 'repository' });
     }, []);
-    const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
     const repositoryProvider = useRepositoryReferenceProvider(isVSCodeRuntime() ? null : referencePickerDirectory);
     const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
     const descriptorOf = useSourceControlDescriptorOf();
@@ -1646,6 +1671,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
             return;
         }
+
+        if (!queuedOnly && !isBtwActive && !isVSCodeRuntime() && inputMode === 'normal'
+            && !await pastedReferences.manager.beforeSend(inputSnapshot.message)) return;
+        const referencesToSend = withReferencesFromText(linkedReferences, pastedReferences.manager.inText(inputSnapshot.message));
 
         // Local slash commands are planned before anything is taken or
         // consumed. An action command must leave the queue and the attached
@@ -2012,7 +2041,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }),
                 ...(syntheticParts?.map((part) => part.text) ?? []),
             ],
-            references: isBtwActive ? [] : linkedReferences.map(toContextReference),
+            references: isBtwActive ? [] : referencesToSend.map(toContextReference),
         }, {
             parseAgentMention: (text) => {
                 if (isBtwActive) return { text };
@@ -2243,13 +2272,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
                     ?? currentDirectory;
             if (linkTargetSessionId) {
-                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferences);
+                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, referencesToSend);
             }
             // A session that starts with a tracker item attached reports itself
             // on that item (the tracker's Session comments, where it has them),
             // however it was started: a draft, a worktree made from the item.
             if (!currentSessionId && linkTargetSessionId) {
-                for (const reference of linkedReferences) {
+                for (const reference of referencesToSend) {
                     if (reference.kind !== 'tracker-item') continue;
                     void postTrackerSessionStarted(runtimeTrackers, reference.provider, {
                         sessionId: linkTargetSessionId,
@@ -2260,7 +2289,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             // The sent references leave the composer; one attached while the
             // send was out stays for the next message.
-            const sentKeys = new Set(linkedReferences.map(composerReferenceKey));
+            const sentKeys = new Set(referencesToSend.map(composerReferenceKey));
             setLinkedReferences((current) => current.filter((reference) => !sentKeys.has(composerReferenceKey(reference))));
         }).catch((error: unknown) => {
             const rawMessage =
@@ -3139,6 +3168,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 && isLargePlainTextPaste(pastedText);
 
             if (!shouldOfferLargePaste) {
+                pastedReferences.manager.readPaste(pastedText);
                 if (pastedText.includes('@')) {
                     markFileMentionPasteSuppression();
                 }
@@ -3156,6 +3186,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     pastedText,
                     getFileMentionInputSourceForInsertedText(pastedText),
                 );
+                pastedReferences.manager.readPaste(pastedText);
             };
 
             const attachAsFile = async (candidate: LargeTextPasteCandidate | null = null) => {
@@ -3275,7 +3306,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         e.preventDefault();
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
-    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+        pastedReferences.manager.readPaste(pastedText);
+    }, [pastedReferences.manager, addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     // Android commits an image through the IME instead of the page (see nativeImagePaste).
     React.useEffect(() => {
@@ -4762,6 +4794,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 onConfirm={attachReferences}
             />
         ) : null}
+        <PastedReferencePreview reference={pastedReferences.preview}
+            onClose={pastedReferences.closePreview} onRemove={pastedReferences.removePreview} />
         {attachDialogGuestId && !isMobile ? (
             <React.Suspense fallback={null}>
                 <GuestAttachDialog

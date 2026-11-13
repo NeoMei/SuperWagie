@@ -5,12 +5,14 @@ import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import type { NotificationPayload } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createWebNotificationsAPI } from '../../../web/src/api/notifications';
 
 const infoToasts: Array<{ title: string; id?: string; description?: string }> = [];
 
 mock.module('@/components/ui', () => ({
   toast: {
+    dismiss: () => {},
     info: (title: string, options?: { id?: string; description?: string }) => {
       infoToasts.push({ title, id: options?.id, description: options?.description });
     },
@@ -29,6 +31,7 @@ class EventSourceFixture {
   emit(properties: NotificationPayload | { title: number }) {
     this.onmessage?.({ data: JSON.stringify({ type: 'openchamber:notification', properties }) });
   }
+  withdraw(tag: string) { this.onmessage?.({ data: JSON.stringify({ type: 'openchamber:notification-withdrawn', properties: { tag } }) }); }
 }
 
 // Real mounted hook and notification API, with only browser boundary fixtures.
@@ -36,9 +39,11 @@ test('shares one control stream, deduplicates main-stream delivery, and retires 
   const dom = new Window({ url: 'http://notification.test' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const delivered: string[] = [];
+  const closed: string[] = [];
   class NotificationFixture {
     static permission = 'granted';
-    constructor(title: string) { delivered.push(title); }
+    constructor(readonly title: string) { delivered.push(title); }
+    close() { closed.push(this.title); }
   }
   const previousSettings = useUIStore.getState();
   for (const [name, value] of Object.entries({
@@ -71,7 +76,7 @@ test('shares one control stream, deduplicates main-stream delivery, and retires 
     expect(EventSourceFixture.instances).toHaveLength(1);
     const source = EventSourceFixture.instances[0];
     expect(source.url).toContain('/api/openchamber/events');
-    const payload = { title: 'Done', body: 'Ready', sessionId: 'session-one', kind: 'complete', directory: '/repo' };
+    const payload = { title: 'Done', body: 'Ready', sessionId: 'session-one', kind: 'complete', directory: '/repo', tag: 'ready-session-one', runtimeKey: getRuntimeKey() };
     await act(async () => {
       source.emit(payload);
       // The main event pipeline forwards these same identity fields to this API.
@@ -84,6 +89,10 @@ test('shares one control stream, deduplicates main-stream delivery, and retires 
     await act(async () => source.emit(pluginPayload));
     expect(delivered).toEqual(['Done']);
     expect(infoToasts).toEqual([{ title: 'Build done', id: 'plugin-build', description: 'Ready to review' }]);
+    await act(async () => source.withdraw('unrelated-event'));
+    expect(closed).toEqual([]);
+    await act(async () => source.withdraw('ready-session-one'));
+    expect(closed).toEqual(['Done']);
 
     source.emit({ title: 123 });
     expect(delivered).toEqual(['Done']);
@@ -101,7 +110,7 @@ test('shares one control stream, deduplicates main-stream delivery, and retires 
     expect(next.url).toContain('other-runtime.test');
     await act(async () => {
       source.emit({ ...payload, title: 'Stale' });
-      next.emit({ ...payload, title: 'New runtime' });
+      next.emit({ ...payload, title: 'New runtime', tag: 'ready-new-instance' });
     });
     expect(delivered).toEqual(['Done', 'New runtime']);
 

@@ -5,7 +5,9 @@ import { Icon } from '@/components/icon/Icon';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import type { ProjectRef } from '@/lib/projectContextApi';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
+import { useKnowledgeDraft } from './knowledgeDrafts';
 
 /** The counter appears only once the text gets close to the limit. */
 const COUNTER_THRESHOLD = 0.8;
@@ -17,10 +19,11 @@ const COUNTER_THRESHOLD = 0.8;
  * Shift+Enter, Return starts a new line and the add button adds. A one-line
  * field turns pasted line breaks into spaces.
  *
- * The draft lives here, so dictation can continue it and a failed add can
- * put it back.
+ * Drafts belong to their runtime, project and form until a confirmed save.
  */
 export const KnowledgeComposer: React.FC<{
+  projectRef: ProjectRef;
+  form: 'notes' | 'todos' | 'plans';
   placeholder: string;
   addLabel: string;
   maxLength: number;
@@ -31,10 +34,9 @@ export const KnowledgeComposer: React.FC<{
   onSubmit: (text: string) => Promise<boolean> | boolean;
   /** Extra controls before the add button, such as an import action. */
   extraActions?: React.ReactNode;
-}> = ({ placeholder, addLabel, maxLength, multiline = false, dictation = true, disabled = false, onSubmit, extraActions }) => {
-  const [text, setText] = React.useState('');
+}> = ({ projectRef, form, placeholder, addLabel, maxLength, multiline = false, dictation = true, disabled = false, onSubmit, extraActions }) => {
+  const { key: draftKey, text, setText, updateText, saving: submitting, save } = useKnowledgeDraft(projectRef, form);
   const isMobile = useUIStore((state) => state.isMobile);
-  const [submitting, setSubmitting] = React.useState(false);
 
   const normalize = React.useCallback((value: string) => (
     (multiline ? value : value.replace(/\r?\n/g, ' ')).slice(0, maxLength)
@@ -43,18 +45,8 @@ export const KnowledgeComposer: React.FC<{
   const submit = React.useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || submitting) return;
-    // Cleared at once so the next entry can be typed while this one saves; a
-    // failed add puts the text back unless something new was typed meanwhile.
-    setText('');
-    setSubmitting(true);
-    try {
-      if (!await onSubmit(trimmed)) {
-        setText((current) => (current.trim() ? current : trimmed));
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }, [onSubmit, submitting, text]);
+    await save((value) => onSubmit(value.trim()));
+  }, [onSubmit, save, submitting, text]);
 
   const showCounter = text.length >= maxLength * COUNTER_THRESHOLD;
   // The field itself stays enabled while an entry saves: disabling it would
@@ -102,7 +94,8 @@ export const KnowledgeComposer: React.FC<{
         // Dictation continues the draft instead of adding it, so a misheard
         // word can be fixed before it lands.
         <InlineDictationButton
-          onTranscript={(spoken) => setText((current) => normalize(current.trim() ? `${current.trimEnd()} ${spoken}` : spoken))}
+          key={draftKey}
+          onTranscript={(spoken) => updateText((current) => normalize(current.trim() ? `${current.trimEnd()} ${spoken}` : spoken))}
           disabled={disabled}
           buttonClassName={KNOWLEDGE_ICON_BUTTON_CLASS}
         />

@@ -6,7 +6,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
 import { expandSlashCommandGoalObjective, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
 import { ChildStoreManager } from './child-store';
-import { setSyncRefs } from './sync-refs';
+import { getDirectoryState, setSyncRefs } from './sync-refs';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
@@ -24,13 +24,19 @@ import { createContextPart } from '@/lib/messages/contextParts';
 
 // Catalog routing and draft ownership do not exercise external model enrichment.
 let previousModelsMetadata = useConfigStore.getState().modelsMetadata;
+let previousReadSession = opencodeClient.getSession;
 beforeEach(() => {
+  previousReadSession = opencodeClient.getSession;
+  opencodeClient.getSession = async (id, directory) => getDirectoryState(directory)?.session.find((session) => session.id === id) ?? { id };
   previousModelsMetadata = useConfigStore.getState().modelsMetadata;
   useConfigStore.setState({ modelsMetadata: new Map([
     ['fixture/model', { id: 'model', providerId: 'fixture' }],
   ]) });
 });
-afterEach(() => { useConfigStore.setState({ modelsMetadata: previousModelsMetadata }); });
+afterEach(() => {
+  opencodeClient.getSession = previousReadSession;
+  useConfigStore.setState({ modelsMetadata: previousModelsMetadata });
+});
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -323,32 +329,43 @@ describe('resolveSendSelection thinking level', () => {
   });
   const desire = (variant) => resolveSendSelection('ses_variant', DIRECTORY, { providerID: 'openai', modelID: MODEL.id, variant });
 
-  // An explicit Default is `null` in UI state; OpenCode rejects a null
-  // variant, so it has to switch the session off its effort without one.
-  test('Default on a session with an effort switches it to the model without a variant', () => {
-    seedSession({ ...MODEL, variant: 'high' });
-    expect(desire(null).model).toEqual(MODEL);
+  test('a stale synced match cannot suppress the server model switch', async () => {
+    seedSession(MODEL);
+    const original = opencodeClient.getSession;
+    opencodeClient.getSession = async () => ({ id: 'ses_variant', model: { providerID: 'openai', id: 'old-model' } });
+    try {
+      expect((await desire(undefined)).model).toEqual(MODEL);
+    } finally {
+      opencodeClient.getSession = original;
+    }
   });
 
-  test('Default on a session without an effort sends no switch', () => {
+  // An explicit Default is `null` in UI state; OpenCode rejects a null
+  // variant, so it has to switch the session off its effort without one.
+  test('Default on a session with an effort switches it to the model without a variant', async () => {
+    seedSession({ ...MODEL, variant: 'high' });
+    expect((await desire(null)).model).toEqual(MODEL);
+  });
+
+  test('Default on a session without an effort sends no switch', async () => {
     seedSession(MODEL);
-    expect(desire(null).model).toBeUndefined();
-    expect(desire(undefined).model).toBeUndefined();
+    expect((await desire(null)).model).toBeUndefined();
+    expect((await desire(undefined)).model).toBeUndefined();
   });
 
   // OpenCode records a switch without a variant as variant "default"; reading
   // that back as a difference would switch again before every prompt.
-  test('Default on a session OpenCode recorded as "default" sends no switch', () => {
+  test('Default on a session OpenCode recorded as "default" sends no switch', async () => {
     seedSession({ ...MODEL, variant: 'default' });
-    expect(desire(null).model).toBeUndefined();
-    expect(desire(undefined).model).toBeUndefined();
-    expect(desire('high').model).toEqual({ ...MODEL, variant: 'high' });
+    expect((await desire(null)).model).toBeUndefined();
+    expect((await desire(undefined)).model).toBeUndefined();
+    expect((await desire('high')).model).toEqual({ ...MODEL, variant: 'high' });
   });
 
-  test('a chosen effort switches only when it differs', () => {
+  test('a chosen effort switches only when it differs', async () => {
     seedSession({ ...MODEL, variant: 'high' });
-    expect(desire('high').model).toBeUndefined();
-    expect(desire('low').model).toEqual({ ...MODEL, variant: 'low' });
+    expect((await desire('high')).model).toBeUndefined();
+    expect((await desire('low')).model).toEqual({ ...MODEL, variant: 'low' });
   });
 });
 

@@ -4,6 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 import { toast } from 'sonner';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { resolveProjectContextId } from '@/lib/projectContextApi';
 import type { Session } from '@/lib/opencode/model';
 import type { LinkedIssue } from '@/lib/linkedIssues';
 import { useUIStore } from '@/stores/useUIStore';
@@ -11,6 +14,8 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import * as sessionActions from '@/sync/session-actions';
+import * as sessionKnowledgeApi from '@/lib/sessionKnowledgeApi';
+import { PresenceContext } from './presenceContext';
 
 let WorkStatusContextSection: typeof import('./WorkStatusContextSection').WorkStatusContextSection;
 
@@ -38,11 +43,15 @@ describe('agent-linked threads in the context section', () => {
   let restoreGlobals: () => void;
   let fetchSpy: ReturnType<typeof spyOn>;
   const sdk = OpenCode.make({ baseUrl: 'http://unlink.test', fetch: () => new Promise<Response>(() => undefined) });
+  const presence = new Map<string, boolean>();
+  const reportPresence = (id: string, present: boolean) => { presence.set(id, present); };
   const render = async () => {
     await act(async () => root.render(
       <I18nProvider>
         <SyncProvider sdk={sdk} directory={directory}>
-          <WorkStatusContextSection sessionId={sessionId} directory={directory} />
+          <PresenceContext.Provider value={reportPresence}>
+            <WorkStatusContextSection sessionId={sessionId} directory={directory} />
+          </PresenceContext.Provider>
         </SyncProvider>
       </I18nProvider>,
     ));
@@ -55,6 +64,7 @@ describe('agent-linked threads in the context section', () => {
   const unlinkButtons = () => Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-label="Remove link"]'));
 
   beforeEach(async () => {
+    presence.clear();
     win = new Window({ url: 'http://localhost' });
     const values = {
       window: win, document: win.document, navigator: win.navigator,
@@ -94,6 +104,55 @@ describe('agent-linked threads in the context section', () => {
     fetchSpy.mockRestore();
     await win.happyDOM.close();
     restoreGlobals();
+  });
+
+  test('an unpinned linked plan alone keeps context visible and pinned duplicates render once', async () => {
+    await publish([]);
+    expect(presence.get('context-sources')).toBe(false);
+    const project = { id: 'plan-owner', path: directory, name: 'Plans' };
+    const key = resolveProjectContextId(project);
+    const previousEntries = useProjectContextStore.getState().entries;
+    const previousProjects = useProjectsStore.getState().projects;
+    const load = spyOn(useProjectContextStore.getState(), 'load').mockResolvedValue();
+    const plan = { id: 'p1', file: 'plan.md', title: 'Linked proposal', createdAt: 1, pinned: false, progress: { done: 2, total: 4 }, session: { sessionId, linkedAt: 1 } };
+    const entry = { notes: [], todos: [], plans: [plan, { ...plan, id: 'other', title: 'Other session plan', session: { sessionId: 'other-session', linkedAt: 1 } }], sharedPlansDir: null, loaded: true, loading: false, error: null };
+    try {
+      await act(async () => {
+        useProjectContextStore.setState({ entries: { [key]: entry } });
+        useProjectsStore.setState({ projects: [project] });
+      });
+      expect(container.textContent).toContain('Linked proposal');
+      expect(container.textContent).toContain('2/4');
+      expect(presence.get('context-sources')).toBe(true);
+      expect(container.querySelectorAll('[aria-label="Unpin from context"]')).toHaveLength(0);
+      expect(container.textContent).not.toContain('Other session plan');
+      const summary = spyOn(sessionKnowledgeApi, 'fetchSessionKnowledgeSummary').mockResolvedValue({
+        notes: [], plans: [{ id: plan.id, title: plan.title }], memory: { global: 0, project: 0 },
+      });
+      try {
+        await act(async () => useProjectContextStore.setState({ entries: { [key]: { ...entry, plans: [{ ...plan, progress: { done: 3, total: 4 } }] } } }));
+        expect(container.textContent?.match(/Linked proposal/g)).toHaveLength(1);
+        expect(container.querySelectorAll('[aria-label="Unpin from context"]')).toHaveLength(1);
+      } finally {
+        summary.mockRestore();
+      }
+      expect(container.textContent).toContain('3/4');
+      await act(async () => useProjectContextStore.setState({ entries: { [key]: { ...entry, plans: [{ ...plan, progress: undefined }] } } }));
+      expect(container.textContent).not.toContain('0%');
+      expect(container.textContent).not.toContain('3/4');
+      await act(async () => useProjectContextStore.setState({ entries: { [key]: {
+        ...entry, plans: [{ ...plan, id: 'other', title: 'Other session plan', session: { sessionId: 'other-session', linkedAt: 1 } }],
+      } } }));
+      expect(container.textContent).not.toContain('Linked proposal');
+      expect(container.textContent).not.toContain('Other session plan');
+      expect(presence.get('context-sources')).toBe(false);
+    } finally {
+      load.mockRestore();
+      await act(async () => {
+        useProjectContextStore.setState({ entries: previousEntries });
+        useProjectsStore.setState({ projects: previousProjects });
+      });
+    }
   });
 
   test('offers a remove control on every linked row that unlinks the thread', async () => {

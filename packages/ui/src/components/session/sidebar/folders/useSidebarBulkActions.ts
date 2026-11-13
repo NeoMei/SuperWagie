@@ -8,6 +8,11 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry } from '../sessions/sessionRowOrder';
 import type { BulkDeleteSessionsConfirmState } from '../shell/ConfirmDialogs';
+import { markSessionsWorkDone } from '@/sync/session-work-batch';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { useUIStore } from '@/stores/useUIStore';
 
 const EMPTY_SESSIONS_BY_ID = new Map<string, { time?: { archived?: number | null } }>();
 
@@ -102,6 +107,22 @@ export const useSidebarBulkActions = (args: Args) => {
   const selectedIds = useSessionMultiSelectStore((state) => state.selectedIds);
   const selectionScopeKey = useSessionMultiSelectStore((state) => state.scopeKey);
   const rowOrderRegistry = useSessionRowOrderRegistry();
+  const workEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const canMarkWorkDone = useGlobalSessionsStore(React.useCallback((state) => workEnabled && [...selectedIds].some(id => isSessionInWork(state.entityById.get(id))), [selectedIds, workEnabled]));
+  const [markingWorkDone, setMarkingWorkDone] = React.useState(false);
+  const handleBulkMarkWorkDone = React.useCallback(async () => {
+    if (markingWorkDone || !canMarkWorkDone) return;
+    const ownerCurrent = captureRuntimeInstance();
+    const ids = [...selectedIds];
+    const titles = new Map(ids.map(id => [id, useGlobalSessionsStore.getState().entityById.get(id)?.title ?? id]));
+    setMarkingWorkDone(true);
+    try {
+      const { doneIds, failedIds } = await markSessionsWorkDone(ids);
+      if (!ownerCurrent()) return;
+      useSessionMultiSelectStore.getState().removeMany(doneIds);
+      if (failedIds.length) toast.error(t('sessions.sidebar.bulkActions.markDoneFailed'), { description: failedIds.map(id => titles.get(id) ?? id).join(', ') });
+    } finally { setMarkingWorkDone(false); }
+  }, [canMarkWorkDone, markingWorkDone, selectedIds, t]);
 
   const handleToggleSelectionMode = React.useCallback(() => {
     useSessionMultiSelectStore.getState().toggleMode();
@@ -308,6 +329,9 @@ export const useSidebarBulkActions = (args: Args) => {
     handleBulkArchive,
     handleBulkHardDelete,
     handleBulkRestore,
+    canMarkWorkDone,
+    markingWorkDone,
+    handleBulkMarkWorkDone,
     confirmBulkDelete,
   };
 };

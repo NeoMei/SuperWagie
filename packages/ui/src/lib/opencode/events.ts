@@ -886,6 +886,14 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     // owns these records independently of session messages.
     case "artifact.updated":
       return []
+    // First-token timing has no sync-model field. Content and execution events
+    // already own activity; this marker must not create another state change.
+    case "session.step.first-token":
+      return []
+    // Experimental MCP subscription payloads belong to their subscriber, not
+    // the app's session/catalog state. Existing mcp.* events own its refreshes.
+    case "experimental.mcp.event":
+      return []
     // --- shell commands -------------------------------------------------------
 
     // A session's running commands keep its turn open (background commands),

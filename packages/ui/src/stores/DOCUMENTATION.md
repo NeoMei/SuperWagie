@@ -588,6 +588,13 @@ provenance, and preserves explicit effort overrides. A fresh draft still starts
 with its normal defaults. Project navigation does not replace a Chat draft's
 catalog or materialize its directory.
 
+Runtime-local pending model picks belong to `sync/selection-store.ts`. Model
+pickers and favorite shortcuts mark explicit intent; restore paths only save
+preferences. Pending intent outranks agent pins and catalog refreshes until its
+captured send or configuration write succeeds. Retry application is scoped to
+the session's owning directory and serializes rapid choices. Account-bound
+`unihub` tasks and Auto do not use that retry write path.
+
 Manual model and effort selections survive catalog gaps too. A missing catalog
 entry is not a request to replace a user's choice. Directory snapshots retain
 the effort override separately from its inherited value, including explicit
@@ -1173,3 +1180,15 @@ and mobile disappearance cleanup consume that separate authority value.
 A bounded newest-page read cannot prove older sessions were removed. Keeping
 complete authority separate lets idle reads stay small without allowing partial
 results or failures to delete pins, folders or session state.
+
+### Session usage changes without timestamp updates
+
+The global session row signature includes cost and tokens as well as time and metadata. A usage-only server update must publish a new row, while identical usage retains the current reference. These values describe the OpenCode session; they do not establish a product billing receipt.
+
+## Session tool steps
+
+`useSessionTodosStore` owns derived per-session lists and their authoritative revisions. Successful empty, off, unsupported, loading and failed refreshes remain distinguishable. A request captures the store generation and its own slot; reset, directory replacement and a newer control event prevent obsolete responses from replacing current data. Mounted watchers decide which invalidated sessions reload. No personal Markdown tasks are read or written.
+
+### Pagination completeness before replacement
+
+A global full-list walk rejects repeated continuation cursors and continuation pages with no new records. Its accepted pages may still seed incremental display, but such a walk never supplies authoritative deletion coverage. Explicit stopAfterPage callers keep their intentional bounded-read semantics.

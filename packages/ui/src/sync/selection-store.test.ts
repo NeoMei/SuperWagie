@@ -4,6 +4,7 @@ import { useSelectionStore } from './selection-store';
 beforeEach(() => {
   useSelectionStore.setState({
     sessionModelSelections: new Map(),
+    sessionPickedModels: new Map(),
     sessionAgentSelections: new Map(),
     sessionFollowedAgents: new Map(),
     sessionFollowedModels: new Map(),
@@ -93,4 +94,28 @@ test('a session model switch counts only against a model already reconciled', ()
   expect(store.isSessionModelSwitched('one', 'p/b#')).toBe(true);
   store.clearSessionSelections('one');
   expect(store.isSessionModelSwitched('one', 'p/b#')).toBe(false);
+});
+
+
+test('a successful model write settles only its captured pick', () => {
+  const store = useSelectionStore.getState();
+  store.pickSessionModel('one', 'byok', 'a');
+  const settle = store.captureSessionModelPickSettlement('one', 'byok', 'a');
+  store.pickSessionModel('one', 'byok', 'b');
+  store.pickSessionModel('one', 'byok', 'a');
+  settle();
+  expect(store.getSessionModelPick('one')).toEqual({ providerId: 'byok', modelId: 'a' });
+  store.captureSessionModelPickSettlement('one', 'byok', 'a')();
+  expect(store.getSessionModelPick('one')).toBeNull();
+});
+
+test('pending model picks are runtime scoped and never persisted as applied choices', () => {
+  const store = useSelectionStore.getState();
+  store.pickSessionModel('one', 'byok', 'b');
+  store.captureSessionModelPickSettlement('one', 'byok', 'b', 'other-runtime')();
+  expect(store.getSessionModelPick('one')).toEqual({ providerId: 'byok', modelId: 'b' });
+  const saved = useSelectionStore.persist.getOptions().partialize?.(useSelectionStore.getState());
+  expect(saved).not.toHaveProperty('sessionPickedModels');
+  store.clearSessionSelections('one');
+  expect(store.getSessionModelPick('one')).toBeNull();
 });

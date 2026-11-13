@@ -25,7 +25,7 @@ import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
-import { resolveProjectContextId } from '@/lib/projectContextApi';
+import { resolveProjectContextId, type ProjectPlanLink, type ProjectRef } from '@/lib/projectContextApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
@@ -35,6 +35,35 @@ import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
 import { useLeaveWorkStatus } from './leaveWorkStatus';
+
+import { useProjectContextOwner } from '@/hooks/useProjectContextOwner';
+import { observeProjectContext } from '@/lib/projectContextSync';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
+
+const EMPTY_PLANS: ProjectPlanLink[] = [];
+
+/**
+ * Plans whose work runs in this session: the plan's card in Project knowledge
+ * leads here, and this row leads back. Read from the project's knowledge
+ * store, kept current through the control stream like the knowledge panel.
+ */
+const useSessionLinkedPlans = (sessionId: string | null, projectRef: ProjectRef | null): ProjectPlanLink[] => {
+  const contextId = projectRef ? resolveProjectContextId(projectRef) : null;
+  const plans = useProjectContextStore((state) => (contextId ? state.entries[contextId]?.plans : undefined) ?? EMPTY_PLANS);
+  const projectId = projectRef?.id;
+  const projectPath = projectRef?.path;
+  React.useEffect(() => {
+    if (!sessionId || !projectId || !projectPath) return;
+    const project = { id: projectId, path: projectPath };
+    return observeProjectContext(project, () => runBackgroundNetworkTask(
+      () => useProjectContextStore.getState().load(project, { force: true }),
+    ));
+  }, [projectId, projectPath, sessionId]);
+  return React.useMemo(
+    () => (sessionId ? plans.filter((plan) => plan.session?.sessionId === sessionId) : EMPTY_PLANS),
+    [plans, sessionId],
+  );
+};
 
 
 type Props = {
@@ -173,6 +202,13 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     });
   }, [directory, sessionId, t]);
 
+  const projectRef = useProjectContextOwner(directory);
+  const linkedPlans = useSessionLinkedPlans(sessionId, projectRef);
+  const linkedPlanIds = React.useMemo(() => new Set(linkedPlans.map((plan) => plan.id)), [linkedPlans]);
+  const linkedPlanProgress = new Map(linkedPlans.map((plan) => [plan.id, plan.progress ? `${plan.progress.done}/${plan.progress.total}` : undefined]));
+  const pinnedPlanIds = React.useMemo(() => new Set(visibleKnowledge.plans.map((plan) => plan.id)), [visibleKnowledge.plans]);
+  const plansToShow = [...linkedPlans, ...visibleKnowledge.plans.filter((plan) => !linkedPlanIds.has(plan.id))];
+
   const memoryCount = visibleKnowledge.memory.global + visibleKnowledge.memory.project;
   const pinnedCount = visibleKnowledge.notes.length + visibleKnowledge.plans.length;
 
@@ -271,12 +307,11 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     [mcpStatus],
   );
 
-  useReportWorkStatusPresence(
-    'context-sources',
-    linked.length > 0 || skills.length > 0 || mcpCount > 0 || pinnedCount > 0 || memoryCount > 0,
-  );
+  const hasContext = linked.length > 0 || skills.length > 0 || mcpCount > 0
+    || pinnedCount > 0 || plansToShow.length > 0 || memoryCount > 0;
+  useReportWorkStatusPresence('context-sources', hasContext);
 
-  if (linked.length === 0 && skills.length === 0 && mcpCount === 0 && pinnedCount === 0 && memoryCount === 0) {
+  if (!hasContext) {
     return null;
   }
 
@@ -448,11 +483,11 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.pinnedNote')}</WorkStatusValue>}
         />
       ))}
-      {visibleKnowledge.plans.map((plan) => (
+      {plansToShow.map((plan) => (
         <WorkStatusRow
           key={plan.id}
           muted
-          leading={(
+          leading={pinnedPlanIds.has(plan.id) ? (
             <button
               type="button"
               disabled={!isDraft && (!sessionId || !directory)}
@@ -465,9 +500,9 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
             >
               <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
             </button>
-          )}
+          ) : <Icon name="file-text" className="size-3.5 text-muted-foreground" />}
           label={plan.title}
-          value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.pinnedPlan')}</WorkStatusValue>}
+          value={<WorkStatusValue tone="muted">{linkedPlanProgress.get(plan.id) ?? t('chat.workStatus.breakdown.pinnedPlan')}</WorkStatusValue>}
         />
       ))}
       {memoryCount > 0 ? (

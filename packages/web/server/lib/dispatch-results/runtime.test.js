@@ -46,6 +46,7 @@ const createOpenCode = () => {
   const state = {
     active: {},
     children: {},
+    jobs: undefined,
     sessions: { ses_child: { id: 'ses_child', title: 'Fix the toolbar' } },
     records: { ses_child: [] },
     synthetic: [],
@@ -54,6 +55,7 @@ const createOpenCode = () => {
   };
   const fetchImpl = vi.fn(async (url, init = {}) => {
     const { pathname, searchParams } = new URL(url);
+    if (pathname === '/api/experimental/job') return state.jobs === undefined ? new Response(null, { status: 404 }) : state.jobs instanceof Response ? state.jobs.clone() : json({ data: state.jobs });
     if (pathname === '/api/session/active') return json({ data: state.active });
     if (pathname === '/api/session') {
       const parentID = searchParams.get('parentID');
@@ -558,4 +560,48 @@ it('retries unavailable older history after settle checks without another idle e
   unavailable = false;
   await settle();
   expect(openCode.state.synthetic[0]?.text).toContain('Recovered A');
+});
+
+
+describe('dispatch result job authority', () => {
+  it('waits for an app-created workflow child absent from the native job list', async () => {
+    const { runtime, openCode } = await createRuntime();
+    openCode.state.records.ses_child.push(user(11), assistant('Waiting on workflow', 12), idle('succeeded', 13));
+    openCode.state.jobs = [];
+    openCode.state.active.ses_workflow = { type: 'running' };
+    openCode.state.sessions.ses_workflow = { id: 'ses_workflow', parentID: 'ses_child' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    await settle();
+    expect(openCode.state.synthetic).toEqual([]);
+    delete openCode.state.active.ses_workflow;
+    openCode.state.records.ses_child.push(assistant('Workflow ready', 40), idle('succeeded', 41));
+    await settle();
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Workflow ready') })]);
+  });
+
+  it('holds a descendant image result and delivers once jobs are authoritatively empty', async () => {
+    const { runtime, openCode } = await createRuntime();
+    openCode.state.records.ses_child.push(user(11), assistant('Image pending', 12), idle('succeeded', 13));
+    openCode.state.jobs = [{ kind: 'image', sessionID: 'ses_grandchild', status: 'running', time: { started: 12 } }];
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    await settle();
+    expect(openCode.state.synthetic).toEqual([]);
+    openCode.state.jobs = [];
+    openCode.state.records.ses_child.push(assistant('Image ready', 40), idle('succeeded', 41));
+    await settle();
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Image ready') })]);
+    expect(openCode.fetchImpl.mock.calls.some(([url]) => new URL(url).searchParams.has('parentID'))).toBe(false);
+  });
+
+  it.each(['http', 'unknown-status'])('retains pending delivery on %s job failure without using legacy children', async (failure) => {
+    const { runtime, openCode } = await createRuntime();
+    openCode.state.records.ses_child.push(user(11), assistant('Done', 12), idle('succeeded', 13));
+    openCode.state.jobs = failure === 'http' ? new Response(null, { status: 503 }) : [
+      { kind: 'image', sessionID: 'ses_child', status: 'not-a-job-status', time: { started: 12 } },
+    ];
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    await settle();
+    expect(openCode.state.synthetic).toEqual([]);
+    expect(openCode.fetchImpl.mock.calls.some(([url]) => new URL(url).searchParams.has('parentID'))).toBe(false);
+  });
 });

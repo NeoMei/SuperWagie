@@ -247,3 +247,52 @@ describe("v2 status and cancellation HTTP boundary", () => {
     }
   })
 })
+
+
+describe("worktree retention native activity", () => {
+  for (const cause of ['idle', 'agent', 'permission', 'form', 'shell', 'image', 'subagent', 'inbox'] as const) {
+    test(`covers ${cause} with native reads scoped to the source`, async () => {
+      const requests: Array<{ path: string; directory: string | null; descendants: string | null }> = []
+      const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input.toString())
+        const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+        requests.push({ path: url.pathname, directory: headers.get('x-opencode-directory'), descendants: url.searchParams.get('descendants') })
+        if (url.pathname.endsWith('/active')) return Response.json({ data: cause === 'agent' ? { session: { type: 'running' } } : {} })
+        if (url.pathname.endsWith('/permission/request')) return Response.json({ data: cause === 'permission' ? [{ id: 'p', sessionID: 'session', action: 'read', resources: [] }] : [] })
+        if (url.pathname.endsWith('/form')) return Response.json({ data: cause === 'form' ? [{ id: 'f', sessionID: 'session', title: 'question' }] : [] })
+        if (url.pathname.endsWith('/job')) return Response.json({ data: ['shell', 'image', 'subagent'].includes(cause) ? [{ id: 'job', kind: cause, sessionID: 'session', status: 'running', time: { started: 1 } }] : [] })
+        return Response.json({ data: cause === 'inbox' ? [{ id: 'queued' }] : [] })
+      })
+      try {
+        expect(await opencodeClient.readSessionActivity(['session'], '/fixture', AbortSignal.timeout(1000))).toBe(cause === 'idle' ? 'idle' : 'active')
+        expect(requests).toHaveLength(5)
+        expect(requests.find((request) => request.path.endsWith('/job'))?.descendants).toBe('true')
+        expect(requests.filter((request) => !request.path.endsWith('/active')).every((request) => request.directory === encodeURIComponent('/fixture'))).toBe(true)
+      } finally { fetch.mockRestore() }
+    })
+  }
+  test('unsupported jobs cannot prove idle', async () => {
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString())
+      if (url.pathname.endsWith('/active')) return Response.json({ data: {} })
+      if (url.pathname.endsWith('/job')) return new Response('not found', { status: 404 })
+      return Response.json({ data: [] })
+    })
+    try {
+      await expect(opencodeClient.readSessionActivity(['session'], '/fixture', AbortSignal.timeout(1000))).rejects.toThrow()
+    } finally { fetch.mockRestore() }
+  })
+  test('malformed pending or job records cannot grant idle permission', async () => {
+    for (const badPath of ['/api/permission/request', '/api/form', '/api/experimental/job', '/api/session/session/inbox']) {
+      const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input.toString())
+        if (url.pathname.endsWith('/active')) return Response.json({ data: {} })
+        return Response.json({ data: url.pathname === badPath ? [{}] : [] })
+      })
+      try {
+        await expect(opencodeClient.readSessionActivity(['session'], '/fixture', AbortSignal.timeout(1000))).rejects.toThrow()
+      } finally { fetch.mockRestore() }
+    }
+  })
+
+})

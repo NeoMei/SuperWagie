@@ -57,6 +57,9 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
       onArchive={bulk.handleBulkArchive}
       onDelete={bulk.handleBulkHardDelete}
       onDone={bulk.handleExitSelectionMode}
+      canMarkWorkDone={bulk.canMarkWorkDone}
+      markingWorkDone={bulk.markingWorkDone}
+      onMarkWorkDone={bulk.handleBulkMarkWorkDone}
     /> : null}
     <BulkSessionDeleteConfirmDialog
       value={bulkDeleteConfirm}

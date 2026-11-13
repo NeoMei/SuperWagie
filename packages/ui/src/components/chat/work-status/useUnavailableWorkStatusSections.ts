@@ -1,11 +1,9 @@
+import React from 'react';
+import { useSessionTodosStore } from '@/stores/useSessionTodosStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isWorkflowEnabled } from '@/lib/workflows/availability';
 import { useUIStore } from '@/stores/useUIStore';
 import type { WorkStatusSectionId } from './sections';
-
-const NONE_UNAVAILABLE: readonly WorkStatusSectionId[] = [];
-const WORKFLOWS_UNAVAILABLE: readonly WorkStatusSectionId[] = ['workflows'];
-const MOBILE_UNAVAILABLE: readonly WorkStatusSectionId[] = ['usage'];
-const MOBILE_WORKFLOWS_UNAVAILABLE: readonly WorkStatusSectionId[] = ['usage', 'workflows'];
 
 /**
  * Built-in sections of features this build may not have. A section of a
@@ -18,6 +16,11 @@ const MOBILE_WORKFLOWS_UNAVAILABLE: readonly WorkStatusSectionId[] = ['usage', '
 export const useUnavailableWorkStatusSections = (): readonly WorkStatusSectionId[] => {
   const workflows = useUIStore(isWorkflowEnabled);
   const isMobile = useUIStore((state) => state.isMobile);
-  if (isMobile) return workflows ? MOBILE_UNAVAILABLE : MOBILE_WORKFLOWS_UNAVAILABLE;
-  return workflows ? NONE_UNAVAILABLE : WORKFLOWS_UNAVAILABLE;
+  const sessionId = useSessionUIStore((state) => state.currentSessionId);
+  const tasks = useSessionTodosStore((state) => sessionId ? state.entries[sessionId]?.state : undefined);
+  return React.useMemo(() => [
+    ...(isMobile ? ['usage' as const] : []),
+    ...(workflows ? [] : ['workflows' as const]),
+    ...(tasks === 'off' || tasks === 'unsupported' || tasks === undefined ? ['tasks' as const] : []),
+  ], [isMobile, tasks, workflows]);
 };

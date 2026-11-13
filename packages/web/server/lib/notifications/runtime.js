@@ -1,4 +1,5 @@
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { notificationEventTag } from './event-identity.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { truncateNotificationText } from './message.js';
@@ -23,6 +24,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     shouldApplyResolvedTemplateMessage,
     emitDesktopNotification,
     broadcastUiNotification,
+    withdrawNotification = () => ({ native: 'unsupported', connectedClients: 'unknown', push: 'unsupported' }),
     sendPushToAllUiSessions,
     sendApnsToAllUiSessions,
     isAnyInteractiveClientVisible,
@@ -46,19 +48,26 @@ export const createNotificationTriggerRuntime = (deps) => {
         buildOpenCodeUrl: (fetchPath) => `http://space${fetchPath}`,
         getOpenCodeAuthHeaders: () => ({}),
         fetchImpl: spaceFetchFor(spaceId) ?? unreachableSpaceFetch,
+        // The isolated-space adapter intentionally exposes session reads only.
+        supportsBackgroundJobs: false,
       }
     : hostSource);
   const hostActivityProbe = createSessionActivityProbe({ ...hostSource, timeoutMs: 2000 });
 
   // A parent goes idle while a background subagent still works; OpenCode then
-  // hands the result back and the parent runs again. That first idle is a
-  // pause, so it announces nothing. When the check cannot be made, the idle is
-  // announced as before: a missed "ready" is worse than an early one.
+  // hands the result back and the parent runs again. Background images also
+  // hold readiness; shell jobs can be persistent dev servers. Unknown activity
+  // stays silent, and only an explicitly unavailable job API uses legacy reads.
   const isPausedForSubagents = async (sessionId, spaceId) => {
     const activityProbe = spaceId ? createSessionActivityProbe({ ...sourceFor(spaceId), timeoutMs: 2000 }) : hostActivityProbe;
+    const jobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    if (jobs === null || jobs?.some((job) => job.kind !== 'shell')) return true;
     const statuses = await activityProbe.fetchActiveSessionStatuses();
-    if (!statuses) return false;
-    return (await activityProbe.hasWorkingChildren(sessionId, statuses)) === true;
+    if (!statuses || statuses[sessionId]) return true;
+    // App-created workflow sessions are not native jobs. Follow only the
+    // currently active lineages; an empty active map performs no reads.
+    if (jobs !== undefined) return (await activityProbe.hasWorkingDescendants(sessionId, statuses)) !== false;
+    return (await activityProbe.hasWorkingChildren(sessionId, statuses)) !== false;
   };
   const setGetIsSessionAutoAccepting = (resolver) => {
     getIsSessionAutoAccepting = typeof resolver === 'function' ? resolver : undefined;
@@ -80,6 +89,13 @@ export const createNotificationTriggerRuntime = (deps) => {
   // set is cleared when a UI client reports visible (`clearPendingPushBadge`),
   // the same moment the device zeroes its icon badge on becomeActive.
   const pendingPushTags = new Set();
+  const settledNotificationTags = new Set();
+  const settleNotification = (tag) => {
+    if (!tag) return;
+    settledNotificationTags.add(tag);
+    pendingPushTags.delete(tag);
+    withdrawNotification({ tag });
+  };
   const clearPendingPushBadge = () => {
     pendingPushTags.clear();
   };
@@ -378,6 +394,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       props?.sessionID ??
       props?.sessionId ??
       props?.session ??
+      props?.form?.sessionID ??
       null;
     return typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
   };
@@ -453,6 +470,12 @@ export const createNotificationTriggerRuntime = (deps) => {
 
     const sessionId = extractSessionIdFromPayload(payload);
     const notificationDirectory = extractDirectoryFromPayload(payload);
+    const eventTag = (kind, requestId) => notificationEventTag(kind, { sessionId, requestId, directory: notificationDirectory, spaceId });
+    if ((payload.type === 'form.settled' || payload.type === 'openchamber:page-settled') && sessionId) {
+      const id = payload.type === 'form.settled' ? payload.properties?.formID : payload.properties?.pageID;
+      settleNotification(eventTag(payload.type === 'form.settled' ? 'form' : 'page', id));
+      return;
+    }
     // A user abort arrives as `session.idle` with `aborted: true`: the turn
     // did not finish, so there is nothing to announce as ready.
     if (payload.type === 'session.idle' && payload.properties?.aborted === true) {
@@ -690,6 +713,8 @@ export const createNotificationTriggerRuntime = (deps) => {
       : payload.type === 'openchamber:page-waiting' ? readPageAsk(payload)
         : null;
     if (ask && sessionId) {
+      const askId = payload.type === 'form.created' ? payload.properties?.form?.id : payload.properties?.page?.id ?? payload.properties?.pageID;
+      const tag = eventTag(payload.type === 'form.created' ? 'form' : 'page', askId);
       const existingTimer = pushQuestionDebounceTimers.get(sessionId);
       if (existingTimer) {
         clearTimeout(existingTimer);
@@ -741,12 +766,13 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Question template resolution failed, using defaults:', error?.message || error);
         }
 
+        if (tag && settledNotificationTags.has(tag)) return;
         if (settings.nativeNotificationsEnabled) {
           const notificationPayload = {
             kind: 'question',
             title,
             body,
-            tag: `question-${sessionId}`,
+            tag: tag ?? `question-${sessionId}`,
             sessionId: formSessionId,
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
@@ -760,7 +786,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             phoneBody: phoneBodyOf('Question', questionText || header),
-            tag: `question-${sessionId}`,
+            tag: tag ?? `question-${sessionId}`,
             data: {
               url: buildSessionDeepLinkUrl(formSessionId),
               sessionId: formSessionId,
@@ -779,6 +805,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     if (payload.type === 'permission.replied' && sessionId) {
       const requestId = payload.properties?.requestID ?? payload.properties?.requestId ?? payload.properties?.id;
       const requestKey = typeof requestId === 'string' ? `${sessionId}:${requestId}` : null;
+      settleNotification(eventTag('permission', requestId));
       const pendingNotification = pushPermissionDebounceTimers.get(sessionId);
       if (!pendingNotification) {
         return;
@@ -796,6 +823,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
     if (payload.type === 'permission.asked' && sessionId) {
       const requestId = payload.properties?.id ?? payload.properties?.requestID ?? payload.properties?.requestId;
+      const tag = eventTag('permission', requestId);
       // v2 describes a permission request as an action plus the resources it
       // touches; the v1 single `permission` string is gone.
       const permissionAction = typeof payload.properties?.action === 'string' ? payload.properties.action.trim() : '';
@@ -881,12 +909,13 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Permission template resolution failed, using defaults:', error?.message || error);
         }
 
+        if (tag && settledNotificationTags.has(tag)) return;
         if (settings.nativeNotificationsEnabled) {
           const notificationPayload = {
             kind: 'permission',
             title,
             body,
-            tag: requestKey ? `permission-${requestKey}` : `permission-${sessionId}`,
+            tag: tag ?? `permission-${sessionId}`,
             sessionId,
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
@@ -904,7 +933,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             phoneBody: permissionPhoneBody,
-            tag: `permission-${sessionId}`,
+            tag: tag ?? `permission-${sessionId}`,
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,

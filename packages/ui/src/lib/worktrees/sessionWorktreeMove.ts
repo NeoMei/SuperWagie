@@ -14,6 +14,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
 import { create } from 'zustand';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { WorktreeKeepStoppedError } from './worktreeRemovalFlow';
 
 export type SessionTreeMoveMessages = {
   success: string;
@@ -209,11 +211,21 @@ const moveSessionTreeTransaction = async (
     metadata: WorktreeMetadata | null;
     onMoveFailure?: (error: Error) => Promise<never>;
   }>,
+  retention?: { assertIdle: (sessions: Session[]) => Promise<void>; isCurrent: () => boolean },
 ): Promise<string> => {
   if (useSessionMoveState.getState().pendingSessionIds.has(input.root.id)) {
     throw new Error('Session move already in progress');
   }
   setSessionMovePending(input.root.id, true);
+  const runtimeKey = getRuntimeKey();
+  const assertCurrent = () => {
+    if (retention && !retention.isCurrent()) throw new WorktreeKeepStoppedError('switched');
+  };
+  const assertIdle = async (sessions: Session[]) => {
+    assertCurrent();
+    await retention?.assertIdle(sessions);
+    assertCurrent();
+  };
 
   try {
     const sessions = [...input.descendants, input.root];
@@ -223,20 +235,24 @@ const moveSessionTreeTransaction = async (
         useSessionUIStore.getState().getWorktreeMetadata(session.id),
       ]),
     );
-    assertSessionsIdle(sessions);
+    if (retention) await assertIdle(sessions);
+    else assertSessionsIdle(sessions);
 
     let destination: Awaited<ReturnType<typeof prepareDestination>> | null = null;
     const moved: Session[] = [];
     let moveOutcomeUnknown = false;
     try {
       destination = await prepareDestination();
+      assertCurrent();
       for (const [index, session] of sessions.entries()) {
         // Setup and earlier moves can take long enough for a not-yet-moved
         // session to start running, so re-check the remaining source tree
         // immediately before each move. The root moves last.
-        assertSessionsIdle(sessions.slice(index));
+        if (retention) await assertIdle(sessions.slice(index));
+        else assertSessionsIdle(sessions.slice(index));
         try {
-          await moveSessionToDirectory(session, input.sourceDirectory, destination.directory);
+          await moveSessionToDirectory(session, input.sourceDirectory, destination.directory, runtimeKey, retention?.isCurrent);
+          assertCurrent();
         } catch (error) {
           // A transport failure leaves the outcome unknown: the server may have
           // moved the session before the response was lost. Definite rejections
@@ -250,6 +266,12 @@ const moveSessionTreeTransaction = async (
       }
     } catch (error) {
       const moveError = error instanceof Error ? error : new Error(String(error));
+      // A native move is queued. Retention leaves applied moves visible, and
+      // never submits a compensating move whose own outcome could be unknown.
+      if (retention) {
+        if (retention.isCurrent()) await refreshMovedDirectories(input.sourceDirectory, destination?.directory);
+        throw moveError;
+      }
       const rollbackFailures = await rollbackMovedSessions(
         moved,
         input.sourceDirectory,
@@ -312,16 +334,16 @@ export const moveSessionTreeToExistingWorktree = async (input: {
   });
 };
 
-const moveSessionTreeToProject = async (input: {
+export const moveSessionTreeToProject = async (input: {
   root: Session;
   descendants: Session[];
   sourceDirectory: string;
   projectDirectory: string;
-}): Promise<string> => {
+}, retention?: { assertIdle: (sessions: Session[]) => Promise<void>; isCurrent: () => boolean }): Promise<string> => {
   if ((normalizePath(input.sourceDirectory) ?? input.sourceDirectory) === (normalizePath(input.projectDirectory) ?? input.projectDirectory)) {
     throw new Error('Source and destination are the same');
   }
-  return moveSessionTreeTransaction(input, async () => ({ directory: input.projectDirectory, metadata: null }));
+  return moveSessionTreeTransaction(input, async () => ({ directory: input.projectDirectory, metadata: null }), retention);
 };
 
 const moveSessionTreeToQuickWorktree = async (input: {

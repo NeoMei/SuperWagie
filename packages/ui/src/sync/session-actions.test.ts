@@ -9,6 +9,11 @@ const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = [
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let formReplyError: unknown | null = null
 let formCancelError: unknown | null = null
+const pendingModelPicks = new Map<string, { providerId: string; modelId: string }>()
+let switchModelBehavior: () => Promise<void> = async () => {}
+let formReplyBehavior: () => Promise<void> = async () => {}
+let pendingFormsSnapshot: FormRequest[] = []
+
 let permissionReplyError: unknown | null = null
 const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part[] }>>()
 // Optional cursor pages for getSessionMessages: the request's cursor selects
@@ -63,6 +68,19 @@ mock.module("@/lib/opencode/client", () => ({
   ascendingId: (prefix: string) => `${prefix}_${(idCounter += 1).toString(16).padStart(12, "0")}`,
   opencodeClient: {
     getDirectory: () => "/test/project",
+    switchSessionModel: mock(async (sessionID: string, model: ModelSelection, directory?: string) => {
+      replyCalls.push({ method: "session.switchModel", params: { sessionID, model, directory } })
+      await switchModelBehavior()
+    }),
+    applySendSelection: mock(async (sessionID: string, selection: { model?: ModelSelection; agent?: string }, directory?: string) => {
+      if (!selection.model && !selection.agent) return
+      replyCalls.push({ method: "session.selection", params: { sessionID, ...selection, directory } })
+      await switchModelBehavior()
+    }),
+    listPendingForms: mock(async (options: { directories: Array<string | undefined> }) => {
+      replyCalls.push({ method: "form.list", params: { directories: options.directories } })
+      return pendingFormsSnapshot
+    }),
     getActiveSessionStatuses: mock((directory?: string | null) => readActiveStatusSnapshot(directory)),
     getSession: mock(async (sessionId: string, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory } })
@@ -152,6 +170,7 @@ mock.module("@/lib/opencode/client", () => ({
       directory?: string | null,
     ) => {
       replyCalls.push({ method: "form.reply", params: { sessionID: sessionId, formID: formId, answer, directory } })
+      await formReplyBehavior()
       if (formReplyError) throw formReplyError
       return true
     }),
@@ -228,6 +247,12 @@ mock.module("./selection-store", () => ({
   useSelectionStore: {
     getState: () => ({
       getSessionModelSelection: () => null,
+      getSessionModelPick: (sessionId: string) => pendingModelPicks.get(sessionId) ?? null,
+      getAgentModelVariantForSession: () => undefined,
+      captureSessionModelPickSettlement: (sessionId: string) => {
+        const pick = pendingModelPicks.get(sessionId)
+        return () => { if (pendingModelPicks.get(sessionId) === pick) pendingModelPicks.delete(sessionId) }
+      },
       getSessionAgentSelection: () => null,
     }),
   },
@@ -298,6 +323,8 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
       activeSessions: globalActiveSessions,
       archivedSessions: globalArchivedSessions,
       entityById: new Map([...globalActiveSessions, ...globalArchivedSessions].map((session) => [session.id, session])),
+      mutationRevision: 0,
+      mutationRevisionBySessionId: new Map<string, number>(),
       hasLoaded: globalHasLoaded,
       upsertSession: (session: unknown) => {
         globalUpsertedSessions.push(session)
@@ -428,7 +455,7 @@ mock.module("./sync-refs", () => ({
 
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
-import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
+import type { Message, ModelSelection, Part, Session, SessionStatus } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
 import { applyRecoverableQuestionEvents, noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { buildFormAnswer, type FormValues } from "../components/chat/formCardState"
@@ -3751,3 +3778,180 @@ describe("sendRecoveredFormAnswer", () => {
     expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
   })
 })
+
+
+describe("SW-OC271 form owner", () => {
+  beforeEach(() => {
+    replyCalls.length = 0;
+    formReplyError = null;
+    beforeSessionGetResolve = null;
+    runtimeKey = "default-runtime";
+    pendingModelPicks.clear();
+    switchModelBehavior = async () => {};
+    formReplyBehavior = async () => {};
+    pendingFormsSnapshot = [];
+  });
+
+  test("a child form shown in its parent replies to the child exactly once", async () => {
+    const child = { ...sessionFixture("form-child"), directory: "/test/child", parentID: "form-parent" };
+    const store = createStore({}, {
+      session: [child, sessionFixture("form-parent")],
+      form: { "form-child": [buildForm("owner-form", "form-child")] },
+    });
+    const { setActionRefs, replyToForm } = await import("./session-actions");
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project");
+    await replyToForm("form-parent", "owner-form", { choice: true });
+    expect(replyCalls.filter((call) => call.method === "form.reply").map((call) => call.params))
+      .toEqual([{ sessionID: "form-child", formID: "owner-form", answer: { choice: true }, directory: "/test/child" }]);
+  });
+
+  test("a missing local session is read before choosing the form's instance", async () => {
+    sessionRecords.set("uncached-form-owner", { ...sessionFixture("uncached-form-owner"), directory: "/test/worktree" });
+    const { setActionRefs, replyToForm } = await import("./session-actions");
+    setActionRefs(createChildStores([]), () => "/test/project");
+    await replyToForm("uncached-form-owner", "uncached-owner-form", { choice: true });
+    expect(replyCalls.filter((call) => call.method === "form.reply")[0]?.params.directory).toBe("/test/worktree");
+  });
+
+  test("an unreadable owner preserves the form and sends nothing", async () => {
+    sessionRecords.delete("unreadable-form-owner");
+    const form = buildForm("unreadable-owner-form", "unreadable-form-owner");
+    const store = createStore({}, { form: { "unreadable-form-owner": [form] } });
+    const { setActionRefs, replyToForm } = await import("./session-actions");
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project");
+    await expect(replyToForm("unreadable-form-owner", form.id, { choice: true })).rejects.toThrow("session record");
+    expect(replyCalls.filter((call) => call.method === "form.reply")).toHaveLength(0);
+    expect(store.getState().form["unreadable-form-owner"]).toEqual([form]);
+  });
+
+  test("switching runtime while reading the owner cannot send the form to the new host", async () => {
+    sessionRecords.set("switched-form-owner", { ...sessionFixture("switched-form-owner"), directory: "/test/worktree" });
+    beforeSessionGetResolve = () => { runtimeKey = "next-runtime"; };
+    const { setActionRefs, replyToForm } = await import("./session-actions");
+    setActionRefs(createChildStores([]), () => "/test/project");
+    await expect(replyToForm("switched-form-owner", "switched-owner-form", { choice: true })).rejects.toThrow("runtime changed");
+    expect(replyCalls.filter((call) => call.method === "form.reply")).toHaveLength(0);
+  });
+});
+
+
+describe("SW-OC271 pending form reply and retry", () => {
+  beforeEach(() => {
+    replyCalls.length = 0;
+    formReplyError = null;
+    beforeSessionGetResolve = null;
+    runtimeKey = "default-runtime";
+    pendingModelPicks.clear();
+    switchModelBehavior = async () => {};
+    formReplyBehavior = async () => {};
+    pendingFormsSnapshot = [];
+  });
+
+  const setup = async (sessionId: string, providerID = "byok") => {
+    const record = { ...sessionFixture(sessionId), model: { providerID, id: "model-a" } };
+    sessionRecords.set(sessionId, record);
+    const form = buildForm(`form-${sessionId}`, sessionId);
+    const store = createStore({}, { session: [record], form: { [sessionId]: [form] }, session_status: { [sessionId]: { type: "retry", attempt: 1, message: "retry", next: 1 } } });
+    const actions = await import("./session-actions");
+    actions.setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project");
+    return { ...actions, store, form };
+  };
+
+  test("a lost form reply is read back before any retry and a settled form never starts another turn", async () => {
+    const { replyToForm, form, store } = await setup("uncertain-reply");
+    formReplyError = new TypeError("Failed to fetch");
+    await expect(replyToForm(form.sessionID, form.id, { choice: true })).rejects.toThrow();
+    expect(store.getState().form[form.sessionID]).toEqual([form]);
+    formReplyError = null;
+    await expect(replyToForm(form.sessionID, form.id, { choice: true })).rejects.toThrow("FormNotFoundError");
+    expect(replyCalls.filter((call) => call.method === "form.reply")).toHaveLength(1);
+    expect(replyCalls.filter((call) => call.method === "form.list")[0]?.params.directories).toEqual(["/test/project"]);
+  });
+
+  test("concurrent answers submit a form once", async () => {
+    const { replyToForm, form } = await setup("concurrent-reply");
+    let release: () => void = () => { throw new Error("Form reply has not started"); };
+    formReplyBehavior = () => new Promise((resolve) => { release = resolve; });
+    const first = replyToForm(form.sessionID, form.id, { choice: true });
+    const second = replyToForm(form.sessionID, form.id, { choice: false });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(replyCalls.filter((call) => call.method === "form.reply")).toHaveLength(1);
+    release();
+    await Promise.all([first, second]);
+  });
+
+  test("a refused model write leaves the original form unanswered and the choice pending", async () => {
+    const { replyToForm, form } = await setup("refused-model");
+    pendingModelPicks.set(form.sessionID, { providerId: "byok", modelId: "model-b" });
+    switchModelBehavior = async () => { throw new Error("selection refused"); };
+    await expect(replyToForm(form.sessionID, form.id, { choice: true })).rejects.toThrow("selection refused");
+    expect(replyCalls.filter((call) => call.method === "form.reply")).toHaveLength(0);
+    expect(pendingModelPicks.get(form.sessionID)?.modelId).toBe("model-b");
+  });
+
+  test("a form answer applies and settles only its own pending model", async () => {
+    const { replyToForm, form } = await setup("picked-form");
+    pendingModelPicks.set(form.sessionID, { providerId: "byok", modelId: "model-b" });
+    pendingModelPicks.set("other-form-session", { providerId: "unihub", modelId: "other-model" });
+    await replyToForm(form.sessionID, form.id, { choice: true });
+    expect(replyCalls.map((call) => call.method)).toEqual(["session.get", "session.selection", "form.reply"]);
+    expect(replyCalls[1].params).toEqual({ sessionID: form.sessionID, model: { providerID: "byok", id: "model-b" }, agent: undefined, directory: "/test/project" });
+    expect(pendingModelPicks.has(form.sessionID)).toBe(false);
+    expect(pendingModelPicks.get("other-form-session")?.providerId).toBe("unihub");
+  });
+
+  test("a known pending original form permits one explicit retry after a lost response", async () => {
+    const { replyToForm, form } = await setup("still-pending-form");
+    formReplyError = new TypeError("Failed to fetch");
+    await expect(replyToForm(form.sessionID, form.id, { choice: true })).rejects.toThrow();
+    formReplyError = null;
+    pendingFormsSnapshot = [form];
+    await replyToForm(form.sessionID, form.id, { choice: true });
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply", "form.list", "form.reply"]);
+  });
+
+  test("a newer choice survives an older retry model response", async () => {
+    const { applyModelPickToRetry } = await setup("retry-new-pick");
+    pendingModelPicks.set("retry-new-pick", { providerId: "byok", modelId: "model-b" });
+    switchModelBehavior = async () => { pendingModelPicks.set("retry-new-pick", { providerId: "byok", modelId: "model-c" }); };
+    await applyModelPickToRetry("retry-new-pick", "/test/project");
+    expect(pendingModelPicks.get("retry-new-pick")?.modelId).toBe("model-c");
+  });
+
+  test("retry changes only BYOK configuration without sending a prompt", async () => {
+    const { applyModelPickToRetry } = await setup("retry-byok");
+    pendingModelPicks.set("retry-byok", { providerId: "byok", modelId: "model-b" });
+    await applyModelPickToRetry("retry-byok", "/wrong/page");
+    expect(replyCalls).toEqual([{ method: "session.switchModel", params: { sessionID: "retry-byok", model: { providerID: "byok", id: "model-b", variant: undefined }, directory: "/test/project" } }]);
+    expect(pendingModelPicks.has("retry-byok")).toBe(false);
+  });
+
+  test("retry cannot move an account task to BYOK or a BYOK task to the account", async () => {
+    const { applyModelPickToRetry } = await setup("retry-account", "unihub");
+    pendingModelPicks.set("retry-account", { providerId: "byok", modelId: "model-b" });
+    await applyModelPickToRetry("retry-account", "/test/project");
+    await setup("retry-to-account");
+    pendingModelPicks.set("retry-to-account", { providerId: "unihub", modelId: "model-b" });
+    await applyModelPickToRetry("retry-to-account", "/test/project");
+    expect(replyCalls).toHaveLength(0);
+  });
+
+  test("retry writes are serialized so the latest pick is the last applied", async () => {
+    const { applyModelPickToRetry } = await setup("retry-order");
+    let releaseFirst: () => void = () => { throw new Error("Model switch has not started"); };
+    switchModelBehavior = () => new Promise((resolve) => { releaseFirst = resolve; });
+    pendingModelPicks.set("retry-order", { providerId: "byok", modelId: "model-b" });
+    const first = applyModelPickToRetry("retry-order", "/test/project");
+    pendingModelPicks.set("retry-order", { providerId: "byok", modelId: "model-c" });
+    const second = applyModelPickToRetry("retry-order", "/test/project");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(replyCalls).toHaveLength(1);
+    switchModelBehavior = async () => {};
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(replyCalls.map((call) => call.params.model)).toEqual([
+      { providerID: "byok", id: "model-b", variant: undefined },
+      { providerID: "byok", id: "model-c", variant: undefined },
+    ]);
+  });
+});

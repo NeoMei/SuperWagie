@@ -836,6 +836,19 @@ async function walkSkillMdFiles(rootDir) {
     }
 
     const childAncestors = new Set(ancestors).add(realDir);
+    // A skill owns its supporting tree. Nested examples and dependencies are
+    // not separate installed skills. A linked SKILL.md counts only while its
+    // target is a file, so a broken link does not hide valid child skills.
+    const skillEntry = entries.find((entry) => entry.name === 'SKILL.md');
+    let holdsSkill = Boolean(skillEntry?.isFile());
+    if (!holdsSkill && skillEntry?.isSymbolicLink()) {
+      try {
+        const target = await limited(() => fs.promises.stat(path.join(dir, skillEntry.name)));
+        holdsSkill = target.isFile();
+      } catch {
+        holdsSkill = false;
+      }
+    }
     const found = await Promise.all(entries.map(async (entry) => {
       const fullPath = path.join(dir, entry.name);
       // Junctions report as links, not directories. A link whose target cannot be
@@ -852,7 +865,10 @@ async function walkSkillMdFiles(rootDir) {
           return [];
         }
       }
-      if (isDirectoryEntry) return walk(fullPath, childAncestors);
+      if (isDirectoryEntry) {
+        if (holdsSkill || entry.name === 'node_modules' || entry.name.startsWith('.')) return [];
+        return walk(fullPath, childAncestors);
+      }
       return isFileEntry && entry.name === 'SKILL.md' ? [fullPath] : [];
     }));
     return found.flat();

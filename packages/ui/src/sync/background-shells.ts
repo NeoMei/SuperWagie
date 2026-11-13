@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { create } from 'zustand';
-import { readBackgroundShellIDFromMetadata, readShellCancellation, type RunningShell, type ShellEnd } from '@/lib/opencode/background-shell';
+import { readBackgroundShellIDFromMetadata, type RunningShell, type ShellEnd } from '@/lib/opencode/background-shell';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { normalizeProjectPath } from '@/lib/projectResolution';
 
@@ -37,7 +37,7 @@ export type TrackedShell = RunningShell & {
 };
 
 /**
- * `stopped`: removed while running, by a user's Stop or an aborted turn.
+ * `stopped`: explicitly removed while running or after a code-less kill.
  * `unknown`: the end fell into a stream gap and a list read dropped it.
  */
 export type EndedShellStatus = 'exited' | 'timeout' | 'killed' | 'stopped' | 'unknown';
@@ -116,38 +116,23 @@ const sessionIdsOf = (byId: ReadonlyMap<string, TrackedShell>, previous: Readonl
   return same ? previous : next;
 };
 
-const publish = (byId: Map<string, TrackedShell>, ended: ReadonlyMap<string, EndedShell> | null): void => {
+const publish = (byId: ReadonlyMap<string, TrackedShell>, ended: ReadonlyMap<string, EndedShell> | null): void => {
   const state = useBackgroundShellsStore.getState();
   useBackgroundShellsStore.setState({ byId, sessionIds: sessionIdsOf(byId, state.sessionIds), ended: ended ?? state.ended });
 };
 
-// A stop posts its note to the agent before it removes the command, and the
-// removal kills the process: OpenCode reports that as an exit without a code,
-// usually before the removal itself. The note is what marks such an end as a
-// stop; a command that exits with a code after a failed stop still exited.
-const stopNoted = new Set<string>();
-
-const rememberStopNoted = (shellID: string): void => {
-  stopNoted.add(shellID);
-  if (stopNoted.size > MAX_TOUCHED) {
-    const oldest = stopNoted.values().next().value;
-    if (oldest !== undefined) stopNoted.delete(oldest);
-  }
-};
-
 const endedFrom = (shell: TrackedShell, end: ShellEnd | null, endedAt: number): EndedShell => {
   if (end === null) return { ...shell, status: 'unknown', endedAt };
-  if (end.kind === 'removed' || (end.exit === undefined && stopNoted.has(shell.id))) return { ...shell, status: 'stopped', endedAt };
+  if (end.kind === 'removed') return { ...shell, status: 'stopped', endedAt };
   return end.exit === undefined
     ? { ...shell, status: end.status, endedAt }
     : { ...shell, status: end.status, exit: end.exit, endedAt };
 };
 
-/** Appends ended commands, dropping the oldest past `ENDED_SHELLS_MAX`. */
-const withEnded = (ended: ReadonlyMap<string, EndedShell>, added: readonly EndedShell[]): ReadonlyMap<string, EndedShell> => {
+/** Records ends and confirmations in end order, dropping the oldest past `ENDED_SHELLS_MAX`. */
+const withEnded = (ended: ReadonlyMap<string, EndedShell>, added: Iterable<EndedShell>): ReadonlyMap<string, EndedShell> => {
   const next = new Map(ended);
   for (const shell of added) {
-    next.delete(shell.id);
     next.set(shell.id, shell);
   }
   for (const id of next.keys()) {
@@ -167,10 +152,46 @@ const sameShell = (left: TrackedShell | undefined, right: TrackedShell): boolean
   && left.background === right.background
 );
 
+type SettleOutcome = 'background' | 'ended';
+type SettleWaiter = { resolve: (outcome: SettleOutcome) => void; reject: (error: Error) => void };
+type ShellSettleWait = { settled: Promise<SettleOutcome>; cancel: () => void };
+const settleWaiters = new Map<string, SettleWaiter>();
+
+
+/**
+ * Waits for a command's call to settle in the background (`'background'`), or
+ * for the command to end first (`'ended'`). Only the call's own settle event
+ * counts, never the `background` flag: a command first seen in a list reads
+ * as background while its call may still wait for it. Rejects after
+ * `timeoutMs` and on a runtime switch. Register it before asking OpenCode to
+ * background the work, since the event can arrive before that call answers.
+ */
+export const waitForShellSettle = (shellID: string, timeoutMs: number): ShellSettleWait => {
+  settleWaiters.get(shellID)?.reject(new Error('Replaced by a newer wait for the same command.'));
+  let cancel = (): void => {};
+  const settled = new Promise<SettleOutcome>((resolve, reject) => {
+    // Every way out, a timeout and a cancel included, drops the waiter.
+    const finish = (settle: () => void) => {
+      clearTimeout(timer);
+      if (settleWaiters.get(shellID) === waiter) settleWaiters.delete(shellID);
+      settle();
+    };
+    const waiter: SettleWaiter = {
+      resolve: (outcome) => finish(() => resolve(outcome)),
+      reject: (error) => finish(() => reject(error)),
+    };
+    const timer = setTimeout(() => waiter.reject(new Error('The command did not move to the background in time.')), timeoutMs);
+    settleWaiters.set(shellID, waiter);
+    cancel = () => waiter.reject(new Error('Cancelled.'));
+  });
+  return { settled, cancel };
+};
+
 /** Applies shell lifecycle events for one directory. Other event types are ignored cheaply. */
 export const applyBackgroundShellEvents = (rawDirectory: string, payloads: readonly SyncEvent[]): void => {
   let draft: Map<string, TrackedShell> | null = null;
-  const ended: EndedShell[] = [];
+  const ended = new Map<string, EndedShell>();
+  const settled: Array<[string, SettleOutcome]> = [];
   const current = (): ReadonlyMap<string, TrackedShell> => draft ?? useBackgroundShellsStore.getState().byId;
   for (const payload of payloads) {
     if (payload.type === 'shell.started') {
@@ -184,26 +205,29 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
       continue;
     }
     if (payload.type === 'shell.ended') {
-      // Only the first end of a running command counts: an exited command is
-      // removed later when OpenCode evicts it, and that is not a stop.
       const { shellID, end, endedAt } = payload.properties;
       touch(shellID);
       settledInBackground.delete(shellID);
+      if (settleWaiters.has(shellID)) settled.push([shellID, 'ended']);
       const tracked = current().get(shellID);
-      if (!tracked) continue;
+      if (!tracked) {
+        if (end.kind !== 'removed') continue;
+        const previous = ended.get(shellID) ?? useBackgroundShellsStore.getState().ended.get(shellID);
+        // Removal first reports a code-less kill. Confirm it only when the
+        // deletion arrives; evicting a normal exit or timeout keeps its cause.
+        if (previous?.status === 'killed' && previous.exit === undefined) {
+          ended.set(shellID, { ...previous, status: 'stopped' });
+        }
+        continue;
+      }
       draft ??= new Map(current());
       draft.delete(shellID);
-      ended.push(endedFrom(tracked, end, endedAt));
-      stopNoted.delete(shellID);
-      continue;
-    }
-    if (payload.type === 'message.updated') {
-      const stopped = readShellCancellation(payload.properties.info);
-      if (stopped) stopped.shellIDs.forEach(rememberStopNoted);
+      ended.set(shellID, endedFrom(tracked, end, endedAt));
       continue;
     }
     const backgroundedID = backgroundedShellID(payload);
     if (backgroundedID === undefined) continue;
+    if (settleWaiters.has(backgroundedID)) settled.push([backgroundedID, 'background']);
     const tracked = current().get(backgroundedID);
     if (!tracked) {
       rememberSettledInBackground(backgroundedID);
@@ -213,7 +237,9 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
     draft ??= new Map(current());
     draft.set(backgroundedID, { ...tracked, background: true });
   }
-  if (draft) publish(draft, ended.length > 0 ? withEnded(useBackgroundShellsStore.getState().ended, ended) : null);
+  if (draft || ended.size > 0) publish(current(), ended.size > 0 ? withEnded(useBackgroundShellsStore.getState().ended, ended.values()) : null);
+  // Publish first so the stop operation observes this batch's command state.
+  for (const [shellID, outcome] of settled) settleWaiters.get(shellID)?.resolve(outcome);
 };
 
 /**
@@ -240,6 +266,7 @@ export const replaceDirectoryShells = (rawDirectory: string, shells: readonly Ru
     draft.set(shell.id, shell);
   }
   if (draft) publish(draft, ended.length > 0 ? withEnded(state.ended, ended) : null);
+  for (const shell of ended) settleWaiters.get(shell.id)?.resolve('ended');
 };
 
 export const backgroundShellRevision = (): number => revision;
@@ -276,7 +303,7 @@ export const resetBackgroundShells = (): void => {
   revision = 0;
   touchedAt.clear();
   settledInBackground.clear();
-  stopNoted.clear();
+  for (const waiter of [...settleWaiters.values()]) waiter.reject(new Error('The runtime changed.'));
   useBackgroundShellsStore.setState({ byId: new Map(), sessionIds: EMPTY_SESSION_IDS, ended: new Map() });
 };
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { registerCloseTabTarget } from '@/lib/closeTabTarget';
 import { SettingsView } from './SettingsView';
 import { ProductHelpPanel } from '@/components/product-help/ProductHelpPanel';
 import { useProductHelpGuidanceStore } from '@/lib/product-help/guidance-store';
@@ -40,6 +41,15 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
       document.querySelector('[data-slot="dropdown-menu-content"][data-open], [data-slot="select-content"][data-open]')
     );
   }, []);
+
+  React.useEffect(() => {
+    if (!open) return;
+    return registerCloseTabTarget(() => {
+      if (hasOpenFloatingMenu()) return;
+      useProductHelpGuidanceStore.getState().stop();
+      onOpenChange(false);
+    }, 1);
+  }, [hasOpenFloatingMenu, onOpenChange, open]);
 
   return (
     <Dialog.Root

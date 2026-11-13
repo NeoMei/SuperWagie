@@ -14,6 +14,10 @@ import {
   GUEST_ORIGINS_MAX,
   GUEST_SERVICE_PROVIDES,
   GUEST_TOOLS_MAX,
+  GUEST_TOOL_CARD_FIELDS_MAX,
+  GUEST_TOOL_CARD_TONES_MAX,
+  GUEST_TOOL_CARD_TONE_KEY_MAX,
+  GUEST_TONES,
   GUEST_TOOL_COLUMNS_MAX,
   GUEST_TOOL_COLUMN_MAX,
   GUEST_TOOL_LANGUAGE_MAX,
@@ -419,6 +423,29 @@ const commandsSchema = z.array(commandSchema).min(1).max(GUEST_COMMANDS_MAX)
 // `language` only means something for `code` and `columns` only for `table`;
 // a table without columns has nothing to draw. Each is a misconfiguration
 // that fails closed instead of carrying a dead field.
+const cardTemplateSchema = z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX).refine(
+  (text) => /\{output(?:\.[A-Za-z0-9_-]+)*\}/.test(text)
+    && !/\{(?!output(?:\.[A-Za-z0-9_-]+)*\})[^}]*\}/.test(text),
+  { message: 'Card templates read {output.path} only.' },
+);
+
+/** Passive card declarations accept no code, styles, settings or actions. */
+export const guestToolCardSchema = z.object({
+  label: cardTemplateSchema.optional(),
+  title: cardTemplateSchema.optional(),
+  status: z.object({
+    value: cardTemplateSchema,
+    tones: z.record(z.string().min(1).max(GUEST_TOOL_CARD_TONE_KEY_MAX), z.enum(GUEST_TONES))
+      .refine((tones) => Object.keys(tones).length <= GUEST_TOOL_CARD_TONES_MAX).optional(),
+  }).strict().optional(),
+  fields: z.array(z.object({ label: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX), value: cardTemplateSchema }).strict())
+    .min(1).max(GUEST_TOOL_CARD_FIELDS_MAX).optional(),
+  link: z.object({
+    label: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX),
+    url: z.string().regex(/^\{output(?:\.[A-Za-z0-9_-]+)*\}$/),
+  }).strict().optional(),
+}).strict().refine((card) => card.label !== undefined || card.title !== undefined || card.status !== undefined || card.fields !== undefined);
+
 const toolSchema = z.object({
   match: z.string().trim().min(1).max(GUEST_TOOL_MATCH_MAX).regex(GUEST_TOOL_MATCH),
   name: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX).optional(),
@@ -428,8 +455,10 @@ const toolSchema = z.object({
   output: z.enum(GUEST_TOOL_OUTPUTS).optional(),
   language: z.string().trim().min(1).max(GUEST_TOOL_LANGUAGE_MAX).optional(),
   columns: z.array(z.string().trim().min(1).max(GUEST_TOOL_COLUMN_MAX)).min(1).max(GUEST_TOOL_COLUMNS_MAX).optional(),
+  card: guestToolCardSchema.optional(),
 }).refine((value) => value.output === 'code' || value.language === undefined, { path: ['language'] })
-  .refine((value) => (value.output === 'table') === (value.columns !== undefined), { path: ['columns'] });
+  .refine((value) => (value.output === 'table') === (value.columns !== undefined), { path: ['columns'] })
+  .refine((value) => (value.output === 'card') === (value.card !== undefined), { path: ['card'] });
 
 const toolsSchema = z.array(toolSchema).min(1).max(GUEST_TOOLS_MAX);
 
@@ -719,7 +748,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   if (path.startsWith('contributes.tools')) {
     return fail(
       'invalid-tools',
-      'contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table", language (code only), and columns (table only, 1 to 16).',
+      'contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table" | "card", language (code only), columns (table only, 1 to 16), and a strict passive card (card only, up to 8 output-only fields and an optional whole HTTPS output link).',
     );
   }
   if (path.startsWith('contributes.fileEditors')) {

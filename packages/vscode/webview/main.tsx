@@ -458,6 +458,10 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return jsonResponse({ error: 'Model configuration requires an OpenChamber server', code: 'runtime_unsupported' }, 501);
   }
 
+  if (normalizedPathname === '/api/conversation-memory/tidy' || normalizedPathname.startsWith('/api/conversation-memory/tidy/')) {
+    return jsonResponse({ error: 'runtime_unsupported', code: 'runtime_unsupported' }, 501);
+  }
+
   if (normalizedPathname === '/api/product-help' || normalizedPathname.startsWith('/api/product-help/')) {
     return jsonResponse({ error: 'Product help requires a SuperWagie server', code: 'runtime_unsupported' }, 501);
   }
@@ -695,6 +699,10 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  if (pathname.startsWith('/api/fs/xlsx-copy/')) {
+    return new Response(JSON.stringify({ error: 'XLSX copy editing is unavailable in VS Code', reason: 'unsupported-runtime' }), { status: 501, headers: { 'Content-Type': 'application/json' } });
   }
 
   if (pathname.startsWith('/api/fs/list')) {

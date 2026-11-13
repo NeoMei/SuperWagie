@@ -39,6 +39,23 @@ describe('openchamber events', () => {
     Reflect.deleteProperty(globalThis, 'EventSource');
   });
 
+  test('the control stream parses session steps and updates only a previously viewed session', async () => {
+    const { subscribeSessionTodosSync } = await import('@/sync/session-todos-sync');
+    const { getRuntimeKey } = await import('./runtime-switch');
+    const { useSessionTodosStore } = await import('@/stores/useSessionTodosStore');
+    const unsubscribe = subscribeSessionTodosSync(getRuntimeKey());
+    const source = MockEventSource.instances[0];
+    try {
+      useSessionTodosStore.setState({ entries: { ses_a: { directory: '/repo', state: 'ready', todos: [], revision: 1, failures: 0, stale: false } } });
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:session-todos', properties: { revision: 2, sessionId: 'ses_a', directory: '/repo', todos: [{ content: 'Read invoice', status: 'in_progress' }] } }) });
+      expect(useSessionTodosStore.getState().entries.ses_a?.todos).toEqual([{ content: 'Read invoice', status: 'in_progress' }]);
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:session-todos', properties: { revision: 3, sessionId: 'ses_b', directory: '/other', todos: [] } }) });
+      expect(useSessionTodosStore.getState().entries.ses_b).toBeUndefined();
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:session-todos', properties: { revision: 4, sessionId: 'ses_a', directory: '/repo', todos: 'broken' } }) });
+      expect(useSessionTodosStore.getState().entries.ses_a?.revision).toBe(2);
+    } finally { unsubscribe(); useSessionTodosStore.getState().reset(); }
+  });
+
   test('does not open the server-only event stream in VS Code', async () => {
     Object.defineProperty(window, '__VSCODE_CONFIG__', {
       value: { workspaceFolder: 'C:/repo', workspaceFolders: [] },

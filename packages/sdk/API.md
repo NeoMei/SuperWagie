@@ -693,3 +693,10 @@ host.onReady((ctx) => {
 | [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md)                                                                                                                                                                                                                       | Local service contract              |
 | [src/ui/DOCUMENTATION.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/src/ui/DOCUMENTATION.md)                                                                                                                                                                                                       | UI kit invariants                 |
 | [sdk.mdx](https://github.com/openchamber/openchamber/blob/main/packages/docs/content/docs/sdk.mdx) / [sdk/host.mdx](https://github.com/openchamber/openchamber/blob/main/packages/docs/content/docs/sdk/host.mdx) / [sdk/ui.mdx](https://github.com/openchamber/openchamber/blob/main/packages/docs/content/docs/sdk/ui.mdx) | Author-facing website pages       |
+
+
+## Passive result cards
+
+`host.setResultCards({ directory, cards })` is available when `ready.features.resultCards` is true. It sends existing result metadata to the host. Each card has `title` and optional `text`, `version`, project-relative `path` and `taskId`. The host draws plain text. The call grants no file, model or service access. The current pilot accepts only the bundled workbench and creation page/panel; older hosts return `UNSUPPORTED` and the guest keeps its existing text and preview controls.
+
+The host may offer its own action to select a card for phone viewing. This action is outside the guest protocol and requires the local desktop owner's authenticated account. Guest code cannot create a phone selection.

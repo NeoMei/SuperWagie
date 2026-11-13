@@ -1,3 +1,4 @@
+import { applySessionLiveToolEvents, resetSessionLiveTools } from './session-live-tool';
 import { create } from 'zustand';
 import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session, SessionStatus } from '@/lib/opencode/model';
@@ -54,6 +55,7 @@ useGlobalSessionStatusStore.subscribe(() => countSyncPerformance('globalStatusPu
  * caller passing both fields to keep them consistent.
  */
 export const replaceGlobalSessionStatusById = (statusById: Map<string, GlobalSessionStatusEntry>): void => {
+  resetSessionLiveTools();
   const current = useGlobalSessionStatusStore.getState();
   const nextActiveSessionIds = new Set<string>();
   for (const [sessionId, entry] of statusById) {
@@ -207,6 +209,7 @@ export const getDirectoryOwnedSessionIds = (directory: string, sessions: readonl
 export const applyGlobalSessionStatusEvents = (directory: string, payloads: readonly SyncEvent[]): void => {
   if (payloads.length === 0) return;
   const normalizedDirectory = normalizeDirectory(directory);
+  applySessionLiveToolEvents(normalizedDirectory, payloads);
   const state = useGlobalSessionStatusStore.getState();
   let statusById: Map<string, GlobalSessionStatusEntry> | null = null;
   let activeSessionIds: Set<string> | null = null;

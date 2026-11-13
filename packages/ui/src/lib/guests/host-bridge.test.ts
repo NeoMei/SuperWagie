@@ -29,6 +29,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   shellOutput: overrides.shellOutput ?? (async () => ({ output: '', cursor: 0, skipped: false })),
   shellStop: overrides.shellStop ?? (async () => ({ stopped: true })),
   storage: overrides.storage ?? (async () => ({ storage: true, op: 'keys', keys: [] })),
+  setResultCards: overrides.setResultCards ?? (() => {}),
   setStatusControls: overrides.setStatusControls ?? (() => {}),
   openSession: overrides.openSession ?? (() => {}),
   toast: overrides.toast ?? (() => {}),

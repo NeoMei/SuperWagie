@@ -600,6 +600,11 @@ export const createUiAuth = ({
       return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
     };
 
+    const hasRuntimeAccess = async (req) => {
+      if (req.headers?.authorization !== undefined) return Boolean(await authenticateClientRequest(req, { allowUrlToken: false }));
+      return !requireClientAuth;
+    };
+
     const requireSessionAuth = async (req, res, next) => {
       if (!requireClientAuth) {
         return next();
@@ -663,6 +668,7 @@ export const createUiAuth = ({
       resolvePlatformAuthContext,
       resolvePlatformAccessContext,
       requireAuth,
+      hasRuntimeAccess,
       requireSessionAuth,
       resolveAuthContext,
       handleSessionStatus: async (req, res) => {
@@ -859,6 +865,11 @@ export const createUiAuth = ({
     }
     clearSessionCookie(req, res);
     return respondUnauthorized(req, res);
+  };
+
+  const hasRuntimeAccess = async (req) => {
+    if (req.headers?.authorization !== undefined) return Boolean(await authenticateClientRequest(req, { allowUrlToken: false }));
+    return await isSessionValid(getTokenFromRequest(req));
   };
 
   const requireSessionAuth = async (req, res, next) => {
@@ -1145,6 +1156,7 @@ export const createUiAuth = ({
     resolvePlatformAuthContext,
     resolvePlatformAccessContext,
     requireAuth,
+    hasRuntimeAccess,
     requireSessionAuth,
     resolveAuthContext,
     handleSessionStatus,

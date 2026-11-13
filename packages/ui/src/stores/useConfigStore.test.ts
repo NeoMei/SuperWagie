@@ -1141,6 +1141,24 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentVariantSelection.override).toBeNull();
   });
 
+  test('an unapplied model pick survives an agent pin and catalog gap', () => {
+    const sessionId = 'sw-oc271-pending-agent-model';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().pickSessionModel(sessionId, 'byok', 'pending-model');
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'pinned-model')],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'pinned-model' } })],
+      currentProviderId: 'byok',
+      currentModelId: 'pending-model',
+      directoryScoped: {},
+    });
+    useConfigStore.getState().setAgent('plan');
+    expect(useConfigStore.getState().currentProviderId).toBe('byok');
+    expect(useConfigStore.getState().currentModelId).toBe('pending-model');
+    useSelectionStore.getState().clearSessionSelections(sessionId);
+  });
+
   test('setAgent prefers saved and agent variants before settings default', () => {
     const sessionId = 'ses_agent_saved_variant';
     useSessionUIStore.setState({ currentSessionId: sessionId });

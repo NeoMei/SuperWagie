@@ -3,6 +3,7 @@ import {
   type GuestStorageRequest,
   type GuestStorageResult,
   type GuestStatusControl,
+  type GuestResultCardsRequest,
   type GuestWorkspaceQuery,
   type GuestWorkspaceSnapshot,
   type GuestWorkspaceSubscription,
@@ -62,6 +63,7 @@ type HostBridgeEffects = {
   shellOutput: (request: GuestShellOutputRequest) => Promise<GuestShellOutputResult>;
   shellStop: (request: { shellId: string }) => Promise<GuestShellStopResult>;
   storage: (request: GuestStorageRequest) => Promise<GuestStorageResult>;
+  setResultCards: (request: GuestResultCardsRequest) => void;
   setStatusControls: (controls: GuestStatusControl[]) => void;
   openSession: (sessionId: string) => void;
   toast: (request: ToastRequest) => void;
@@ -287,6 +289,7 @@ export const answerGuestMessage = async (
     case 'shell-output': return okResult(message.id, await effects.shellOutput(message.payload));
     case 'shell-stop': return okResult(message.id, await effects.shellStop(message.payload));
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
+    case 'result-cards': effects.setResultCards(message.payload); return okResult(message.id);
     case 'status-controls': effects.setStatusControls(message.payload.controls); return okResult(message.id);
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);
     // No answer: the pane handles these itself. File editor traffic belongs to

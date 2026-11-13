@@ -1,5 +1,14 @@
 /** App-owned creation copy. Filesystem markers and user-authored content stay unchanged. */
 const messages = {
+  "receipt.loading": ["正在读取审批回执…", "Reading the approval receipt…"],
+  "receipt.coordinated": ["此决定由当前主机统一认领。重复确认不会再次发送生成请求。", "This host coordinates this decision. Repeated approval will not send generation again."],
+  "receipt.unavailable": ["当前连接未启用跨客户端审批协调。本次仍使用原有会话确认。", "Approval coordination is unavailable on this connection. This action uses the existing session confirmation."],
+  "receipt.stale": ["样稿或来源已变化，重新打开此作品后再确认。", "The sample or its source changed. Reopen this work before approving."],
+  "receipt.originalSession": ["这份样稿已由另一个会话认领。请返回首次确认它的创作会话查看回执。", "Another session already owns this sample decision. Open the creation session that first confirmed it to read its receipt."],
+  "receipt.accepted": ["决定已接受，尚未核实生成完成。回执 {id}", "Decision accepted. Generation completion is unverified. Receipt {id}"],
+  "receipt.completed": ["生成已完成。回执 {id}", "Generation completed. Receipt {id}"],
+  "receipt.unknown": ["决定已认领，发送或生成结果未知。不会自动重发。回执 {id}", "Decision claimed. Dispatch or generation outcome is unknown. It will not resend automatically. Receipt {id}"],
+  "receipt.unknownResponse": ["未收到确定回执，结果未知。重新打开作品可读取回执，不会自动重发。", "A definite receipt was not received. The outcome is unknown. Reopen this work to read its receipt. It will not resend automatically."],
   "title": ["创作", "Create"],
   "restart": ["重来", "Start over"],
   "newWork": ["新作品", "New work"],

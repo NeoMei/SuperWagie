@@ -682,6 +682,31 @@ describe("materializeSessionSnapshots", () => {
 })
 
 describe("getSessionMaterializationStatus", () => {
+  test("waits for a live empty step only while authoritative history is held", () => {
+    const state = { message: { ses_1: [message("msg_1")] }, part: {}, session_status: { ses_1: { type: "busy" as const } } }
+    expect(getSessionMaterializationStatus(state, "ses_1", { historyCovered: true }).renderable).toBe(true)
+    expect(getSessionMaterializationStatus(state, "ses_1", { historyCovered: false }).missingPartMessageIDs).toEqual(["msg_1"])
+    expect(getSessionMaterializationStatus({ message: { ses_1: [completedAssistantMessage("msg_1")] }, part: {} }, "ses_1", { historyCovered: true }).missingPartMessageIDs).toEqual(["msg_1"])
+    expect(getSessionMaterializationStatus({ ...state, part: { msg_1: [] } }, "ses_1").renderable).toBe(true)
+  })
+
+  test("covered history still repairs an older unknown assistant before a later turn", () => {
+    const old = message("older-missing");
+    const newer: Message = { ...message("later-user"), role: "user", time: { created: 20 } };
+    const state = { message: { ses_1: [old, newer] }, part: {}, session_status: { ses_1: { type: "busy" as const } } };
+    expect(getSessionMaterializationStatus(state, "ses_1", { historyCovered: true }).missingPartMessageIDs).toEqual(["older-missing"]);
+  });
+
+  test("only the current live assistant may wait for parts", () => {
+    const older = message("older-missing");
+    const latest = { ...message("latest-missing"), time: { created: 20 } };
+    const state = { message: { ses_1: [older, latest] }, part: {}, session_status: { ses_1: { type: "busy" as const } } };
+    expect(getSessionMaterializationStatus(state, "ses_1", { historyCovered: true }).missingPartMessageIDs).toEqual(["older-missing"]);
+    for (const status of [undefined, { type: "idle" as const }]) {
+      expect(getSessionMaterializationStatus({ ...state, message: { ses_1: [latest] }, session_status: status ? { ses_1: status } : {} }, "ses_1", { historyCovered: true }).missingPartMessageIDs).toEqual(["latest-missing"]);
+    }
+  });
+
   test("requires assistant parts for renderable cached state", () => {
     const state = {
       message: { ses_1: [message("msg_1")] },

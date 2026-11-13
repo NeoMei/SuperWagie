@@ -161,8 +161,8 @@ describe('section arrangement dialog', () => {
     await act(async () => dispatch('touchstart', 18));
     await act(async () => dispatch('touchmove', 90));
     await act(async () => dispatch('touchend', 90));
-    // Workflows are not in this build, so their section is not listed.
-    expect(order()).toEqual(WORK_STATUS_SECTION_IDS.filter((id) => id !== 'workflows'));
+    // Workflows are disabled and the session has not enabled todo steps.
+    expect(order()).toEqual(WORK_STATUS_SECTION_IDS.filter((id) => id !== 'workflows' && id !== 'tasks'));
     await act(async () => {
       dispatch('touchstart', 18);
       await new Promise((resolve) => setTimeout(resolve, 220));

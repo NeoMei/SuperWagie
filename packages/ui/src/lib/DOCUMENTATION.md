@@ -1,5 +1,10 @@
 # Shared runtime HTTP transport
 
+`messageSearchNavigation.ts` owns opening indexed-message hits from the sidebar,
+archive and command palette. It selects the authoritative session directory and
+reveals the matched reasoning message when needed. Search components contain
+only their rendering exports.
+
 ## Ownership
 
 `runtime-fetch.ts` resolves shared runtime HTTP requests, preserves request data,

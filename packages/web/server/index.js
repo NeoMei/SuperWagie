@@ -1,3 +1,6 @@
+import { captureMobileOfficialTransport } from './lib/guests/mobile-official-transport.js';
+import { createMobileOfficialAccess } from './lib/guests/mobile-official-auth.js';
+import { registerMobileOfficialRoutes } from './lib/guests/mobile-official.js';
 import { createManagedKnowledgeContext, createManagedKnowledgeMiddleware } from './lib/knowledge-library/managed-context.js';
 import { installOpenCodeV2, supportsOpenCodeV2Install } from './lib/opencode/v2-install.js';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion } from './lib/opencode/compatibility.js';
@@ -118,12 +121,15 @@ import { createSessionActivityProbe } from './lib/opencode/session-activity.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
+import { createSessionTodosRuntime } from './lib/session-todos/runtime.js';
+import { isSpaceDirectory } from './lib/spaces/dispatcher.js';
 import { createSessionWarmingRuntime } from './lib/session-warming/runtime.js';
 import { createTrackerRegistry } from './lib/trackers/registry.js';
 import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
 import { sourceControlProviderDescriptors } from './lib/source-control/provider-descriptors.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
+import { applyOwnedArchiveState } from './lib/opencode/proxy.js';
 import { createConversationMemoryRuntime } from './lib/conversation-memory/runtime.js';
 import { readConversationSegments } from './lib/conversation-memory/reader.js';
 import { readConversationSource } from './lib/conversation-memory/source.js';
@@ -212,6 +218,7 @@ import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { removeWorkbenchTasksForSchedule } from './lib/scheduled-tasks/workbench-tasks.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
+import { createPageWaitChangeHandler } from './lib/openchamber-control/page-wait-events.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -1110,6 +1117,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   shouldApplyResolvedTemplateMessage,
   emitDesktopNotification,
   broadcastUiNotification,
+  withdrawNotification: (payload) => notificationEmitterRuntime.withdrawNotification(payload),
   sendPushToAllUiSessions,
   sendApnsToAllUiSessions,
   isAnyInteractiveClientVisible,
@@ -1326,6 +1334,19 @@ const sessionWorkRuntime = createSessionWorkRuntime({
   lineage: sessionLineage,
 });
 
+const sessionTodosRuntime = createSessionTodosRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  globalEventHub: globalMessageStreamHub,
+  getFlagOverrides: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv()?.OPENCODE_FLAGS,
+  isSpaceDirectory,
+  broadcast: broadcastOpenChamberUiEvent,
+});
+void sessionTodosRuntime.start().catch((error) => {
+  console.warn('[session-todos] failed to start:', error?.message ?? error);
+});
+
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
@@ -1427,6 +1448,9 @@ const messageSearchRuntime = createMessageSearchRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   globalEventHub: globalMessageStreamHub,
+  getArchivedSessions: () => openChamberSessionService.archiveStore.getAll(),
+  applyOwnedArchiveState,
+  isSpaceDirectory,
   readSettings: async () => {
     const settings = await readSettingsFromDisk();
     return { enabled: settings.messageSearchEnabled === true, reasoning: settings.messageSearchReasoningEnabled === true };
@@ -1982,6 +2006,7 @@ let scheduledNotificationEmitter = null;
 
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
+  resolveAutoSelection: (input) => routingRuntime.resolveAutoSelection(input),
   chatsScope: scheduledChatsScope,
   messageQueueRuntime,
   resolvePrimaryWorktreeRoot,
@@ -2247,22 +2272,7 @@ const openChamberControlService = createOpenChamberControlService({
   // A page that waits for the user's answer shows the session as waiting
   // the way a form does: the pending list the clients seed from, a live event
   // for the clients already connected, and the "Input needed" notification.
-  onPageWaitChange: (change) => {
-    sessionRuntime.trackWaitingPage(change);
-    if (change.type === 'waiting') {
-      const payload = {
-        type: 'openchamber:page-waiting',
-        properties: { sessionID: change.sessionId, directory: change.directory, page: { id: change.callId, title: change.title } },
-      };
-      broadcastOpenChamberUiEvent(payload);
-      void maybeSendPushForTrigger(payload);
-      return;
-    }
-    broadcastOpenChamberUiEvent({
-      type: 'openchamber:page-settled',
-      properties: { sessionID: change.sessionId, pageID: change.callId },
-    });
-  },
+  onPageWaitChange: createPageWaitChangeHandler({ sessionRuntime, broadcastOpenChamberUiEvent, maybeSendPushForTrigger }),
   // The tool is off by default; a plugin generated before it was switched off
   // must not keep paging the user.
   notifyUser: async (input) => {
@@ -2351,6 +2361,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   sessionGoalRuntime,
   contextObligatoryRuntime,
   sessionWarmingRuntime,
+  sessionTodosRuntime,
   messageQueueRuntime,
   dispatchResultsRuntime,
   workflowRuntime,
@@ -2466,9 +2477,15 @@ async function main(options = {}) {
     isModelAvailable: () => platformModelRuntime?.enabled() === true,
     isModelHistoryAvailable: () => platformModelRuntime?.historyAvailable?.() === true,
   });
+  const mobileOfficialAccess = createMobileOfficialAccess({
+    getAccountRuntime: () => platformAccountRuntime,
+    resolveFullIdentity: (req, res, options) => uiAuthController?.resolvePlatformAccessContext?.(req, res, options) ?? null,
+    captureTransport: (req) => captureMobileOfficialTransport(req, { tunnelAuthController, getUiAuthController: () => uiAuthController }),
+    isRequestOriginAllowed,
+  });
   const platformAccessGate = createPlatformAccessGate({
     getAccountRuntime: () => platformAccountRuntime,
-    resolveIdentity: (req, res, options) => uiAuthController?.resolvePlatformAccessContext?.(req, res, options) ?? null,
+    resolveIdentity: mobileOfficialAccess.resolveIdentity,
     authorizeServiceRequest: (req) => req.path === '/api/git/repository-credential'
       ? featureRoutesRuntime.authorizeRepositoryCredentialRequest(req)
       : agentToolRuntime.authorizeRequest(req),
@@ -2659,6 +2676,7 @@ async function main(options = {}) {
   if (typeof options.onDesktopNotification === 'function') {
     notificationEmitterRuntime.setOnDesktopNotification(options.onDesktopNotification);
   }
+  if (options.onDesktopNotificationWithdraw) notificationEmitterRuntime.setOnDesktopNotificationWithdraw(options.onDesktopNotificationWithdraw);
   if (typeof options.getIsWindowFocused === 'function') {
     notificationTriggerRuntime.setGetIsWindowFocused(options.getIsWindowFocused);
   }
@@ -2932,6 +2950,7 @@ async function main(options = {}) {
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
   uiAuthController = bootstrapResult.uiAuthController;
+
   registerPlatformAccountRoutes(app, {
     runtime: platformAccountRuntime,
     onSessionRead: async (identity) => {
@@ -3001,6 +3020,14 @@ async function main(options = {}) {
   // An archived chat of a deleted space is read and deleted, never run or changed.
   app.use(spaceArchive.guard);
   app.use((req, res, next) => (spacesHost ? spacesHost.middleware(req, res, next) : next()));
+  mobileOfficialAccess.register(app);
+  const nativeOfficialSelections = registerMobileOfficialRoutes(app, {
+    dataDir: OPENCHAMBER_DATA_DIR,
+    getAccountRuntime: () => platformAccountRuntime,
+    resolveIdentity: (req, res) => req.method ? mobileOfficialAccess.resolveIdentity(req, res, { allowUrlToken: false }) : uiAuthController.resolvePlatformAuthContext(req, res),
+    readSettings: readSettingsFromDiskMigrated,
+    readSession: (sessionID, directory) => openCodeSessionClient(directory).session.get({ sessionID }),
+  });
   // First of all upgrade handlers: a socket addressed to a space by its directory carries a path
   // a host handler would take too, and the space's handler marks it as the space's before they run.
   server.prependListener('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });
@@ -3122,6 +3149,7 @@ async function main(options = {}) {
     resolvePlatformIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
     resolveAuthContext: (req, res, options) => uiAuthController.resolveAuthContext(req, res, options),
     sessionWarmingRuntime,
+    sessionTodosRuntime,
     crypto,
     fs,
     os,
@@ -3345,7 +3373,7 @@ async function main(options = {}) {
     });
   }
 
-  return {
+  const controller = {
     expressApp: app,
     httpServer: server,
     getPort: () => tunnelRuntimeContext.getActivePort(),
@@ -3376,6 +3404,8 @@ async function main(options = {}) {
     },
     stop: (shutdownOptions = {}) => gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false }),
   };
+  if (options.nativeOfficialSelections === true) controller.nativeOfficialSelections = nativeOfficialSelections;
+  return controller;
 }
 
 runCliEntryIfMain({

@@ -630,7 +630,7 @@ Session display order is independent from streaming-frequency `time.updated` pub
 
 A background subagent keeps its parent's turn open for display. The parent goes idle while the child session works and runs again when OpenCode hands the result back; `global-session-status.ts` therefore holds the parent's timer through that pause (an idle parent with a running descendant does not settle, the last descendant to finish settles it, and snapshots count ancestors of running sessions as active). `useSessionTurnActivity` exposes that display state to rows, tabs and switchers. `statusById` and `activeSessionIds` stay the session's own status: sends, cleanup and retention must not treat an idle parent as busy. The parent lookup comes from the global sessions store through `setSessionParentResolver`, wired by `sync-context.tsx`.
 
-A background shell command keeps its session's turn open the same way. OpenCode settles a `shell` call with `background: true` at once, the session goes idle, and it runs again when the command's result is handed back. `background-shells.ts` indexes the commands OpenCode runs on behalf of a session (the shell tool tags each with `metadata.sessionID`): `shell.started`/`shell.ended` events keep it current for every directory, applied before status events in the same flush; a directory's `/api/shell` list is authoritative for that directory and is read by directory bootstrap and, on `server.connected`, for directories without a store that the index holds commands for. The list is keyed by the directory OpenCode answered for (symlinks resolved), which its shell events carry, and events that arrive while it is read win over it. A failed read changes nothing; a runtime switch resets the index and discards reads started before it. OpenCode runs every shell call as such a command, including one the turn waits for, so each entry carries `background`: set when the call that started it settles while it runs (`message.tool.transition` success with `metadata.status: "running"` and the `shellID`, remembered when it arrives before the start), false until then, and true for a command first seen in a list, which has no event to tell. The turn state below counts every command; the composer's background commands strip shows only background ones. A command that leaves the index moves to its `ended` list (extensions read it through `lib/guests/shells.ts`) with how it ended: `shell.exited` gives `exited` / `timeout` / `killed`, its exit code and the event time; `shell.deleted` of a running command is `stopped`, since only a user's Stop (the shell route) or an aborted turn removes a running command; a list read that no longer has the command records `unknown`. Removing a running command kills it, and OpenCode usually reports that kill as `shell.exited` with no exit code before the `shell.deleted`, so the index remembers each stop note (`message.updated` with `openchamberShellCancellation` metadata, written by `stopBackgroundShell` before it removes the command) and reads an exit without a code after one as `stopped`; an exit with a code after a stop that failed stays `exited`. Only the first end of a tracked command counts, so OpenCode evicting an exited command later (also `shell.deleted`) changes nothing. The list holds the latest `ENDED_SHELLS_MAX` (200) and resets with the index on a runtime switch. The session turn activity combines this index with live session status; the turn timer does not settle while a command runs, and the last command of an idle session ending settles it. The session's own status and the queue gate are unchanged: a dev server left running in the background must not hold queued messages.
+A background shell command keeps its session's turn open the same way. OpenCode settles a `shell` call with `background: true` at once, the session goes idle, and it runs again when the command's result is handed back. `background-shells.ts` indexes the commands OpenCode runs on behalf of a session (the shell tool tags each with `metadata.sessionID`): `shell.started`/`shell.ended` events keep it current for every directory, applied before status events in the same flush; a directory's `/api/shell` list is authoritative for that directory and is read by directory bootstrap and, on `server.connected`, for directories without a store that the index holds commands for. The list is keyed by the directory OpenCode answered for (symlinks resolved), which its shell events carry, and events that arrive while it is read win over it. A failed read changes nothing; a runtime switch resets the index and discards reads started before it. OpenCode runs every shell call as such a command, including one the turn waits for, so each entry carries `background`: set when the call that started it settles while it runs (`message.tool.transition` success with `metadata.status: "running"` and the `shellID`, remembered when it arrives before the start), false until then, and true for a command first seen in a list, which has no event to tell. The turn state below counts every command; the composer's background commands strip shows only background ones. A command that leaves the index moves to its `ended` list (extensions read it through `lib/guests/shells.ts`) with how it ended: `shell.exited` gives `exited` / `timeout` / `killed`, its exit code and the event time; `shell.deleted` of a running command is `stopped`, since only a user's Stop (the shell route) or an aborted turn removes a running command; a list read that no longer has the command records `unknown`. The staged OpenCode 2.3.0 runtime reports removal first as `shell.exited` with status `killed` and no exit code, then `shell.deleted`. The first event records `killed`; only the explicit deletion refines that code-less kill to `stopped`, in the same batch or a later one. Refinement preserves the original end time, end order and running-map identity. A cancellation note alone never determines the end status. Natural exits, timeouts, coded kills and unknown list disappearances retain their cause when OpenCode later deletes the historical shell record. The list holds the latest `ENDED_SHELLS_MAX` (200) and resets with the index on a runtime switch. The session turn activity combines this index with live session status; the turn timer does not settle while a command runs, and the last command of an idle session ending settles it. The session's own status and the queue gate are unchanged: a dev server left running in the background must not hold queued messages.
 
 Starts are persisted so a reload resumes the same count, but a persisted start is a lookup table and never a claim of activity. **A busy status does not mark where a turn begins.** OpenCode publishes busy at every step of the agent loop, so a busy event means "still running", not "just started"; after a refresh one of those repeats normally beats the first status snapshot, so treating it as a turn boundary reset the counter on nearly every reload. Only `session.execution.started` marks a start, and a reload or a late join never sees it. Turn *ends* are marked — `session.idle` and `session.error` fire once, live, and retire the persisted record — while a snapshot that omits a session is not evidence of anything, since it may simply not see it yet.
 
@@ -706,6 +706,33 @@ Live activity/status indicators must not depend on this cache. They must use the
 ### Unread sessions
 
 `session-unread.ts` owns the unread mark, and OpenCode owns the state behind it. A session record carries `time.idle` (when its last turn ended, whatever the outcome) and `time.viewed` (a watermark of the last turn end a viewer saw, which OpenCode keeps monotone). A top-level, unarchived session whose `idle` is past its `viewed` is unread. Rows, tabs, switchers, collapsed aggregates, run overviews, the tray, the dock badge and the iOS widget all read that one rule from the global sessions store.
+
+The user can also mark a top-level active session unread through its row menu.
+`metadata.openchamber.manualUnread` overlays the kernel watermark without
+rewinding it. The existing metadata route persists and broadcasts that flag.
+Opening or marking the session read clears the flag and records the latest
+completed turn seen. Automatic attention observation checks only kernel turn
+unread state, so the metadata event from a manual mark does not immediately
+clear the mark on a visible session. A later completed turn retains the normal
+attention rule. Manual writes serialize per runtime instance and session;
+a failed write reports failure and retains the last confirmed state. A return
+to a runtime key starts a new queue owner, so an unresolved retired request
+cannot delay new manual marks or remove their pending queue entry.
+
+`patchSessionMetadata` captures the runtime instance for every write. Its
+response applies only metadata to the session currently held by the global
+or live store, preserving same-head viewed/idle watermarks, archive state,
+location, title and usage changes. A removal during the prerequisite read
+prevents the write. A removal during the write prevents cache resurrection.
+An instance round trip retires the response even when its runtime key repeats.
+
+`session-work-batch.ts` uses the single-session work-state operation for each
+selected session. Independent failures leave their ids selected for retry;
+successful ids leave selection. It changes no execution, archive or project
+todo state. A runtime switch prevents remaining writes and cache publication.
+Web and Electron expose both row and batch controls. VS Code uses its existing
+metadata bridge. Hosted mobile and Capacitor receive the same metadata state;
+their existing session-sheet controls remain unchanged.
 
 Marking a session seen (`markSessionViewed` in `notification-store.ts`, which also clears its native notifications) writes the watermark locally at once and sends `POST /api/session/:id/view` with the `idle` it saw; a failed write restores the previous watermark unless a newer record replaced it. OpenCode announces the view as `session.viewed` to every client, so a session seen on one device stops being unread on the others. The global store's change signatures include `idle` and `viewed`, so these updates publish immediately instead of waiting with recency-only updates.
 
@@ -963,9 +990,44 @@ Examples of global-store updates performed in `session-actions.ts`:
 
 ### Blocking-request (form/permission) reply routing
 
-`replyToForm`, `cancelForm`, `respondToPermission`, and `dismissPermission` route the reply through `resolveDirectoryForBlockingRequest`. The directory chosen decides which OpenCode instance resolves the pending request, so it must be the **session record's own server-confirmed directory** (ownership), never the containing child-store key (containment): a project store legitimately holds its worktree sessions, and a reply addressed to the parent instance makes the server answer `FormNotFoundError` while the form stays pending in the worktree instance — the session is then stuck on the running form tool with no recovery. When a form reply/cancel comes back not-found, the stale request is removed locally and a `settled-running-tool` tail materialization is enqueued so the trailing tool part converges to the server's actual state instead of leaving the UI on "asking question" forever. A permission reply/reject that comes back not-found only removes the request locally.
+`respondToPermission` and `dismissPermission` resolve the owning directory through `resolveDirectoryForBlockingRequest`. Form reply and cancellation first resolve the form ID to its own session through `resolveFormTarget`, even when a parent displays the card. A missing local session record is read from the original runtime before anything is sent. A failed read preserves the form and its draft. The directory chosen decides which OpenCode instance resolves the pending request, so it must be the **session record's own server-confirmed directory** (ownership), never the containing child-store key (containment): a project store legitimately holds its worktree sessions, and a reply addressed to the parent instance makes the server answer `FormNotFoundError` while the form stays pending in the worktree instance — the session is then stuck on the running form tool with no recovery. When a form reply/cancel comes back not-found, the stale request is removed locally and a `settled-running-tool` tail materialization is enqueued so the trailing tool part converges to the server's actual state instead of leaving the UI on "asking question" forever. A permission reply/reject that comes back not-found only removes the request locally.
 
 Sending a message while forms are open cancels them through `dismissOpenFormsForSession`, which removes them from the store before the cancel request so the card disappears at once. A not-found answer keeps them removed. Any other failure puts each form back into the store and session it came from: the agent is still waiting, and no event will return it. The mounted chat's form-only recovery would refetch the open session's own form, but a subagent's form shown in the parent chat has no other path back. Open permissions follow the same rule through `dismissOpenPermissionsForSession`, which rejects them: a not-found answer keeps them removed, any other failure puts each one back. Permissions have no in-chat recovery at all, so without the restore even the open session's own prompt stays hidden until a reconnect. A restored card can belong to a request the server already settled (its response was lost, or another client answered it); any reply from the card then comes back not-found, and `respondToPermission` removes it. The same cleanup applies to its other callers, VS Code auto-accept and the desktop tray's approve action.
+
+### Explicit model selection and form continuation
+
+`selection-store.ts` owns runtime-local pending model picks separately from saved
+composer preferences. Only a user picker or favorite-model shortcut records a
+pending pick. Successful sends or model writes settle the exact captured pick;
+a newer pick and an instance round trip survive a late completion. Catalog
+reads, restores and agent pins cannot replace an unapplied pick.
+
+Normal and command sends compare the captured selection with a fresh session
+record and the latest sync record. A stale matching sync record cannot suppress
+a requested switch. Auto remains routing intent. A retry wait can apply an
+explicit BYOK pick by switching configuration, with writes serialized per
+runtime and session. It never dispatches another prompt. Account tasks and Auto
+remain pending for their existing authorized send path; no retry changes their
+payer or replays an uncertain paid call.
+
+A form uses the model and agent of its own composer. The open root or review
+session may use app-wide configuration. Child, pinned and BTW forms use only
+their own pending picks and session record. A refused selection leaves the form
+unanswered. Concurrent replies share one submission. An ambiguous reply keeps
+its draft and requires an authoritative read of that original form before a
+retry. A missing form is settled as missing and never becomes a new prompt.
+Interrupted-question recovery retains its separate, guarded ordinary-send path.
+
+### Why pending picks are separate from saved selections
+
+Saved choices also describe restores and past sends. A distinct pending pick
+identifies the user's unapplied intent and lets a late completion settle only
+the write it carried.
+
+### Why unknown form replies read their original form
+
+A lost response may already have resumed the turn. Reading the original form
+can establish that it still waits without starting another generation.
 
 ### Restore (unarchive) contract
 
@@ -1517,3 +1579,56 @@ newer invalidations retain a trailing refresh. A queued batch from before an
 A-to-B-to-A runtime switch cannot execute in the new instance. Models.dev
 enrichment remains until explicit refresh or runtime reset, while SDK catalogs
 continue to refresh from their existing authoritative readers.
+
+### Materialization history coverage
+
+`getSessionMaterializationStatus` accepts `historyCovered` only from the message
+loader for that exact runtime, directory, session and directory-store identity.
+Coverage comes from a committed server page or a confirmed empty session
+creation. Generic renderability and event-only cache never establish coverage.
+A stream gap, retired runtime instance, replaced store or history eviction
+revokes it until an authoritative read commits again.
+
+Only the newest incomplete assistant may wait for parts, and only while live
+directory status is busy or retrying. Older unknown assistants, idle or unknown
+status, uncovered history and completed missing parts still request repair.
+Loader coverage and exact-session status changes notify `useSessionRenderable`;
+`use-sync` and the loader's own ensure path consume the same authority.
+
+### Why renderability does not establish history coverage
+
+A user-only event cache is already renderable and can set the loader's generic
+resolved flag without a history read. Coverage retains its own server-confirmed
+owner, so that cache cannot suppress a later missing-part repair.
+
+## Session step control events
+
+`session-todos-sync` resets the derived step store for each runtime and subscribes to parsed `openchamber:session-todos` control events. A successful list replaces only a session already viewed. A gap or invalidation reloads visible mounted consumers; cached inactive sessions wait until opened. VS Code leaves this unsupported server capability inactive.
+
+
+## Live tool names for official result status
+
+`session-live-tool.ts` is a bounded in-memory index fed by the live global event path. It records a running tool's name, call ID and directory, without arguments, output or command text. Terminal events and runtime reset retire entries; history/bootstrap never populates it. The guest workspace projection exposes the name only while authoritative activity is running and its directory matches. Repeated updates of the same call/name preserve the map and publish nothing.
+
+## Activity authority for worktree retention
+
+`readSessionsLiveActivity` owns the destructive move's fresh activity decision.
+It asks the SDK boundary for agent, permission, form, inbox and descendant-job
+coverage with a 5-second deadline. A newer local busy event or unanswered request
+still blocks the move after that read. A failed read or replaced runtime is
+unknown. Existing cached idle coverage alone never grants retention permission.
+
+The retention caller captures a runtime-instance predicate. `moveSessionToDirectory`
+checks it before publishing local relocation, including an A-to-B-to-A switch.
+The worktree module keeps already applied groups visible after partial failure;
+ordinary session moves keep their existing rollback contract. Retention does not
+mark sessions Done, archive them, or close their tabs.
+
+
+Foreground shell stops register a settlement waiter before session.background. A matching tool transition or terminal shell event resolves it only after publishing that event batch. Authoritative list disappearance resolves ended without inferring a stop reason. Runtime reset rejects outstanding waiters. Repeated stop UI state is owned outside row components and discarded when its shell leaves the index or its instance changes.
+
+## Shell stop confirmation
+
+### Why shell stops wait for explicit removal evidence
+
+The cancellation note precedes shell.remove, which can fail or time out. A native code-less kill or timeout after the note proves that the command ended, but cannot establish that the requested removal succeeded. The index waits for shell.deleted before confirming a code-less kill as stopped. Terminal completion messages retain their own authoritative result in the tool row.

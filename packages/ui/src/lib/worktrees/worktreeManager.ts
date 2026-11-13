@@ -838,6 +838,9 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   deleteRemoteBranch?: boolean;
   deleteLocalBranch?: boolean;
   remoteName?: string;
+  /** Retention rechecks native sessions after slow remote work, immediately before checkout removal. */
+  beforeRemove?: () => Promise<void>;
+  isCurrent?: () => boolean;
   network?: {
     sourceControl: Pick<SourceControlAPI, 'repositoryBinding'>;
     git: Pick<GitAPI, 'planNetworkOperation' | 'executeNetworkOperation' | 'getNetworkOperation'>;
@@ -854,6 +857,7 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   }
   markWorktreeRemoving(worktree.path);
   try {
+    if (options?.isCurrent && !options.isCurrent()) throw new Error('Server changed during worktree removal');
     if (deleteRemote && branchName && remoteName && options?.network) {
       await runBoundRemoteBranchDelete({
         branch: branchName,
@@ -863,6 +867,8 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
         git: options.network.git,
       });
     }
+    if (options?.beforeRemove) await options.beforeRemove();
+    if (options?.isCurrent && !options.isCurrent()) throw new Error('Server changed during worktree removal');
     const raw = await git.worktree.remove(projectDirectory, {
       directory: worktree.path,
       deleteLocalBranch,
@@ -870,6 +876,7 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
     if (!raw?.success) {
       throw new Error('Worktree removal failed');
     }
+    if (options?.isCurrent && !options.isCurrent()) throw new Error('Server changed during worktree removal');
   } catch (error) {
     clearWorktreeRemoval(worktree.path);
     throw error;

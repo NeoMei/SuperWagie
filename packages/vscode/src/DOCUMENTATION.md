@@ -522,3 +522,12 @@ Office preview callers send 30 MiB and also enforce that bound in the webview.
 Webview cancellation retires its request, but the current native local proxy
 does not receive the request AbortSignal; an already-started bounded disk read
 can finish. Installed-extension acceptance is separate from temporary-file tests.
+
+
+## Memory review route
+
+The webview answers every `/api/conversation-memory/tidy` request with `501`
+and `code: runtime_unsupported` before the generic OpenCode proxy. Memory review
+requires the OpenChamber server's shared ledger and source authorization. The
+shared review entry is disabled in VS Code; direct route calls receive the same
+unsupported result without a filesystem write or model call.

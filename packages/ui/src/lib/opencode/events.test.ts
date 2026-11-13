@@ -335,7 +335,7 @@ describe("translateWireEvent", () => {
       [{ ...base, type: "command.updated", data: {} }, "command"],
       [{ ...base, type: "skill.updated", data: {} }, "skill"],
       [{ ...base, type: "plugin.updated", data: {} }, "plugin"],
-      [{ ...base, type: "credential.updated", data: {} }, "credential"],
+      [{ ...base, type: "credential.updated", data: { integrationID: "openai", credentialID: "credential-test" } }, "credential"],
       [{ ...base, type: "credential.switched", data: { integrationID: "openai", credentialID: null } }, "credential"],
       [
         { ...base, type: "project.updated", data: { id: "proj", canonical: "/repo", time: { created: 1, updated: 1, active: 1 }, sandboxes: [] } },
@@ -398,6 +398,9 @@ describe("translateWireEvent", () => {
 
   test("events the sync layer does not model translate to nothing", () => {
     const ignored: OpenCodeEvent[] = [
+      { ...base, type: "session.step.first-token", durable, data: { sessionID: "ses_1", assistantMessageID: "msg_a1" } },
+      { ...base, type: "experimental.mcp.event", data: { id: "sub_1", server: "fixture", name: "changed", eventId: "remote_1",
+        timestamp: "2026-11-13T12:00:00Z", data: { value: "plugin payload" }, cursor: null } },
       { ...base, type: "session.inbox.delivery.changed", durable, data: { sessionID: "ses_1", inboxID: "in_1", delivery: "queue" } },
       { ...base, type: "tui.toast.show", data: { message: "x", variant: "info" } },
       { ...base, type: "integration.updated", data: {} },

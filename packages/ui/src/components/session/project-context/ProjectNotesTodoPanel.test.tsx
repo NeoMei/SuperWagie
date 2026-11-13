@@ -60,6 +60,7 @@ const peerNote: ProjectNote = {
 };
 let serverContext = emptyContext();
 let readFailed = false;
+let noteWriteFailed = false;
 let readContext = async (): Promise<Response> => Response.json(serverContext);
 let reads = 0;
 const noteWrites: string[] = [];
@@ -77,6 +78,7 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: Request
     }
     if (init?.method === 'PATCH') {
       noteWrites.push(String(init.body));
+      if (noteWriteFailed) return Response.json({ error: 'offline' }, { status: 503 });
       const saved = { ...peerNote, body: 'Local autosave draft', updatedAt: 2 };
       serverContext = { ...serverContext, notes: [saved] };
       return Response.json({ note: saved });
@@ -174,6 +176,7 @@ beforeEach(() => {
   TestEventSource.instances = [];
   serverContext = emptyContext();
   readFailed = false;
+  noteWriteFailed = false;
   readContext = async () => Response.json(serverContext);
   reads = 0;
   noteWrites.length = 0;
@@ -201,6 +204,19 @@ afterAll(async () => {
     if (descriptor) Object.defineProperty(globalThis, name, descriptor);
     else Reflect.deleteProperty(globalThis, name);
   }
+});
+
+test('a failed note autosave survives leaving and reopening its entry', async () => {
+  serverContext = { ...serverContext, notes: [{ ...peerNote, id: 'failed-note' }] };
+  noteWriteFailed = true;
+  await mount();
+  const editor = await openNoteEditor();
+  await editor.type('Unsent note body');
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+  expect(noteWrites.length).toBeGreaterThan(0);
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Back to notes"]')!.click());
+  const reopened = await openNoteEditor();
+  expect(reopened.text()).toBe('Unsent note body');
 });
 
 test('adopts peer note creation, edits, and todo completion without remounting', async () => {

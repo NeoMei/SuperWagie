@@ -15,6 +15,7 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/
 import { formatSessionDateLabel, normalizePath } from '@/components/session/sidebar/utils';
 import { useShallow } from 'zustand/react/shallow';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
+import { SessionContentSearch } from '@/components/session/SessionContentSearch';
 import { refreshSpaceArchives, useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { isRestorableOnItsOwn } from '@/sync/session-restore-rule';
 import { createSessionOwnershipIndex } from '@/components/session/sidebar/sessions/sessionOwnership';
@@ -281,7 +282,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   const emptyLabel = () => {
     if (totalCount === 0 && sessionsStatus === 'error') return t('sessions.sidebar.group.empty.loadFailed');
     if (totalCount === 0 && sessionsStatus !== 'ready') return t('sessions.sidebar.group.empty.loadingSessions');
-    return normalizedQuery ? t('sessions.archivePage.empty.noMatches') : t('sessions.archivePage.empty.noArchived');
+    return normalizedQuery ? t('sessions.search.titles.empty') : t('sessions.archivePage.empty.noArchived');
   };
 
   const emptyState = (
@@ -402,6 +403,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
           className="min-h-0 flex-1 overflow-y-auto pt-1"
           style={{ paddingBottom: 'calc(0.5rem + var(--oc-safe-area-bottom, 0px))' }}
         >
+          <SessionContentSearch query={query} lifecycle="archived" onNavigate={onLeave} />
           {worktreeGroups.length > 0 ? (
             <div className={cn('space-y-2 px-3', visibleSessions.length > 0 && 'pb-3')}>
               {worktreeGroups.map(({ archive, sessions: groupSessions }) => (
@@ -581,6 +583,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3">
             <div className="mx-auto w-full max-w-3xl space-y-0.5">
+              <SessionContentSearch query={query} lifecycle="archived" onNavigate={onLeave} />
               {/* Each archived worktree is a tile holding its sessions; the loose sessions follow. */}
               {worktreeGroups.length > 0 ? (
                 <div className={cn('space-y-2', visibleSessions.length > 0 && 'pb-3')}>

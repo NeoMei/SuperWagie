@@ -309,4 +309,66 @@ describe('settings normalization runtime - case-insensitive filesystem casing (#
     expect(runtime.normalizePathForPersistence('c:\\users\\me\\desktop\\app'))
       .toBe('C:\\Users\\me\\Desktop\\app');
   });
+
+  it('reads four shared parents once for 71 projects and refreshes them on the next pass', () => {
+    const projectNames = Array.from({ length: 71 }, (_, index) => `Project-${index}`);
+    const tree = {
+      '/': ['Users'],
+      '/Users': ['me'],
+      '/Users/me': ['Projects'],
+      '/Users/me/Projects': projectNames,
+    };
+    let reads = 0;
+    const runtime = createTestRuntime({
+      path: posixPath,
+      processLike: { platform: 'darwin', env: {} },
+      realpathSync: (value) => value,
+      readdirSync: (directory) => {
+        reads += 1;
+        if (!Object.hasOwn(tree, directory)) throw new Error('ENOENT');
+        return tree[directory];
+      },
+    });
+    const projects = projectNames.map((name, index) => ({ id: `project-${index}`, path: `/users/me/projects/${name.toLowerCase()}` }));
+
+    expect(runtime.sanitizeProjects(projects).map((project) => project.path))
+      .toEqual(projectNames.map((name) => `/Users/me/Projects/${name}`));
+    expect(reads).toBe(4);
+
+    tree['/Users/me'] = ['PROJECTS'];
+    tree['/Users/me/PROJECTS'] = [...projectNames, 'New-project'];
+    delete tree['/Users/me/Projects'];
+    reads = 0;
+    expect(runtime.sanitizeProjects([...projects, { id: 'new', path: '/users/me/projects/new-project' }]).map((project) => project.path))
+      .toEqual([...projectNames.map((name) => `/Users/me/PROJECTS/${name}`), '/Users/me/PROJECTS/New-project']);
+    expect(reads).toBe(4);
+  });
+
+  it('keeps unreadable and missing paths while sharing a failed parent read only within the pass', () => {
+    let inaccessible = true;
+    let reads = 0;
+    const runtime = createTestRuntime({
+      path: posixPath,
+      processLike: { platform: 'darwin', env: {} },
+      realpathSync: (value) => value,
+      readdirSync: (directory) => {
+        reads += 1;
+        if (directory === '/') return ['Projects'];
+        if (inaccessible) throw new Error('EACCES');
+        return ['One', 'Two'];
+      },
+    });
+    const projects = [
+      { id: 'one', path: '/projects/one' },
+      { id: 'two', path: '/projects/two' },
+      { id: 'missing', path: '/projects/missing' },
+    ];
+    expect(runtime.sanitizeProjects(projects).map((project) => project.path))
+      .toEqual(['/projects/one', '/projects/two', '/projects/missing']);
+    expect(reads).toBe(2);
+    inaccessible = false;
+    expect(runtime.sanitizeProjects(projects).map((project) => project.path))
+      .toEqual(['/Projects/One', '/Projects/Two', '/projects/missing']);
+    expect(reads).toBe(4);
+  });
 });

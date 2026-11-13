@@ -1029,3 +1029,26 @@ describe('worktreeManager missing worktrees', () => {
   });
 
 });
+
+
+describe('retention removal guard', () => {
+  test('a failed final native session rescan prevents Git removal and topology cleanup', async () => {
+    const target: WorktreeMetadata = { path: '/repo-keep', projectDirectory: '/repo', branch: 'keep', label: 'keep', worktreeStatus: 'ready' };
+    sessionState.availableWorktrees = [target];
+    await expect(removeProjectWorktree({ id: 'p', path: '/repo' }, target, {
+      isCurrent: () => true,
+      beforeRemove: async () => { throw new Error('new session discovered'); },
+    })).rejects.toThrow('new session discovered');
+    expect(removeCalls).toEqual([]);
+    expect(sessionState.availableWorktrees).toEqual([target]);
+  });
+  test('a runtime switch during the final check prevents the native Git request', async () => {
+    let current = true;
+    const target: WorktreeMetadata = { path: '/repo-keep', projectDirectory: '/repo', branch: 'keep', label: 'keep' };
+    await expect(removeProjectWorktree({ id: 'p', path: '/repo' }, target, {
+      isCurrent: () => current,
+      beforeRemove: async () => { current = false; },
+    })).rejects.toThrow('Server changed');
+    expect(removeCalls).toEqual([]);
+  });
+});

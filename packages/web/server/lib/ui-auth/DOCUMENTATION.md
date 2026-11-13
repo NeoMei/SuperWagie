@@ -29,6 +29,7 @@ Compatibility: upgrading renames the cookie for any explicit-port host, so alrea
 - `createUiAuth({ password, cookieName, sessionTtlMs, trustedSessionTtlMs, readSettingsFromDiskMigrated })`: creates UI auth controller with methods:
   - `enabled`
   - `requireAuth(req, res, next)`
+  - `hasRuntimeAccess(req)`: read-only connection authorization, with no cookie issuance or response mutation. It validates explicit device bearers alone, signed password cookies at current expiry, or the configured passwordless open/client-required policy. It accepts no URL token.
   - `handleSessionStatus(req, res)`
   - `handleSessionCreate(req, res)`
   - `handlePasskeyStatus(req, res)`
@@ -72,3 +73,14 @@ across packaged restarts. Trusted desktop client bearers therefore use a finite
 lifetime with a 30-day floor, independent of the shorter browser cookie. An
 explicitly cleared trust preference keeps the shorter session lifetime, and
 revocation still removes the device's access.
+
+
+## Selected-material transport lifetime
+
+The selected-material reader captures runtime connection authority separately
+from its product account. `hasRuntimeAccess` supplies the local UI/client check
+without minting cookies through the generic identity resolver. A captured
+transport rechecks the original UI controller and request scope after source IO.
+A tunneled request pins its original actual tunnel session and rechecks the
+session owner's revocation, expiry and active tunnel. Stopping the tunnel cannot
+replace that authority with a still-valid local UI cookie.

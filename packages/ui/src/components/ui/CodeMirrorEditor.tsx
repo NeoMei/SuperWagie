@@ -436,7 +436,7 @@ export function CodeMirrorEditor({
           onChangeRef.current(next);
           syncPortalWidgets(blockWidgetsRef.current);
         }),
-        editableCompartment.of(EditorView.editable.of(!readOnly)),
+        editableCompartment.of([EditorView.editable.of(!readOnly), EditorState.readOnly.of(Boolean(readOnly))]),
         externalExtensionsCompartment.of(extensions ?? []),
         highlightLinesCompartment.of(createHighlightLinesExtension(highlightLines)),
         blockWidgetsCompartment.of(createBlockWidgetsExtension(blockWidgets, widgetContainersRef.current)),
@@ -494,7 +494,7 @@ export function CodeMirrorEditor({
       effects.push(lineNumbersCompartment.reconfigure(lineNumbers(lineNumbersConfig)));
     }
     if (applied.readOnly !== readOnly) {
-      effects.push(editableCompartment.reconfigure(EditorView.editable.of(!readOnly)));
+      effects.push(editableCompartment.reconfigure([EditorView.editable.of(!readOnly), EditorState.readOnly.of(Boolean(readOnly))]));
     }
     if (applied.extensions !== extensions) {
       effects.push(externalExtensionsCompartment.reconfigure(extensions ?? []));

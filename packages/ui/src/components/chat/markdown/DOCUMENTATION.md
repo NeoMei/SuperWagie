@@ -28,3 +28,15 @@ literal `50%25off.md`. Decode only at the URL boundary to keep those files disti
 Filename edge spaces distinguish files. Prose cleanup stays on native text
 inputs, while resolved hrefs, filesystem probes and absolute file tabs retain
 those spaces.
+
+## Passive SVG fences in file previews
+
+`MarkdownContent.passiveSvg` is opt-in and defaults off. FilesView enables it
+for its Markdown previews. A complete `svg` fence can display a data-URL image
+with a source toggle. `passiveSvgImage` accepts static SVG geometry and text, capped at 128 KiB,
+5,000 elements and 64 ancestor levels. `use`, definitions, reference paints and
+all hrefs remain source, so a small reference graph cannot expand into a large
+image render. Scripts, event attributes, HTML, animation, style attributes,
+external resources, processing instructions, document types and entities also
+reject the image path. No SVG markup enters page DOM.
+Ordinary chat fences, standalone SVG files and Mermaid keep their prior paths.

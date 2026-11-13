@@ -57,6 +57,7 @@ import type {
   UpdateChangeRequestInput,
 } from '../source-control/types';
 import type { SourceControlProviderDescriptor } from '../source-control/providers/descriptor';
+import type { OfficialSelection, OfficialSelectionRequest } from '@/lib/guests/mobile-official';
 import type { TrackerAPI } from '../trackers/types';
 
 export type * from '../source-control/types';
@@ -1426,6 +1427,18 @@ interface FileReadOptions {
   fresh?: boolean;
 }
 
+export interface XlsxCopyInspection {
+  version: string;
+  sheets: { name: string; truncated: boolean; cells: { address: string; value: string; editable: boolean }[] }[];
+}
+
+export interface XlsxCellEdit {
+  sheet: string;
+  address: string;
+  kind: 'string' | 'number';
+  value: string;
+}
+
 export interface FilesAPI {
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
   search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
@@ -1441,6 +1454,9 @@ export interface FilesAPI {
   readFileBinary?(path: string, options?: FileReadOptions): Promise<{ dataUrl: string; path: string }>;
   /** Creates an empty file exclusively. Rejects collisions; absent on VS Code. */
   createFile?(path: string): Promise<{ success: true; path: string }>;
+  /** Workspace XLSX pilot; absent on VS Code. Never writes to the source. */
+  inspectXlsxCopy?(path: string, signal: AbortSignal): Promise<XlsxCopyInspection>;
+  saveXlsxCopy?(path: string, request: { version: string; name: string; edits: XlsxCellEdit[] }, signal: AbortSignal): Promise<{ success: true; path: string }>;
   writeFile?(path: string, content: string): Promise<{ success: boolean; path: string }>;
   uploadFile?(path: string, file: Blob, options?: { overwrite?: boolean; directory?: string }): Promise<{ success: boolean; path: string }>;
   delete?(path: string): Promise<{ success: boolean }>;
@@ -1526,7 +1542,11 @@ export interface NotificationPayload {
   showWhenFocused?: boolean;
 }
 
+export type NotificationWithdrawalResult = { status: 'withdrawn'; count: number } | { status: 'unknown' | 'unsupported' };
+
 export interface NotificationsAPI {
+  /** Optional OS support. Absence means unsupported; stream delivery never proves remote withdrawal. */
+  withdraw?(input: { tag: string; runtimeKey?: string }): Promise<NotificationWithdrawalResult>;
   notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean>;
   canNotify?: () => boolean | Promise<boolean>;
 }
@@ -2112,6 +2132,13 @@ export interface RelayHostStatus {
 }
 
 export interface RuntimeAPIs {
+  /** Native, account-bound coordination of existing creation approval actions. */
+  creationApprovals?: import('../guests/creation-approval').CreationApprovalsAPI;
+  /** Native local selection only. Web, hosted mobile, Capacitor and VS Code are unsupported. */
+  officialSelections?: {
+    select(input: OfficialSelectionRequest, signal?: AbortSignal): Promise<OfficialSelection>;
+    revoke(id: string, signal?: AbortSignal): Promise<void>;
+  };
   /** Native local picker. Web/mobile fall back to their browser file input; VS Code does not import themes. */
   themeFiles?: {
     pick(): Promise<{ status: 'unsupported' } | { status: 'picked'; file: { name: string; size: number; text: string } | null }>;

@@ -248,3 +248,14 @@ describe('composerLanguage — attachment citations', () => {
         expect(citationChips(state).map(([text]) => text)).toEqual(['@build', '@build']);
     });
 });
+
+
+test('resolved pasted links draw in place and disappear when deleted', () => {
+    const link = 'https://github.com/team/repo/issues/1';
+    const state = stateWith(`See ${link} now`, context({ referenceLinkChips: new Map([
+        [link, { label: '#1 报价', title: 'Current issue', iconHref: '#oc-record-circle' }],
+    ]) }));
+    expect(citationChips(state)).toEqual([[link, '#1 报价']]);
+    const cleared = state.update({ changes: { from: 4, to: 4 + link.length, insert: '' } }).state;
+    expect(citationChips(cleared)).toEqual([]);
+});

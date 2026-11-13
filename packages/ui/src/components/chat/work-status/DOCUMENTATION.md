@@ -791,3 +791,30 @@ sections register no demand. Usage keeps bootstrap demand until configuration
 is known, then stops recurring work when no provider is configured. Other shown
 quota readouts share the same store interval and opening freshness. Hiding the
 native desktop window stops this work even when Chromium reports visible.
+
+## Plans linked to the current session
+
+Context sources reads the owning project context store and shows plans whose latest Implement/Improve link names the current session. The visible project is refreshed through the existing project-context event observer, without loading unrelated projects. Pinned and linked instances of the same plan share one row. Progress comes from the stored Steps count; absent progress has no invented percentage. This projection never changes personal todos or plan steps.
+
+### Linked plan visibility
+
+Displayed linked plans contribute to the context section's presence and empty
+checks, including an unpinned plan that is the only context. A linked and pinned
+plan retains one row and its existing unpin control. A plan linked to another
+session does not contribute presence.
+
+### Why presence counts displayed plans
+
+Pinned knowledge and linked plans have separate ownership. Counting only pins
+would hide an otherwise usable linked plan and its progress when ambient
+context is empty.
+
+## MCP sign-in action
+
+The needs-auth action starts the same MCP OAuth component as Settings, only after an explicit click. It verifies the configured remote server is enabled and OAuth-capable, checks its integration policy, and binds pending intent to the current session, directory and runtime visit. Switching owner, disabling the server or retiring the sign-in prevents its completion from reconnecting a different scope. A repeated click keeps the same mounted attempt.
+
+## Session steps
+
+The Round steps section reads the server-owned latest successful `todowrite` list. It uses its own persisted section id `tasks`; project Steps progress and personal Markdown tasks keep their existing owners. Off and unsupported sections are unavailable. Confirmed empty and failed reads have separate messages. A failed refresh retains the previous confirmed list.
+
+The section list acquires history only for its mounted, visible session while this section is enabled. The control stream applies successful lists without another read. Revert, reconnect and configuration invalidation reload mounted consumers and mark other cached sessions stale. Runtime reset retires pending requests and rebinds mounted consumers before using the replacement runtime. Isolated-space sessions never request host history.

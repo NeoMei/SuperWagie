@@ -398,12 +398,14 @@ const sendPlainMessage = async (
     },
     beforeOptimisticInsert: () => assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey),
     onOptimisticInsert: () => requestChatForceScrollBottom(sessionID),
-    send: (messageID, context) => {
+    send: async (messageID, context) => {
       assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
       // Only a genuine change travels with the prompt; the review session was
       // created on this selection, so normally nothing is switched.
-      const selection = resolveSendSelection(sessionID, directory, resolved);
+      const selection = await resolveSendSelection(sessionID, directory, resolved);
+      assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
       return opencodeClient.sendMessage({
+        runtimeKey: expectedRuntimeKey,
         id: sessionID,
         directory,
         providerID: resolved.providerID,
