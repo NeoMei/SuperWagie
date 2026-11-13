@@ -9,7 +9,9 @@ import { useBackgroundSessionWork } from '@/hooks/useBackgroundSessionWork';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { BackgroundWorkButton } from './BackgroundWorkButton';
+import { ChatActivityToneDot } from './ChatActivityTone';
 import { registerFloatingPanelClearanceReader } from '@/components/chat/composer/state/composerInsetReaders';
+import type { ActivityTone } from '../lib/turns/activityTone';
 
 /** The scroll action: the arrow, plus the status label while the session works. */
 const ScrollAction: React.FC<{ onClick: () => void; children?: React.ReactNode }> = ({ onClick, children }) => {
@@ -74,10 +76,14 @@ interface ScrollToBottomButtonProps {
     /** The session is still streaming: the pill carries the status label
         while the floating status row is hidden away from the live edge. */
     working?: boolean;
+    tone?: ActivityTone;
+    showTone?: boolean;
     onClick: () => void;
 }
 
-const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, working = false, onClick }) => {
+const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
+    visible, working = false, tone = 'neutral', showTone = false, onClick,
+}) => {
     return (
         <div
             ref={registerFloatingPanelClearanceReader}
@@ -105,6 +111,11 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, wo
                     )}
                 >
                     {working && visible ? <WorkingPillBody onClick={onClick} /> : <ScrollAction onClick={onClick} />}
+                    {showTone && tone !== 'neutral' && visible ? (
+                        <span className="inline-flex shrink-0 items-center ps-2 pe-2.5">
+                            <ChatActivityToneDot tone={tone} waiting={tone === 'working' || tone === 'waiting'} />
+                        </span>
+                    ) : null}
                 </div>
                 </div>
             </div>

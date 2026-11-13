@@ -9,6 +9,13 @@ import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { GeneratedJsonResultCard } from './GeneratedJsonResultCard';
 import { parseGeneratedJsonResult } from './generatedJsonResult';
 import { LiveActivityInlineContentContext } from '../../components/liveActivityContext';
+import { RevealedTextPartContext, RevealedTextTurnContext } from '../../components/revealedTextContext';
+import {
+    readTextPartContent,
+    readTextPartGeneration,
+    recordRevealedText,
+} from '../../lib/turns/revealedText';
+import type { RevealedTextPresentation } from '../../lib/turns/revealedText';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -27,11 +34,14 @@ interface AssistantTextPartProps {
 
 const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     part,
+    sessionId,
     messageId,
     streamPhase,
     onShowPopup,
 }) => {
     const inlineActivity = React.useContext(LiveActivityInlineContentContext);
+    const turnScope = React.useContext(RevealedTextTurnContext);
+    const partScope = React.useContext(RevealedTextPartContext);
     // Use part directly from props — parent provides the latest version from the store.
     // No store subscription here to avoid re-render cascade from unrelated delta events.
     const partWithText = part as PartWithText;
@@ -69,6 +79,42 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     streamPerfObserve('ui.assistant_text_part.display_len', displayTextContent.length);
 
     const isRenderableTextPart = part.type === 'text' || part.type === 'reasoning';
+    const generatedResult = !isStreaming && isFinalized ? parseGeneratedJsonResult(displayTextContent) : null;
+    const presentation: RevealedTextPresentation = generatedResult ? 'generated-result' : 'markdown';
+    const canRecordRevealedText = Boolean(
+        isRenderableTextPart
+        && part.type === 'text'
+        && turnScope?.outsideFold
+        && partScope
+        && !partScope.pinnedCopy
+        && !isInvisibleText(displayTextContent),
+    );
+    const revealSessionId = sessionId || part.sessionID;
+    const revealMessageOrder = messageId ? turnScope?.messageOrderById.get(messageId) : undefined;
+    const revealAuthoritativeText = canRecordRevealedText ? readTextPartContent(part) : '';
+    const revealGeneration = canRecordRevealedText ? readTextPartGeneration(part, partScope?.messageCreatedAt) : 0;
+
+    React.useLayoutEffect(() => {
+        if (!canRecordRevealedText || !turnScope || !partScope || revealMessageOrder === undefined) return;
+        recordRevealedText({
+            runtimeKey: turnScope.runtimeKey,
+            directory: turnScope.directory,
+            sessionId: revealSessionId,
+            turnId: turnScope.turnId,
+            messageId,
+            partId: part.id,
+            generation: revealGeneration,
+            messageOrder: revealMessageOrder,
+            partIndex: partScope.partIndex,
+            displayText: displayTextContent,
+            authoritativeText: revealAuthoritativeText,
+            presentation,
+        });
+    }, [
+        canRecordRevealedText, displayTextContent, messageId, part.id, partScope, presentation,
+        revealAuthoritativeText, revealGeneration, revealMessageOrder, revealSessionId, turnScope,
+    ]);
+
     if (!isRenderableTextPart) {
         return null;
     }
@@ -77,7 +123,6 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         return null;
     }
 
-    const generatedResult = !isStreaming && isFinalized ? parseGeneratedJsonResult(displayTextContent) : null;
     if (generatedResult) {
         return (
             <div

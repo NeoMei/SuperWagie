@@ -11,10 +11,11 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
-import { StopIcon } from '@/components/icons/StopIcon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
+
+import { ComposerStopCoin } from './ComposerStopCoin';
 
 type ComposerActionButtonsProps = {
     isMobile: boolean;
@@ -110,7 +111,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                 )}
                 aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
             >
-                <StopIcon className={cn(stopIconSizeClass)} />
+                <ComposerStopCoin className={cn(stopIconSizeClass)} />
             </button>
         </div>
     );

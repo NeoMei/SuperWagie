@@ -2,22 +2,25 @@ import { createContext } from 'react';
 
 import type { ToolPart } from '@/lib/opencode/model';
 
-/** Only the final message splits its non-text parts from its answer/footer. */
-export const LiveFinalActivityContext = createContext<{
+/** Only a rendered final message outside a pinned inner fold splits its non-text parts from its answer/footer. */
+type LiveFinalActivityContextValue = {
     messageId: string;
     expanded: boolean;
     contentId: string;
     animate: boolean;
-    /** User interactions drawn above the answer instead of inside the fold. */
+    /** Interaction cards owned by this final message, drawn above its answer and outside execution. */
     interactions: readonly ToolPart[];
-} | null>(null);
+} | null;
+export const LiveFinalActivityContext = createContext<LiveFinalActivityContextValue>(null);
 
-/** Calls drawn outside execution, so an opened fold does not repeat them. */
+/** All interaction call IDs, so every disclosure suppresses duplicate cards. */
 export const LiveTurnHoistedInteractionsContext = createContext<ReadonlySet<string> | null>(null);
 
 /**
- * A folded execution keeps every process row behind the turn's header.
- * Final answer text, questions and interactive pages are presented separately.
+ * A folded execution keeps unrevealed tails, tool rows and reasoning behind
+ * the outer Activity header and each pinned message's inner fold. Retired
+ * prose, the current authoritative answer, questions and interactive pages
+ * stay outside those folds.
  */
 export const LiveActivityToolsHiddenContext = createContext(false);
 

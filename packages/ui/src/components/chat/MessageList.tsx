@@ -1061,9 +1061,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     // Row lookups for navigation, built in one pass over the rows. Assistant
     // messages before a turn's last one are collapsible: in a collapsed turn
-    // their text sits inside the folded activity and has no row of its own.
-    // Reasoning of any of a turn's messages, the last one included, sits in
-    // that fold too.
+    // they sit in an Activity region, and navigation expands the fold that
+    // owns them. Runtime-local revealed prose can keep an original root
+    // outside the outer header, with its unrevealed tail, tools and reasoning
+    // in a pinned inner fold. Cold-loaded history has no revealed records and
+    // stays folded. Reasoning of any message, the last one included, sits in
+    // an outer or pinned inner fold.
     const {
         messageIndexMap,
         turnIndexMap,

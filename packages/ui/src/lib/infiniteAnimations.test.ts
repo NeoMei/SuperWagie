@@ -10,18 +10,18 @@ import { fileURLToPath } from 'node:url';
  * `BusyDots` or `useWaitingBlink`, all on one shared clock. The infinite CSS
  * animations left are bounded by the user: the short `animate-spin` of a button
  * or a quick load, the diff's expand spinner, the model name that scrolls while
- * hovered. The folded Activity header's repeating 2.8 s left-to-right shimmer
- * is another user-requested exception: fixed 240 px bands keep long headers
- * visibly animated. It starts only after the text is stable for one second, and
- * stops when the header changes, settles, leaves the viewport or loses
- * visibility. A new infinite animation fails here until it is replaced or
- * listed with a reason.
+ * hovered. The folded Activity header's repeating 2.8 s shimmer starts only
+ * after the text is stable for one second, and stops when the header changes,
+ * settles, leaves the viewport or loses visibility. The stop coin rotates one
+ * composited transform only while a turn runs. A new infinite animation fails
+ * here until it is replaced or listed with a reason.
  */
 const ALLOWED = [
   { file: 'index.css', declaration: 'animation: webkit-spin 1s linear infinite !important;' },
   { file: 'index.css', declaration: 'animation: oc-trailing-expand-spin 0.8s linear infinite;' },
   { file: 'index.css', declaration: 'animation: marquee-scroll 5s linear infinite alternate;' },
   { file: 'index.css', declaration: 'animation: oc-live-header-shimmer 2.8s linear infinite;' },
+  { file: 'index.css', declaration: 'animation: oc-stop-coin-orbit 1.8s linear infinite;' },
   { file: 'components/views/PierreDiffViewer.tsx', declaration: 'animation: oc-expand-spin 0.8s linear infinite;' },
 ];
 
@@ -59,8 +59,20 @@ test('every allowed infinite animation still exists', () => {
 
 test('the folded Activity header sweeps repeating bands from left to right', () => {
   const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
-  expect(css).toContain('transparent 60% 100%) -240px 0 / 240px 100% repeat-x;');
+  expect(css).toContain('color-mix(in srgb, currentColor 20%, white) 40% 60%,');
+  expect(css).toContain('transparent 75% 100%) -240px 0 / 240px 100% repeat-x;');
   expect(css).toContain('@keyframes oc-live-header-shimmer {\n  from { background-position: -240px 0; }\n  to { background-position: 0 0; }');
+});
+
+test('each folded header highlight covers three full-width Chinese glyphs', () => {
+  const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
+  const gradient = css.match(/color-mix\(in srgb, currentColor 20%, white\) (\d+)% (\d+)%,/);
+  const tile = css.match(/-240px 0 \/ (\d+)px 100% repeat-x;/);
+  expect(gradient).not.toBeNull();
+  expect(tile).not.toBeNull();
+  const brightWidthPx = Number(tile?.[1]) * (Number(gradient?.[2]) - Number(gradient?.[1])) / 100;
+  // The mobile typography scale raises the title to 14 px.
+  expect(brightWidthPx).toBeGreaterThanOrEqual(3 * 14);
 });
 
 test('the isolated background-position fixture sweeps from left to right', () => {
@@ -69,4 +81,6 @@ test('the isolated background-position fixture sweeps from left to right', () =>
   expect(fixture).toContain('background-repeat: no-repeat;');
   expect(fixture).toContain('background-position: 100% 0;');
   expect(fixture).toContain('background-size: 200% 100%;');
+  expect(fixture).toContain('color-mix(in srgb, currentColor 20%, white) 40% 60%,');
+  expect(fixture).toContain('transparent 75% 100%) -240px 0 / 240px 100% repeat-x;');
 });

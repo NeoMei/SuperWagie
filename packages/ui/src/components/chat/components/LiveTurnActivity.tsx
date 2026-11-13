@@ -31,8 +31,21 @@ import { getCompactReasoningSummary } from '../lib/reasoningSummary';
 import { useStreamingTextThrottle } from '../hooks/useStreamingTextThrottle';
 import { ClockPausedContext } from '@/hooks/clockPausedContext';
 import { isShimmerAllowed, watchHeaderShimmer } from '@/hooks/liveHeaderShimmer';
+import { normalizePath } from '@/lib/pathNormalization';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import {
+    getRevealedText,
+    getRevealedTextVersion,
+    readTextPartContent,
+    readTextPartGeneration,
+    selectRevealedTextForMessage,
+    subscribeRevealedText,
+} from '../lib/turns/revealedText';
+import { RevealedTextTurnContext, type LivePinnedMessagePresentation } from './revealedTextContext';
+import { PinnedMessage } from './withPinnedMessage';
 
 const SHIMMER_STABLE_DELAY_MS = 1000;
+const subscribeRuntimeKey = (notify: () => void): (() => void) => subscribeRuntimeEndpointChanged(() => notify());
 
 /** The shimmer starts only after the whole folded header has held still for one second. */
 const useStableHeaderShimmer = (identity: string, active: boolean) => {
@@ -73,11 +86,25 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     const finalContentId = React.useId();
     const belowInteractionsContentId = React.useId();
     const finalMessage = getLiveFinalMessage(turn.assistantMessages);
+    const turnId = turn.turnId;
+    const directory = useEffectiveDirectory();
+    const runtimeKey = React.useSyncExternalStore(subscribeRuntimeKey, getRuntimeKey, getRuntimeKey);
+    const sessionId = turn.userMessage.info.sessionID;
+    const revealIdentity = React.useMemo(() => ({
+        runtimeKey,
+        directory: normalizePath(directory) ?? '',
+        sessionId,
+        turnId,
+    }), [runtimeKey, directory, sessionId, turnId]);
+    React.useSyncExternalStore(subscribeRevealedText, getRevealedTextVersion, getRevealedTextVersion);
+    const revealedRecords = getRevealedText(revealIdentity);
+    const messageOrderById = React.useMemo(() => new Map(
+        turn.assistantMessages.map((message, order) => [message.info.id, order] as const),
+    ), [turn.assistantMessages]);
     const activityMessages = React.useMemo(
         () => (finalMessage ? turn.assistantMessages.filter((message) => message !== finalMessage) : turn.assistantMessages),
         [finalMessage, turn.assistantMessages],
     );
-    const directory = useEffectiveDirectory();
     const backgroundCalls = React.useMemo(() => {
         const children = new Set<string>();
         const shells = new Set<string>();
@@ -162,15 +189,17 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     const terminalError = settled && lastAssistant?.role === 'assistant' ? lastAssistant.error : undefined;
     const terminalFailed = settled && lastAssistant?.role === 'assistant' && (lastAssistant.finish === 'error' || Boolean(terminalError));
     const terminalStopped = terminalError && isStoppedTurnError(terminalError.type, terminalError.message);
-    // Keep execution detail behind one activity summary. The former fallback
-    // opened every tool and reasoning row while a turn was running, which made
-    // the transcript grow with each step and pushed the answer out of focus.
-    // A reader can still open the fold explicitly; the live header carries the
-    // current state and latest running tool.
+    // One Activity header owns the outer disclosures and one inner disclosure
+    // per pinned original message. The former fallback opened every tool and
+    // reasoning row while a turn was running, which made the transcript grow
+    // with each step and pushed the answer out of focus. A reader can open all
+    // disclosures explicitly; the live header carries the current state and
+    // latest running tool.
     const isExpanded = expanded ?? false;
     // One latest progress update remains readable while the execution log is
-    // folded. Its original message stays in that log, so opening the fold
-    // shows the complete sequence without a second copy in the transcript.
+    // folded. Messages whose prose was already shown keep their original root
+    // above it; opening the folds shows the unrevealed work without a second
+    // copy in the transcript.
     const progressMessage = React.useMemo(() => {
         if (finalMessage || isExpanded || (!isWorking && !waitingForUser) || hasLaterAssistant) return null;
         for (let index = turn.assistantMessages.length - 1; index >= 0; index -= 1) {
@@ -181,6 +210,40 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         }
         return null;
     }, [finalMessage, isExpanded, isWorking, waitingForUser, hasLaterAssistant, turn.assistantMessages]);
+    const foregroundMessage = finalMessage ?? progressMessage;
+    const foregroundMessageId = foregroundMessage?.info.id;
+    // Runtime-local revealed prose stays in the original ChatMessage root
+    // above the Activity header. A rewritten foreground keeps retired text and
+    // the current authoritative answer in one export-source wrapper outside
+    // its pinned inner fold; only unrevealed work renders inside that fold.
+    // Cold-loaded history has no runtime records and stays folded.
+    const rewrittenForeground = foregroundMessage
+        ? foregroundMessage.parts.some((part) => {
+            if (part.type !== 'text') return false;
+            const records = selectRevealedTextForMessage(revealedRecords, foregroundMessage.info.id)
+                .filter((record) => record.partId === part.id);
+            if (records.length === 0) return false;
+            const authoritativeText = readTextPartContent(part);
+            const generation = readTextPartGeneration(part, foregroundMessage.info.role === 'assistant'
+                ? foregroundMessage.info.time.created
+                : undefined);
+            return records.some((record) => (
+                !record.active
+                || record.generation !== generation
+                || !authoritativeText.startsWith(record.displayText)
+            ));
+        })
+        : false;
+    const pinnedForegroundMessage = rewrittenForeground ? foregroundMessage : null;
+    const pinnedForegroundMessageId = pinnedForegroundMessage?.info.id;
+    const foregroundToRender = pinnedForegroundMessageId ? null : foregroundMessage;
+    const pinnedMessages = React.useMemo(() => turn.assistantMessages.filter((message) => (
+        (message.info.id !== foregroundMessageId || Boolean(pinnedForegroundMessageId))
+        && selectRevealedTextForMessage(revealedRecords, message.info.id).length > 0
+    )), [foregroundMessageId, pinnedForegroundMessageId, revealedRecords, turn.assistantMessages]);
+    const pinnedMessageIds = React.useMemo(() => new Set(pinnedMessages.map((message) => message.info.id)), [pinnedMessages]);
+    const foldedMessages = React.useMemo(() => activityMessages.filter((message) => !pinnedMessageIds.has(message.info.id)),
+        [activityMessages, pinnedMessageIds]);
     const liveTool = React.useMemo(
         () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
         [turn.activityParts],
@@ -194,8 +257,9 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         }
         return undefined;
     }, [liveTool, settled, turn.assistantMessages]);
-    // The turn owns disclosure for prose, reasoning and tools together. An
-    // absent choice follows execution; explicit reader choices survive it.
+    // The turn owns one effective state for all outer and pinned inner
+    // disclosures. An absent choice follows execution; explicit reader choices
+    // survive it.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
     const reasoningText = useStreamingTextThrottle({
         text: !isExpanded && showReasoningTraces && liveThought?.type === 'reasoning' ? liveThought.text : '',
@@ -208,23 +272,34 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     // the row has stopped changing for a second. The composer status stays
     // still. Permission waits and settled turns carry no shimmer.
     // Questions, pages and proposed workflows remain outside execution,
-    // including after the turn ends without a final answer.
+    // including after the turn ends without a final answer. Each call ID has
+    // one card owner: a pinned message, the hoisted list or the final message.
     const interactions = React.useMemo(() => getShownInteractions(turn.assistantMessages), [turn.assistantMessages]);
-    // While the turn works, what the agent does after its last interaction (more
-    // steps, the reply it is still writing) is drawn below it, in the
-    // order it happened. Once the answer arrives, execution folds away and
-    // the interactions stay above the answer.
-    const lastInteractionMessageId = !finalMessage && interactions.length > 0 ? interactions[interactions.length - 1]?.messageID : undefined;
+    // While the turn works, steps after the last interaction and the reply
+    // being written stay below it in the order they happened. When the answer
+    // arrives, later work folds below the retained prose and the answer.
+    const foldedInteractions = React.useMemo(() => interactions.filter((part) => !pinnedMessageIds.has(part.messageID)),
+        [interactions, pinnedMessageIds]);
+    const lastInteractionMessageId = !finalMessage && foldedInteractions.length > 0
+        ? foldedInteractions[foldedInteractions.length - 1]?.messageID
+        : undefined;
     const [messagesAboveInteractions, messagesBelowInteractions] = React.useMemo(() => {
-        const interactionIndex = lastInteractionMessageId ? activityMessages.findIndex((message) => message.info.id === lastInteractionMessageId) : -1;
-        if (interactionIndex < 0) return [activityMessages, NO_MESSAGES];
+        const interactionIndex = lastInteractionMessageId ? foldedMessages.findIndex((message) => message.info.id === lastInteractionMessageId) : -1;
+        if (interactionIndex < 0) return [foldedMessages, NO_MESSAGES];
         const split = interactionIndex + 1;
-        return [activityMessages.slice(0, split), activityMessages.slice(split)];
-    }, [activityMessages, lastInteractionMessageId]);
+        return [foldedMessages.slice(0, split), foldedMessages.slice(split)];
+    }, [foldedMessages, lastInteractionMessageId]);
+    // Suppress in-place cards inside every message body. The owning pinned
+    // message, hoisted list or final message draws each call exactly once.
     const hoistedInteractions = React.useMemo(() => new Set(interactions.map((part) => part.id)), [interactions]);
-    const finalContext = React.useMemo(() => finalMessage ? {
-        messageId: finalMessage.info.id, expanded: isExpanded, contentId: finalContentId, animate: expanded !== undefined, interactions,
-    } : null, [finalMessage, isExpanded, finalContentId, expanded, interactions]);
+    const finalInteractions = React.useMemo(
+        () => interactions.filter((part) => !pinnedMessageIds.has(part.messageID)),
+        [interactions, pinnedMessageIds],
+    );
+    const finalContext = React.useMemo(() => finalMessage && foregroundToRender ? {
+        messageId: finalMessage.info.id, expanded: isExpanded, contentId: finalContentId,
+        animate: expanded !== undefined, interactions: finalInteractions,
+    } : null, [finalMessage, foregroundToRender, isExpanded, finalContentId, expanded, finalInteractions]);
     // No diff parsing at token frequency. The report is only shown once the
     // turn settles; later authoritative tool metadata can refine it.
     const summary = React.useMemo(() => settled ? summarizeLiveActivity(turn.assistantMessages) : null,
@@ -247,7 +322,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             <span className="live-activity-icon inline-flex shrink-0" data-running={liveTool ? 'true' : undefined}>
                 <Icon name="stack" className="size-3.5 text-[var(--tools-icon)]" />
             </span>
-            <span className="shrink-0 font-semibold text-[var(--tools-title)]">
+            <span className="oc-activity-title shrink-0 font-semibold text-[var(--tools-title)]">
                 {headerTitle}
                 {!settled ? <BusyDots /> : null}
             </span>
@@ -303,7 +378,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         if (!isExpanded) {
             dispatchRowExpand(event.currentTarget);
             if (windowStore) {
-                const rowCount = activityMessages.reduce(
+                const rowCount = foldedMessages.reduce(
                     (total, message) => total + activityRowParts(message.parts, showReasoningTraces).length,
                     0,
                 );
@@ -311,20 +386,52 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             }
         }
         onToggle(!isExpanded);
-    }, [activityMessages, isExpanded, onToggle, settled, showReasoningTraces, turn.turnId, windowStore]);
-    const headerClass = 'w-full justify-start normal-case !ps-px !pe-2 text-[var(--tools-description)] hover:!bg-transparent active:!bg-transparent';
+    }, [foldedMessages, isExpanded, onToggle, settled, showReasoningTraces, turn.turnId, windowStore]);
+    const headerClass = 'oc-activity-header w-full justify-start normal-case !ps-px !pe-2 text-[var(--tools-description)] hover:!bg-transparent active:!bg-transparent';
+    const turnScope = React.useMemo(() => ({
+        ...revealIdentity, messageOrderById, outsideFold: false,
+    }), [revealIdentity, messageOrderById]);
+    const outsideFoldScope = React.useMemo(() => ({
+        ...revealIdentity, messageOrderById, outsideFold: true,
+    }), [revealIdentity, messageOrderById]);
+    const pinnedForegroundContext = React.useMemo(() => (
+        pinnedForegroundMessageId ? { ...outsideFoldScope } : null
+    ), [outsideFoldScope, pinnedForegroundMessageId]);
+    const pinnedPresentations: LivePinnedMessagePresentation[] = React.useMemo(() => pinnedMessages.map((message, index) => ({
+        messageId: message.info.id,
+        contentId: 'pinned-' + contentId + '-' + index,
+        expanded: isExpanded,
+        animate: expanded !== undefined,
+        interactions: message.info.id === pinnedForegroundMessageId
+            ? interactions.filter((part) => (
+                part.messageID === message.info.id
+                || (Boolean(finalMessage) && finalInteractions.some((entry) => entry.id === part.id))
+            ))
+            : interactions.filter((part) => part.messageID === message.info.id),
+        records: selectRevealedTextForMessage(revealedRecords, message.info.id),
+        foreground: message.info.id === pinnedForegroundMessageId,
+        revealTurnScope: message.info.id === pinnedForegroundMessageId ? pinnedForegroundContext : null,
+    })), [contentId, expanded, finalInteractions, finalMessage, interactions, isExpanded, pinnedForegroundContext,
+        pinnedForegroundMessageId, pinnedMessages, revealedRecords]);
     return (
         <LiveTurnHoistedInteractionsContext.Provider value={hoistedInteractions}>
             <LiveActivityInlineContentContext.Provider value>
             <LiveActivityToolsHiddenContext.Provider value={!isExpanded}>
+            <RevealedTextTurnContext.Provider value={turnScope}>
             <div className="relative z-0" data-live-turn-activity={turn.turnId}>
+                {pinnedMessages.map((message, index) => (
+                    <PinnedMessage key={message.info.id} message={message} turnScope={turnScope}
+                        presentation={pinnedPresentations[index]}
+                        renderMessage={renderMessage} />
+                ))}
                 <div className="chat-message-column @container">
                     <div className="mt-1">
+                        {/* The control names every rendered outer and pinned inner fold. */}
                         <Button variant="ghost" size="sm" className={headerClass} onClick={handleToggle}
                             ref={shimmer.headerRef}
                             data-shimmer={shimmer.ready ? 'ready' : undefined}
                             aria-expanded={isExpanded}
-                            aria-controls={[contentId, ...(finalMessage ? [finalContentId] : []), ...(messagesBelowInteractions.length > 0 ? [belowInteractionsContentId] : [])].join(' ')}>
+                            aria-controls={[contentId, ...(foregroundToRender && finalMessage ? [finalContentId] : []), ...(messagesBelowInteractions.length > 0 ? [belowInteractionsContentId] : []), ...pinnedPresentations.map((presentation) => presentation.contentId)].join(' ')}>
                             {label}
                             {shimmer.ready ? (
                                 <span key={headerIdentity} className="oc-live-header-shimmer" aria-hidden="true">{label}</span>
@@ -337,9 +444,9 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                         <TurnMessageWindow turnId={turn.turnId} messages={messagesAboveInteractions} renderMessage={renderMessage} />
                     </div>
                 </LiveActivityCollapse>
-                {!finalMessage && interactions.length > 0 ? (
+                {!finalMessage && foldedInteractions.length > 0 ? (
                     <div className="chat-message-column">
-                        {interactions.map((part) => <ShownToolCard key={part.id} part={part} />)}
+                        {foldedInteractions.map((part) => <ShownToolCard key={part.id} part={part} />)}
                     </div>
                 ) : null}
                 {messagesBelowInteractions.length > 0 ? (
@@ -351,10 +458,13 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                         </div>
                     </LiveActivityCollapse>
                 ) : null}
-                <LiveFinalActivityContext.Provider value={finalContext}>
-                    {finalMessage ? renderMessage(finalMessage) : progressMessage ? renderMessage(progressMessage) : null}
-                </LiveFinalActivityContext.Provider>
+                <RevealedTextTurnContext.Provider value={outsideFoldScope}>
+                    <LiveFinalActivityContext.Provider value={finalContext}>
+                        {foregroundToRender ? renderMessage(foregroundToRender) : null}
+                    </LiveFinalActivityContext.Provider>
+                </RevealedTextTurnContext.Provider>
             </div>
+            </RevealedTextTurnContext.Provider>
             </LiveActivityToolsHiddenContext.Provider>
             </LiveActivityInlineContentContext.Provider>
         </LiveTurnHoistedInteractionsContext.Provider>

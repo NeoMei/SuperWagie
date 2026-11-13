@@ -3,9 +3,9 @@ import { createContext } from 'react';
 import type { Part, ToolPart } from '@/lib/opencode/model';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
 
-// While a turn works with Activity collapsed, only its latest rows stay in
-// view and the earlier ones fold into one "+N more" row. A row is what
-// MessageBody draws for one part: a text, a reasoning block, a tool call.
+// A long turn mounts only a window of its rows; the head can cut into a
+// message and skip its first rows. A row is what MessageBody draws for one
+// part: a text, a reasoning block, a tool call.
 
 const isToolRunning = (status: string | undefined): boolean => (
     status === 'pending' || status === 'running' || status === 'started'

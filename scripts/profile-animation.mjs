@@ -59,6 +59,7 @@ const DEFAULT_VARIANTS = [
   "ctx-currentcolor",
   "activity-header-static",
   "activity-header-shimmer",
+  "stop-coin-orbit",
 ]
 
 const HELP = `Usage: bun run profile:animation -- [options]

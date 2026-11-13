@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.89 for macOS Apple silicon and
+The website targets release 2.7.91 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
@@ -26,13 +26,33 @@ with the same key before its connection is applied. Tests appear as they start,
 with up to three running together. A missing compatible model has an explicit
 unavailable result. Models without native prices remain unavailable.
 
+Version 2.7.91 shows live turn state with one small dot that uses yellow while
+working, orange while waiting for input, red on error, and green for about
+3 seconds after completion before it returns to neutral. The stop control is a
+copper coin whose outer ring orbits while the agent works. Long folded activity
+headers get several wider highlights that sweep from left to right after the
+text stays unchanged for one second. Each highlight covers at least three
+full-width Chinese glyphs. Font size, weight, title color and the 2.8 s rhythm
+stay as they are. Chat prose already shown above the folded activity stays
+visible when later work begins.
+
+UniHub's verified-email password recovery from 2.7.90 stays in place. The
+library switch still turns on experience learning, and new conversations in
+any user-visible root session enter extraction after the switch is on. The
+2.7.88 sign-in recovery, Alipay's browser checkout page and the 2.7.89
+experience learning fixes remain in this release.
+
+Version 2.7.90 opens UniHub's verified-email recovery form from
+"Forgot password?". Casdoor's shell could not recover a UniHub account. Enter
+the account email and a single-use link arrives by mail.
+
 Version 2.7.89 gives long folded activity headers several highlights spaced
 240 px apart, moving from left to right after the visible text has stayed
 unchanged for one second. Short headers keep one highlight. Font size and
 weight, title color, the 2.8 s rhythm and the still gray status line stay as
-they are. Alipay checkout now opens its payment page in the browser instead of
-drawing an unscannable QR code from that page. This release also retains the
-2.7.88 sign-in recovery described below.
+they are. Alipay opens its checkout page in the browser. The library switch
+turns on experience learning, and new conversations in any user-visible root
+session enter extraction after the switch is on.
 
 Version 2.7.88 restores sign-in when a saved desktop device credential is no
 longer recognised: the app renews it once and reads the account again. An
@@ -148,7 +168,7 @@ background and indexed for project retrieval. The Experiences checkbox can pause
 or resume learning. Sessions from before enablement require explicit processing.
 Methodology candidates require confirmation.
 
-Installer links point to the v2.7.89 GitHub Release assets. The unified release
+Installer links point to the v2.7.91 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 

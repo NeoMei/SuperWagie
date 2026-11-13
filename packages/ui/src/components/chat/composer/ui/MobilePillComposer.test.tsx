@@ -12,7 +12,7 @@ import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQue
 
 import { MobilePillComposer } from './MobilePillComposer';
 
-const renderPill = async (options: { hasContent: boolean; newSessionDraftOpen: boolean; canAbort?: boolean; dictationEnabled?: boolean; followUpBehavior?: FollowUpBehavior }) => {
+const renderPill = async (options: { hasContent: boolean; newSessionDraftOpen: boolean; canAbort?: boolean; dictationEnabled?: boolean; followUpBehavior?: FollowUpBehavior; inspectStop?: boolean }) => {
     const win = new Window({ url: 'http://localhost' });
     Object.defineProperty(win.navigator, 'mediaDevices', {
         value: { getUserMedia: () => Promise.resolve() },
@@ -25,9 +25,15 @@ const renderPill = async (options: { hasContent: boolean; newSessionDraftOpen: b
     const values = { window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage, IS_REACT_ACT_ENVIRONMENT: true };
     const previous = new Map(Object.keys(values).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
     for (const [key, value] of Object.entries(values)) Object.defineProperty(globalThis, key, { configurable: true, value });
+    const outer = document.createElement('div');
     const container = document.createElement('div');
+    outer.append(container);
     const root = createRoot(container);
     let primaryActions = 0;
+    let abortActions = 0;
+    let expandActions = 0;
+    let outerClicks = 0;
+    outer.addEventListener('click', () => { outerClicks += 1; });
     try {
         await act(async () => root.render(
         <SyncProvider directory="/fixture" sdk={OpenCode.make({ baseUrl: "http://opencode.test", fetch: async () => new Response("[]", { headers: { "content-type": "application/json" } }) })}>
@@ -44,13 +50,13 @@ const renderPill = async (options: { hasContent: boolean; newSessionDraftOpen: b
                 iconSizeClass="icon-size"
                 sendIconSizeClass="send-icon-size"
                 stopIconSizeClass="stop-icon-size"
-                onExpand={() => {}}
+                onExpand={() => { expandActions += 1; }}
                 onPrimaryAction={() => { primaryActions += 1; }}
                 onPickLocalFiles={() => {}}
                 onOpenGitHubPicker={() => {}}
                 onOpenAttachSheet={() => {}}
                 onStartDictation={() => {}}
-                onAbort={() => {}}
+                onAbort={() => { abortActions += 1; }}
             />
         </I18nProvider>
         </ThemeSystemProvider>
@@ -64,7 +70,24 @@ const renderPill = async (options: { hasContent: boolean; newSessionDraftOpen: b
             await act(async () => { action?.click(); });
             expect(primaryActions).toBe(1);
         }
-        return container.innerHTML;
+        const stop = container.querySelector<HTMLButtonElement>('[aria-label="Stop generating"]');
+        const stopLabel = stop?.getAttribute('aria-label') ?? null;
+        const coinCount = container.querySelectorAll('[data-composer-stop-coin]').length;
+        const coinInStop = Boolean(stop?.querySelector('[data-composer-stop-coin]'));
+        if (options.inspectStop) {
+            const primaryBeforeStop = primaryActions;
+            await act(async () => { stop?.click(); });
+            return {
+                markup: container.innerHTML,
+                primaryActions: primaryBeforeStop,
+                extraPrimaryActions: primaryActions - primaryBeforeStop,
+                abortActions, expandActions, outerClicks, stopLabel, coinCount, coinInStop,
+            };
+        }
+        return {
+            markup: container.innerHTML,
+            primaryActions, abortActions, expandActions, outerClicks, stopLabel, coinCount, coinInStop,
+        };
     } finally {
         await act(async () => root.unmount());
         for (const [key, descriptor] of previous) {
@@ -77,16 +100,17 @@ const renderPill = async (options: { hasContent: boolean; newSessionDraftOpen: b
 
 describe('MobilePillComposer', () => {
     test('uses the inline action to send content while the session is idle', async () => {
-        const markup = await renderPill({ hasContent: true, newSessionDraftOpen: false });
+        const { markup, coinCount } = await renderPill({ hasContent: true, newSessionDraftOpen: false });
 
         expect(markup).toContain('aria-label="Send message"');
         expect(markup).not.toContain('aria-label="Queue message"');
+        expect(coinCount).toBe(0);
     });
 
     test('queues content from inside the pill, between mic and stop, while the session is running', async () => {
         // The expanded composer shows a rotated send icon labelled "Queue
         // message" in this state; the collapsed pill must read the same.
-        const markup = await renderPill({ hasContent: true, newSessionDraftOpen: false, canAbort: true });
+        const { markup, coinCount } = await renderPill({ hasContent: true, newSessionDraftOpen: false, canAbort: true });
 
         expect(markup).toContain('aria-label="Stop generating"');
         expect(markup).toContain('aria-label="Queue message"');
@@ -97,10 +121,11 @@ describe('MobilePillComposer', () => {
         const stop = markup.indexOf('aria-label="Stop generating"');
         expect(mic).toBeLessThan(queue);
         expect(queue).toBeLessThan(stop);
+        expect(coinCount).toBe(1);
     });
 
     test('offers a plain send between mic and stop when follow-ups steer', async () => {
-        const markup = await renderPill({ hasContent: true, newSessionDraftOpen: false, canAbort: true, followUpBehavior: 'steer' });
+        const { markup } = await renderPill({ hasContent: true, newSessionDraftOpen: false, canAbort: true, followUpBehavior: 'steer' });
 
         expect(markup).not.toContain('aria-label="Queue message"');
         expect(markup).not.toContain('-rotate-90');
@@ -112,42 +137,55 @@ describe('MobilePillComposer', () => {
     });
 
     test('uses the inline send action for content in a new-session draft', async () => {
-        const markup = await renderPill({ hasContent: true, newSessionDraftOpen: true });
+        const { markup } = await renderPill({ hasContent: true, newSessionDraftOpen: true });
 
         expect(markup).toContain('aria-label="Send message"');
         expect(markup).not.toContain('aria-label="Queue message"');
     });
 
     test('shows neither send nor queue for an empty existing session', async () => {
-        const markup = await renderPill({ hasContent: false, newSessionDraftOpen: false });
+        const { markup } = await renderPill({ hasContent: false, newSessionDraftOpen: false });
 
         expect(markup).not.toContain('aria-label="Queue message"');
         expect(markup).not.toContain('aria-label="Send message"');
     });
 
     test('shows neither send nor queue for an empty new-session draft', async () => {
-        const markup = await renderPill({ hasContent: false, newSessionDraftOpen: true });
+        const { markup } = await renderPill({ hasContent: false, newSessionDraftOpen: true });
 
         expect(markup).not.toContain('aria-label="Queue message"');
         expect(markup).not.toContain('aria-label="Send message"');
     });
 
     test('keeps only abort while a session runs without content', async () => {
-        const markup = await renderPill({ hasContent: false, newSessionDraftOpen: false, canAbort: true });
+        const { markup, coinCount } = await renderPill({ hasContent: false, newSessionDraftOpen: false, canAbort: true });
 
         expect(markup).toContain('aria-label="Stop generating"');
         expect(markup).not.toContain('aria-label="Queue message"');
         expect(markup).not.toContain('aria-label="Send message"');
+        expect(coinCount).toBe(1);
+    });
+
+    test('aborts in place once from the running pill without expanding or bubbling the tap', async () => {
+        const result = await renderPill({ hasContent: false, newSessionDraftOpen: false, canAbort: true, inspectStop: true });
+
+        expect(result.stopLabel).toBe('Stop generating');
+        expect(result.coinCount).toBe(1);
+        expect(result.coinInStop).toBe(true);
+        expect(result.abortActions).toBe(1);
+        expect(result.extraPrimaryActions).toBe(0);
+        expect(result.expandActions).toBe(0);
+        expect(result.outerClicks).toBe(0);
     });
 
     test('renders the mic button when dictation is enabled and supported', async () => {
-        const markup = await renderPill({ hasContent: false, newSessionDraftOpen: false, dictationEnabled: true });
+        const { markup } = await renderPill({ hasContent: false, newSessionDraftOpen: false, dictationEnabled: true });
 
         expect(markup).toContain('aria-label="Start dictation"');
     });
 
     test('hides the mic button when dictation is disabled', async () => {
-        const markup = await renderPill({ hasContent: false, newSessionDraftOpen: false, dictationEnabled: false });
+        const { markup } = await renderPill({ hasContent: false, newSessionDraftOpen: false, dictationEnabled: false });
 
         expect(markup).not.toContain('aria-label="Start dictation"');
     });

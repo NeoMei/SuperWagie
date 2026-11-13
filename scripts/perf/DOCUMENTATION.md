@@ -440,12 +440,14 @@ once. No new headed measurement was taken for the fixed-period variant.
 
 `activity-header-static` and `activity-header-shimmer` reproduce the folded
 Activity header's font sizes, semantic colors, truncated command and duplicate
-text layer with the fixed period. The isolated `background-position` property
-fixture has a non-repeating gradient that also sweeps left to right. The app
-mounts the shimmer only after the whole header has held still for one second
-and removes it on a text change, settled turn, permission wait, hidden page,
-minimized or tray-hidden native window, offscreen header, paused clock, inert
-subtree or reduced-motion preference.
+text layer with the fixed period and bright plateau. The stop coin variant
+measures one composited rim rotation over a still base. The isolated
+`background-position` property fixture has a non-repeating gradient that also
+sweeps left to right. `lib/infiniteAnimations.test.ts` checks that the fixture
+keeps the app's plateau. The app mounts the shimmer only after the whole
+header has held still for one second and removes it on a text change, settled
+turn, permission wait, hidden page, minimized or tray-hidden native window,
+offscreen header, paused clock, inert subtree or reduced-motion preference.
 
 Composited does not mean free. With `--headed` the command also reports process
 CPU, and a composited animation that costs the main thread nothing still makes

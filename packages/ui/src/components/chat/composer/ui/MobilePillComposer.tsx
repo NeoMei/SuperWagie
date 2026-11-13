@@ -17,7 +17,6 @@ import React, { useState } from 'react';
 import type { SourceControlProvider } from '@/lib/api/types';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
-import { StopIcon } from '@/components/icons/StopIcon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -25,6 +24,7 @@ import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { ComposerAttachmentControls, type ComposerTrackerPicker } from './ComposerAttachmentControls';
+import { ComposerStopCoin } from './ComposerStopCoin';
 
 export interface MobilePillComposerProps {
     message: string;
@@ -173,8 +173,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 ) : null}
                 {/* Same visibility rule as the full composer's stop control:
                     while a turn is running the stop button takes the mic's
-                    end slot and the mic shifts one slot left. Instant swap —
-                    no shape animation (WKWebView). */}
+                    end slot and the mic shifts one slot left. The button swaps
+                    instantly (WKWebView); its coin rim shows the live activity. */}
                 {canAbort ? (
                     <button
                         type="button"
@@ -195,7 +195,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                         title={t('chat.chatInput.actions.stopGeneratingAria')}
                         aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
                     >
-                        <StopIcon className={cn(stopIconSizeClass)} />
+                        <ComposerStopCoin className={cn(stopIconSizeClass)} />
                     </button>
                 ) : canPrimaryAction ? (
                     <Button

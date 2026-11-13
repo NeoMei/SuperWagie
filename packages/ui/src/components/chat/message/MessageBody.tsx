@@ -60,8 +60,16 @@ import { isExpandableTool } from './parts/toolRenderUtils';
 import { ShownToolCard } from './parts/ShownToolCard';
 import { isShownInPlace } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
+import { LivePinnedMessageContext, RevealedTextPartContext, type LivePinnedMessagePresentation, type RevealedTextPartScope } from '../components/revealedTextContext';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../lib/turns/activityRows';
 import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from '../components/liveActivityContext';
+import {
+    buildRevealedTailPart,
+    buildRevealedTextPart,
+    cropPinnedRevealedPart,
+} from '../lib/turns/revealedText';
+import { parseGeneratedJsonResult } from './parts/generatedJsonResult';
+import { GeneratedJsonResultCard } from './parts/GeneratedJsonResultCard';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -84,11 +92,165 @@ import { hasTextSelectionInside } from '@/lib/textSelection';
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
 const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-start gap-1.5';
+const PINNED_PROSE_WRAPPER_CLASS_NAME = 'group/assistant-text relative my-1 break-words';
+const renderRevealedPart = (
+    part: Part,
+    messageId: string,
+    sessionId: string | undefined,
+    streamPhase: StreamPhase,
+    onShowPopup: (content: ToolPopupContent) => void,
+    scope: RevealedTextPartScope,
+): React.ReactNode => (
+    <LiveActivityInlineContentContext.Provider value={false}>
+        <RevealedTextPartContext.Provider value={scope}>
+            <div className={PINNED_PROSE_WRAPPER_CLASS_NAME}>
+                <AssistantTextPart part={part} sessionId={sessionId} messageId={messageId}
+                    streamPhase={streamPhase} onShowPopup={onShowPopup} />
+            </div>
+        </RevealedTextPartContext.Provider>
+    </LiveActivityInlineContentContext.Provider>
+);
+
+// Pinned copies stay inside the original message root. Their prose is sealed
+// for display; the authoritative tail and process rows keep folding below it.
 
 const getDisplayFileName = (file: string): string => {
     const normalized = file.replace(/\\/g, '/');
     const segments = normalized.split('/').filter(Boolean);
     return segments.at(-1) ?? file;
+};
+
+interface PinnedMessagePartRenderInput {
+    visibleParts: readonly Part[];
+    pinnedMessage: LivePinnedMessagePresentation;
+    messageId: string;
+    sessionId?: string;
+    messageCreatedAt?: number;
+    effectiveStreamPhase: StreamPhase;
+    onShowPopup: (content: ToolPopupContent) => void;
+    standaloneActions?: React.ReactNode;
+    recordCurrentText?: boolean;
+}
+
+const renderPinnedMessageParts = ({
+    visibleParts,
+    pinnedMessage,
+    messageId,
+    sessionId,
+    messageCreatedAt,
+    effectiveStreamPhase,
+    onShowPopup,
+    standaloneActions,
+    recordCurrentText = false,
+}: PinnedMessagePartRenderInput): React.ReactNode[] => {
+    const prose: React.ReactNode[] = [];
+    const activity: React.ReactNode[] = [];
+    const pendingInteractionIds = new Set(pinnedMessage.interactions.map((part) => part.id));
+    const addInteractionCard = (part: Part): boolean => {
+        if (part.type !== 'tool' || !pendingInteractionIds.has(part.id)) return false;
+        for (const interaction of pinnedMessage.interactions.filter((entry) => entry.id === part.id)) {
+            prose.push(<ShownToolCard key={`pinned-interaction-${interaction.id}`} part={interaction} />);
+        }
+        pendingInteractionIds.delete(part.id);
+        return true;
+    };
+    const addRevealedText = (part: Part, partIndex: number, pinnedCopy: boolean): React.ReactNode => (
+        <LiveActivityToolsHiddenContext.Provider value={false}>
+            <LiveFinalActivityContext.Provider value={null}>
+                {renderRevealedPart(part, messageId, sessionId, effectiveStreamPhase, onShowPopup,
+                    { partIndex, messageCreatedAt, pinnedCopy })}
+            </LiveFinalActivityContext.Provider>
+        </LiveActivityToolsHiddenContext.Provider>
+    );
+    const addFoldedText = (part: Part, partIndex: number): void => {
+        activity.push(<div key={`pinned-text-${part.id}`}>{addRevealedText(part, partIndex, true)}</div>);
+    };
+    const addFoldedRows = (part: Part): void => {
+        if (pinnedMessage.foreground && part.type === 'tool' && pendingInteractionIds.has(part.id)) return;
+        if (part.type === 'reasoning') {
+            activity.push(<LiveFinalActivityContext.Provider key={`pinned-reasoning-${part.id}`} value={null}>
+                <ReasoningPart part={part} messageId={messageId} streamPhase={effectiveStreamPhase} />
+            </LiveFinalActivityContext.Provider>);
+            return;
+        }
+        if (part.type !== 'tool' || !isToolRowShown(part)) return;
+        const toolPart = part;
+        if (isShownInPlace(toolPart.tool, toolPart.state)) return;
+        activity.push(
+            <LiveActivityToolsHiddenContext.Provider key={`pinned-tool-${toolPart.id}`} value={false}>
+            <FadeInOnReveal>
+                <ToolRevealOnMount animate={false}>
+                    <ToolPart part={toolPart} isExpanded={false} onToggle={() => undefined}
+                        isMobile={false} alwaysShowActions={false} onShowPopup={onShowPopup} />
+                </ToolRevealOnMount>
+            </FadeInOnReveal>,
+            </LiveActivityToolsHiddenContext.Provider>,
+        );
+    };
+
+    visibleParts.forEach((part, partIndex) => {
+        if (addInteractionCard(part)) return;
+        if (part.type !== 'text') {
+            addFoldedRows(part);
+            return;
+        }
+        const crop = cropPinnedRevealedPart(pinnedMessage.records, part, messageCreatedAt, messageId);
+        if (crop.records.length === 0 && !recordCurrentText) {
+            addFoldedText(part, partIndex);
+            return;
+        }
+        const scope: RevealedTextPartScope = { partIndex, messageCreatedAt, pinnedCopy: true };
+        const revealedProse: React.ReactNode[] = [];
+        if (recordCurrentText && !crop.active) {
+            revealedProse.push(<div key={`pinned-current-${messageId}-${partIndex}`} data-live-pinned-current-text="true">
+                {addRevealedText(part, partIndex, false)}
+            </div>);
+        }
+        for (const record of crop.records) {
+            const sealedPart = buildRevealedTextPart(record);
+            const key = `pinned-revealed-${messageId}-${partIndex}-${record.revealId}`;
+            if (record.presentation === 'generated-result') {
+                const result = parseGeneratedJsonResult(record.displayText);
+                if (result) {
+                    revealedProse.push(
+                        <div key={key} className={PINNED_PROSE_WRAPPER_CLASS_NAME}>
+                                <GeneratedJsonResultCard result={result} />
+                        </div>,
+                    );
+                    continue;
+                }
+            }
+            const sealedText = renderRevealedPart(sealedPart, messageId, sessionId, 'completed', onShowPopup, scope);
+            revealedProse.push(<div key={key}>{sealedText}</div>);
+        }
+        prose.push(
+            <RevealedTextPartContext.Provider key={`pinned-prose-${messageId}-${partIndex}`} value={scope}>
+                <div data-message-text-export-source="true">{revealedProse}</div>
+            </RevealedTextPartContext.Provider>,
+        );
+        if (crop.active && crop.visibleTail) {
+            const tailPart = buildRevealedTailPart(part, crop.tail, crop.active?.displayText.length ?? 0, crop.generation);
+            addFoldedText(tailPart, partIndex);
+        }
+    });
+
+    for (const interactionId of pendingInteractionIds) {
+        const interaction = pinnedMessage.interactions.find((part) => part.id === interactionId);
+        if (interaction) prose.push(<ShownToolCard key={`pinned-interaction-${interaction.id}`} part={interaction} />);
+    }
+    if (standaloneActions) prose.push(standaloneActions);
+
+    if (activity.length === 0 && !pinnedMessage.contentId) return prose;
+    return [
+        ...prose,
+        <div key={`pinned-activity-${messageId}`} data-message-image-export-exclude="true">
+            <LiveActivityCollapse expanded={pinnedMessage.expanded} id={pinnedMessage.contentId}
+                animate={pinnedMessage.animate}>
+                {activity}
+            </LiveActivityCollapse>
+            <span aria-hidden="true" className="block h-0" />
+        </div>,
+    ];
 };
 
 const CHANGED_FILE_CHIP_CLASS_NAME = 'inline-flex max-w-full items-center gap-1.5 rounded-lg oc-tile px-2 py-1 text-xs text-muted-foreground';
@@ -1240,6 +1402,7 @@ const AssistantMessageBody = React.memo(({
     void _allowAnimation;
     const messageContentRef = React.useRef<HTMLDivElement>(null);
     const messageTextContentRef = React.useRef<HTMLDivElement>(null);
+    const pinnedTextContentRef = React.useRef<HTMLDivElement>(null);
     const toolRevealReadyRef = React.useRef(false);
 
     React.useEffect(() => {
@@ -1374,6 +1537,8 @@ const AssistantMessageBody = React.memo(({
     const inlineActivityReasoning = React.useContext(LiveActivityInlineContentContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
     const hoistedInteractions = React.useContext(LiveTurnHoistedInteractionsContext);
+    const pinnedMessage = React.useContext(LivePinnedMessageContext);
+    const isPinnedMessage = pinnedMessage?.messageId === messageId;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
     const effectiveStreamPhase: StreamPhase = hasStopFinish ? 'completed' : streamPhase;
@@ -1515,7 +1680,7 @@ const AssistantMessageBody = React.memo(({
 
     const shareMessageAsImage = React.useCallback(
         async (requestedSourceElement?: HTMLElement | null) => {
-            const sourceElement = requestedSourceElement ?? messageTextContentRef.current ?? messageContentRef.current;
+            const sourceElement = requestedSourceElement ?? pinnedTextContentRef.current ?? messageTextContentRef.current ?? messageContentRef.current;
             if (!sourceElement) return;
 
             let wrapper: HTMLDivElement | null = null;
@@ -1699,9 +1864,35 @@ const AssistantMessageBody = React.memo(({
         return lastIndex;
     }, [shouldShowStandaloneMessageActions, visibleParts]);
 
-    const shouldRenderStandaloneActionsAfterContent = shouldShowStandaloneMessageActions && lastRenderableTextPartIndex < 0;
+    const shouldRenderStandaloneActionsAfterContent = shouldShowStandaloneMessageActions && lastRenderableTextPartIndex < 0 && !isPinnedMessage;
 
     const renderedParts = React.useMemo(() => {
+        if (isPinnedMessage && pinnedMessage) {
+            const pinnedActions = shouldShowStandaloneMessageActions ? (
+                <div key={`message-actions-${messageId}`} className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
+                    <div className="flex items-center gap-1.5" data-message-action-group="true">
+                        {messageActionButtons}
+                    </div>
+                </div>
+            ) : null;
+            return [
+                <ActivityRowSkipContext.Provider key="pinned-row-skip" value={null}>
+                    <div ref={pinnedTextContentRef} data-pinned-message-prose="true">
+                        {renderPinnedMessageParts({
+                            visibleParts,
+                            pinnedMessage,
+                            messageId,
+                            sessionId,
+                            messageCreatedAt,
+                            effectiveStreamPhase,
+                            onShowPopup,
+                            standaloneActions: pinnedActions,
+                            recordCurrentText: pinnedMessage.foreground,
+                        })}
+                    </div>
+                </ActivityRowSkipContext.Provider>,
+            ];
+        }
         const answerRendered: React.ReactNode[] = [];
         const activityRendered: React.ReactNode[] = [];
         let rendered = answerRendered;
@@ -1753,13 +1944,15 @@ const AssistantMessageBody = React.memo(({
                 hasRenderedAnswerText = true;
                 rendered.push(
                     <div key={`assistant-text-${messageId}-${i}`} ref={messageTextContentRef} data-message-text-export-source="true">
-                        <AssistantTextPart
-                            part={part}
-                            sessionId={sessionId}
-                            messageId={messageId}
-                            streamPhase={effectiveStreamPhase}
-                            onShowPopup={onShowPopup}
-                        />
+                        <RevealedTextPartContext.Provider value={{ partIndex: i, messageCreatedAt }}>
+                            <AssistantTextPart
+                                part={part}
+                                sessionId={sessionId}
+                                messageId={messageId}
+                                streamPhase={effectiveStreamPhase}
+                                onShowPopup={onShowPopup}
+                            />
+                        </RevealedTextPartContext.Provider>
                     </div>
                 );
                 if (shouldShowStandaloneMessageActions && i === lastRenderableTextPartIndex) {
@@ -1786,14 +1979,15 @@ const AssistantMessageBody = React.memo(({
                     if (!collapsibleThinkingBlocks && !inlineActivityReasoning) {
                         // Non-collapsible mode: render thinking blocks as plain text inline.
                         rendered.push(
-                            <AssistantTextPart
-                                key={`reasoning-${messageId}-${i}`}
-                                part={part}
-                                sessionId={sessionId}
-                                messageId={messageId}
-                                streamPhase={effectiveStreamPhase}
-                                onShowPopup={onShowPopup}
-                            />
+                            <RevealedTextPartContext.Provider key={`reasoning-${messageId}-${i}`} value={{ partIndex: i, messageCreatedAt }}>
+                                <AssistantTextPart
+                                    part={part}
+                                    sessionId={sessionId}
+                                    messageId={messageId}
+                                    streamPhase={effectiveStreamPhase}
+                                    onShowPopup={onShowPopup}
+                                />
+                            </RevealedTextPartContext.Provider>
                         );
                     } else {
                         // Per-part mode: each reasoning block at its natural position.
@@ -1915,6 +2109,10 @@ const AssistantMessageBody = React.memo(({
         activityRowSkip,
         alwaysShowMessageActions,
         hoistedInteractions,
+        isPinnedMessage,
+        pinnedMessage,
+        messageCreatedAt,
+        pinnedTextContentRef,
         animatedToolIdsLookup,
         collapsibleThinkingBlocks,
         expandedTools,

@@ -152,6 +152,21 @@ Enter under the follow-up setting: with Queue it queues and shows the rotated
 icon labelled "Queue message"; with Steer it steers into the running turn and
 looks like the ordinary send button.
 
+### Why the stop coin orbits on the shared animation budget
+
+Both busy composer surfaces render the same `ComposerStopCoin`: a neutral
+circular base, a red square from `--status-error`, and one highlight travelling
+clockwise around the outer rim. The rim rotates a single composited
+`transform`; its conic-gradient highlight is measured in the headed
+`stop-coin-orbit` variant of `scripts/perf/animation-fixture.html` and is the
+one long-running CSS animation listed in `lib/infiniteAnimations.test.ts` for
+this reason. The control mounts only while `canAbort` is true, so an idle
+composer pays nothing. Reduced motion, a hidden document and an `inert`
+subtree stop the orbit while the coin and its red square stay visible. The
+shared four-frames-per-second spinner clock was rejected here because a single
+highlight stepping 45 degrees at a time reads as choppy; the continuous orbit
+is an explicit, measured exception to that clock rule.
+
 `BackgroundShellsStrip` lists the commands that went to the background (not the ones
 a turn is waiting for, see `background` in `sync/background-shells.ts`) of
 the session and of its
@@ -190,6 +205,25 @@ rows), and the column carries `data-floating-panel` while any frame is
 mounted so the recap hint hides instead of landing over the transcript.
 Unmounting clears the offset and the marker; resizing or collapsing the frame
 updates it.
+
+`ChatContainer.tsx` owns the one execution-status dot among these riders.
+`deriveChatActivityTone` reads live session status, messages, permissions and
+forms. `useChatActivityTone` keeps the completion marker green for 3 s and an
+error marker red until the next turn. A user stop, cold history and resumed
+work return to neutral. The active tones use `--status-warning`,
+`--status-error`, `--status-success` and a mix of warning and error tokens;
+the neutral tone uses `--surface-muted-foreground`. Forced-colors mode uses
+CanvasText for the dot and its outline. `ClockPausedContext` pauses the green
+expiry and `useWaitingBlink` on the shared one-second clock. The dot mounts in
+the floating status row, the scroll-to-bottom pill, or a zero-height layer
+outside the measured status overlay when neither chip is visible.
+`ChatActivityToneHost` has zero layout height, so a completion or error dot
+does not change `--chat-floating-panel-clearance` or the transcript's end
+inset. Work text, chip surfaces and the folded Activity header stay neutral.
+
+The shared UI applies this behavior on web, Electron desktop, VS Code, hosted
+mobile and Capacitor mobile. Each renderer derives the same state and shows one
+dot in the same selected host.
 
 ## Floating composer
 

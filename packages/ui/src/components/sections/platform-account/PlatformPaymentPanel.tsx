@@ -1,6 +1,7 @@
 import React from 'react';
 import QRCode from 'qrcode';
 import { openExternalUrl } from '@/lib/url';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -44,10 +45,14 @@ const statusKey = (checkout: PlatformCheckout): I18nKey => {
   return 'platformAccount.paymentWaiting';
 };
 
-const StatusDot: React.FC<{ tone: 'waiting' | 'progress' | 'done' | 'idle' }> = ({ tone }) => <span
-  aria-hidden
-  className={`size-1.5 shrink-0 rounded-full ${tone === 'waiting' ? 'animate-pulse bg-[var(--status-warning)]' : tone === 'progress' ? 'animate-pulse bg-[var(--status-info)]' : tone === 'done' ? 'bg-[var(--status-success)]' : 'bg-muted-foreground'}`}
-/>;
+const StatusDot: React.FC<{ tone: 'waiting' | 'progress' | 'done' | 'idle' }> = ({ tone }) => {
+  const blink = useWaitingBlink(tone === 'waiting' || tone === 'progress');
+  const fill = tone === 'waiting' ? 'bg-[var(--status-warning)]'
+    : tone === 'progress' ? 'bg-[var(--status-info)]'
+      : tone === 'done' ? 'bg-[var(--status-success)]'
+        : 'bg-muted-foreground';
+  return <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${fill} ${blink ?? ''}`} />;
+};
 
 /** History rows carry a state word, not a sentence. */
 const shortStateKey = (checkout: PlatformCheckout): I18nKey => {
