@@ -118,7 +118,9 @@ try {
   receipt.engineVersion = info.version; receipt.existingSessionAndSyntheticHistoryRead = true; receipt.signedOutBusinessApiRefused = true;
   if (process.platform === 'win32') {
     checkpoint('Windows multiline PowerShell');
-    const command = "$ErrorActionPreference = 'Stop'\r\n$items = @('first-line', '犇马✓')\r\n$items | ForEach-Object { [Console]::WriteLine($_) }\r\nexit 0";
+    // Console.WriteLine uses the Windows host code page unless the script
+    // chooses an encoding. Observe that default separately from UTF-8 capture.
+    const command = "$ErrorActionPreference = 'Stop'\r\nWrite-Output ('console-codepage=' + [Console]::OutputEncoding.CodePage)\r\nWrite-Output 'pipeline-default=犇马✓'\r\n[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\r\n[Console]::WriteLine('utf8-output-begin')\r\n$items = @('first-line', '犇马✓')\r\n$items | ForEach-Object { [Console]::WriteLine($_) }\r\nexit 0";
     const created = await sdk.shell.create({ command, cwd: project, location: { directory: project }, metadata: { sessionID: session.id } });
     try {
       const shell = await until(async () => { const value = (await sdk.shell.get({ id: created.data.id, location: { directory: project } })).data; return value.status !== 'running' && value; }, 30_000);
@@ -130,8 +132,13 @@ try {
         shell: shell.shell, output: JSON.stringify(outputPage).slice(0, 2048) };
       checkpoint('Windows multiline PowerShell result');
       assert(/powershell|pwsh/i.test(shell.shell)); assert.equal(shell.status, 'exited'); assert.equal(shell.exit, 0);
-      assert(output.includes('first-line') && output.includes('犇马✓'));
-      receipt.multilinePowerShell = { status: shell.status, exit: shell.exit, unicodeOutput: true };
+      const codePage = output.match(/console-codepage=(\d+)/)?.[1];
+      const utf8Output = output.split('utf8-output-begin\r\n')[1];
+      assert(codePage, 'Missing default console encoding observation');
+      assert.equal(utf8Output, 'first-line\r\n犇马✓\r\n', 'Explicit UTF-8 multiline output must round-trip exactly');
+      receipt.multilinePowerShell = { status: shell.status, exit: shell.exit,
+        defaultConsoleCodePage: Number(codePage), defaultPipelineUnicode: output.includes('pipeline-default=犇马✓'),
+        explicitUtf8Console: true, unicodeOutput: true };
     } finally { await sdk.shell.remove({ id: created.data.id, location: { directory: project } }); }
   }
   checkpoint('native quit');

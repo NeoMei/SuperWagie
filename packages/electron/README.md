@@ -799,8 +799,12 @@ package's CLI, cold-starts the application, checks its mounted packaged renderer
 then uses a localhost account fixture through the existing password-login flow.
 Runtime credentials remain in the renderer while the official SDK's requests
 read the engine version and seeded history through the authenticated backend.
-Windows also runs a multiline PowerShell command and checks its Unicode output
-and exit status. Native quit must complete. The receipt excludes cross-version
+Windows also runs a multiline PowerShell command and checks its exact UTF-8
+output and exit status. The fixture explicitly sets `Console.OutputEncoding`
+before calling .NET console methods. It separately records the original Windows
+code page and whether default PowerShell pipeline output preserves Unicode.
+The check does not establish Unicode capture for arbitrary legacy-code-page
+programs. Native quit must complete. The receipt excludes cross-version
 migration, installer GUI, automatic recovery and real billing. Windows CI runs
 this check after resource verification and uploads its sanitized receipt even
 when the check fails. `--root` accepts only a new directory; no existing app
