@@ -59,6 +59,19 @@
     position: absolute; inset: 0; border-radius: 50%;
     animation: oc-stop-coin-orbit 1.8s linear infinite;
   }
+
+  /* The working row's provider mark: one 16 px silhouette breathing through opacity. */
+  @keyframes oc-activity-mark-breath { 0%, 100% { opacity: 0.58; } 50% { opacity: 1; } }
+  .v-activity-mark-static .cell::before,
+  .v-activity-mark-breath .cell::before {
+    content: ''; display: block; width: 16px; height: 16px; background: #e2b33e;
+    -webkit-mask: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"%3E%3Cpath d="M2 5 5 2l3 2 3-2 3 3-2 2 1 5-4 2-6-3 1-4z"/%3E%3C/svg%3E') center / contain no-repeat;
+    mask: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"%3E%3Cpath d="M2 5 5 2l3 2 3-2 3 3-2 2 1 5-4 2-6-3 1-4z"/%3E%3C/svg%3E') center / contain no-repeat;
+  }
+  .v-activity-mark-breath .cell::before { animation: oc-activity-mark-breath 2.2s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    .v-activity-mark-breath .cell::before { animation: none; }
+  }
   .v-stop-coin-orbit .cell .coin-orbit::before {
     content: ''; position: absolute; inset: 0; border-radius: 50%;
     background: conic-gradient(from 0deg,

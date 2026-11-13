@@ -113,7 +113,7 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
                     {working && visible ? <WorkingPillBody onClick={onClick} /> : <ScrollAction onClick={onClick} />}
                     {showTone && tone !== 'neutral' && visible ? (
                         <span className="inline-flex shrink-0 items-center ps-2 pe-2.5">
-                            <ChatActivityToneDot tone={tone} waiting={tone === 'working' || tone === 'waiting'} />
+                            <ChatActivityToneDot tone={tone} />
                         </span>
                     ) : null}
                 </div>

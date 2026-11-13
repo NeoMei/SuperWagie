@@ -18,7 +18,7 @@ export const ChatActivityToneHost: React.FC<{ tone: ActivityTone }> = ({ tone })
     >
         <div className="chat-input-column">
             <span className="ms-3 inline-flex h-7 items-center">
-                <ChatActivityToneDot tone={tone} waiting={tone === 'working' || tone === 'waiting'} />
+                <ChatActivityToneDot tone={tone} />
             </span>
         </div>
     </div>

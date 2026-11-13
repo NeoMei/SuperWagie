@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import productMarkUrl from '@/assets/provider-logos/superwagie.png?url';
 
 type LogoSource = 'local' | 'remote' | 'none';
 
@@ -41,6 +42,13 @@ const LOGO_ALIAS = new Map<string, string>([
     ['copilot', 'github-copilot'],
 ]);
 
+// Account-backed SuperWagie models keep their provider's rotating operation id
+// in the native provider id. The product mark is the provider's logo for every
+// one of those instances; making the renderer guess from the model family would
+// put another vendor's mark on SuperWagie's account connection.
+const SUPERWAGIE_PROVIDER_PREFIX = 'superwagie-account-';
+const SUPERWAGIE_LOGO_SRC = productMarkUrl;
+
 const normalizeProviderId = (providerId: string | null | undefined) => {
     return (providerId ?? '')
         .toLowerCase()
@@ -48,6 +56,11 @@ const normalizeProviderId = (providerId: string | null | undefined) => {
         .replace(/^models\./, '')
         .replace(/^provider\./, '')
         .replace(/\s+/g, '-');
+};
+
+const isSuperWagieProvider = (providerId: string | null | undefined): boolean => {
+    const normalized = normalizeProviderId(providerId);
+    return normalized === 'superwagie' || normalized.startsWith(SUPERWAGIE_PROVIDER_PREFIX);
 };
 
 const buildLogoCandidates = (providerId: string | null | undefined) => {
@@ -66,6 +79,9 @@ const buildLogoCandidates = (providerId: string | null | undefined) => {
 };
 
 const resolveProviderLogoSrc = (providerId: string | null | undefined): string | null => {
+    if (isSuperWagieProvider(providerId)) {
+        return SUPERWAGIE_LOGO_SRC;
+    }
     const candidates = buildLogoCandidates(providerId);
     const localResolvedId = candidates.find((candidate) => LOCAL_PROVIDER_LOGO_MAP.has(candidate)) ?? null;
     const localLogoSrc = localResolvedId ? LOCAL_PROVIDER_LOGO_MAP.get(localResolvedId) ?? null : null;
@@ -106,23 +122,26 @@ for (const [path, url] of Object.entries(localLogoModules)) {
 }
 
 export function useProviderLogo(providerId: string | null | undefined): UseProviderLogoReturn {
-    const candidates = buildLogoCandidates(providerId);
+    const superWagieProvider = isSuperWagieProvider(providerId);
+    const candidates = superWagieProvider ? [] : buildLogoCandidates(providerId);
     const localResolvedId = candidates.find((candidate) => LOCAL_PROVIDER_LOGO_MAP.has(candidate)) ?? null;
     const remoteResolvedId = candidates[0] ?? null;
-    const hasLocalLogo = Boolean(localResolvedId);
-    const localLogoSrc = localResolvedId ? LOCAL_PROVIDER_LOGO_MAP.get(localResolvedId) ?? null : null;
+    const localLogoSrc = superWagieProvider
+        ? productMarkUrl
+        : localResolvedId ? LOCAL_PROVIDER_LOGO_MAP.get(localResolvedId) ?? null : null;
+    const hasLocalLogo = Boolean(localLogoSrc);
 
     const [source, setSource] = useState<LogoSource>(hasLocalLogo ? 'local' : 'remote');
 
     useEffect(() => {
         setSource(hasLocalLogo ? 'local' : 'remote');
-    }, [hasLocalLogo, localResolvedId, remoteResolvedId]);
+    }, [hasLocalLogo, providerId, remoteResolvedId]);
 
     const handleError = useCallback(() => {
         setSource((current) => (current === 'local' && hasLocalLogo ? 'remote' : 'none'));
     }, [hasLocalLogo]);
 
-    if (!localResolvedId && !remoteResolvedId) {
+    if (!localLogoSrc && !remoteResolvedId) {
         return { src: null, onError: handleError, hasLogo: false };
     }
 

@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
  * hovered. The folded Activity header's repeating 2.8 s shimmer starts only
  * after the text is stable for one second, and stops when the header changes,
  * settles, leaves the viewport or loses visibility. The stop coin rotates one
- * composited transform only while a turn runs. A new infinite animation fails
+ * composited transform only while a turn runs. The status mark breathes one
+ * composited opacity only while a turn works or waits. A new infinite animation fails
  * here until it is replaced or listed with a reason.
  */
 const ALLOWED = [
@@ -22,6 +23,7 @@ const ALLOWED = [
   { file: 'index.css', declaration: 'animation: marquee-scroll 5s linear infinite alternate;' },
   { file: 'index.css', declaration: 'animation: oc-live-header-shimmer 2.8s linear infinite;' },
   { file: 'index.css', declaration: 'animation: oc-stop-coin-orbit 1.8s linear infinite;' },
+  { file: 'index.css', declaration: 'animation: oc-activity-mark-breath 2.2s ease-in-out infinite;' },
   { file: 'components/views/PierreDiffViewer.tsx', declaration: 'animation: oc-expand-spin 0.8s linear infinite;' },
 ];
 
@@ -100,4 +102,20 @@ test('the stop coin uses the chat surface and the brand signal', () => {
   const coin = readFileSync(join(SOURCE_ROOT, 'components/chat/composer/ui/ComposerStopCoin.tsx'), 'utf8');
   expect(coin).toContain("backgroundColor: 'var(--surface-background)'");
   expect(coin).toContain('bg-[var(--oc-brand-signal)]');
+});
+
+test('the provider mark breathes smoothly and stops for reduced motion', () => {
+  const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
+  expect(css).toContain('animation: oc-activity-mark-breath 2.2s ease-in-out infinite;');
+  expect(css).toContain('0%, 100% { opacity: 0.58; }');
+  expect(css).toContain('50% { opacity: 1; }');
+  expect(css).toContain('.oc-activity-mark--breathing {\n    animation: none;');
+  const fixture = readFileSync(FIXTURE_ROOT, 'utf8');
+  expect(fixture).toContain('@keyframes oc-activity-mark-breath { 0%, 100% { opacity: 0.58; } 50% { opacity: 1; } }');
+  expect(fixture).toContain('.v-activity-mark-breath .cell::before { animation: oc-activity-mark-breath 2.2s ease-in-out infinite; }');
+});
+
+test('the SuperWagie provider uses a colorable product-mark asset', () => {
+  const logos = readFileSync(join(SOURCE_ROOT, 'hooks/useProviderLogo.ts'), 'utf8');
+  expect(logos).toContain("import productMarkUrl from '@/assets/provider-logos/superwagie.png?url'");
 });

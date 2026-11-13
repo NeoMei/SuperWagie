@@ -63,17 +63,18 @@ afterEach(() => {
 });
 
 describe('chat activity tone hosts', () => {
-    test('one dot is decorative, uses theme tokens, and blinks only in active states', async () => {
-        await render(<ChatActivityToneDot tone="working" waiting />);
+    test('one mark is decorative, uses theme tokens, and breathes only in active states', async () => {
+        await render(<ChatActivityToneDot tone="working" />);
         expect(dots()).toHaveLength(1);
         expect(dots()[0].getAttribute('aria-hidden')).toBe('true');
         expect(dots()[0].getAttribute('data-activity-tone')).toBe('working');
         expect(dots()[0].className).not.toContain('waiting-dim');
-        await act(async () => { jest.advanceTimersByTime(1000); });
-        expect(dots()[0].className).toContain('waiting-dim');
+        expect(dots()[0].className).toContain('oc-activity-mark--breathing');
 
-        await render(<ChatActivityToneDot tone="done" waiting={false} />);
-        expect(dots()[0].className).not.toContain('waiting-dim');
+        await render(<ChatActivityToneDot tone="done" />);
+        expect(dots()[0].className).not.toContain('oc-activity-mark--breathing');
+        await render(<ChatActivityToneDot tone="waiting" />);
+        expect(dots()[0].className).toContain('oc-activity-mark--breathing');
 
         for (const [tone, token] of [
             ['working', 'var(--status-warning)'],
@@ -82,10 +83,30 @@ describe('chat activity tone hosts', () => {
             ['done', 'var(--status-success)'],
         ] as const) {
             expect(css).toContain(".oc-activity-tone[data-activity-tone='" + tone + "'] {");
-            expect(css).toContain('background-color: ' + token + ';');
+            expect(css).toContain('--oc-activity-color: ' + token + ';');
         }
-        expect(css).toContain('background-color: CanvasText;');
+        expect(css).toContain('.oc-activity-mark__dot,\n  .oc-activity-mark__logo {\n    background-color: CanvasText;');
         expect(css).not.toContain('.oc-activity-header[data-activity-tone=');
+    });
+
+    test('the working row shows its provider mark once and the text stays neutral', async () => {
+        await render(<StatusRow
+            isWorking
+            tone="working"
+            showTone
+            providerId="superwagie-account-operation"
+            status={{ key: 'chat.agentStatus.thinking', seed: 'reasoning-0' }}
+        />);
+        expect(dots()).toHaveLength(1);
+        expect(dots()[0].querySelector('.oc-activity-mark__logo')).not.toBeNull();
+        expect(host.querySelectorAll('img')).toHaveLength(1);
+        expect(host.querySelector('[role="status"].text-muted-foreground')).not.toBeNull();
+    });
+
+    test('a provider without a logo keeps the fallback dot and never leaves an empty mark', async () => {
+        await render(<ChatActivityToneDot tone="working" providerId="" />);
+        expect(dots()[0].querySelector('.oc-activity-mark__dot')).not.toBeNull();
+        expect(dots()[0].querySelector('.oc-activity-mark__logo')).toBeNull();
     });
 
     test('the working row owns the dot and leaves its long status phrase neutral', async () => {

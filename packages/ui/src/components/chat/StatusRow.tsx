@@ -77,7 +77,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             its own scrollbar. Clipping both axes cut descenders off at the
             label's 16px line box, so only the width is clipped. */}
         <div className="flex items-center min-w-0 gap-2 overflow-x-clip">
-          {showTone ? <ChatActivityToneDot tone={tone} waiting={tone === 'working' || tone === 'waiting'} /> : null}
+          {showTone ? <ChatActivityToneDot tone={tone} providerId={providerId} /> : null}
           {shouldRenderPlaceholder ? (
             <WorkingPlaceholder
               key={currentSessionId ?? "no-session"}
@@ -89,6 +89,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
               agentName={agentName}
               modelName={modelName}
               providerId={providerId}
+              showProviderLogo={!showTone}
             />
           ) : null}
         </div>

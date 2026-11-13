@@ -449,6 +449,13 @@ header has held still for one second and removes it on a text change, settled
 turn, permission wait, hidden page, minimized or tray-hidden native window,
 offscreen header, paused clock, inert subtree or reduced-motion preference.
 
+The working row's provider mark is the same kind of bounded exception: it
+breathes one composited `opacity` transition only while the current turn works
+or waits. It stops for a hidden page, minimized or tray-hidden native window,
+settled turn, error and reduced-motion preference. The smooth pulse figure
+above is the closest measured cost (59-60 frames and 7.3-7.6% CPU for one
+headed fixture); there is no separate provider-mark capture yet.
+
 Composited does not mean free. With `--headed` the command also reports process
 CPU, and a composited animation that costs the main thread nothing still makes
 the compositor and the GPU process draw every frame: the three pulsing dots of

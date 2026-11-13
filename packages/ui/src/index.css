@@ -2486,36 +2486,83 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 }
 
 /*
- * One small dot carries execution state wherever the chat currently shows its
- * prompt. Work text, folded titles, chip and pill surfaces stay neutral. A wait
- * uses the shared one-second clock; completed and error states stand still.
+ * One state mark carries execution state wherever the chat currently shows its
+ * prompt. The working row fills its mark with the active provider's logo; other
+ * hosts and providers without a logo keep the small dot. The mark uses the
+ * theme's status fill, and work or a wait breathes smoothly through opacity.
+ * Completed and error states stand still.
  */
 .oc-activity-tone {
-  background-color: var(--surface-muted-foreground);
+  --oc-activity-color: var(--surface-muted-foreground);
+  display: inline-grid;
+  place-items: center;
 }
 
 .oc-activity-tone[data-activity-tone='working'] {
-  background-color: var(--status-warning);
+  --oc-activity-color: var(--status-warning);
 }
 
 .oc-activity-tone[data-activity-tone='waiting'] {
-  background-color: color-mix(in srgb, var(--status-warning) 65%, var(--status-error));
+  --oc-activity-color: color-mix(in srgb, var(--status-warning) 65%, var(--status-error));
 }
 
 .oc-activity-tone[data-activity-tone='error'] {
-  background-color: var(--status-error);
+  --oc-activity-color: var(--status-error);
 }
 
 .oc-activity-tone[data-activity-tone='done'] {
-  background-color: var(--status-success);
+  --oc-activity-color: var(--status-success);
+}
+
+.oc-activity-mark__probe {
+  display: none;
+}
+
+.oc-activity-mark__dot {
+  background-color: var(--oc-activity-color);
+}
+
+.oc-activity-mark__logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-color: var(--oc-activity-color);
+  -webkit-mask-image: var(--oc-activity-logo);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--oc-activity-logo);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+/* A smooth luminance breath carries work and waits; no stepped clock frames. */
+.oc-activity-mark--breathing {
+  animation: oc-activity-mark-breath 2.2s ease-in-out infinite;
+}
+
+@keyframes oc-activity-mark-breath {
+  0%, 100% { opacity: 0.58; }
+  50% { opacity: 1; }
 }
 
 @media (forced-colors: active) {
   .oc-activity-tone {
-    background-color: CanvasText;
     forced-color-adjust: none;
     outline: 1px solid CanvasText;
     outline-offset: 1px;
+  }
+
+  .oc-activity-mark__dot,
+  .oc-activity-mark__logo {
+    background-color: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-activity-mark--breathing {
+    animation: none;
   }
 }
 
