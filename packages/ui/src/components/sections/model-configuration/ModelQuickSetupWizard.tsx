@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Radio } from '@/components/ui/radio';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { SettingsFieldRow, SettingsChipGroup, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsFieldRow, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -56,7 +56,7 @@ const toPurposeId = (value: string): ModelPurposeId | null => isPurposeId(value)
 export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ open, configuration, onClose, onApplied, onRolledBack, client = defaultClient }) => {
   const { t } = useI18n();
   const [step, setStep] = React.useState<Step>('source');
-  const [fundingMode, setFundingMode] = React.useState<'credits' | 'prepaid_cash'>('prepaid_cash');
+  const fundingMode = 'credits' as const;
   const [source, setSource] = React.useState<Source>('session');
   const [key, setKey] = React.useState('');
   const [mode, setMode] = React.useState<ModelBootstrapMode>('fill-missing');
@@ -94,7 +94,7 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
       setError(null);
       return;
     }
-    setStep('source'); setSource('session'); setFundingMode('prepaid_cash'); setKey(''); setMode('fill-missing'); setDiscovery(null); setPreview(null); setSelections({});
+    setStep('source'); setSource('session'); setKey(''); setMode('fill-missing'); setDiscovery(null); setPreview(null); setSelections({});
     setOperationId(null); setTestRunId(null); setTestStatus(null); setTestResults([]); setTestPurposes([]); setBusy(false); setError(null);
   }, [open]);
 
@@ -193,10 +193,7 @@ export const ModelQuickSetupWizard: React.FC<ModelQuickSetupWizardProps> = ({ op
           <span><span className="typography-ui-label text-foreground">{t(sourceText[option])}</span><span className={`block ${SETTINGS_HELPER_CLASS}`}>{t(sourceHintText[option])}</span></span>
         </div>)}
         {source === 'session' && <SettingsFieldRow label={t('platformAccount.keySetup.fundingMode')} info={t('platformAccount.keySetup.fundingSwitchHint')}>
-          <SettingsChipGroup value={fundingMode} onChange={setFundingMode} options={[
-            { value: 'prepaid_cash', label: t('platformAccount.keySetup.cash'), disabled: busy || unsupported || accountUnsupported },
-            { value: 'credits', label: t('platformAccount.keySetup.credits'), disabled: busy || unsupported || accountUnsupported },
-          ]} />
+          <span className="typography-ui-label text-foreground">{t('platformAccount.keySetup.credits')}</span>
         </SettingsFieldRow>}
         {source === 'imported-key' ? <SettingsFieldRow label={t('modelConfiguration.quickSetup.key')}><Input type="password" value={key} onChange={(event) => setKey(event.target.value)} aria-label={t('modelConfiguration.quickSetup.key')} className="max-w-[24rem]" /></SettingsFieldRow> : null}
         <Button onClick={discover} disabled={busy || unsupported || accountUnsupported || (source === 'imported-key' && !key.trim())}>{t('modelConfiguration.quickSetup.discover')}</Button>

@@ -53,9 +53,9 @@ test('native credit setup requires explicit activation, respects readiness and r
       const evidence=process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR;if(evidence){mkdirSync(evidence,{recursive:true});const shot=await cdp.send('Page.captureScreenshot',{format:'png'});writeFileSync(path.join(evidence,name),Buffer.from(shot.data,'base64'));}
     };
     await cdp.send('Page.navigate',{url:server.resolvedUrls.local[0]});
-    await until(`${button('现金余额')} && ${button('积分')} && window.reads.length===1`);
+    await until(`!${button('现金余额')} && document.body.innerText.includes('积分') && window.reads.length===1`);
     assert.deepEqual(await evaluate('window.writes'),[]);
-    await click('积分');await until('window.reads.at(-1)?.fundingMode==="credits" && document.body.innerText.includes("积分模型调用暂未开通。")');
+    await until('window.reads.at(-1)?.fundingMode==="credits" && document.body.innerText.includes("积分模型调用暂未开通。")');
     assert.equal(await evaluate(`${button('开通并配置')}?.disabled`),true);
     assert.deepEqual(await evaluate('window.writes'),[]);
     await screenshot('native-credit-key-zh-CN-dark-390-unavailable.png',true,390);
@@ -64,7 +64,7 @@ test('native credit setup requires explicit activation, respects readiness and r
     await screenshot('native-credit-key-zh-CN-light-1200-ready.png',false,1200);
     await click('开通并配置');await until('window.writes.length===1 && document.body.innerText.includes("FIX1")');
     assert.deepEqual(await evaluate('window.writes'),[{path:'/api/model-configuration/bootstrap/account-key',method:'POST',body:{accountId:'fixture-account',action:'activate',fundingMode:'credits'}}]);
-    await click('现金余额');await until('window.reads.at(-1)?.fundingMode==="prepaid_cash"');
+    assert.equal(await evaluate('window.reads.every(read=>read.fundingMode==="credits")'),true);
     assert.equal(await evaluate('window.writes.length'),1);
     await evaluate('window.scene(true)');await until('document.querySelector("[role=dialog]") && document.body.innerText.includes("发现模型")');
     assert.equal(await evaluate(`${button('发现模型')}?.disabled`),true);
