@@ -2,6 +2,12 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.94] - 2026-11-14
+
+### Fixes
+
+- **Billing:** Model calls are billed in credits only. Key setup and quick setup no longer offer a cash balance option, and a funding refusal opens credit top-up instead of a cash key or model balance.
+
 ## [2.7.88] - 2026-11-12
 
 ### Fixes

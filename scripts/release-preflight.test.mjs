@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+import { checkRelease, releaseTagsToCheck } from './release-preflight.mjs';
+
+const ancestors = (list) => (tag) => list.includes(tag);
+
+test('2.7.93 那种情况被拦下：上一版 2.7.92 不在当前提交里', () => {
+  const problems = checkRelease({
+    version: '2.7.93',
+    tags: ['v2.7.91', 'v2.7.92'],
+    isAncestor: ancestors(['v2.7.91']),
+  });
+  assert.match(problems[0], /上一版 v2\.7\.92 不是当前提交的祖先/);
+});
+
+test('一个版本号被两条发布线占用时被拦下', () => {
+  const problems = checkRelease({
+    version: '2.7.92',
+    tags: ['v2.7.91', 'v2.7.92'],
+    isAncestor: ancestors(['v2.7.91']),
+  });
+  assert.match(problems[0], /v2\.7\.92 已被另一条发布线占用/);
+});
+
+test('上一版是祖先就通过，包括本版 tag 已存在的重跑', () => {
+  assert.deepEqual(
+    checkRelease({ version: '2.7.92', tags: ['v2.7.91', 'v2.7.92'], isAncestor: ancestors(['v2.7.91', 'v2.7.92']) }),
+    [],
+  );
+  assert.deepEqual(checkRelease({ version: '2.7.94', tags: ['v2.7.93'], isAncestor: ancestors(['v2.7.93']) }), []);
+});
+
+test('首个版本与无 tag 仓库放行', () => {
+  assert.deepEqual(checkRelease({ version: '1.0.0', tags: [], isAncestor: () => false }), []);
+});
+
+test('上一版取小于本版的最大 tag，走版本号比较而不是字符串排序', () => {
+  const { previous, own } = releaseTagsToCheck('2.7.94', ['v2.7.9', 'v2.7.90', 'v2.7.100', 'v2.7.93']);
+  assert.equal(previous, 'v2.7.93');
+  assert.equal(own, null);
+});

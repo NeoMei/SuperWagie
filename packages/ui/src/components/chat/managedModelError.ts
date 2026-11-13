@@ -16,17 +16,8 @@ export const isManagedModelFundingRequired = (message: string, responseBody?: st
   try { return fundingRefusal.safeParse(JSON.parse(responseBody)).success; } catch { return false; }
 };
 
-/** Only an explicit credits refusal or its trusted asset marker changes the purchase target. */
-export const managedModelFundingMode = (message: string, responseBody?: string | null): 'credits' | 'prepaid_cash' => {
-  if (/(?:^|[^a-z0-9_])platform_model_credits_required(?:$|[^a-z0-9_])/i.test(message)) return 'credits';
-  if (responseBody && responseBody.length <= 4096) {
-    try {
-      const parsed = fundingRefusal.safeParse(JSON.parse(responseBody));
-      if (parsed.success && (parsed.data.error.code === 'platform_model_credits_required' || parsed.data.error.asset === 'CREDIT/6' || parsed.data.error.funding_mode === 'credits')) return 'credits';
-    } catch { /* An unconfirmed response keeps the legacy funding destination. */ }
-  }
-  return 'prepaid_cash';
-};
+/** Model calls are billed in credits only, so every funding refusal leads to credits. */
+export const managedModelFundingMode = (): 'credits' => 'credits';
 
 const gatewaySizeRefusal = z.object({ error: z.object({ code: z.literal('platform_gateway_request_too_large') }) });
 export const isManagedModelRequestTooLarge = (message: string, responseBody?: string | null): boolean => {

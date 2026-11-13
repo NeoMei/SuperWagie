@@ -164,10 +164,9 @@ no wallet balance, credential or original refund identity is changed.
 Customer-facing Chinese calls CREDIT benefits 积分; English calls them credits.
 Asset identifiers, units, payload fields and legacy cash values are unchanged.
 
-Native key setup presents an explicit cash or credits choice. Selection only
-reads the selected mode's receipt; issuing, probing and applying still require
-explicit actions. Credits readiness comes from the server, and missing readiness
-keeps activation unavailable. A credits refusal opens the existing funding target,
-which chooses membership or add-ons from the read membership state. The cash
-refusal retains the model cash target. Neither destination starts a payment or
-replays the model request.
+Model calls are billed in credits only, so native key setup always reads and
+writes the credits receipt. Issuing, probing and applying still require explicit
+actions. Credits readiness comes from the server, and missing readiness keeps
+activation unavailable. A funding refusal opens the existing credits target,
+which chooses membership or add-ons from the read membership state. That
+destination never starts a payment or replays the model request.
