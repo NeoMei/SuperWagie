@@ -2,9 +2,9 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * The busy composer's stop control: a white-surface coin with a brand square and a
- * highlight travelling clockwise around the rim. The rim rotates in CSS; the
- * button and its label stay still.
+ * The busy composer's stop control: a white-surface coin with a stable brand
+ * outline, a brand square and a highlight travelling clockwise around the rim.
+ * The rim rotates in CSS; the button and its label stay still.
  */
 const useStopCoinPaused = (): boolean => {
     const [reduceMotion, setReduceMotion] = React.useState(
@@ -47,7 +47,7 @@ export const ComposerStopCoin: React.FC<{ className?: string }> = ({ className }
                 className="absolute inset-0 rounded-full"
                 style={{
                     backgroundColor: 'var(--surface-background)',
-                    boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--foreground) 14%, transparent)',
+                    boxShadow: 'inset 0 0 0 1px var(--oc-brand-signal)',
                 }}
             />
             <span data-composer-stop-coin-orbit="" className="oc-stop-coin-orbit absolute inset-0 rounded-full" />

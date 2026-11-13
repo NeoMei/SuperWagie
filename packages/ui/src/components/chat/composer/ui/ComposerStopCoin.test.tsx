@@ -48,10 +48,12 @@ describe('ComposerStopCoin', () => {
         const expectVisibleCoin = (paused: boolean) => {
             const control = coin();
             expect(control).not.toBeNull();
+            const base = control?.querySelector<HTMLElement>('[data-composer-stop-coin-base]');
             expect(control?.hasAttribute('data-composer-stop-coin-paused')).toBe(paused);
-            expect(control?.querySelector('[data-composer-stop-coin-base]')).not.toBeNull();
+            expect(base).not.toBeNull();
             expect(control?.querySelector('[data-composer-stop-coin-orbit]')).not.toBeNull();
             expect(control?.querySelector('[data-composer-stop-coin-square]')).not.toBeNull();
+            expect(base?.style.boxShadow).toBe('inset 0 0 0 1px var(--oc-brand-signal)');
         };
 
         try {
