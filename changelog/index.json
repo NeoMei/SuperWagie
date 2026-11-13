@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.7.92",
+    "date": "2026-11-13",
+    "title": "Credits-only model billing",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "**Billing:** Model calls are billed in credits only. Key setup and quick setup no longer offer a cash balance option, and a funding refusal opens credit top-up instead of a cash key or model balance."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.88",
     "date": "2026-11-12",
     "title": "Sign-in recovers from a lost device credential",
