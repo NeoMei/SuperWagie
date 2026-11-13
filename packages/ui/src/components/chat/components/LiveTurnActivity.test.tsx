@@ -515,6 +515,20 @@ describe('live Activity with the real message body', () => {
             .toBe(container.querySelectorAll('[data-message-id]').length);
     });
 
+    test('does not show the same prose twice when a retry changes only the text generation', async () => {
+        const outsideFold = () => [...container.querySelectorAll('[data-message-text-export-source]')]
+            .filter((element) => !element.closest('[data-live-activity-content]'))
+            .map((element) => element.textContent ?? '').join('\n');
+        const first = assistant('retry', [textPart('retry-part', 'Same paragraph', 'retry', { start: 2, end: 3 })], 'tool-calls');
+        await act(async () => root.render(<Harness record={turn([first])} working />));
+        expect(outsideFold().match(/Same paragraph/g)).toHaveLength(1);
+        const retried = assistant('retry', [textPart('retry-part', 'Same paragraph', 'retry', { start: 4, end: 5 })], 'stop');
+        await act(async () => root.render(<Harness record={turn([retried])} working={false} />));
+        expect(outsideFold().match(/Same paragraph/g)).toHaveLength(1);
+        await act(async () => root.render(<Harness key="retry-revisited" record={turn([retried])} working={false} />));
+        expect(outsideFold().match(/Same paragraph/g)).toHaveLength(1);
+    });
+
     for (const rewrittenGeneration of [8, 9] as const) {
         test(`pins a rewritten progress update and keeps one interaction card (generation ${rewrittenGeneration})`, async () => {
             const outsideFold = () => [...container.querySelectorAll('[data-message-text-export-source]')]

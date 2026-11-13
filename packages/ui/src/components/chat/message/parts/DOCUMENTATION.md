@@ -500,6 +500,12 @@ above the fold, and the active chain's tail appears in the inner fold.
 Whitespace-only tails draw no empty prose wrapper. The store bounds itself to
 4000 turns and exposes a numeric snapshot version for `useSyncExternalStore`.
 
+A retry can repeat the same text part with a new `time.start` generation. An
+identical display string, authoritative string and presentation move that one
+record to the new generation instead of pinning the paragraph twice. Records
+left by an older renderer are also collapsed by their visible text when cropped.
+Text that actually changed keeps its separate retired record.
+
 A long turn, in either mode, mounts only a window of its rows
 (`lib/turns/turnMessageWindow.ts`, `components/TurnMessageWindow.tsx`): past
 60 rows its newest 40, with the rest behind spacers that mount 40 at a time as
