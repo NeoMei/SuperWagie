@@ -14,6 +14,8 @@ interface WorkingPlaceholderProps {
   agentName?: string;
   modelName?: string | null;
   providerId?: string | null;
+  /** False when the surrounding status row already shows the provider mark. */
+  showProviderLogo?: boolean;
 }
 
 const STATUS_DISPLAY_TIME_MS = 1200;
@@ -64,6 +66,7 @@ export function WorkingPlaceholder({
   retryInfo,
   modelName,
   providerId,
+  showProviderLogo = true,
 }: WorkingPlaceholderProps) {
   const { t, locale } = useI18n();
   const { src: providerLogoSrc, onError: handleProviderLogoError, hasLogo: hasProviderLogo } = useProviderLogo(providerId ?? null);
@@ -196,7 +199,7 @@ export function WorkingPlaceholder({
     return null;
   }
 
-  const providerLogo = hasProviderLogo && providerLogoSrc ? (
+  const providerLogo = showProviderLogo && hasProviderLogo && providerLogoSrc ? (
     // Flex sibling of the label, never an inline rider on the text line: a
     // tall inline-block drags the line box with it and the label drifts off
     // the chip's vertical center. As flex children both center independently.

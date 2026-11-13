@@ -13,7 +13,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 const SITE = 'https://www.superwagie.com';
-const SITE_VERSION = '2.7.91';
+const SITE_VERSION = '2.7.93';
 const REPO_URL = 'https://github.com/NeoMei/SuperWagie';
 const RELEASE_DOWNLOAD_URL = `${REPO_URL}/releases/download/v${SITE_VERSION}`;
 const DOWNLOAD_URLS = {
@@ -48,6 +48,8 @@ const LANGS = {
       ['问题反馈', 'https://github.com/NeoMei/SuperWagie/issues'],
       ['隐私', '/privacy/'],
       ['图片版权', '/credits/'],
+      ['品牌与标志', '/brand/'],
+      ['quukk 产品主页', 'https://www.quukk.com/'],
     ],
     footerMeta: '2026 · 数据留在本机',
     docsTitle: '文档',
@@ -92,6 +94,8 @@ const LANGS = {
       ['Feedback', 'https://github.com/NeoMei/SuperWagie/issues'],
       ['Privacy', '/en/privacy/'],
       ['Photo credits', '/en/credits/'],
+      ['Brand & logo', '/en/brand/'],
+      ['quukk products', 'https://www.quukk.com/en/'],
     ],
     footerMeta: '2026 · your data stays on your Mac',
     docsTitle: 'Documentation',

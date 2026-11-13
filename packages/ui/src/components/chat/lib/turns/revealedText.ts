@@ -58,6 +58,10 @@ const chainKey = (record: Pick<RevealedTextRecord, 'sessionId' | 'turnId' | 'mes
     record.sessionId, record.turnId, record.messageId, record.partId, String(record.generation),
 ].join('\u0000');
 
+const partKey = (record: Pick<RevealedTextRecord, 'messageId' | 'partId'>): string => [
+    record.messageId, record.partId,
+].join('\u0000');
+
 const compareRecords = (left: RevealedTextRecord, right: RevealedTextRecord): number => (
     left.messageOrder - right.messageOrder
     || left.partIndex - right.partIndex
@@ -95,6 +99,37 @@ export const recordRevealedText = (input: RevealedTextInput): void => {
     if (input.displayText.length === 0 || isInvisibleText(input.displayText)) return;
     const state = readTurnState(input);
     const key = chainKey(input);
+    // A provider may repeat the same text part with a new start timestamp on
+    // a retry. That is the same visible prose, so a new generation must not
+    // give the reader a second copy. Keep real rewrites as separate records.
+    const repeated = state.records.find((record) => (
+        partKey(record) === partKey(input)
+        && record.displayText === input.displayText
+        && record.authoritativeText === input.authoritativeText
+        && record.presentation === input.presentation
+    ));
+    if (repeated) {
+        if (repeated.generation === input.generation
+            && repeated.active
+            && repeated.messageOrder === input.messageOrder
+            && repeated.partIndex === input.partIndex) return;
+        state.records = state.records.map((record) => {
+            if (partKey(record) !== partKey(input)) return record;
+            if (record.revealId === repeated.revealId) {
+                return {
+                    ...record,
+                    generation: input.generation,
+                    messageOrder: input.messageOrder,
+                    partIndex: input.partIndex,
+                    active: true,
+                };
+            }
+            return record.active ? { ...record, active: false } : record;
+        });
+        settleTurnState(state);
+        notify();
+        return;
+    }
     const matching = state.records.filter((record) => chainKey(record) === key);
     const extendable = matching
         .filter((record) => input.authoritativeText.startsWith(record.authoritativeText))
@@ -135,7 +170,7 @@ export const recordRevealedText = (input: RevealedTextInput): void => {
 
     state.records = [
         ...state.records.map((record) => (
-            chainKey(record) === key && record.active ? { ...record, active: false } : record
+            partKey(record) === partKey(input) && record.active ? { ...record, active: false } : record
         )),
         { ...input, revealId: nextRevealId++, active: true },
     ];
@@ -255,10 +290,35 @@ export const cropPinnedRevealedPart = (
             record.messageId === messageId
             && record.partId === part.id
             && record.generation !== current.generation
+            // A provider retry can rerun the same text with a new start. The
+            // current record already shows that text; rendering the old one as
+            // retired would show the same paragraph twice.
+            && !(current.records.some((visible) => (
+                visible.displayText === record.displayText
+                && visible.authoritativeText === record.authoritativeText
+                && visible.presentation === record.presentation
+            )))
         ))
         .sort(compareRecords);
     return {
         ...current,
-        records: [...retired, ...current.records].sort(compareRecords),
+        // Older runtime records can predate the generation merge above. Do not
+        // draw a retired copy whose visible text is already in the current
+        // generation, and do not draw identical retired copies twice.
+        records: [...retired, ...current.records]
+            .filter((record, index, all) => (
+                !current.records.some((visible) => (
+                    visible !== record
+                    && visible.displayText === record.displayText
+                    && visible.authoritativeText === record.authoritativeText
+                    && visible.presentation === record.presentation
+                ))
+                && all.findIndex((candidate) => (
+                    candidate.displayText === record.displayText
+                    && candidate.authoritativeText === record.authoritativeText
+                    && candidate.presentation === record.presentation
+                )) === index
+            ))
+            .sort(compareRecords),
     };
 };

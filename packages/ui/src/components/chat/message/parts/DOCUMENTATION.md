@@ -501,6 +501,12 @@ above the fold, and the active chain's tail appears in the inner fold.
 Whitespace-only tails draw no empty prose wrapper. The store bounds itself to
 4000 turns and exposes a numeric snapshot version for `useSyncExternalStore`.
 
+A retry can repeat the same text part with a new `time.start` generation. An
+identical display string, authoritative string and presentation move that one
+record to the new generation instead of pinning the paragraph twice. Records
+left by an older renderer are also collapsed by their visible text when cropped.
+Text that actually changed keeps its separate retired record.
+
 A long turn, in either mode, mounts only a window of its rows
 (`lib/turns/turnMessageWindow.ts`, `components/TurnMessageWindow.tsx`): past
 60 rows its newest 40, with the rest behind spacers that mount 40 at a time as
@@ -918,22 +924,27 @@ its concrete target; parallel calls of one kind show their count. Permission and
 retry states take precedence over thinking copy. Ordinary changes retain the
 existing 1200 ms display hold; permission transitions display at once.
 
-`ChatContainer.tsx` owns the chat's one 6 px status dot.
+`ChatContainer.tsx` owns the chat's one status mark.
 `deriveChatActivityTone` derives the turn's state from live session status,
 messages, permissions and forms. `useChatActivityTone` keeps the transient
 state. `ChatContainer` selects the floating status row, the scroll pill, or a
 zero-height layer as the dot's one visible host. Work uses
 `--status-warning`, a wait mixes warning and error tokens, a terminal error
 uses `--status-error`, and a live completion uses `--status-success` for 3 s.
-Every other state uses `--surface-muted-foreground`. Working and waiting share
-`useWaitingBlink` on the shared one-second clock; completed and error states
-stand still. The dot is decorative and hidden from assistive technology because
+Every other state uses `--surface-muted-foreground`. The floating working row
+fills the mark with the active provider's logo; no other host repeats that
+logo beside the label. Account-backed SuperWagie providers use the product's
+cow mark, so the work line starts with the same provider identity the model
+was selected under. A provider without a logo keeps the small dot. Working and
+waiting breathe one continuous opacity transition; completed and error states
+stand still. The mark is decorative and hidden from assistive technology because
 the surrounding status text names the state. Work text, chip and pill surfaces
 stay neutral. The folded Activity header has no status dot or tone attribute.
 Its existing failed label keeps its status text token. Forced-colors mode
-draws the dot and its outline in CanvasText. `ClockPausedContext` pauses the
-green expiry and shared blink while the window is hidden or the surface is
-inert. The zero-height layer sits outside the status overlay's ResizeObserver,
+draws the mark and its outline in CanvasText. The breath stops while the page
+is hidden, a desktop window is minimized or tray-hidden, or reduced motion is
+requested. `ClockPausedContext` pauses the green expiry while the window is
+hidden or the surface is inert. The zero-height layer sits outside the status overlay's ResizeObserver,
 so a completion or error marker does not change the transcript's end inset.
 
 The same shared UI behavior applies on web, Electron desktop, VS Code, hosted
@@ -964,6 +975,19 @@ reopened history does not fill the transcript with green dots and a failure
 remains visible. The marker is runtime state keyed by session and turn; resumed
 work, a user stop, or a new turn clears the previous completion timer.
 
+### Why the working row's provider mark breathes
+
+The floating working row already shows a provider mark beside the label, so
+rendering both a separate state dot and that mark produced two identities for
+one model. One mark now carries the provider identity and the state: its
+status color fills the logo, and only work or a wait animate. The motion is
+one composited `opacity` transition over 2.2 s. A one-second stepped blink read
+as separate states rather than breathing. Motion that can last for minutes
+stops outside work, when obscured, and under reduced motion. The resource-backed
+provider id is mapped by its stable `superwagie-account-` prefix; matching a
+model family would label the account connection with the upstream vendor
+instead of SuperWagie.
+
 ### Why thinking lines use reasoning identity
 
 Every kind of work carries two phrasings of its own, and thinking carries six
@@ -977,10 +1001,11 @@ polling or model request selects copy.
 The folded Activity header sweeps 2.8 s luminance bands from left to right
 through a visual copy of its own text. Each band repeats every 240 px, so a
 short header shows one highlight and a long header shows several moving
-highlights instead of one slow wash across the full width. Each band stays
-bright for 48 px, wide enough for three Chinese characters at the largest
-supported header font size. The copy keeps the original sizes and weights and
-uses the title color for the highlight. The
+highlights instead of one slow wash across the full width. Each band fades in
+and out through the same luminance without a hard edge; its bright span is 48
+px, wide enough for three Chinese characters at the largest supported header
+font size. The copy keeps the original sizes and weights and uses the title
+color for the highlight. The
 shimmer starts only after the visible header identity has held still for one
 second, and resets on any identity, tool, target or language change. The gray
 status row and scroll pill stay still so their concrete work text reads
@@ -998,12 +1023,15 @@ short and long headers. Shifting the repeating background by exactly one tile
 during 2.8 s keeps the loop seamless while the highlights travel left to
 right.
 
-### Why each band has a bright plateau
+### Why each band has a broad, graded peak
 
-A narrow peak left only 19.2 px at full brightness, below the 42 px of three
-Chinese glyphs at the largest 14 px header size. Holding the bright color from
-40% through 60% of each 240 px tile gives a 48 px plateau. The 36 px ramps on
-each side keep its edges soft.
+A narrow peak left only 19.2 px above the resting luminance, below the 42 px of
+three Chinese glyphs at the largest 14 px header size. A flat plateau reached
+that width, but its equal-brightness middle and sudden steps read as a moving
+rectangle. The band stays above the resting luminance from 26% through 74% of
+each 240 px tile, while its brightness rises and falls across that span through
+five steps. The edges reach transparent at 0% and 100%, so adjacent tiles join
+without a seam.
 
 
 ## Single foreground command stop

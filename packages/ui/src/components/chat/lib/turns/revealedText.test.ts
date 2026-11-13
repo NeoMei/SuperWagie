@@ -3,6 +3,7 @@ import type { Part, TextPart } from '@/lib/opencode/model';
 import {
     buildRevealedTailPart,
     buildRevealedTextPart,
+    cropPinnedRevealedPart,
     cropRevealedPart,
     getRevealedText,
     getRevealedTextVersion,
@@ -164,6 +165,29 @@ describe('revealed text store', () => {
         expect(records({ turnId: 'other-turn' })[0]?.displayText).toBe('Other turn prose');
         expect(records({ sessionId: 'other-session' })).toHaveLength(1);
         expect(records({ sessionId: 'other-session' })[0]?.displayText).toBe('Other session prose');
+    });
+
+    test('renders an identical newer generation once and keeps a real rewrite', () => {
+        recordRevealedText(reveal({ generation: 10, displayText: 'Same paragraph', authoritativeText: 'Same paragraph' }));
+        recordRevealedText(reveal({ generation: 11, displayText: 'Same paragraph', authoritativeText: 'Same paragraph' }));
+        const part = textPart('part', 'message', 'Same paragraph', 11);
+        expect(cropPinnedRevealedPart(records(), part).records.map(({ displayText }) => displayText))
+            .toEqual(['Same paragraph']);
+
+        // Records left by an older renderer may still contain both copies.
+        const legacyRepeat = [
+            { ...records()[0]!, generation: 10, revealId: 1, active: false },
+            { ...records()[0]!, generation: 11, revealId: 2, active: true },
+        ];
+        expect(cropPinnedRevealedPart(legacyRepeat, part).records)
+            .toHaveLength(1);
+
+        recordRevealedText(reveal({ generation: 12, displayText: 'Old wording', authoritativeText: 'Old wording' }));
+        recordRevealedText(reveal({ generation: 13, displayText: 'New wording', authoritativeText: 'New wording' }));
+        expect(records().map(({ displayText }) => displayText)).toEqual([
+            'Same paragraph', 'Old wording', 'New wording',
+        ]);
+        expect(records().filter(({ active }) => active).map(({ displayText }) => displayText)).toEqual(['New wording']);
     });
 
     test('isolates equal session and turn IDs across runtimes and directories', () => {

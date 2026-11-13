@@ -688,6 +688,11 @@ svg.animate-spin {
   to { transform: rotate(360deg); }
 }
 
+/* The brand signal orange is the product logo's dominant opaque color. */
+:root {
+  --oc-brand-signal: #fd4d06;
+}
+
 .oc-stop-coin-orbit {
   animation: oc-stop-coin-orbit 1.8s linear infinite;
 }
@@ -697,13 +702,25 @@ svg.animate-spin {
   position: absolute;
   inset: 0;
   border-radius: 50%;
+  /* The first gradient is the fallback for engines without color-mix(). It
+     repeats the brand colour across the head instead of leaving a solid arc. */
   background: conic-gradient(from 0deg,
     transparent 0deg 250deg,
-    color-mix(in srgb, var(--foreground) 12%, transparent) 270deg,
-    color-mix(in srgb, var(--foreground) 85%, transparent) 350deg,
+    var(--oc-brand-signal) 270deg,
+    var(--oc-brand-signal) 350deg,
     transparent 360deg);
   -webkit-mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
   mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+}
+
+@supports (color: color-mix(in lab, red, red)) {
+  .oc-stop-coin-orbit::before {
+    background: conic-gradient(from 0deg,
+    transparent 0deg 250deg,
+    color-mix(in srgb, var(--oc-brand-signal) 18%, transparent) 270deg,
+    var(--oc-brand-signal) 350deg,
+    transparent 360deg);
+  }
 }
 
 [data-composer-stop-coin-paused] .oc-stop-coin-orbit,
@@ -2469,36 +2486,83 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 }
 
 /*
- * One small dot carries execution state wherever the chat currently shows its
- * prompt. Work text, folded titles, chip and pill surfaces stay neutral. A wait
- * uses the shared one-second clock; completed and error states stand still.
+ * One state mark carries execution state wherever the chat currently shows its
+ * prompt. The working row fills its mark with the active provider's logo; other
+ * hosts and providers without a logo keep the small dot. The mark uses the
+ * theme's status fill, and work or a wait breathes smoothly through opacity.
+ * Completed and error states stand still.
  */
 .oc-activity-tone {
-  background-color: var(--surface-muted-foreground);
+  --oc-activity-color: var(--surface-muted-foreground);
+  display: inline-grid;
+  place-items: center;
 }
 
 .oc-activity-tone[data-activity-tone='working'] {
-  background-color: var(--status-warning);
+  --oc-activity-color: var(--status-warning);
 }
 
 .oc-activity-tone[data-activity-tone='waiting'] {
-  background-color: color-mix(in srgb, var(--status-warning) 65%, var(--status-error));
+  --oc-activity-color: color-mix(in srgb, var(--status-warning) 65%, var(--status-error));
 }
 
 .oc-activity-tone[data-activity-tone='error'] {
-  background-color: var(--status-error);
+  --oc-activity-color: var(--status-error);
 }
 
 .oc-activity-tone[data-activity-tone='done'] {
-  background-color: var(--status-success);
+  --oc-activity-color: var(--status-success);
+}
+
+.oc-activity-mark__probe {
+  display: none;
+}
+
+.oc-activity-mark__dot {
+  background-color: var(--oc-activity-color);
+}
+
+.oc-activity-mark__logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-color: var(--oc-activity-color);
+  -webkit-mask-image: var(--oc-activity-logo);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--oc-activity-logo);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+/* A smooth luminance breath carries work and waits; no stepped clock frames. */
+.oc-activity-mark--breathing {
+  animation: oc-activity-mark-breath 2.2s ease-in-out infinite;
+}
+
+@keyframes oc-activity-mark-breath {
+  0%, 100% { opacity: 0.58; }
+  50% { opacity: 1; }
 }
 
 @media (forced-colors: active) {
   .oc-activity-tone {
-    background-color: CanvasText;
     forced-color-adjust: none;
     outline: 1px solid CanvasText;
     outline-offset: 1px;
+  }
+
+  .oc-activity-mark__dot,
+  .oc-activity-mark__logo {
+    background-color: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-activity-mark--breathing {
+    animation: none;
   }
 }
 
@@ -2506,11 +2570,12 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
  * The folded Activity header sweeps soft luminance bands from left to right
  * through a duplicate of its own text. The bands repeat every 240 px, so a
  * long header shows several highlights at once while a short one shows one.
- * Each band stays bright across at least three full-width Chinese characters.
- * The duplicate carries the original classes, so font size and weight stay as
- * they are; the highlight uses the title color. React mounts it only after the
- * header has held still for one second, and removes it when the visible
- * identity changes or the turn settles.
+ * Every band fades in and out through the same luminance, and its bright span
+ * covers at least three full-width Chinese characters. The duplicate carries
+ * the original classes, so font size and weight stay as they are; the
+ * highlight uses the title color. React mounts it only after the header has
+ * held still for one second, and removes it when the visible identity changes
+ * or the turn settles.
  */
 .oc-live-header-shimmer {
   position: absolute;
@@ -2525,15 +2590,40 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   padding-inline: inherit;
   pointer-events: none;
   color: var(--tools-title);
+  /* Without color-mix(), a transparent stop written as a colour keyword stays
+     transparent, but the stopping points would show a flat band. This
+     fallback keeps the same soft envelope with fixed-opacity white bands. */
   background: linear-gradient(90deg,
-    transparent 0 25%,
-    color-mix(in srgb, currentColor 18%, transparent) 35%,
-    color-mix(in srgb, currentColor 20%, white) 40% 60%,
-    color-mix(in srgb, currentColor 18%, transparent) 65%,
-    transparent 75% 100%) -240px 0 / 240px 100% repeat-x;
+    transparent 0%,
+    rgb(255 255 255 / 0.07) 13%,
+    rgb(255 255 255 / 0.19) 26%,
+    rgb(255 255 255 / 0.38) 40%,
+    rgb(255 255 255 / 0.48) 50%,
+    rgb(255 255 255 / 0.38) 60%,
+    rgb(255 255 255 / 0.19) 74%,
+    rgb(255 255 255 / 0.07) 87%,
+    transparent 100%) -240px 0 / 240px 100% repeat-x;
   -webkit-background-clip: text;
   background-clip: text;
   animation: oc-live-header-shimmer 2.8s linear infinite;
+}
+
+@supports (color: color-mix(in lab, red, red)) {
+  .oc-live-header-shimmer {
+  background: linear-gradient(90deg,
+    transparent 0%,
+    color-mix(in srgb, currentColor 7%, transparent) 13%,
+    color-mix(in srgb, currentColor 19%, transparent) 26%,
+    color-mix(in srgb, currentColor 38%, white) 40%,
+    color-mix(in srgb, currentColor 48%, white) 50%,
+    color-mix(in srgb, currentColor 38%, white) 60%,
+    color-mix(in srgb, currentColor 19%, transparent) 74%,
+    color-mix(in srgb, currentColor 7%, transparent) 87%,
+    transparent 100%) -240px 0 / 240px 100% repeat-x;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: oc-live-header-shimmer 2.8s linear infinite;
+  }
 }
 
 .oc-live-header-shimmer,
