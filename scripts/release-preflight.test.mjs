@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { checkRelease, releaseTagsToCheck } from './release-preflight.mjs';
+import { checkMainLine, checkRelease, releaseTagsToCheck } from './release-preflight.mjs';
 
 const ancestors = (list) => (tag) => list.includes(tag);
+
+test('打 tag 前的 --require-main 拦住旁支发版', () => {
+  assert.deepEqual(checkMainLine(true), []);
+  assert.match(checkMainLine(false)[0], /还没进 origin\/main/);
+});
 
 test('2.7.93 那种情况被拦下：上一版 2.7.92 不在当前提交里', () => {
   const problems = checkRelease({
