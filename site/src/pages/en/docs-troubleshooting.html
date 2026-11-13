@@ -3,7 +3,7 @@
 
 <h2>The app will not open</h2>
 <ul>
-  <li>If 2.7.64 reports that the app is damaged, download 2.7.92 and replace the old copy in Applications. The 2.7.82 repair fixed incomplete bundle signatures; the current build remains unnotarised.</li>
+  <li>If 2.7.64 reports that the app is damaged, download 2.7.93 and replace the old copy in Applications. The 2.7.82 repair fixed incomplete bundle signatures; the current build remains unnotarised.</li>
   <li>Only for a trusted, unmodified package: try opening the app first. If macOS blocks it because it is not notarised, open System Settings → Privacy &amp; Security, scroll down to Open Anyway, then confirm when prompted. See <a href="https://support.apple.com/en-gb/102445">Apple's instructions</a>.</li>
   <li>Match the installer to your device. The Apple silicon arm64 build requires macOS 13 or later; Windows uses the x64 installer.</li>
   <li>If Open Anyway is unavailable or the app still will not launch, include the system message in an issue. Attach relevant app logs if any were created.</li>
@@ -11,7 +11,7 @@
 
 <h2>Startup or session errors</h2>
 <ul>
-  <li><strong>agent.list failed (403):</strong> update to 2.7.92. Version 2.7.82 fixed the desktop page being rejected by the newer engine's origin check.</li>
+  <li><strong>agent.list failed (403):</strong> update to 2.7.93. Version 2.7.82 fixed the desktop page being rejected by the newer engine's origin check.</li>
   <li><strong>session.prompt failed (503):</strong> requests wait for the engine during startup or restart. If the failure continues, check the log for its cause. A missing session returns 404 separately.</li>
   <li><strong>Old session not found:</strong> SuperWagie uses its private session database and does not import system OpenCode history. Start a new session in SuperWagie; the original database is retained.</li>
   <li><strong>Key activated but configuration failed:</strong> after updating, choose Continue setup under API keys in the account panel. Setup reuses the existing key without another activation.</li>
@@ -55,12 +55,12 @@
 <p>The server turns on learning when the library switch goes on. An install upgraded with the library already on gets the setting at first launch. Once learning is enabled, any user-visible session in any project with a new conversation enters extraction automatically, including sessions you do not have open. Internal child sessions stay outside the experience reader. The Experiences tab can pause or resume learning, and turning the library off and back on resumes it after a pause. Sessions from before enablement, and an older open session, remain available through an explicit history import. Failures show a specific reason on the status page, clear when recovery finishes, and transient failures keep retry available.</p>
 <ul>
   <li><strong>Enabled but unavailable:</strong> the saved setting is retained. Memory reports unavailable until startup succeeds and can retry after the service recovers. If it keeps failing, check the displayed reason and app log.</li>
-  <li><strong>The request does not finish:</strong> update to 2.7.92. The Experiences tab shows the current capture or indexing failure, clears it after recovery, and keeps transient failures retryable. Resolve model quota or credential problems before retrying.</li>
-  <li><strong>An embedding request fails:</strong> update to 2.7.92. Long Chinese content is split at UTF-8 character boundaries, and each embedding request carries one short text. Use Retry indexing for existing failed entries.</li>
-  <li><strong>Learning stayed off after an upgrade:</strong> update to 2.7.92 and restart once. The first start migrates an install whose library was already on. Use the Experiences checkbox to pause or resume learning.</li>
+  <li><strong>The request does not finish:</strong> update to 2.7.93. The Experiences tab shows the current capture or indexing failure, clears it after recovery, and keeps transient failures retryable. Resolve model quota or credential problems before retrying.</li>
+  <li><strong>An embedding request fails:</strong> update to 2.7.93. Long Chinese content is split at UTF-8 character boundaries, and each embedding request carries one short text. Use Retry indexing for existing failed entries.</li>
+  <li><strong>Learning stayed off after an upgrade:</strong> update to 2.7.93 and restart once. The first start migrates an install whose library was already on. Use the Experiences checkbox to pause or resume learning.</li>
   <li><strong>An older session has no experiences:</strong> check whether it happened after the switch was enabled. Sessions from before enablement need an explicit history import.</li>
-  <li><strong>A previously failed task stays red:</strong> update to 2.7.92. A complete extraction result from an older failed task is reused for indexing, and a completed manual index clears its own error.</li>
+  <li><strong>A previously failed task stays red:</strong> update to 2.7.93. A complete extraction result from an older failed task is reused for indexing, and a completed manual index clears its own error.</li>
 </ul>
 
 <h2>Windows</h2>
-<p>Windows x64 uses 2.7.92. The installer is unsigned, so SmartScreen may block the first run. It contains no keys.</p>
+<p>Windows x64 uses 2.7.93. The installer is unsigned, so SmartScreen may block the first run. It contains no keys.</p>
