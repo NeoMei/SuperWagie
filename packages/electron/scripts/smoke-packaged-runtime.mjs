@@ -122,7 +122,13 @@ try {
     const created = await sdk.shell.create({ command, cwd: project, location: { directory: project }, metadata: { sessionID: session.id } });
     try {
       const shell = await until(async () => { const value = (await sdk.shell.get({ id: created.data.id, location: { directory: project } })).data; return value.status !== 'running' && value; }, 30_000);
-      const output = (await sdk.shell.output({ id: shell.id, location: { directory: project }, cursor: 0 })).data.output;
+      const outputPage = (await sdk.shell.output({ id: shell.id, location: { directory: project }, cursor: 0 })).data;
+      const output = outputPage.output;
+      // This process runs only the fixed synthetic command above; retain bounded
+      // diagnostics so a native shell mismatch is distinguishable from startup.
+      receipt.multilinePowerShell = { status: shell.status, exit: shell.exit,
+        shell: shell.shell, output: JSON.stringify(outputPage).slice(0, 2048) };
+      checkpoint('Windows multiline PowerShell result');
       assert(/powershell|pwsh/i.test(shell.shell)); assert.equal(shell.status, 'exited'); assert.equal(shell.exit, 0);
       assert(output.includes('first-line') && output.includes('犇马✓'));
       receipt.multilinePowerShell = { status: shell.status, exit: shell.exit, unicodeOutput: true };
