@@ -998,13 +998,14 @@ polling or model request selects copy.
 ### Why only the folded header shimmers
 
 The folded Activity header sweeps 2.8 s luminance bands from left to right
-through a visual copy of its own text. Each band repeats every 240 px, so a
+through a masked copy of its own text. Each band repeats every 240 px, so a
 short header shows one highlight and a long header shows several moving
 highlights instead of one slow wash across the full width. Each band fades in
 and out through the same luminance without a hard edge; its bright span is 48
 px, wide enough for three Chinese characters at the largest supported header
-font size. The copy keeps the original sizes and weights and uses the title
-color for the highlight. The
+font size. The copy keeps the original sizes and weights, and its white text is
+masked so only glyphs light up while the unchanged base label keeps its title
+and description colors at either side. The
 shimmer starts only after the visible header identity has held still for one
 second, and resets on any identity, tool, target or language change. The gray
 status row and scroll pill stay still so their concrete work text reads
@@ -1016,11 +1017,10 @@ reduced-motion preferences stand still. The infinite CSS animation is listed in
 
 ### Why the shimmer uses a fixed period
 
-A `200%` background grows with the header and stretches one highlight across
-long text. A fixed 240 px tile keeps each band the same width and speed on
-short and long headers. Shifting the repeating background by exactly one tile
-during 2.8 s keeps the loop seamless while the highlights travel left to
-right.
+A `200%` mask grows with the header and stretches one highlight across long
+text. A fixed 240 px tile keeps each band the same width and speed on short and
+long headers. Shifting the repeating mask by exactly one tile during 2.8 s
+keeps the loop seamless while the highlights travel left to right.
 
 ### Why each band has a broad, graded peak
 
@@ -1029,5 +1029,8 @@ three Chinese glyphs at the largest 14 px header size. A flat plateau reached
 that width, but its equal-brightness middle and sudden steps read as a moving
 rectangle. The band stays above the resting luminance from 26% through 74% of
 each 240 px tile, while its brightness rises and falls across that span through
-five steps. The edges reach transparent at 0% and 100%, so adjacent tiles join
-without a seam.
+five steps. The centre is pure white and the adjacent stops fade through 82%,
+55%, 25%, 10% and 3% alpha to zero at both ends. The white duplicate is masked
+as a whole, so the light touches glyph pixels only and fades back to the
+untouched base label at either side. The edges reach transparent at 0% and
+100%, so adjacent tiles join without a seam.

@@ -404,6 +404,7 @@ Measured on this repository's fixture, at any element count from 1 to 32:
 | `opacity`, `filter` | 0 | 0 |
 | `rotate` (the individual property) | 60 | 0 |
 | `background-position` | 60 | 0 |
+| `mask-position` | 60 | 0 |
 | `border-color` | 60 | 0 |
 | `box-shadow` | 60 | 0 |
 | `width` | 60 | 60 |
@@ -433,18 +434,22 @@ A headed run of the folded Activity header drew 60 frames/sec, about 61 style
 recalculations/sec and no layouts/sec. The static header drew 0-0.2 frames/sec
 and no style recalculations. Main-thread busy time was 2.45-2.98% for one
 header, 4.65-5.86% for eight and 9.84% for 32. Those figures were measured on
-the earlier repeated-gradient implementation. The final repeating gradient
-uses the same animated property and a fixed 240 px period: one band passes
-each point during a 2.8 s cycle, and a long header shows several bands at
-once. No new headed measurement was taken for the fixed-period variant.
+the earlier repeated-gradient implementation. The final repeating mask uses a
+fixed 240 px period: one band passes each point during a 2.8 s cycle, and a
+long header shows several bands at once. A headed `mask-position` property run
+at eight elements drew 60 frames/sec, 61.19 style recalculations/sec, no
+layouts, 2.68% main-thread busy and 11.88% total Chrome CPU. It has played
+this masked effect in a headed app fixture; a fresh headed header capture was
+not taken for the fixed-period mask.
 
 `activity-header-static` and `activity-header-shimmer` reproduce the folded
-Activity header's font sizes, semantic colors, truncated command and duplicate
-text layer with the fixed period and graded peak. The stop coin variant
+Activity header's font sizes, semantic colors, truncated command and masked
+white text layer with the fixed period and graded peak. The stop coin variant
 measures one composited rim rotation over a still base. The isolated
-`background-position` property fixture has a non-repeating gradient that also
-sweeps left to right. `lib/infiniteAnimations.test.ts` checks that the fixture
-keeps the app's gradient stops. The app mounts the shimmer only after the whole
+`background-position` and `mask-position` property fixtures sweep left to right;
+the latter animates the same property the header masks.
+`lib/infiniteAnimations.test.ts` checks that the fixture keeps the app's
+gradient stops. The app mounts the shimmer only after the whole
 header has held still for one second and removes it on a text change, settled
 turn, permission wait, hidden page, minimized or tray-hidden native window,
 offscreen header, paused clock, inert subtree or reduced-motion preference.

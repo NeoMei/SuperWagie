@@ -23,6 +23,7 @@
   @keyframes oc-translate { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
   @keyframes oc-scale { 0%, 100% { transform: scale(0.7); } 50% { transform: scale(1); } }
   @keyframes oc-background-position { from { background-position: 100% 0; } to { background-position: 0 0; } }
+  @keyframes oc-mask-position { from { -webkit-mask-position: 100% 0; mask-position: 100% 0; } to { -webkit-mask-position: 0 0; mask-position: 0 0; } }
   @keyframes oc-border-color { 0%, 100% { border-color: #345; } 50% { border-color: #8ab; } }
   @keyframes oc-box-shadow { 0%, 100% { box-shadow: 0 0 0 0 #8ab; } 50% { box-shadow: 0 0 8px 2px #8ab; } }
   @keyframes oc-filter { 0%, 100% { filter: brightness(0.6); } 50% { filter: brightness(1.4); } }
@@ -45,6 +46,18 @@
     background-position: 100% 0;
     background-size: 200% 100%;
     animation: oc-background-position 1.5s linear infinite;
+  }
+  .v-mask-position .cell {
+    background-color: #8ab;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000, transparent);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+    -webkit-mask-size: 200% 100%;
+    mask-size: 200% 100%;
+    animation: oc-mask-position 1.5s linear infinite;
   }
   .v-border-color .cell { border: 2px solid #345; animation: oc-border-color 1.5s linear infinite; }
   .v-box-shadow .cell { animation: oc-box-shadow 1.5s linear infinite; }
@@ -270,26 +283,51 @@
     overflow: hidden;
     padding-inline: 1px 0.5rem;
     pointer-events: none;
-    color: var(--tools-title);
-    background: linear-gradient(90deg,
-      transparent 0%,
-      color-mix(in srgb, currentColor 7%, transparent) 13%,
-      color-mix(in srgb, currentColor 19%, transparent) 26%,
-      color-mix(in srgb, currentColor 38%, white) 40%,
-      color-mix(in srgb, currentColor 48%, white) 50%,
-      color-mix(in srgb, currentColor 38%, white) 60%,
-      color-mix(in srgb, currentColor 19%, transparent) 74%,
-      color-mix(in srgb, currentColor 7%, transparent) 87%,
-      transparent 100%) -240px 0 / 240px 100% repeat-x;
-    -webkit-background-clip: text;
-    background-clip: text;
+    color: rgb(255 255 255);
+    -webkit-mask-image: linear-gradient(90deg,
+      rgb(255 255 255 / 0) 0%,
+      rgb(255 255 255 / 0.03) 12%,
+      rgb(255 255 255 / 0.1) 24%,
+      rgb(255 255 255 / 0.25) 34%,
+      rgb(255 255 255 / 0.55) 42%,
+      rgb(255 255 255 / 0.82) 47%,
+      rgb(255 255 255 / 1) 50%,
+      rgb(255 255 255 / 0.82) 53%,
+      rgb(255 255 255 / 0.55) 58%,
+      rgb(255 255 255 / 0.25) 66%,
+      rgb(255 255 255 / 0.1) 76%,
+      rgb(255 255 255 / 0.03) 88%,
+      rgb(255 255 255 / 0) 100%);
+    mask-image: linear-gradient(90deg,
+      rgb(255 255 255 / 0) 0%,
+      rgb(255 255 255 / 0.03) 12%,
+      rgb(255 255 255 / 0.1) 24%,
+      rgb(255 255 255 / 0.25) 34%,
+      rgb(255 255 255 / 0.55) 42%,
+      rgb(255 255 255 / 0.82) 47%,
+      rgb(255 255 255 / 1) 50%,
+      rgb(255 255 255 / 0.82) 53%,
+      rgb(255 255 255 / 0.55) 58%,
+      rgb(255 255 255 / 0.25) 66%,
+      rgb(255 255 255 / 0.1) 76%,
+      rgb(255 255 255 / 0.03) 88%,
+      rgb(255 255 255 / 0) 100%);
+    -webkit-mask-mode: alpha;
+    mask-mode: alpha;
+    -webkit-mask-size: 240px 100%;
+    mask-size: 240px 100%;
+    -webkit-mask-repeat: repeat-x;
+    mask-repeat: repeat-x;
   }
-  .activity-layer, .activity-layer * { -webkit-text-fill-color: transparent; }
+  .activity-layer, .activity-layer * { color: rgb(255 255 255); -webkit-text-fill-color: rgb(255 255 255); }
   .activity-layer svg, .activity-layer [aria-hidden='true'] { visibility: hidden; }
   .v-activity-header-static .activity-layer { animation: none; }
   .v-activity-header-shimmer .activity-layer { animation: oc-live-header-shimmer 2.8s linear infinite; }
   /* One 240 px period of travel loops seamlessly. */
-  @keyframes oc-live-header-shimmer { from { background-position: -240px 0; } to { background-position: 0 0; } }
+  @keyframes oc-live-header-shimmer {
+    from { -webkit-mask-position: -240px 0; mask-position: -240px 0; }
+    to { -webkit-mask-position: 0 0; mask-position: 0 0; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .v-activity-header-shimmer .activity-layer { animation: none; display: none; }
   }

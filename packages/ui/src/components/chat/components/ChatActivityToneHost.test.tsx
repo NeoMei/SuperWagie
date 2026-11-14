@@ -31,6 +31,7 @@ let root: Root;
 let dom: Window;
 
 const dots = () => [...host.querySelectorAll<HTMLElement>('.oc-activity-tone')];
+const statusRow = () => host.querySelector<HTMLElement>('[data-status-row]');
 const render = (element: React.ReactElement) => act(async () => root.render(
     <I18nProvider><ThemeSystemContext.Provider value={themeContext}>
         <ChatColumnSessionContext.Provider value={{ sessionId: 'ses', directory: '/project' }}>
@@ -98,6 +99,7 @@ describe('chat activity tone hosts', () => {
             status={{ key: 'chat.agentStatus.thinking', seed: 'reasoning-0' }}
         />);
         expect(dots()).toHaveLength(1);
+        expect(statusRow()).not.toBeNull();
         expect(dots()[0].querySelector('.oc-activity-mark__logo')).not.toBeNull();
         expect(host.querySelectorAll('img')).toHaveLength(1);
         expect(host.querySelector('[role="status"].text-muted-foreground')).not.toBeNull();
@@ -107,6 +109,17 @@ describe('chat activity tone hosts', () => {
         await render(<ChatActivityToneDot tone="working" providerId="" />);
         expect(dots()[0].querySelector('.oc-activity-mark__dot')).not.toBeNull();
         expect(dots()[0].querySelector('.oc-activity-mark__logo')).toBeNull();
+    });
+
+    test('the rendered status root is the only presence signal for its clearance', async () => {
+        await render(<div data-composer-bound><div data-status-row-host="visible"><StatusRow isWorking tone="working" showTone /></div></div>);
+        expect(statusRow()).not.toBeNull();
+        expect(host.querySelector('[data-composer-bound]')?.querySelector('[data-status-row]')).toBe(statusRow());
+        expect(css).toContain('[data-composer-bound]:has([data-status-row-host="visible"] [data-status-row]) .chat-scroll-fade--end {');
+
+        await render(<div data-composer-bound><div data-status-row-host="visible"><StatusRow isWorking={false} /></div></div>);
+        expect(statusRow()).toBeNull();
+        expect(host.querySelector('[data-composer-bound] [data-status-row]')).toBeNull();
     });
 
     test('the working row owns the dot and leaves its long status phrase neutral', async () => {

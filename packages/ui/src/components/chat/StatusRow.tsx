@@ -56,6 +56,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
 
   return (
     <div
+      data-status-row=""
       // The row renders inside the composer-anchored overlay, which owns the
       // distance to the input and the horizontal column (the same ones the
       // scroll-to-bottom pill uses).
