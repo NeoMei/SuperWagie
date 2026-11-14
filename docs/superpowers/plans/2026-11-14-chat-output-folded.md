@@ -106,6 +106,6 @@ Expected: build succeeds and emits no new warnings that change behavior.
 - [ ] **Step 4: Commit the implementation**
 
 ```bash
-git add docs/superpowers/specs/2026-11-14-chat-output-folded.md docs/superpowers/plans/2026-11-14-chat-output-folded.md packages/ui/src/components/chat/components/liveCommandPreview.ts packages/ui/src/components/chat/components/liveCommandPreview.test.tsx packages/ui/src/components/chat/components/LiveTurnActivity.tsx packages/ui/src/components/chat/message/parts/DOCUMENTATION.md
+git add docs/superpowers/specs/2026-11-14-chat-output-folded.md docs/superpowers/plans/2026-11-14-chat-output-folded.md packages/ui/src/components/chat/components/liveCommandPreviewModel.ts packages/ui/src/components/chat/components/liveCommandPreview.tsx packages/ui/src/components/chat/components/liveCommandPreview.test.tsx packages/ui/src/components/chat/components/LiveTurnActivity.tsx packages/ui/src/components/chat/message/parts/DOCUMENTATION.md
 git commit -m "feat(chat): fold live command output into activity"
 ```
