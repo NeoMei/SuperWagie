@@ -2,6 +2,13 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.96] - 2026-11-14
+
+### Fixes
+
+- **Wallet and orders:** A stale local lock kept account purchases from loading. The membership page now recovers the lock when its owner has exited, and an unfinished old payment says its status is unconfirmed.
+- **Account:** When the server cannot return wallet or order details, Manage subscription and Buy credits stay disabled with the error message and Refresh wallet and orders available. A successful refresh restores both entries.
+
 ## [2.7.95] - 2026-11-14
 
 ### Improvements
