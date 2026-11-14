@@ -177,6 +177,31 @@ describe('UniHub commerce without sandbox funding', () => {
     expect(view.body.orders).toEqual([]);
   });
 
+  it('keeps a purchased order and legacy receipt readable after dead-owner recovery and a restart', async () => {
+    const f = await fixture();
+    const body = purchaseBody(f);
+    await f.runtime.purchase(identity, body);
+    await f.runtime.close();
+    const journalPath = path.join(f.directory, 'unihub-commerce/state.json');
+    const before = JSON.parse(await fs.readFile(journalPath, 'utf8'));
+    const legacy = Object.values(before.intents)[0];
+    expect(legacy.status).toBe('APPLIED');
+    legacy.operationId = 'operation-a';
+    await fs.writeFile(journalPath, JSON.stringify(before));
+    const lockPath = path.join(f.directory, 'unihub-commerce/writer.lock');
+    await fs.writeFile(lockPath, `999999999:${crypto.randomUUID()}`);
+    const restarted = f.create();
+    const app = express();
+    registerPlatformCommerceRoutes(app, { runtime: restarted, resolveIdentity: () => identity, isRequestOriginAllowed: () => true });
+    const view = await request(app).get('/api/platform-account/commerce').expect(200);
+    expect(view.body.orders).toEqual([expect.objectContaining({ amount: membership.price, paymentStatus: 'PAID' })]);
+    expect(view.body.intents).toEqual([expect.objectContaining({ idempotencyKey: body.idempotencyKey, status: 'APPLIED' })]);
+    expect(view.body.intents[0].operationId).toBeUndefined();
+    expect(f.state.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+    await restarted.close();
+    expect(JSON.parse(await fs.readFile(journalPath, 'utf8')).intents[Object.keys(before.intents)[0]].operationId).toBe('operation-a');
+  });
+
   it('quotes and accepts an upgrade with the original amount', async () => {
     const f = await fixture(); f.state.activeMembership = true; f.state.wallet = 10_000_000n;
     const quote = await f.runtime.quoteUpgrade(identity, { accountId: f.state.account, subscriptionId: 'sub-a', offerId: membership.id });

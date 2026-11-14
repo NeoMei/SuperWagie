@@ -174,6 +174,10 @@ uses a redirect or HTTP success as evidence of funds arriving.
   quote bindings. Version 1 recharge/purchase records remain readable and are
   retained on the next version-2 write. It stores no token, password, balance or model
   content. Service namespaces include API URL and authenticated client ID.
+  A legacy operationId on an intent is an original ledger operation receipt,
+  not an idempotency key. It remains readable and is retained unchanged on
+  later writes; it is never projected to the renderer. Passive reads do not
+  strip or migrate journal fields.
 - Passive overview requests never submit financial commands. Explicit recovery
   reads a known object; if the original response was lost before its ID was
   saved, recovery resubmits only the original payload and idempotency key. A
@@ -199,6 +203,18 @@ uses a redirect or HTTP success as evidence of funds arriving.
   an operator should stop all processes using the data directory, preserve
   `state.json`, and remove only `unihub-commerce/writer.lock` before restarting
   with a build that predates automatic dead-owner recovery.
+
+### Why commerce adopts the kernel-owned writer guard
+
+An exclusive wx owner file cannot distinguish a crashed writer from a live
+one. Its leftover record made every later financial overview fail closed until
+an operator removed the file, while the journal itself stayed valid. The
+existing platform-model guard serializes acquisition with an exclusive SQLite
+transaction and reclaims only a complete owner record whose PID no longer
+exists. Reusing it recovers that restart without touching state.json, legacy
+ledger receipts or uncertain financial intents. Deleting any lock on every
+startup was rejected because it could admit two concurrent writers; keeping
+the owner file also excludes an older application that predates the guard.
 
 ### Why recovery requires an explicit action
 
