@@ -32,6 +32,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input)
   const path = String(input instanceof Request ? input.url : input);
   if (path.endsWith('/api/system/info')) return Response.json({ openchamberVersion: '2.7.54' });
   if (path.endsWith('/api/opencode/upgrade-status')) return Response.json({ currentVersion: '2.0.0' });
+  if (path.includes('/api/openchamber/update-check?')) return Response.json({ available: false, currentVersion: '2.7.98' });
   throw new Error(`Unexpected request: ${path}`);
 });
 
@@ -72,6 +73,23 @@ afterAll(async () => {
   for (const [name, descriptor] of savedGlobals) {
     if (descriptor) Object.defineProperty(globalThis, name, descriptor);
     else Reflect.deleteProperty(globalThis, name);
+  }
+});
+
+test('checks for updates once when About opens', async () => {
+  const checkForUpdates = spyOn(useUpdateStore.getState(), 'checkForUpdates').mockResolvedValue(null);
+  try {
+    await act(async () => root.render(<I18nProvider><AboutDialog open onOpenChange={() => {}} /></I18nProvider>));
+    expect(checkForUpdates).toHaveBeenCalledTimes(1);
+
+    await act(async () => root.render(<I18nProvider><AboutDialog open onOpenChange={() => {}} /></I18nProvider>));
+    expect(checkForUpdates).toHaveBeenCalledTimes(1);
+
+    await act(async () => root.render(<I18nProvider><AboutDialog open={false} onOpenChange={() => {}} /></I18nProvider>));
+    await act(async () => root.render(<I18nProvider><AboutDialog open onOpenChange={() => {}} /></I18nProvider>));
+    expect(checkForUpdates).toHaveBeenCalledTimes(2);
+  } finally {
+    checkForUpdates.mockRestore();
   }
 });
 
