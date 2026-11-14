@@ -47,12 +47,20 @@ This module provides notification message preparation utilities for the web serv
 - Owns:
   - completion/error/question/permission trigger routing (a page an agent shows that waits for the user's answer, `openchamber:page-waiting` from this server, notifies exactly like a form, with the page title as the ask); permission suppression consults the authoritative permission-auto-accept runtime
   - session parent cache for subtask suppression
-  - no ready notification on a `session.idle` while a subagent of that session is still running (a background-subagent pause; OpenCode runs the parent again with the result and its next idle announces). The check comes from `../opencode/session-activity.js`; when it cannot be made, the idle announces as before
+  - no ready notification on a `session.idle` while the parent resumed or its
+    job tree has a running subagent or image. Persistent shell jobs do not
+    hold readiness. The shared activity probe uses legacy child-session reads
+    only when jobs are explicitly unavailable. Unknown activity stays silent;
+    a later authoritative idle event can announce readiness, without replaying
+    missed notifications.
+  - active app-created workflow descendants also hold readiness even when
+    native jobs are empty. Their bounded parent lineage is read only for
+    currently active sessions, preserving independence from other tasks.
   - an MCP elicitation form (session id `global`, owned by no session) notifies without a session: no session title lookup, and the deep link opens the app
   - template resolution and fallback behavior: an empty field in `settings.notificationTemplates` resolves to the default for `settings.locale` (`template-locales.js`), so notification text follows the interface language unless the user wrote their own
   - native notification fanout and web push payload fanout
   - push suppression while any fresh UI visibility heartbeat reports a focused client
-  - chats of isolated spaces: `maybeSendPushForTrigger(payload, { spaceId })` reads such a chat's record (title, parent, goal), its last reply and its running subagents inside the space, through `spaceFetchFor(spaceId)`, a `fetch` over the spaces dispatcher (`../spaces/space-fetch.js`), and never asks the host's OpenCode or the host's permission policy about it, since neither knows the chat. What comes back is the space's text, shown as it is shown in the sidebar. A space that cannot be asked gives the generic text, as a host chat whose reads fail does. The host's auto-accept is not consulted for a space's permission request, so such a request notifies after the debounce unless its reply arrives first.
+  - chats of isolated spaces: `maybeSendPushForTrigger(payload, { spaceId })` reads such a chat's record (title, parent, goal), its last reply and its running subagents inside the space, through `spaceFetchFor(spaceId)`, a `fetch` over the spaces dispatcher (`../spaces/space-fetch.js`), and never asks the host's OpenCode or the host's permission policy about it, since neither knows the chat. This adapter explicitly supports session reads only, so the activity probe uses its legacy child query without a job request or a wider allowlist. Unknown space activity suppresses readiness; errors, questions and permissions retain their own notification policy. The host's auto-accept is not consulted for a space's permission request, so such a request notifies after the debounce unless its reply arrives first.
 
 ### Push runtime API (push-runtime.js)
 - `createPushRuntime(dependencies)`: creates runtime for web push and UI visibility state.
@@ -164,6 +172,13 @@ delivery. Its existing five-second claim suppresses duplicate native alerts.
 Native alerts remain best-effort live events, with no historical replay or
 synthetic catch-up alerts. Unread marks are OpenCode session state (`packages/ui/src/sync/session-unread.ts`).
 
+### Why unreadable activity suppresses readiness
+
+A parent can idle while an image or descendant still runs. A failed read
+cannot establish completion, so a readiness notification waits for a later
+authoritative idle event. The same rule applies to the space's own source
+without consulting host activity.
+
 This removes one persistent HTTP connection per browser tab in both main-WS and
 main-SSE modes. Two tabs use two control SSE connections, or four connections
 when their main event pipelines also use SSE. It does not make HTTP/1.1 support
@@ -175,3 +190,20 @@ The control stream retains its browser-control capability declaration, runtime
 switch cleanup, stale-source rejection, heartbeat, and reconnect-ready events.
 Electron uses its native notification path; VS Code does not subscribe to this
 server-only stream. Mobile shells retain their existing push behavior.
+
+## Event-scoped withdrawal
+
+Authoritative permission replies, form settlements and waiting-page settlements withdraw only a notification whose request ID, session, directory and host/space owner match. `event-identity.js` hashes that tuple into a bounded tag, keeping source paths out of push metadata. Missing request identity cannot retract all notifications in a session. A settlement also suppresses a delayed notification still preparing its text. This mechanism is separate from approval receipts and never establishes that a generation succeeded.
+
+Waiting pages retain their original directory in `createPageAnswers` until an
+answer or abort. The server's `page-wait-events.js` handler passes both waiting
+and settled envelopes to this trigger as well as the existing UI broadcaster;
+UI fanout by itself does not perform withdrawal.
+
+`emitter-runtime.js` carries `openchamber:notification-withdrawn` through the existing authenticated control SSE and global broadcast, including the existing transparent relay connection. It calls the embedded native withdrawal callback when present. Stream publication reports connected-client delivery as unknown. It does not replay a historical cleanup or promise delivery to an offline/disconnected device. APNs, FCM and browser vendor push recall are unsupported by this runtime.
+
+Connected browser clients close only the matching tag and runtime's retained `Notification` objects and supported service-worker notifications. The native macOS registry removes only the exact event/runtime's notification IDs. Windows, Linux and VS Code report unsupported for delivered notification retraction. A missing retained ID, native failure or disconnected browser is unknown. Notification IDs remain scoped to the current native run; restart does not invent OS history.
+
+### Why withdrawal has its own event
+
+A notification event asks a client to display an alert. Reusing that payload for withdrawal could display a blank alert in an older client. The separate event is ignored by older clients and names only the target tag, while each runtime reports the retraction it can actually perform.

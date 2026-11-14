@@ -483,7 +483,11 @@ const dependsOnRevivalBlock = (parameters) => {
 };
 
 const multiActionSchema = (definitions) => ({
-  property: { type: 'string', oneOf: definitions.map((entry) => ({ const: entry.action, description: entry.description })), description: 'SuperWagie action to perform' },
+  property: {
+    type: 'string',
+    enum: definitions.map((entry) => entry.action),
+    description: `SuperWagie action to perform (${definitions.map((entry) => `${entry.action}: ${entry.description}`).join('; ')})`,
+  },
   required: ['action'],
   normalize: '',
 });
@@ -529,10 +533,9 @@ const singleActionSchema = (definition) => ({
  * entrypoint with a bare dynamic import and nothing resolves from the generated
  * directory.
  *
- * The action schema carries `oneOf` only. A node combining `enum` and `oneOf`
- * is valid JSON Schema, but some OpenAI-compatible gateways reject it and
- * answer with an empty completion instead of an error, and the `oneOf` branches
- * are what carry the per-action descriptions the model reads.
+ * Multi-action choices use a string enum, with action instructions on the
+ * property's description. Some compatible gateways omit oneOf branch
+ * descriptions; combining enum with oneOf also causes gateway refusals.
  */
 const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false }) => {
   const normalizeBooleans = booleanNormalizationBlock(parameters);

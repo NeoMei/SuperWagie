@@ -169,6 +169,29 @@ reaches it on its next run without editing it. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 
+An Auto selection is resolved for the run's actual directory after session
+creation and before Goal setup or dispatch. The sentinel is omitted from the
+create request. The routing owner chooses the configured provider/model,
+variant and agent, and the runtime applies those choices to that session before
+its first prompt or command. Goal setup receives the resolved provider/model;
+the stored Goal remains associated with that session and directory through its
+existing metadata contract. It does not store a second model selection.
+
+Auto without a routing adapter, an unavailable configured fallback, or a
+`not-ready` routing decision fails without a task prompt. The existing routing
+policy still chooses the configured fallback after classifier errors; it never
+substitutes another provider merely because the model ID matches. A failed
+switch or dispatch keeps the created session attached to the failed run and
+does not replay the occurrence. A transport failure after a prompt was sent
+can leave its outcome unknown; the task state records the error, and platform
+account receipts retain their own authority.
+
+### Why Auto resolves after creating the session
+
+Routing records decisions by session ID, while OpenCode stores the selected
+model and agent on the session. Resolving and applying that choice before Goal
+setup gives both the Goal and the first dispatch the same execution context.
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`

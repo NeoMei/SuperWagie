@@ -381,3 +381,30 @@ ID remain unresolved. The saved intent snapshot and active-operation fence
 prevent an older read from overwriting a newer refund or reconciliation.
 An external quote rejected with exactly `quote_invalidated` and HTTP 409 keeps
 its original failed key and permits a fresh quote only after new confirmation.
+
+
+## Hosted selected-material identity
+
+The read-only hosted pilot uses a separate `session:mobile-official:<random>`
+namespace, issued and resolved only by `guests/mobile-official-auth.js`. Ordinary
+UI and platform identity resolvers never recognize its cookie. The global gate
+allows its exact auth-control endpoints before product login, while the existing
+runtime UI/tunnel gate still protects every one of those routes. Only exact GET
+`/api/mobile-official/reader` list/project/content paths resolve a signed-in pilot actor. Existing full C01 read paths keep their ordinary account identity and ignore ambient pilot cookies. Prompt,
+task-file, guest-service, settings, scheduling, filesystem and unknown API
+requests still require independent full product authority.
+
+`identityAccounts` verifies `/v1/accounts`, applies the existing personal-first
+initial account rule, preserves an explicitly removed selection as null, and
+uses session/account/mutation fences before persisting account scope. It reads
+no finances, starts no usage activity and triggers no model or account-key
+bootstrap. Account selection changes only the isolated login's scope. Full
+managed web/desktop identities and their existing permissions remain separate.
+
+### Why pilot identity cannot become ordinary API authority
+
+The pilot's random HttpOnly cookie is mapped to an internal namespace only on
+exact selected-material GET routes. Cookie path, viewport, user agent and client
+kind provide no authorization. An explicit invalid bearer is rejected before
+pilot fallback. An independently full-authorized credential keeps its existing
+permissions; adding a pilot cookie neither creates nor removes those permissions.

@@ -14,7 +14,7 @@ import { el, formatDate, installStyles, notice, relativeDay } from './shared.ts'
 import { soupAuthor, soupFor } from './soup.ts';
 import { preserveFormState } from './locale-render.ts';
 import { collectDeliverables, type Deliverable } from './deliverables.ts';
-import { creationProjectIds, mergeSessions } from './sessions.ts';
+import { creationProjectIds, sessionStatusKey, mergeSessions } from './sessions.ts';
 import { installNoteReorder } from './note-reorder.ts';
 
 const host = connectHost();
@@ -1088,7 +1088,7 @@ const renderHome = (): HTMLElement => {
     item.tabIndex = 0;
     const main = el('div');
     main.append(el('div', 'title', session.title || t('untitledSession')));
-    main.append(el('div', 'meta-line', new Date(session.updatedAt).toLocaleDateString(workbenchLocale())));
+    main.append(el('div', 'meta-line', [t(sessionStatusKey(session)), session.activity === 'running' ? session.tool?.name ?? t('session.toolUnknown') : null, new Date(session.updatedAt).toLocaleDateString(workbenchLocale())].filter(Boolean).join(' · ')));
     item.append(main);
     item.addEventListener('click', () => void host.openSession(session.id));
     sessionPanel.append(item);
@@ -1417,6 +1417,13 @@ const greeting = (): HTMLElement => {
 
 const render = (): void => {
   if (!root) return;
+  const directory = state.ready?.directory;
+  if (directory && state.ready?.features?.resultCards) {
+    const selected = state.selection?.scope === 'project'
+      ? state.project?.tasks.find((task) => task.id === state.selection?.id) : null;
+    void host.setResultCards({ directory, cards: selected?.id
+      ? [{ title: selected.title, text: selected.note.slice(0, 2000), version: stateLabel(selected.state), path: '任务.md', taskId: selected.id }] : [] }).catch(() => {});
+  }
   const focused = document.activeElement;
   const noteFocus = focused instanceof HTMLTextAreaElement && focused.classList.contains('note-body')
     ? { id: focused.id, start: focused.selectionStart, end: focused.selectionEnd, scrollTop: focused.scrollTop } : null;

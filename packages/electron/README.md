@@ -10,6 +10,21 @@ Electron desktop runtime for OpenChamber on macOS, Windows, and Linux.
 
 This package owns the native shell: windows, menus, deep links, native notifications, auto-updates, host switching, SSH connections, tunnel helpers, and packaged desktop builds. The web UI and OpenChamber server logic still live in `packages/web` and shared React UI lives in `packages/ui`.
 
+The embedded official-material controller also coordinates existing creation
+approval decisions through `desktop_creation_approval`. The actual current
+application top frame is required, together with the local runtime and current
+account authentication. Guests and remote pages cannot acquire that controller.
+Decision persistence and source validation belong to the web runtime; the native
+bridge only supplies the guarded call.
+The bridge rechecks the same frame, controller and operation lease after the
+controller resolves. A stale result never returns dispatch permission, even
+when the controller already published a retained unknown claim.
+
+Event-scoped notification withdrawal uses `event-notifications.mjs`. macOS
+removes only IDs retained for the exact event tag and runtime. Windows and Linux
+report delivered-notification retraction as unsupported. Missing IDs and native
+failures remain unknown. These results do not prove an approval or generation.
+
 The shared interface and native menus include English and Simplified Chinese.
 The renderer sends its normalized language to the native menu dictionaries.
 
@@ -777,6 +792,24 @@ The macOS menu bar item is enabled by default and can be disabled in General set
 
 Packaged Desktop builds include the official OpenCode CLI release pinned by `opencodeCli.version` in `packages/electron/package.json` (OpenChamber requires OpenCode 2.x). OpenCode 2.x ships on npm rather than as GitHub release assets, so `prepare:opencode-cli` downloads the platform package tarball (`@opencode/cli-<os>-<arch>`, the same one OpenCode's own installer uses), caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. Windows supports only the x64 target. On Windows `verify:opencode-cli` and `verify:opencode-cli:packaged` also read the binary's PE header (`scripts/windows-executable.mjs`) and reject a binary built for another architecture.
 
+`node packages/electron/scripts/smoke-packaged-runtime.mjs --app <app> --receipt <json>`
+checks a macOS app bundle or Windows executable with fresh private app data,
+Electron profile and home directories. It seeds synthetic history using that
+package's CLI, cold-starts the application, checks its mounted packaged renderer,
+then uses a localhost account fixture through the existing password-login flow.
+Runtime credentials remain in the renderer while the official SDK's requests
+read the engine version and seeded history through the authenticated backend.
+Windows also runs a multiline PowerShell command and checks its exact UTF-8
+output and exit status. The fixture explicitly sets `Console.OutputEncoding`
+before calling .NET console methods. It separately records the original Windows
+code page and whether default PowerShell pipeline output preserves Unicode.
+The check does not establish Unicode capture for arbitrary legacy-code-page
+programs. Native quit must complete. The receipt excludes cross-version
+migration, installer GUI, automatic recovery and real billing. Windows CI runs
+this check after resource verification and uploads its sanitized receipt even
+when the check fails. `--root` accepts only a new directory; no existing app
+profile or user history is reused.
+
 Managed local Desktop owns one engine and resolves it in this order:
 
 0. `opencodeBinary` in the machine policy file, when an administrator pinned one. It has no fallback: an unusable pin stops startup (see `packages/web/server/lib/enterprise-mode.js`).
@@ -904,6 +937,20 @@ Add new native capabilities in this order:
 2. Add the real command handling in `main.mjs` under `openchamber:invoke`.
 3. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities. A command added to `COMMANDS_SAFE_FOR_REMOTE` takes input from, and answers, another server's page: parse what it stores and strip credentials from what it returns (`remote-page-policy.mjs`). Splash colours, for example, end up in the trusted splash page, and `desktop_hosts_get` hands remote pages the host list without tokens or auth headers.
 4. Keep shared UI runtime contracts in `packages/ui` and server/runtime APIs in `packages/web` when the behavior is not inherently native.
+
+### Official phone selection authority
+
+The embedded bootstrap requests an in-process `nativeOfficialSelections` controller.
+It is never exposed through HTTP. `official-selection-ipc.mjs` owns temporary
+operation leases for selection and revocation. Main accepts those commands only
+from the actual current top frame of a tracked application window, using the same
+packaged/HMR frame gate as application-menu preferences. Remote pages, child frames
+and stale frames receive no controller access. The active renderer bearer or its Electron session cookie authenticates the
+platform owner after that native gate. Main reads cookies from that caller's
+Electron session and keeps them out of responses. Credential type and client
+kind supply no native privilege. The adapter targets only this embedded server. Runtime or
+caller changes cancel pending leases, while frame/server replacement invalidates
+them at every server authorization check.
 
 ## Logs And Data
 
@@ -1048,3 +1095,7 @@ Preview reuses the existing physical SuperWeb Playwright and Hy Python resources
 read-only. It requires a supported installed Chrome or Edge and successful local
 preflight; no browser resource or startup download is added. Remote-client
 packages retain their existing omission of local runtime prerequisites.
+
+### Closing Settings before the window
+
+The Settings overlay registers a higher-priority close target while open. A file tab registering later cannot take Cmd/Ctrl+W away from that overlay. Closing Settings also ends its product-help guidance; an open floating picker retains the overlay until the picker is dismissed. Other file targets keep their registration-order behavior.

@@ -4,6 +4,7 @@ import { sendBridgeMessage } from './bridge';
 // The extension host shows notifications: Chromium never displays a
 // `new Notification()` from a VS Code webview frame.
 export const createVSCodeNotificationsAPI = (): NotificationsAPI => ({
+  async withdraw() { return { status: 'unsupported' }; },
   async notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean> {
     try {
       const result = await sendBridgeMessage<{ shown?: boolean }>('api:notifications:show', {

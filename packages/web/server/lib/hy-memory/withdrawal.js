@@ -119,7 +119,7 @@ const withdrawnRecord = (record, plan) => {
     const edge = relationSchema.parse(record.value);
     return nodes.has(edge.source_id) || nodes.has(edge.target_id) ? null : record;
   }
-  if (!['trace', 'code_history', 'review'].includes(record.collection)) return record;
+  if (!['trace', 'code_history', 'review', 'hy-tidy-revision'].includes(record.collection)) return record;
   const info = recordInfo(record.value);
   if (!info) return record;
   if (sessionMatches(info, sessions) || scopeMatches(info, plan.sourceScopes) || nodes.has(info.experience_id) || nodes.has(info.entry_id) || nodes.has(info.owner_node_id)) return null;

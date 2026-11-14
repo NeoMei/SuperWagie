@@ -62,11 +62,12 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
 import { fileRowMatchRanges, projectRowMatchRanges, splitRelativePath } from './commandPaletteMatches';
 import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
-import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { openMessageSearchHit } from '@/lib/messageSearchNavigation';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { useMessageSearch } from '@/hooks/useMessageSearch';
-import type { MessageSearchHit } from '@/lib/messageSearch';
+import { isSearchableQuery, type MessageSearchHit } from '@/lib/messageSearch';
 import { MessageHitItem, MessageSearchFilters, type MessageAuthor, type MessageScope } from './commandPaletteMessages';
-import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { useObserveProjectActionRuns, useProjectActions } from '@/components/layout/projectActionsRunnerContext';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
 
@@ -155,6 +156,10 @@ export const CommandPalette: React.FC = () => {
     (state) => isCommandPaletteOpen ? state.activeSessions : EMPTY_SESSIONS,
     [isCommandPaletteOpen],
   ));
+  const archivedSessions = useGlobalSessionsStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.archivedSessions : EMPTY_SESSIONS,
+    [isCommandPaletteOpen],
+  ));
   const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
     (state) => isCommandPaletteOpen ? state.ids : EMPTY_PINNED_SESSION_IDS,
     [isCommandPaletteOpen],
@@ -181,9 +186,12 @@ export const CommandPalette: React.FC = () => {
   );
 
   const [query, setQuery] = React.useState('');
-  const debouncedQuery = useDebouncedValue(query, 200);
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [isComposing, setIsComposing] = React.useState(false);
+  const composingRef = React.useRef(false);
+  const debouncedQuery = useDebouncedValue(searchQuery, 200);
   const trimmedQuery = debouncedQuery.trim();
-  const liveTrimmed = query.trim();
+  const liveTrimmed = searchQuery.trim();
   // Messages mode: the palette lists only message hits, with filters.
   const [messagesMode, setMessagesMode] = React.useState(false);
   const [messageScope, setMessageScope] = React.useState<MessageScope>('all');
@@ -194,6 +202,9 @@ export const CommandPalette: React.FC = () => {
   React.useEffect(() => {
     if (isCommandPaletteOpen) {
       setQuery('');
+      setSearchQuery('');
+      composingRef.current = false;
+      setIsComposing(false);
       setMessagesMode(false);
     }
   }, [isCommandPaletteOpen]);
@@ -631,7 +642,7 @@ export const CommandPalette: React.FC = () => {
   // Message search (server index, opt-in; VS Code has no OpenChamber server)
   // ---------------------------------------------------------------------------
   const messageSearchEnabled = useUIStore((state) => state.messageSearchEnabled);
-  const messageSearchSupported = messageSearchEnabled && !isVSCodeRuntime();
+  const messageSearchSupported = messageSearchEnabled && !isVSCodeRuntime() && !isSpaceDirectory(currentRoot);
   // Reasoning hits only while it is indexed and shown in the chat: a hit in
   // hidden reasoning would lead nowhere visible.
   const reasoningIndexed = useUIStore((state) => state.messageSearchReasoningEnabled);
@@ -646,16 +657,17 @@ export const CommandPalette: React.FC = () => {
   const projectScoped = messagesMode && messageScope === 'project' && projectDirectories.length > 0;
   const { state: messageSearch, loadMore: loadMoreMessages } = useMessageSearch({
     query: trimmedQuery,
-    enabled: isCommandPaletteOpen && messageSearchSupported,
+    enabled: isCommandPaletteOpen && messageSearchSupported && !isComposing && !trimmedQuery.toLowerCase().startsWith('ses_'),
     limit: messagesMode ? MESSAGE_PAGE_SIZE : MESSAGE_PREVIEW_LIMIT,
     directories: projectScoped ? projectDirectories : undefined,
     role: messagesMode && effectiveAuthor !== 'any' ? effectiveAuthor : null,
-    includeReasoning: showReasoningTraces,
+    includeReasoning: reasoningSearchable,
+    lifecycle: 'all',
   });
   const messageHits = 'hits' in messageSearch ? messageSearch.hits : [];
 
   React.useEffect(() => {
-    if (!isCommandPaletteOpen) {
+    if (!isCommandPaletteOpen || isComposing) {
       setFileResults([]);
       setFileResultsKey('');
       return;
@@ -698,7 +710,7 @@ export const CommandPalette: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [isCommandPaletteOpen, currentRoot, trimmedQuery, fileSearchKey, searchFiles]);
+  }, [isCommandPaletteOpen, isComposing, currentRoot, trimmedQuery, fileSearchKey, searchFiles]);
 
   // ---------------------------------------------------------------------------
   // Filter visible items
@@ -721,8 +733,15 @@ export const CommandPalette: React.FC = () => {
 
   const scoredSessions = React.useMemo(() => {
     if (!hasQuery) return orderedActiveSessions.slice(0, 5).map((item) => ({ item, score: 0, ranges: NO_RANGES }));
+    if (liveTrimmed.toLowerCase().startsWith('ses_')) return orderedActiveSessions.filter(item => item.id.toLowerCase() === liveTrimmed.toLowerCase()).map(item => ({ item, score: 0, ranges: NO_RANGES }));
     return rankBySubsequence(orderedActiveSessions, liveTrimmed, (s) => s.title || '', { limit: 7 });
   }, [orderedActiveSessions, liveTrimmed, hasQuery]);
+  const scoredArchivedSessions = React.useMemo(() => {
+    if (!hasQuery) return [];
+    const roots = archivedSessions.filter(session => !session.parentID);
+    if (liveTrimmed.toLowerCase().startsWith('ses_')) return roots.filter(item => item.id.toLowerCase() === liveTrimmed.toLowerCase()).map(item => ({ item, score: 0, ranges: NO_RANGES }));
+    return rankBySubsequence(roots, liveTrimmed, session => session.title || '', { limit: 7 });
+  }, [archivedSessions, hasQuery, liveTrimmed]);
 
   const scoredFiles = React.useMemo(() => {
     if (!isCommandPaletteOpen) return [];
@@ -796,13 +815,14 @@ export const CommandPalette: React.FC = () => {
     return [...groups.map((g) => g.key), 'messages'];
   }, [hasQuery, scoredCommands, scoredSettings, scoredSessions, scoredFiles, scoredProjects]);
 
+  const searchOwnerCurrent = captureRuntimeInstance();
   const handleOpenMessage = React.useCallback(
     (hit: MessageSearchHit) => {
+      if (!searchOwnerCurrent()) return;
       close();
-      requestReasoningReveal(hit.role === 'reasoning' ? hit.id : null);
-      void openSessionLink(hit.sessionId, hit.id);
+      openMessageSearchHit(hit);
     },
-    [close],
+    [close, searchOwnerCurrent],
   );
 
   const handleOpenSession = React.useCallback(
@@ -891,9 +911,22 @@ export const CommandPalette: React.FC = () => {
         >
           <CommandInput
             value={query}
-            onValueChange={setQuery}
+            onValueChange={(value) => {
+              setQuery(value);
+              if (!composingRef.current) setSearchQuery(value);
+            }}
+            onCompositionStart={() => { composingRef.current = true; setIsComposing(true); }}
+            onCompositionEnd={(event) => {
+              composingRef.current = false;
+              setIsComposing(false);
+              setSearchQuery(event.currentTarget.value);
+            }}
             placeholder={messagesMode ? t('commandPalette.messages.placeholder') : t('commandPalette.input.placeholder')}
             onKeyDown={(event) => {
+              if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) {
+                event.stopPropagation();
+                return;
+              }
               if (messagesMode && event.key === 'Backspace' && query.length === 0) {
                 event.preventDefault();
                 setMessagesMode(false);
@@ -915,9 +948,12 @@ export const CommandPalette: React.FC = () => {
           <CommandList>
             {messagesMode ? (
               <>
-                {messageHits.map((hit) => (
-                  <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />
-                ))}
+                {(['active', 'archived'] as const).map(lifecycle => {
+                  const hits = messageHits.filter(hit => Boolean(hit.archived) === (lifecycle === 'archived'));
+                  return hits.length ? <CommandGroup key={lifecycle} heading={t(lifecycle === 'archived' ? 'sessions.search.body.archived' : 'sessions.search.body.active')}>
+                    {hits.map(hit => <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />)}
+                  </CommandGroup> : null;
+                })}
                 {messageSearch.status === 'ready' && messageSearch.next ? (
                   <CommandItem value="message:load-more" onSelect={loadMoreMessages} disabled={messageSearch.loadingMore}>
                     <Icon name="more" className="me-2 h-4 w-4" />
@@ -926,10 +962,10 @@ export const CommandPalette: React.FC = () => {
                 ) : null}
                 <div className="px-4 py-2 typography-meta text-muted-foreground" role="status">
                   {messageSearch.status === 'idle' || messageSearch.status === 'too-short'
-                    ? t('commandPalette.messages.tooShort')
+                    ? t('sessions.search.body.tooShort')
                     : messageSearch.status === 'loading' && messageHits.length === 0
                       ? t('commandPalette.messages.searching')
-                      : messageSearch.status === 'error'
+                      : messageSearch.status === 'error' || (messageSearch.status === 'ready' && messageSearch.pageError)
                         ? t('commandPalette.messages.error')
                         : messageSearch.status === 'unavailable'
                           ? t('commandPalette.messages.unavailable')
@@ -944,20 +980,37 @@ export const CommandPalette: React.FC = () => {
             ) : (
             <>
             <CommandEmpty>{t('commandPalette.empty.noResults')}</CommandEmpty>
+            {hasQuery && !liveTrimmed.toLowerCase().startsWith('ses_') ? (
+              <p role="status" className="px-4 py-1 typography-micro text-muted-foreground">
+                {!messageSearchSupported
+                  ? t(isVSCodeRuntime() || isSpaceDirectory(currentRoot) ? 'sessions.search.body.unsupported' : 'sessions.search.body.off')
+                  : !isSearchableQuery(liveTrimmed) ? t('sessions.search.body.tooShort')
+                    : messageSearch.status === 'error' || (messageSearch.status === 'ready' && messageSearch.pageError) ? t('commandPalette.messages.error')
+                      : messageSearch.status === 'unavailable' ? t('commandPalette.messages.unavailable')
+                        : messageSearch.status === 'ready' && (messageSearch.index?.lifecycleComplete === false || messageSearch.index?.backfill.state === 'running') ? t('sessions.search.body.indexing') : null}
+              </p>
+            ) : null}
 
             {groupOrder.map((groupKey) => {
               if (groupKey === 'messages') {
                 if (!hasQuery || messageHits.length === 0) return null;
                 return (
-                  <CommandGroup key="messages" heading={t('commandPalette.group.messages')}>
-                    {messageHits.map((hit) => (
+                  <React.Fragment key="messages">
+                  <CommandGroup heading={t('sessions.search.body.active')}>
+                    {messageHits.filter(hit => !hit.archived).map((hit) => (
                       <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />
                     ))}
+                  </CommandGroup>
+                  {messageHits.some(hit => hit.archived) ? <CommandGroup heading={t('sessions.search.body.archived')}>
+                    {messageHits.filter(hit => hit.archived).map(hit => <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />)}
+                  </CommandGroup> : null}
+                  <CommandGroup>
                     <CommandItem value="message:show-all" onSelect={() => setMessagesMode(true)}>
                       <Icon name="search" className="me-2 h-4 w-4" />
                       <span className="truncate text-muted-foreground">{t('commandPalette.messages.showAll')}</span>
                     </CommandItem>
                   </CommandGroup>
+                  </React.Fragment>
                 );
               }
               if (groupKey === 'openFiles' && visibleOpenFiles.length > 0) {
@@ -996,9 +1049,10 @@ export const CommandPalette: React.FC = () => {
                   </CommandGroup>
                 );
               }
-              if (groupKey === 'sessions' && scoredSessions.length > 0) {
+              if (groupKey === 'sessions' && (scoredSessions.length > 0 || scoredArchivedSessions.length > 0)) {
                 return (
-                  <CommandGroup key="sessions" heading={t('commandPalette.group.sessions')}>
+                  <React.Fragment key="sessions">
+                  <CommandGroup heading={t('sessions.search.titles.label')}>
                     {scoredSessions.map(({ item: session, ranges }) => {
                       // Untitled sessions never match, so their ranges are empty.
                       const title = session.title || t('commandPalette.session.untitled');
@@ -1026,6 +1080,13 @@ export const CommandPalette: React.FC = () => {
                       );
                     })}
                   </CommandGroup>
+                  {scoredArchivedSessions.length ? <CommandGroup heading={t('sessions.search.titles.archived')}>
+                    {scoredArchivedSessions.map(({ item: session, ranges }) => <CommandItem key={session.id} value={`archived-session:${session.id}`} onSelect={() => handleOpenSession(session)}>
+                      <Icon name="inbox-archive" className="me-2 h-4 w-4" />
+                      <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align"><Matched text={session.title || t('commandPalette.session.untitled')} ranges={ranges} /></span>
+                    </CommandItem>)}
+                  </CommandGroup> : null}
+                  </React.Fragment>
                 );
               }
               if (groupKey === 'files' && visibleFiles.length > 0) {

@@ -1,3 +1,5 @@
+import { isSessionUnread } from '@/sync/session-unread';
+import { useSessionLiveToolStore } from '@/sync/session-live-tool';
 import { HostRequestError, type GuestLoadState, type GuestSessionRecord, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestWorktree } from '@openchamber/sdk';
 import type { Session } from '@/lib/opencode/model';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -57,7 +59,11 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
     // is waiting for the user to answer", so the public activity value stays.
     else if (child?.form[session.id]?.length) activity = 'waiting-question';
   }
+  const liveTool = useSessionLiveToolStore.getState().tools.get(session.id);
   return {
+    unread: isSessionUnread(session),
+    pendingReply: activity === 'unknown' ? null : activity === 'waiting-question' || activity === 'waiting-permission',
+    tool: activity === 'running' && liveTool?.directory === (normalizePath(directory) ?? directory) ? { name: liveTool.name, target: null } : null,
     id: session.id, title: session.title || session.id, projectId, directory,
     parentId: session.parentID ?? null, createdAt: session.time.created, updatedAt: session.time.updated,
     archivedAt: session.time.archived || null, worktree,
@@ -165,6 +171,7 @@ export const observeGuestWorkspace = (query: GuestWorkspaceQuery, guestId: strin
       unsubs.push(
         useGlobalSessionsStore.subscribe((state, previous) => { if (state.activeSessions !== previous.activeSessions || state.archivedSessions !== previous.archivedSessions || state.status !== previous.status) update(); }),
         useGlobalSessionStatusStore.subscribe(update),
+        useSessionLiveToolStore.subscribe(update),
         useConfigStore.subscribe((state, previous) => { if (state.isConnected !== previous.isConnected) update(); }),
         manager.subscribeBootstrap(update),
         manager.subscribeAllSelected((state) => state.session, update),

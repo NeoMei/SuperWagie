@@ -25,6 +25,9 @@ import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
 import { APP_NAME, APP_NAME_EN, UPDATES_ENABLED } from './branding.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
+import { createOfficialSelectionIpc } from './official-selection-ipc.mjs';
+import { createEventNotificationRegistry } from './event-notifications.mjs';
+import { z } from 'zod';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { describeStartupEnvironmentOverrides, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
@@ -1408,6 +1411,7 @@ const NATIVE_NOTIFICATION_DEDUPE_TTL_MS = 5000;
 // the session removes them from Notification Center. Only macOS can remove a
 // delivered notification.
 const deliveredNotificationIdsBySession = new Map();
+const eventNotifications = createEventNotificationRegistry({ platform: process.platform, remove: (ids) => Notification.remove(ids) });
 
 const clearSessionNotifications = (sessionId) => {
   const ids = deliveredNotificationIdsBySession.get(sessionId);
@@ -1418,7 +1422,7 @@ const clearSessionNotifications = (sessionId) => {
 
 const getNativeNotificationClaimKey = (payload) => {
   const tag = typeof payload?.tag === 'string' ? payload.tag.trim() : '';
-  if (tag) return tag;
+  if (tag) return JSON.stringify([readTrimmedString(payload.runtimeKey) || 'local', tag]);
   return [payload?.sessionId, payload?.kind, payload?.title, payload?.body]
     .filter((value) => typeof value === 'string' && value.trim())
     .map((value) => value.trim())
@@ -1481,6 +1485,7 @@ const maybeShowNativeNotification = (rawInput) => {
     silent: false,
     ...(process.platform === 'darwin' ? { sound: 'Glass' } : {}),
   });
+  eventNotifications.track({ tag: payload.tag, runtimeKey }, notificationId);
   if (process.platform === 'darwin' && sessionId) {
     const ids = deliveredNotificationIdsBySession.get(sessionId) ?? [];
     ids.push(notificationId);
@@ -1641,6 +1646,7 @@ const spawnLocalServer = async () => {
     host: bindHost,
     uiPassword: desktopUiPassword || null,
     attachSignals: false,
+    nativeOfficialSelections: true,
     exitOnShutdown: false,
     apiOnly: false,
     builtInExtensionsDir: app.isPackaged
@@ -1648,6 +1654,7 @@ const spawnLocalServer = async () => {
       : undefined,
     // The in-process server's notifications belong to the local instance.
     onDesktopNotification: (payload) => maybeShowNativeNotification({ ...payload, runtimeKey: 'local' }),
+    onDesktopNotificationWithdraw: (payload) => eventNotifications.withdraw({ ...payload, runtimeKey: 'local' }),
     getIsWindowFocused: isAnyWindowFocused,
     getDesktopRuntimeConfig: () => ({
       apiBaseUrl: state.apiBaseUrl || '',
@@ -5863,7 +5870,31 @@ ipcMain.on('openchamber:shortcut-sequence-state', (event, value) => {
     && shortcutSequenceOwners.get(window)?.update(value));
 });
 
+const officialSelectionIpc = createOfficialSelectionIpc({
+  isFrameAllowed: (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    return windowMenuShortcuts.has(window) && isAppShortcutFrame(event, window, shortcutHmrOrigin);
+  },
+  isLocalTarget: (target) => Boolean(state.sidecarUrl && normalizeHostUrl(target) === normalizeHostUrl(state.sidecarUrl)),
+  getController: () => state.serverHandle?.nativeOfficialSelections,
+  resolveAuthentication: async (event, accountToken) => {
+    if (accountToken) return { kind: 'bearer', token: accountToken };
+    const cookies = await event.sender.session.cookies.get({ url: state.sidecarUrl });
+    return { kind: 'cookie', host: new URL(state.sidecarUrl).host, cookie: cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ') };
+  },
+});
+
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
+  if (command === 'desktop_official_select' || command === 'desktop_official_revoke' || command === 'desktop_official_selection_cancel' || command === 'desktop_creation_approval') {
+    return officialSelectionIpc(event, command, args);
+  }
+  if (command === 'desktop_withdraw_event_notification') {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!windowMenuShortcuts.has(window) || !isAppShortcutFrame(event, window, shortcutHmrOrigin)) throw new Error('Notification withdrawal requires the application top frame');
+    const input = z.object({ tag: z.string().min(1).max(200), runtimeKey: z.string().min(1).max(200) }).strict().parse(args);
+    return eventNotifications.withdraw(input);
+  }
+
   if (command === 'desktop_set_menu_shortcuts' || command === 'desktop_set_locale') {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!windowMenuShortcuts.has(window) || !isAppShortcutFrame(event, window, shortcutHmrOrigin)) {

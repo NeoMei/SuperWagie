@@ -55,6 +55,7 @@ import {
   type StartSessionWorktreeMenuLoadArgs,
 } from './sidebar/sessionWorktreeMenu';
 import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
+import { SessionContentSearch } from './SessionContentSearch';
 
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 const activeSessionByProjectSchema = z.record(z.string(), z.string().min(1).catch(''));
@@ -673,6 +674,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         expandAll={projectView.actions.expandAll}
       />
 
+      <SessionContentSearch query={sessionSearchQuery} lifecycle="active" active={isVisible && (isSessionSearchOpen || hideDirectoryControls)} onNavigate={resetSessionSearch} />
       <SessionProjectCollection
         topology={{
           projects: sortedProjects,

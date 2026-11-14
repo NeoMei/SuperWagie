@@ -1005,6 +1005,33 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       if (activeLogins.get(key) === transaction) activeLogins.delete(key);
     }
   };
+  // Identity-only account scope for the hosted selected-material reader. No
+  // wallet, subscription, model recovery or usage activation is involved.
+  const identityAccounts = async (identity, requestedAccountId) => {
+    const session = await ensureFreshSession(identity);
+    const key = namespace(identity);
+    const selecting = requestedAccountId !== undefined;
+    const mutationVersion = selecting ? beginAccountMutation(key) : accountMutationVersions.get(key) ?? 0;
+    const selection = { mutationVersion };
+    if (selecting) pendingAccountSelections.set(key, selection);
+    const accountVersion = session.accountVersion;
+    try {
+      const accounts = z.array(accountSchema).max(200).parse(await sessionRequest(key, session, '/v1/accounts'));
+      assertCurrentSession(key, session, accountVersion);
+      assertAccountMutation(key, mutationVersion);
+      const accountId = selecting ? requestedAccountId
+        : !session.selectedOnce ? accounts.find((account) => account.kind === 'personal')?.id ?? accounts[0]?.id ?? null
+          : accounts.some((account) => account.id === session.accountId) ? session.accountId : null;
+      if (selecting && !accounts.some((account) => account.id === accountId)) reject('platform_account_forbidden', 403);
+      if (!selecting && pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
+      if (!session.selectedOnce || session.accountId !== accountId) {
+        persistSession(identity, { ...assertCurrentSession(key, session, accountVersion), accountId, selectedOnce: true, accountVersion: accountVersion + 1 });
+      }
+      return { accounts: accounts.map(({ id, name }) => ({ id, name })), accountId };
+    } finally {
+      if (selecting && pendingAccountSelections.get(key) === selection) pendingAccountSelections.delete(key);
+    }
+  };
   const selectAccount = async (identity, accountId) => {
     const session = getSession(identity);
     const key = namespace(identity);
@@ -1128,7 +1155,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const authSession = crypto.createHash('sha256').update(JSON.stringify([session.generation ?? '', session.accountVersion])).digest('hex');
     return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt, authSession };
   };
-  return { publicSession, identitySession, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
+  return { publicSession, identitySession, identityAccounts, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
     logout: (identity) => { const session = restoreSession(identity); const key = namespace(identity); revokePlatformSession(session); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: async (identity, path, init) => { const session = await ensureFreshSession(identity); const key = namespace(identity); return sessionRequest(key, session, path, init); },
     readUsage, readApiKeys, startUsageActivity, wakeUsageActivity: () => { if (!activityClosed) void activityRuntimePromise?.then((runtime) => runtime.wake()).catch(() => {}); }, close,

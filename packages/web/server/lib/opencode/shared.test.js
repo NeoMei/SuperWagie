@@ -465,6 +465,42 @@ describe('walkSkillMdFiles', () => {
 
     expect(await foundRelative()).toEqual(['a/SKILL.md', 'b/to-a/SKILL.md']);
   });
+
+  it('stops at each skill and skips dependency and hidden directories', async () => {
+    writeSkill('office');
+    writeSkill('office/references/example');
+    writeSkill('office/node_modules/dependency');
+    writeSkill('node_modules/dependency');
+    writeSkill('.venv/dependency');
+    writeSkill('.cache/dependency');
+    writeSkill('collection/explicit');
+    // Explicitly installed links remain usable even when their target lives
+    // in a dependency folder that an ordinary recursive scan skips.
+    linkDirectory(path.join(FIXTURE_DIR, 'node_modules', 'dependency'), 'installed');
+
+    expect(await foundRelative()).toEqual([
+      'collection/explicit/SKILL.md',
+      'installed/SKILL.md',
+      'office/SKILL.md',
+    ]);
+  });
+
+  it('treats a linked skill file as a skill boundary', async () => {
+    const source = writeFixture('instructions.md', STANDARD_MD);
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'linked-file'), { recursive: true });
+    fs.symlinkSync(source, path.join(FIXTURE_DIR, 'linked-file', 'SKILL.md'), 'file');
+    writeSkill('linked-file/references/example');
+
+    expect(await foundRelative()).toEqual(['linked-file/SKILL.md']);
+  });
+
+  it('keeps scanning children when a skill file link is dangling', async () => {
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'collection'), { recursive: true });
+    fs.symlinkSync(path.join(FIXTURE_DIR, 'gone.md'), path.join(FIXTURE_DIR, 'collection', 'SKILL.md'), 'file');
+    writeSkill('collection/real');
+
+    expect(await foundRelative()).toEqual(['collection/real/SKILL.md']);
+  });
 });
 
 describe('writeConfig preserves JSONC comments (issue #3587)', () => {

@@ -67,7 +67,8 @@ import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatch
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedSidebarChange, type LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState } from './sessionPrSummaries';
-import { useSessionUnread } from '@/sync/session-unread';
+import { setSessionUnread, useSessionUnread } from '@/sync/session-unread';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { useHasSessionTurnDuration } from '@/sync/session-turn-duration';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -1321,6 +1322,17 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           {isInWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
         </Item>
         </SessionMenuItemHint>
+      ) : null}
+      {!archivedBucket && !session.parentID ? (
+        <Item onClick={() => {
+          const ownerCurrent = captureRuntimeInstance();
+          void setSessionUnread(session.id, !needsAttention).catch(() => {
+            if (ownerCurrent()) toast.error(t('sessions.sidebar.session.unread.failed'));
+          });
+        }} className="[&>svg]:me-1">
+          <Icon name="eye" className="me-1 h-4 w-4" />
+          {t(needsAttention ? 'sessions.sidebar.session.unread.markRead' : 'sessions.sidebar.session.unread.markUnread')}
+        </Item>
       ) : null}
       {canKeepWarm ? (
         <SessionMenuItemHint hint={isWarmed ? t('sessions.sidebar.session.menuHint.stopWarm') : t('sessions.sidebar.session.menuHint.keepWarm')}>

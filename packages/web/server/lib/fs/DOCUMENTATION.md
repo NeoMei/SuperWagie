@@ -147,7 +147,7 @@ The Git service validates a selected commit identity before planning or spawning
 - `GET /api/fs/raw` answers one `Range: bytes=…` span with `206`, `Content-Range` and a stream from disk (`byte-range.js` reduces the header to a span). Media elements send a span on every seek, and Chromium and WebKit refuse to seek without a `206`, so the viewer's audio and video players depend on this. A whole-file request streams from disk the same way, so a large PDF or recording never sits in server memory. The MIME table (`FILE_MIME_MAP`) is shared with `/api/fs/preview` and covers images, PDF, audio, video, fonts, CSV/TSV and Mermaid.
 - File read, raw and stat routes accept outside paths with `allowOutsideWorkspace=true` under the normal server authentication and OS permissions. They do not require a separate file grant. Legacy grant parameters are ignored. Workspace-scoped reads resolve symlinks after checking the requested path. Write routes keep canonical-target boundary checks.
 - If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.
-- `routes.js` and the sibling modules it imports (`byte-range.js`, `workspace-file-names.js`, `content-search.js`, `../shared/guards.js`, `../git/redaction.js`, `../path-realpath-cache.js`) load with Node built-ins only: `routes.test.js` imports a copy of them in a bare Node process without `node_modules`, the way a packaged desktop build once failed to load them. A new sibling module goes into that test's copy list and takes its value guards from `../shared/guards.js` rather than from a dependency.
+- `routes.js` and the sibling modules it imports (`byte-range.js`, `xlsx-copy.js`, `workspace-file-names.js`, `content-search.js`, `../shared/guards.js`, `../git/redaction.js`, `../path-realpath-cache.js`) load with Node built-ins only: `routes.test.js` imports a copy of them in a bare Node process without `node_modules`, the way a packaged desktop build once failed to load them. A new sibling module goes into that test's copy list and takes its value guards from `../shared/guards.js` rather than from a dependency.
 - `GET /api/fs/list` may resolve symlinks with `realpath` to read directory contents, but the response `path` and each entry `path` must stay in the caller's requested path space (`path.join(requestedPath, name)`). Returning real paths breaks file-tree expansion for directories reached through workspace symlinks.
 - `POST /api/fs/upload` accepts one `application/octet-stream` body with `path` and optional `overwrite=true` query parameters. The body streams into a same-directory temp file with a 100 MiB default cap configurable through `OPENCHAMBER_FS_UPLOAD_MAX_BYTES`; failed and oversized uploads clean up that temp file. New files commit through an atomic no-replace link, existing files return `409` unless overwrite is explicit, directory targets are rejected, and the destination parent resolves before writing so uploads cannot escape through workspace symlinks.
 
@@ -217,3 +217,62 @@ existing preview allowance set keeps authored scripts in an opaque origin;
 forcing attachment would change SVG embedding and preview behavior. Header tests
 verify emitted policy and original bytes. Browser rendering and navigation need
 their own acceptance checks.
+
+## XLSX copy editing pilot
+
+`POST /api/fs/xlsx-copy/inspect` reads a workspace XLSX snapshot and returns an
+opaque version plus the first 2,000 visible cells per visible sheet. Hidden
+sheets, rows and columns never enter that response. `POST
+/api/fs/xlsx-copy/save` accepts that version, a distinct sibling filename and up
+to 100 explicit existing-cell edits. Both routes use normal API authentication
+and canonical workspace containment; outside-workspace preview permission does
+not authorize this operation.
+
+`xlsx-copy.js` owns the OOXML gate, patch and publication. It accepts UTF-8,
+non-Zip64 XLSX packages up to 30 MiB, with at most 4,096 entries, 128 MiB expanded
+and 16 MiB per parsed XML part. Chart-bearing, macro/binary, signed, protected,
+external-link, embedded-object, custom-XML, pivot, slicer and control packages
+remain read-only. Content types and every relationship part classify excluded
+features even when their files use nonconventional names. External workbook
+references and external relationship targets are refused.
+Manual calculation workbooks remain read-only. Existing scalar cells can be
+edited; formulas, merged cells, rich text and unsupported cell metadata remain
+read-only. Strings with SpreadsheetML escape sequences are readable and remain
+read-only in this pilot.
+
+### Why the ZIP is patched by part
+
+Spreadsheet reserialization can discard authored drawings, styles and other
+parts. This writer retains every untouched compressed local ZIP record and its
+central metadata, patches only selected cell elements, and sets the workbook's
+full-recalculation flags. Formulas, style references and merges keep their
+original XML. Excel or WPS recalculates dependent formulas; this module does not
+evaluate them. Chart-bearing workbooks remain read-only because unchanged chart
+caches did not redraw correctly in installed Excel, including after Calculate.
+Byte preservation alone does not establish visible chart fidelity.
+
+XML writes reject forbidden XML 1.0 code points. Literal CR/CRLF sequences are
+normalized when inspecting XML, while character references retain their values.
+New carriage returns use character references so they roundtrip unchanged.
+
+### Why publication uses an exclusive hard link
+
+A fully written, synced candidate is linked to a new sibling name, so a racing
+file or symlink wins without replacement. The source is read-only throughout;
+its SHA-256 and file identity/timestamps are checked when inspecting, before
+editing and again immediately before publication. A conflict or candidate write
+failure removes the candidate and preserves the original and any destination.
+An OS error cannot become a successful save. A server crash can leave a private
+`.xlsx-copy-*.tmp` candidate; it cannot partially overwrite the original. External
+editors are not locked, so the final source check is a point-in-time check.
+
+Web, Electron, hosted mobile and Capacitor use their connected server's copy
+operation. Isolated-space paths keep their existing dispatcher ownership. VS
+Code has no capability and its webview explicitly returns 501 for these routes.
+There is no original-file write operation and no automatic retry after uncertain
+transport failure.
+
+XLSX copy and mkdir payloads use dependency-free parsers built from the shared
+value guards. JSON string fields reject boxed strings, invalid identities and
+invalid scalar kinds/values before their owning operation. Adding a validator
+package to this import chain breaks bare-Node desktop loading.

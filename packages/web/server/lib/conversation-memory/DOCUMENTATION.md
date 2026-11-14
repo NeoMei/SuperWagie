@@ -233,3 +233,13 @@ learning after a pause, and the latter preserves that pause across restarts.
 Disabling learning leaves the document library on. Alternative rejected: asking
 the UI to send a second learning request, which failed for remote clients and
 for installs upgraded with the library already enabled.
+
+## Explicit review source checks
+
+The Hy review pilot uses the runtime's existing session, location, checkpoint
+and anchor validator with reconciliation disabled. A source mismatch invalidates
+its retained cards and revision prose, and cannot schedule history capture from
+this review action. Ordinary recall keeps its existing reconciliation behavior.
+Review apply/undo retain the original kind, verification and confirmation state.
+The shared ledger remains the mutation authority; the review HTTP layer cannot
+supply replacement text or a client-selected project identity.

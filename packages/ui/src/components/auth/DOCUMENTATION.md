@@ -69,9 +69,7 @@ authorization owns access enforcement independently of these React gates.
 - Workspace settings, persisted directory validation and home-directory reads
   run after identity authentication. The runtime gate can retain its existing
   bootstrap behavior for callers that do not defer it.
-- VS Code, hosted mobile and Capacitor show the explicit unsupported identity
-  state and do not mount their business application until those runtimes gain
-  the UniHub contract.
+- VS Code, the complete hosted-mobile application and Capacitor show the explicit unsupported identity state and do not mount their business application. The separately approved hosted selected-material reader has its own isolated pilot account gate, documented in `apps/DOCUMENTATION.md`. Its root retains `SessionAuthGate` for existing runtime access and never invokes normal platform account login or runtime bootstrap. The unsupported hosted root exposes only a link to that reader; Capacitor gets no exception.
 
 ## Decisions
 

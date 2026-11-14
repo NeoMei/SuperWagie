@@ -4,11 +4,13 @@
  */
 
 import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
-import { compact, partIds } from "@/lib/opencode/model"
+import { compact, partIds, isSameModelRef, toModelRef } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
 import { Binary } from "./binary"
+import { LOCATION_SCOPED_FORM_SESSION_ID } from "./location-scoped-forms"
+import { isAutoModel } from "@/lib/routing/autoModel"
 import { dropSessionCaches } from "./session-cache"
 import { useSessionUIStore } from "./session-ui-store"
 import { useSelectionStore } from "./selection-store"
@@ -345,12 +347,13 @@ export async function moveSessionToDirectory(
   sourceDirectory: string,
   destinationDirectory: string,
   expectedRuntimeKey?: string,
+  isCurrent?: () => boolean,
 ): Promise<void> {
   await opencodeClient.moveSession(session.id, destinationDirectory)
 
   // If the runtime changed during the move request, the server move
   // already happened, but we must not publish stale local state to the UI/stores.
-  if (isStaleRuntime(expectedRuntimeKey)) return
+  if (isStaleRuntime(expectedRuntimeKey) || (isCurrent && !isCurrent())) return
 
   const moved = relocateSession(session, sourceDirectory, destinationDirectory)
   useGlobalSessionsStore.getState().upsertSession(moved)
@@ -536,6 +539,27 @@ function resolveKnownSessionDirectory(sessionId: string): string | null {
 
 export function isSessionBusyNow(sessionId: string): boolean {
   return getSessionLiveActivity(sessionId) === "active"
+}
+
+/** A failed or unsupported native read never grants destructive-move permission. */
+export async function readSessionsLiveActivity(sessionIds: string[], directory: string): Promise<SessionLiveActivity> {
+  const isCurrent = captureRuntimeInstance()
+  const hasLocalWork = () => sessionIds.some((id) => {
+    if (isSessionBusyNow(id)) return true
+    for (const [, store] of _childStores?.children ?? []) {
+      const state = store.getState()
+      if (state.permission[id]?.length || state.form[id]?.length) return true
+    }
+    return false
+  })
+  if (hasLocalWork()) return 'active'
+  try {
+    const activity = await opencodeClient.readSessionActivity(sessionIds, directory, AbortSignal.timeout(5_000))
+    if (!isCurrent()) return 'unknown'
+    return hasLocalWork() ? 'active' : activity
+  } catch {
+    return 'unknown'
+  }
 }
 
 async function abortDescendantIfBusy(sessionId: string, directory: string): Promise<void> {
@@ -1041,6 +1065,51 @@ function getRequestReplyDirectory(
     ?? getSessionReplyDirectory(sessionId)
 }
 
+
+function findSessionRecordAnywhere(sessionId: string, directory?: string): Session | undefined {
+  const local = directory ? _childStores?.getChild(directory)?.getState().session.find((session) => session.id === sessionId) : undefined
+  if (local) return local
+  for (const store of _childStores?.children.values() ?? []) {
+    const record = store.getState().session.find((session) => session.id === sessionId)
+    if (record) return record
+  }
+  return useGlobalSessionsStore.getState().entityById.get(sessionId)
+}
+
+/** The form ID owns the destination even when its card is shown in a parent. */
+async function resolveFormTarget(sessionId: string, formId: string): Promise<{ sessionId: string; record?: Session; directory?: string }> {
+  let directory = getRequestReplyDirectory("form", sessionId, formId)
+  let located = false
+  formOwner: for (const [storeDirectory, store] of _childStores?.children ?? []) {
+    for (const [ownerId, forms] of Object.entries(store.getState().form)) {
+      const form = forms?.find((candidate) => candidate.id === formId)
+      if (!form) continue
+      sessionId = form.sessionID || ownerId
+      directory = storeDirectory
+      located = true
+      break formOwner
+    }
+  }
+  if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) {
+    if (!located) throw new Error("The reply was not sent because its form location could not be read.")
+    return { sessionId, directory }
+  }
+  const isCurrentRuntime = captureRuntimeInstance()
+  let record = findSessionRecordAnywhere(sessionId, directory)
+  if (!record) {
+    let fetched: Session
+    try {
+      fetched = await opencodeClient.getSession(sessionId, directory)
+    } catch (error) {
+      // A session read failing with 404 does not prove the form has settled.
+      throw new Error("The reply was not sent because its session record could not be read.", { cause: error })
+    }
+    if (!isCurrentRuntime()) throw new Error("The reply was cancelled because the runtime changed.")
+    record = findSessionRecordAnywhere(sessionId, directory) ?? fetched
+  }
+  return { sessionId, record, directory: resolveSessionOwnedDirectory(record) ?? directory }
+}
+
 // ---------------------------------------------------------------------------
 // Session CRUD
 // ---------------------------------------------------------------------------
@@ -1132,12 +1201,11 @@ function isStaleRuntime(expectedRuntimeKey: string | undefined): boolean {
 /**
  * Read a session, apply `updater` to its metadata, and persist the result.
  *
- * `expectedRuntimeKey` is optional here and unguarded when omitted, unlike the
- * archive and delete actions. When supplied, the runtime is rechecked before
- * the read, before the write, and before the global store is updated; a change
- * at any of those points **throws** `"runtime changed"` rather than returning a
- * value, because this function must resolve to a `Session`. Callers that pass a
- * key must therefore be prepared to catch that rejection.
+ * Every operation captures the runtime instance; an explicit expected key
+ * additionally rejects a call queued by another runtime. The cache receives
+ * only metadata from the write response, preserving current session fields.
+ * A removal while reading prevents the write, and a removal while saving
+ * prevents cache resurrection after the write.
  */
 const isMetadataRecord = (value: JsonValue | undefined): value is Metadata =>
   value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value)
@@ -1183,9 +1251,22 @@ export async function patchSessionMetadata(
   expectedRuntimeKey?: string,
 ): Promise<Session> {
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  const ownerCurrent = captureRuntimeInstance()
+  const initialGlobal = useGlobalSessionsStore.getState()
+  const baselineRevision = initialGlobal.mutationRevision
+  const heldGlobally = initialGlobal.entityById.has(sessionId)
+  const heldLive = findLiveSession(sessionId) !== null
+  const wasRemoved = () => {
+    const state = useGlobalSessionsStore.getState()
+    if (state.entityById.has(sessionId)) return false
+    return heldGlobally
+      || (state.mutationRevisionBySessionId.get(sessionId) ?? 0) > baselineRevision
+      || (heldLive && findLiveSession(sessionId) === null)
+  }
   const targetDirectory = directory ?? getSessionDirectory(sessionId)
   const current = await opencodeClient.getSession(sessionId, targetDirectory)
-  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  if (!ownerCurrent() || isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  if (wasRemoved()) throw new Error("session removed while metadata was read")
   const currentMetadata = getSessionMetadata(current)
   const nextMetadata = updater(currentMetadata)
   // OpenCode 2.x only accepts metadata at session creation, so OpenChamber
@@ -1197,8 +1278,10 @@ export async function patchSessionMetadata(
   const result = await requestSessionMetadataUpdate(sessionId, buildMetadataMergePatch(currentMetadata, nextMetadata), targetDirectory)
   if (result.outcome === "directory-missing") throw new SessionDirectoryMissingError(sessionId)
   if (result.outcome !== "updated") throw new Error(`session metadata update failed: ${result.reason}`)
-  const updated: Session = { ...current, metadata: result.metadata }
-  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  if (!ownerCurrent() || isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  const latest = getGlobalSessionSnapshot(sessionId) ?? findLiveSession(sessionId) ?? current
+  const updated: Session = { ...latest, metadata: result.metadata }
+  if (wasRemoved()) return updated
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = updated.directory || targetDirectory
   if (sessionDirectory) registerSessionDirectory(updated.id, sessionDirectory)
@@ -2546,28 +2629,108 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
 /** One filled-in form: every field the agent declared, keyed by field key. */
 export type FormAnswer = Record<string, string | number | boolean | string[]>
 
-export async function replyToForm(
-  sessionId: string,
-  formId: string,
-  answer: FormAnswer,
-): Promise<void> {
-  await waitForConnectionOrThrow()
-  const directory = getRequestReplyDirectory("form", sessionId, formId)
-  try {
-    if (await opencodeClient.replyToForm(sessionId, formId, answer, directory) !== true) {
-      throw new Error("Form reply failed")
+
+type FormSelection = { model?: ModelSelection; agent?: string }
+
+function resolveFormSelection(record: Session | undefined, sessionId: string): FormSelection {
+  const picks = useSelectionStore.getState()
+  const pick = picks.getSessionModelPick(sessionId)
+  const agent = picks.getSessionAgentSelection(sessionId) ?? record?.agent
+  // Only the open root/review composer owns app-wide configuration.
+  if (record && (!record.parentID || isReviewSession(record))
+    && useSessionUIStore.getState().currentSessionId === sessionId) {
+    const config = useConfigStore.getState()
+    return {
+      agent: config.currentAgentName ?? agent,
+      model: config.currentProviderId && config.currentModelId
+        ? { providerID: config.currentProviderId, id: config.currentModelId,
+            variant: config.currentVariantSelection.override === null ? null : config.currentVariant }
+        : undefined,
     }
-    // A successful reply is authoritative: the backend resolved the form, so
-    // clear it from the local store deterministically instead of waiting for
-    // the SSE `form.replied` event. A lost event (SSE gap) would leave the
-    // form pending forever, which keeps the session in "waiting for answer" —
-    // the next task's thinking and final response never render (issues #2911,
-    // #2448). The later SSE event is a no-op (the reducer only removes when
-    // present).
+  }
+  if (!pick) return {}
+  const variant = agent ? picks.getAgentModelVariantForSession(sessionId, agent, pick.providerId, pick.modelId) : undefined
+  return { model: { providerID: pick.providerId, id: pick.modelId, variant }, agent }
+}
+
+async function applyFormSelection(record: Session | undefined, sessionId: string, directory: string | undefined, runtimeKey: string): Promise<() => void> {
+  if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) return () => {}
+  const desired = resolveFormSelection(record, sessionId)
+  if (!desired.model && !desired.agent) return () => {}
+  const isCurrentRuntime = captureRuntimeInstance()
+  let serverRecord: Session
+  try {
+    serverRecord = await opencodeClient.getSession(sessionId, directory)
+  } catch (error) {
+    throw new Error("The reply was not sent because its session record could not be read.", { cause: error })
+  }
+  if (!isCurrentRuntime()) throw new Error("The reply was cancelled because the runtime changed.")
+  const model = desired.model ? toModelRef(desired.model) : undefined
+  const settle = desired.model
+    ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, desired.model.providerID, desired.model.id, runtimeKey)
+    : undefined
+  await opencodeClient.applySendSelection(sessionId, {
+    model: model && (!serverRecord.model || !isSameModelRef(serverRecord.model, model)
+      || !record?.model || !isSameModelRef(record.model, model)) ? model : undefined,
+    agent: desired.agent && desired.agent !== serverRecord.agent ? desired.agent : undefined,
+  }, directory, runtimeKey)
+  return () => settle?.()
+}
+
+// A dropped reply can already have resumed a paid turn. Read its original form
+// before another submission; never convert a missing live form into a prompt.
+const uncertainFormReplies = new Set<string>()
+const pendingFormReplies = new Map<string, Promise<void>>()
+
+export async function replyToForm(sessionId: string, formId: string, answer: FormAnswer): Promise<void> {
+  const key = JSON.stringify([getRuntimeKey(), formId])
+  const pending = pendingFormReplies.get(key)
+  if (pending) return pending
+  const operation = replyToOwnedForm(sessionId, formId, answer, key)
+  pendingFormReplies.set(key, operation)
+  try {
+    await operation
+  } finally {
+    if (pendingFormReplies.get(key) === operation) pendingFormReplies.delete(key)
+  }
+}
+
+async function replyToOwnedForm(sessionId: string, formId: string, answer: FormAnswer, key: string): Promise<void> {
+  const isCurrentRuntime = captureRuntimeInstance()
+  const runtimeKey = getRuntimeKey()
+  const assertCurrent = () => {
+    if (!isCurrentRuntime()) throw new Error("The reply was cancelled because the runtime changed.")
+  }
+  await waitForConnectionOrThrow()
+  assertCurrent()
+  const target = await resolveFormTarget(sessionId, formId)
+  assertCurrent()
+  sessionId = target.sessionId
+  let requestSent = false
+  try {
+    if (uncertainFormReplies.has(key)) {
+      const forms = await opencodeClient.listPendingForms({ directories: [target.directory] })
+      assertCurrent()
+      if (!forms.some((form) => form.id === formId && form.sessionID === sessionId)) {
+        uncertainFormReplies.delete(key)
+        throw Object.assign(new Error("FormNotFoundError"), { status: 404 })
+      }
+      uncertainFormReplies.delete(key)
+    }
+    const settle = await applyFormSelection(target.record, sessionId, target.directory, runtimeKey)
+    assertCurrent()
+    requestSent = true
+    if (await opencodeClient.replyToForm(sessionId, formId, answer, target.directory) !== true) throw new Error("Form reply failed")
+    if (!isCurrentRuntime()) return
+    settle()
+    uncertainFormReplies.delete(key)
     removeFormRequestFromChildStores(sessionId, formId)
     noteLocalFormReplied(formId)
   } catch (error) {
+    if (requestSent && isAmbiguousSendFailure(error)) uncertainFormReplies.add(key)
+    if (!isCurrentRuntime()) throw error
     if (isFormRequestNotFoundError(error)) {
+      uncertainFormReplies.delete(key)
       removeFormRequestFromChildStores(sessionId, formId)
       recoverStaleBlockingRequest(sessionId)
     }
@@ -2576,22 +2739,57 @@ export async function replyToForm(
 }
 
 export async function cancelForm(sessionId: string, formId: string): Promise<void> {
+  const isCurrentRuntime = captureRuntimeInstance()
   await waitForConnectionOrThrow()
-  const directory = getRequestReplyDirectory("form", sessionId, formId)
+  if (!isCurrentRuntime()) throw new Error("The reply was cancelled because the runtime changed.")
+  const target = await resolveFormTarget(sessionId, formId)
+  if (!isCurrentRuntime()) throw new Error("The reply was cancelled because the runtime changed.")
   try {
-    if (await opencodeClient.cancelForm(sessionId, formId, directory) !== true) {
-      throw new Error("Form cancellation failed")
-    }
-    // A successful cancellation is authoritative; see replyToForm for the
-    // lost-SSE-event rationale (issues #2911, #2448).
-    removeFormRequestFromChildStores(sessionId, formId)
+    if (await opencodeClient.cancelForm(target.sessionId, formId, target.directory) !== true) throw new Error("Form cancellation failed")
+    if (!isCurrentRuntime()) return
+    removeFormRequestFromChildStores(target.sessionId, formId)
     noteLocalFormCancelled(formId)
   } catch (error) {
-    if (isFormRequestNotFoundError(error)) {
-      removeFormRequestFromChildStores(sessionId, formId)
-      recoverStaleBlockingRequest(sessionId)
+    if (isCurrentRuntime() && isFormRequestNotFoundError(error)) {
+      removeFormRequestFromChildStores(target.sessionId, formId)
+      recoverStaleBlockingRequest(target.sessionId)
     }
     throw error
+  }
+}
+
+const pendingRetryModelWrites = new Map<string, Promise<void>>()
+
+/** Retry picks only change the next attempt's configuration; no prompt is sent. */
+export async function applyModelPickToRetry(sessionId: string, directory: string | undefined): Promise<void> {
+  const isCurrentRuntime = captureRuntimeInstance()
+  const picks = useSelectionStore.getState()
+  const pick = picks.getSessionModelPick(sessionId)
+  if (!pick || isAutoModel(pick.providerId, pick.modelId) || pick.providerId === "unihub") return
+  const key = JSON.stringify([getRuntimeKey(), sessionId])
+  const write = async () => {
+    if (!isCurrentRuntime() || useSelectionStore.getState().getSessionModelPick(sessionId) !== pick) return
+    const record = findSessionRecordAnywhere(sessionId, directory)
+    // Account tasks keep their immutable admitted model and payer.
+    if (!record?.model || record.model.providerID === "unihub") return
+    const targetDirectory = resolveSessionOwnedDirectory(record) ?? directory
+    const state = targetDirectory ? _childStores?.getChild(targetDirectory)?.getState() : undefined
+    const status = state?.session_status[sessionId]
+      ?? Array.from(_childStores?.children.values() ?? [], (store) => store.getState().session_status[sessionId]).find((candidate) => candidate !== undefined)
+    if (status?.type !== "retry") return
+    const { model } = resolveFormSelection(record, sessionId)
+    if (!model || model.providerID !== pick.providerId || model.id !== pick.modelId) return
+    const settle = picks.captureSessionModelPickSettlement(sessionId, pick.providerId, pick.modelId)
+    await opencodeClient.switchSessionModel(sessionId, model, targetDirectory)
+    if (isCurrentRuntime()) settle()
+  }
+  const previous = pendingRetryModelWrites.get(key)
+  const operation = previous ? previous.catch(() => {}).then(write) : write()
+  pendingRetryModelWrites.set(key, operation)
+  try {
+    await operation
+  } finally {
+    if (pendingRetryModelWrites.get(key) === operation) pendingRetryModelWrites.delete(key)
   }
 }
 

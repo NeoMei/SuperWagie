@@ -14,6 +14,7 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { subagentCancellationNote } from '@/lib/opencode/subagent-run';
+import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
 import { applyDirectoryEvent } from '@/sync/event-reducer';
 import { applyGlobalSessionStatusEvents, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { readHostBlockingRequestsSnapshot, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
@@ -452,3 +453,30 @@ for (const state of ['pending', 'running', 'completed', 'error'] as const) {
     });
   });
 }
+
+
+test('a live foreground shell offers an explicit single-command stop with its side effect', async () => {
+  const running: ToolPartData = { ...parent, tool: 'shell', state: {
+    status: 'running', input: { command: 'sleep 300' }, metadata: { shellID: 'sh_selected' }, time: { start: 100 },
+  } };
+  const background = spyOn(opencodeClient, 'backgroundSessionWork').mockImplementation(async () => {
+    applyBackgroundShellEvents('/workspace', [{ type: 'message.tool.transition', properties: {
+      sessionID: 'parent', messageID: 'parent-message', partID: 'parent-call',
+      transition: { kind: 'success', output: '', metadata: { status: 'running', shellID: 'sh_selected' }, executed: true, end: 200 },
+    } }]);
+  });
+  const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
+  try {
+    await withHarness(running, false, async (_store, container) => {
+      await act(async () => applyBackgroundShellEvents('/workspace', [{ type: 'shell.started', properties: { shell: {
+        id: 'sh_selected', sessionID: 'parent', command: 'sleep 300', file: '/tmp/selected', startedAt: 100,
+      } } }]));
+      const button = container.querySelector<HTMLButtonElement>('button[aria-label^="Stop this command."]');
+      expect(button?.title).toContain('subagents continue in the background');
+      await act(async () => { button?.click(); button?.click(); });
+      expect(background).toHaveBeenCalledTimes(1);
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(stop.mock.calls[0]?.[0].shells).toEqual([{ shellID: 'sh_selected', shellDirectory: '/workspace', command: 'sleep 300' }]);
+    });
+  } finally { background.mockRestore(); stop.mockRestore(); resetBackgroundShells(); }
+});

@@ -1,3 +1,4 @@
+import { guestResultCardsSchema } from './result-card-schemas.ts';
 import { z } from 'zod';
 import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
@@ -265,6 +266,7 @@ const readyPayloadSchema = z.object({
     projectDialog: z.literal(true).optional(),
     deviceStorage: z.literal(true).optional(),
     statusControls: z.literal(true).optional(),
+    resultCards: z.literal(true).optional(),
     popovers: z.literal(true).optional(),
     lateGenerateResults: z.literal(true).optional(),
   }).optional(),
@@ -685,6 +687,12 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     payload: z.object({
       sha: z.string().regex(GUEST_COMMIT_SHA),
     }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('result-cards'),
+    id: z.string().min(1),
+    payload: guestResultCardsSchema,
   }),
   z.object({
     ...envelope,

@@ -37,7 +37,7 @@ import { createFileContentPoller } from './fileContentPoller';
 import { hasFileStatChanged, openFilePollStep } from './fileStatChange';
 import { pendingFileNavigationStep } from './pendingFileNavigation';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
-import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { FileMarkdownPreview } from './files/previews/FileMarkdownPreview';
 import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
@@ -62,6 +62,7 @@ import { cn, getRevealLabelKey } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isOfficeFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { MAX_OPEN_FILE_BYTES, MAX_OFFICE_PREVIEW_BYTES } from '@/lib/fileOpenLimits';
+import { dataPreviewKind } from './files/previews/dataFilePreview';
 import { OfficePreviewSizeError, readBoundedResponseBytes } from './files/previews/officePreviewBytes';
 import { formatFileSize } from '@/lib/fileSize';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
@@ -94,13 +95,18 @@ import { useFileTreeUpload } from './files/useFileTreeUpload';
 import { moveWorkspacePath } from './files/moveWorkspacePath';
 import { useFileTreeMutationOwner } from './files/useFileTreeMutationOwner';
 import { areDirectoryNodesEqual, buildFileTreeStatusIndex } from './files/fileTreeStatus';
-import { BinaryArtifact } from './files/previews/BinaryArtifact';
-import { FontArtifact } from './files/previews/FontArtifact';
-import { ImageArtifact, type ImageNeighbor } from './files/previews/ImageArtifact';
+
+
+import type { ImageNeighbor } from './files/previews/ImageArtifact';
+import { LazyFilePreview } from './files/previews/LazyFilePreview';
+import { MarkdownOutlineMenu } from './files/previews/MarkdownOutlineMenu';
+import { attachToMainComposerDraft } from '@/components/chat/composer/comment/mainComposerDraftTarget';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { tableQuoteDraft } from './files/previews/tableQuoteDraft';
 import { imageNeighborsOf } from './files/imageNeighbors';
-import { MediaArtifact } from './files/previews/MediaArtifact';
-import { OfficeArtifact } from './files/previews/OfficeArtifact';
-import { TableArtifact } from './files/previews/TableArtifact';
+
+
+
 import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 import { useHtmlPreviewUrl } from './files/useHtmlPreviewUrl';
 import { useRawAssetUrl } from './files/useRawAssetUrl';
@@ -367,6 +373,14 @@ const isDirectoryReadError = (error: unknown): boolean => {
 };
 
 const MAX_CONTENT_POLL_BYTES = 200_000;
+
+const loadDataFileArtifact = () => import('./files/previews/DataFileArtifact').then((module) => ({ default: module.DataFileArtifact }));
+const loadBinaryArtifact = () => import('./files/previews/BinaryArtifact').then((module) => ({ default: module.BinaryArtifact }));
+const loadFontArtifact = () => import('./files/previews/FontArtifact').then((module) => ({ default: module.FontArtifact }));
+const loadImageArtifact = () => import('./files/previews/ImageArtifact').then((module) => ({ default: module.ImageArtifact }));
+const loadMediaArtifact = () => import('./files/previews/MediaArtifact').then((module) => ({ default: module.MediaArtifact }));
+const loadOfficeArtifact = () => import('./files/previews/OfficeArtifact').then((module) => ({ default: module.OfficeArtifact }));
+const loadTableArtifact = () => import('./files/previews/TableArtifact').then((module) => ({ default: module.TableArtifact }));
 
 const isMarkdownFile = (path: string): boolean => {
   if (!path) return false;
@@ -1955,7 +1969,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
 
     // A binary file saves only through the extension editor that owns it.
-    const selectedIsBinary = (isBinaryFile(selectedFile.path) || contentDetectedBinary) && !binaryCanvasRef.current;
+    const selectedIsBinary = (isBinaryFile(selectedFile.path) || dataPreviewKind(selectedFile.path) !== null || contentDetectedBinary) && !binaryCanvasRef.current;
     if (!shouldAllowFileDraftSave({
       selectedFilePath: selectedFile.path,
       loadedFilePath,
@@ -2105,7 +2119,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   React.useEffect(() => {
     const canWrite = Boolean(selectedFile && files.writeFile);
-    const selectedIsBinary = Boolean(selectedFile?.path && (isBinaryFile(selectedFile.path) || contentDetectedBinary)) && !binaryCanvasRef.current;
+    const selectedIsBinary = Boolean(selectedFile?.path && (isBinaryFile(selectedFile.path) || dataPreviewKind(selectedFile.path) !== null || contentDetectedBinary)) && !binaryCanvasRef.current;
     if (!shouldScheduleFileAutosave({
       autoSaveEnabled,
       isDirty,
@@ -2230,7 +2244,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     const selectedIsImage = isImageFile(node.path);
     const isSvg = isSvgFile(node.path);
     const selectedIsPdf = isPdfFile(node.path);
-    const selectedIsBinary = isBinaryFile(node.path);
+    const selectedIsBinary = isBinaryFile(node.path) || dataPreviewKind(node.path) !== null;
 
     if (isMobile) {
       setShowMobilePageContent(true);
@@ -2540,7 +2554,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       isDrawioFile(selectedPath) && diagramXmlRef.current !== diagramSavedXmlRef.current
     );
     // Same exclusions as `isTextFile`: `isBinaryFile` covers PDFs, `isImageFile` covers SVG.
-    const contentPoller = !isBinaryFile(selectedPath) && !isImageFile(selectedPath) && !contentDetectedBinary
+    const contentPoller = !isBinaryFile(selectedPath) && dataPreviewKind(selectedPath) === null && !isImageFile(selectedPath) && !contentDetectedBinary
       ? createFileContentPoller({
           readContent: () => readFile(selectedPath, { fresh: true }),
           getLoadedContent: () => lastLoadedFileContentRef.current,
@@ -2863,11 +2877,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const isSelectedMedia = isSelectedVideo || Boolean(selectedFile?.path && isAudioFile(selectedFile.path));
   const isSelectedFont = Boolean(selectedFile?.path && isFontFile(selectedFile.path));
   const isSelectedOffice = Boolean(selectedFile?.path && isOfficeFile(selectedFile.path));
+  const selectedDataKind = selectedFile?.path ? dataPreviewKind(selectedFile.path) : null;
   const isSelectedBinary = Boolean(
     selectedFile?.path
-    && (isBinaryFile(selectedFile.path) || contentDetectedBinary)
+    && (isBinaryFile(selectedFile.path) || selectedDataKind !== null || contentDetectedBinary)
   );
-  const isUnsupportedBinary = isSelectedBinary && !isSelectedImage && !isSelectedPdf && !isSelectedMedia && !isSelectedFont && !isSelectedOffice;
+  const isUnsupportedBinary = isSelectedBinary && selectedDataKind === null && !isSelectedImage && !isSelectedPdf && !isSelectedMedia && !isSelectedFont && !isSelectedOffice;
   // Everything the viewer shows as an artifact rather than as text.
   const isSelectedNonText = isSelectedBinary || (isSelectedImage && !isSvgSource);
 
@@ -3987,53 +4002,76 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     return readBoundedResponseBytes(response, { maxBytes: MAX_OFFICE_PREVIEW_BYTES, signal });
   }, [resolveFileReadOptions, root, t]);
 
+  const readDataBytes = React.useCallback(async (path: string, callerSignal: AbortSignal, maxBytes: number): Promise<Uint8Array<ArrayBuffer>> => {
+    const readOptions = resolveFileReadOptions(path);
+    const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(30_000)]);
+    signal.throwIfAborted();
+    const response = await runtimeFetch('/api/fs/raw', {
+      signal, cache: 'no-store',
+      query: { path, maxBytes: String(maxBytes), allowOutsideWorkspace: readOptions.allowOutsideWorkspace ? 'true' : undefined, directory: root || undefined },
+    });
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
+      if (response.status === 413) throw new OfficePreviewSizeError();
+      throw new Error(t('filesView.error.readFileFailed'));
+    }
+    return readBoundedResponseBytes(response, { maxBytes, signal });
+  }, [resolveFileReadOptions, root, t]);
+
   // Everything shown as an artifact rather than as editable text. One place
   // for both the docked and the fullscreen viewer, so they cannot drift.
+  const previewIdentity = JSON.stringify([fileScope, selectedFile?.path, fileContentRevision]);
   const renderArtifactPreview = (file: FileNode): React.ReactNode => {
     if (isSelectedImage && !isSvgSource) {
-      return <ImageArtifact src={imageSrc} name={file.name} sizeBytes={artifactSize} neighbors={imageNeighbors} />;
+      return <LazyFilePreview key={previewIdentity} load={loadImageArtifact} previewProps={{ src: imageSrc, name: file.name, sizeBytes: artifactSize, neighbors: imageNeighbors }} />;
     }
     if (isSelectedPdf) return renderPdfPreview(file);
     if (isSelectedMedia) {
       return (
-        <MediaArtifact
-          kind={isSelectedVideo ? 'video' : 'audio'}
-          src={pdfSrc}
-          renewSrc={rawAsset.renew}
-          name={file.name}
-          sizeBytes={artifactSize}
-          download={downloadButton}
-        />
+        <LazyFilePreview key={previewIdentity} load={loadMediaArtifact} previewProps={{
+          kind: isSelectedVideo ? 'video' : 'audio', src: pdfSrc, renewSrc: rawAsset.renew,
+          name: file.name, sizeBytes: artifactSize, download: downloadButton,
+        }} />
       );
     }
     if (isSelectedFont) {
-      return <FontArtifact src={pdfSrc} name={file.name} sizeBytes={artifactSize} />;
+      return <LazyFilePreview key={previewIdentity} load={loadFontArtifact} previewProps={{ src: pdfSrc, name: file.name, sizeBytes: artifactSize }} />;
     }
     if (isSelectedOffice) {
       return (
-        <OfficeArtifact
-          key={JSON.stringify([fileScope, file.path])}
-          name={file.name}
-          path={file.path}
-          sizeBytes={artifactSize}
-          revision={fileContentRevision}
-          readBytes={(signal) => readOfficeBytes(file.path, signal)}
-          download={downloadButton}
-        />
+        <LazyFilePreview key={previewIdentity} load={loadOfficeArtifact} previewProps={{
+          name: file.name, path: file.path, sizeBytes: artifactSize, revision: fileContentRevision,
+          readBytes: (signal: AbortSignal) => readOfficeBytes(file.path, signal), download: downloadButton,
+          copyAPI: !selectedFileIsOutsideWorkspace && files.inspectXlsxCopy && files.saveXlsxCopy ? { inspectXlsxCopy: files.inspectXlsxCopy, saveXlsxCopy: files.saveXlsxCopy } : undefined,
+          onQuote: (quote) => {
+            if (fileScopeRef.current !== fileScope || getRuntimeKey() !== runtimeKey || !panelDirectory || root !== panelRoot || selectedFileIsOutsideWorkspace) return false;
+            const attached = attachToMainComposerDraft(runtimeKey, panelDirectory, tableQuoteDraft(file.name, file.path, quote, 'XLSX'));
+            if (attached) queueMicrotask(focusChatInput);
+            return attached;
+          },
+        }} />
       );
     }
+    if (selectedDataKind) {
+      return <LazyFilePreview key={previewIdentity} load={loadDataFileArtifact} previewProps={{ kind: selectedDataKind, name: file.name, path: file.path, revision: fileContentRevision, sizeBytes: artifactSize, readBytes: (signal, maxBytes) => readDataBytes(file.path, signal, maxBytes), download: downloadButton }} />;
+    }
     if (isUnsupportedBinary) {
-      return <BinaryArtifact name={file.name} path={file.path} sizeBytes={artifactSize} download={downloadButton} />;
+      return <LazyFilePreview key={previewIdentity} load={loadBinaryArtifact} previewProps={{ name: file.name, path: file.path, sizeBytes: artifactSize, download: downloadButton }} />;
     }
     if (isTable && tableViewMode === 'table') {
-      return <TableArtifact path={file.path} content={fileContent} sizeBytes={artifactSize} />;
+      return <LazyFilePreview key={previewIdentity} load={loadTableArtifact} previewProps={{ path: file.path, content: fileContent, sizeBytes: artifactSize, onQuote: (quote) => {
+        if (fileScopeRef.current !== fileScope || getRuntimeKey() !== runtimeKey || !panelDirectory || root !== panelRoot || selectedFileIsOutsideWorkspace) return false;
+        const attached = attachToMainComposerDraft(runtimeKey, panelDirectory, tableQuoteDraft(file.name, file.path, quote));
+        if (attached) queueMicrotask(focusChatInput);
+        return attached;
+      } }} />;
     }
     if (isMermaid && mermaidViewMode === 'preview') {
       return (
         // The whole panel is the diagram: the same fill-the-container styling
         // the fullscreen mermaid dialog uses, not the chat block's capped height.
         <div className="h-full min-h-0 overflow-hidden">
-          <ErrorBoundary
+          <ErrorBoundary key={previewIdentity}
             fallback={
               <div className="m-3 rounded-md bg-destructive/10 px-3 py-2">
                 <div className="mb-1 font-medium text-destructive">{t('filesView.error.previewUnavailable')}</div>
@@ -4041,7 +4079,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               </div>
             }
           >
-            <SimpleMarkdownRenderer
+            <FileMarkdownPreview
               content={`\`\`\`mermaid\n${fileContent}\n\`\`\``}
               className="markdown-mermaid-fullscreen h-full"
               enableFileReferences={false}
@@ -4775,6 +4813,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           )
         )}
 
+        {previewReady && isMarkdown && getMdViewMode() === 'preview' && (
+          <MarkdownOutlineMenu key={previewIdentity} containerRef={isFullscreen ? mdFullscreenPreviewContainerRef : mdPreviewContainerRef} />
+        )}
+
         {isMarkdown && getMdViewMode() === 'preview' && (
           withTooltip(t('filesView.editor.findInFile'),
             <Button
@@ -5255,7 +5297,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 </div>
               )
           ) : fileError ? (
-            <div className="p-3 typography-ui text-[color:var(--status-error)]">{fileError}</div>
+            <div className="flex flex-col items-start gap-3 p-3 typography-ui text-[color:var(--status-error)]">
+              <div>{fileError}</div>
+              <Button variant="outline" size="sm" onClick={() => { setFailedFilePath(null); setLoadedFilePath(null); setFileError(null); setFileContentRevision((value) => value + 1); }}>{t('filesView.artifact.office.retry')}</Button>
+            </div>
 ) : showCanvas ? (
             // Ahead of the built-in previews: a binary editor may claim an image or PDF.
             // Shown fullscreen instead while the overlay is open: one canvas instance.
@@ -5272,7 +5317,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               />
             </div>
           ) : selectedFile && isJson && jsonViewMode === 'tree' ? (
-            <ErrorBoundary
+            <ErrorBoundary key={previewIdentity}
               fallback={
                 <div className="rounded-md bg-destructive/10 px-3 py-2">
                   <div className="mb-1 font-medium text-destructive">{t('filesView.error.jsonViewerUnavailable')}</div>
@@ -5315,7 +5360,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     {t('filesView.warning.largeFilePreviewLimited', { sizeKb: Math.round(fileContent.length / 1024) })}
                   </div>
                 )}
-                <ErrorBoundary
+                <ErrorBoundary key={previewIdentity}
                   fallback={
                     <div className="rounded-md bg-destructive/10 px-3 py-2">
                       <div className="mb-1 font-medium text-destructive">{t('filesView.error.previewUnavailable')}</div>
@@ -5326,13 +5371,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                   }
                 >
                   <div style={previewFontStyle}>
-                    <SimpleMarkdownRenderer
+                    <FileMarkdownPreview
                       content={fileContent}
                       documentAssets={markdownDocumentAssets}
                       className="typography-markdown-body"
                       frontmatter="properties"
                       enableFileReferences={false}
                       allowRawHtml
+                      passiveSvg
                     />
                   </div>
                 </ErrorBoundary>
@@ -5604,7 +5650,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 </div>
               )
           ) : fileError ? (
-            <div className="p-4 typography-ui text-[color:var(--status-error)]">{fileError}</div>
+            <div className="flex flex-col items-start gap-3 p-4 typography-ui text-[color:var(--status-error)]">
+              <div>{fileError}</div>
+              <Button variant="outline" size="sm" onClick={() => { setFailedFilePath(null); setLoadedFilePath(null); setFileError(null); setFileContentRevision((value) => value + 1); }}>{t('filesView.artifact.office.retry')}</Button>
+            </div>
 ) : showCanvas ? (
             canvasElement
           ) : artifactPreview ? (
@@ -5632,7 +5681,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     {t('filesView.warning.largeFilePreviewLimited', { sizeKb: Math.round(fileContent.length / 1024) })}
                   </div>
                 )}
-              <ErrorBoundary
+              <ErrorBoundary key={previewIdentity}
                 fallback={
                   <div className="rounded-md bg-destructive/10 px-3 py-2">
                     <div className="mb-1 font-medium text-destructive">{t('filesView.error.previewUnavailable')}</div>
@@ -5643,13 +5692,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 }
               >
                 <div style={previewFontStyle}>
-                  <SimpleMarkdownRenderer
+                  <FileMarkdownPreview
                     content={fileContent}
                     documentAssets={markdownDocumentAssets}
                     className="typography-markdown-body"
                     frontmatter="properties"
                     enableFileReferences={false}
                     allowRawHtml
+                    passiveSvg
                   />
                 </div>
               </ErrorBoundary>

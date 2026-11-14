@@ -76,7 +76,7 @@ afterEach(() => {
  * `content[]`, `model`, `finish`, `tokens`), `{ location, data }` envelopes,
  * `/api/session/active` for busy state, and the three continuation calls.
  */
-const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, sessionRead = async () => {} }) => {
+const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, jobResponse = () => new Response(null, { status: 404 }), otherSessions = {}, sessionRead = async () => {} }) => {
   const calls = [];
   const json = (data, status = 200) => new Response(JSON.stringify({ location: { directory: '/repo' }, data }), {
     status,
@@ -96,8 +96,11 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
       const next = index + 1 < childPages.length ? { next: `page-${index + 1}` } : {};
       return json({ data, cursor: next }, childrenStatus);
     }
+    if (url.pathname === '/api/experimental/job') return jobResponse();
     if (url.pathname === '/api/shell') return json(shells, shellStatus);
     if (url.pathname.endsWith('/message')) return json({ data: [...messages].reverse(), cursor: null });
+    const otherId = url.pathname.split('/').at(-1);
+    if (Object.hasOwn(otherSessions, otherId)) return json(otherSessions[otherId]);
     if (url.pathname === `/api/session/${SESSION_ID}`) {
       await sessionRead();
       return json({ id: SESSION_ID, location: { directory: '/repo' } });
@@ -1261,5 +1264,149 @@ describe('session goal runtime', () => {
     );
     runtime.stop();
     warning.mockRestore();
+  });
+});
+
+
+describe('session Goal background job authority', () => {
+  it('keeps an app-created workflow child active even when the native job list is empty', async () => {
+    quiet();
+    const active = { ses_workflow: { type: 'running' } };
+    const server = v2OpenCode({
+      messages: [assistantRecord()], active, jobResponse: () => Response.json({ data: [] }),
+      otherSessions: { ses_workflow: { id: 'ses_workflow', parentID: SESSION_ID } },
+    });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({
+      ...wired({ openchamber: { goal: activeGoal() } }),
+      getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 5,
+    });
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+    await vi.waitFor(() => expect(server.calls.some((call) => call.path === '/api/experimental/job')).toBe(true));
+    expect(generate).not.toHaveBeenCalled();
+    delete active.ses_workflow;
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    expect(server.calls.some((call) => call.query.parentID)).toBe(false);
+  });
+
+  it('waits for a descendant shell from this round using jobs without a directory shell scan', async () => {
+    quiet();
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    let jobs = [{ kind: 'shell', sessionID: 'ses_grandchild', status: 'running', command: 'bun test', time: { started: 7 } }];
+    const server = v2OpenCode({ messages: [
+      { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Run tests', time: { created: 5 } },
+      assistantRecord(),
+    ], jobResponse: () => Response.json({ data: jobs }) });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 5 });
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+    await vi.waitFor(() => expect(server.calls.filter((call) => call.path === '/api/experimental/job').length).toBeGreaterThan(1));
+    expect(generate).not.toHaveBeenCalled();
+    jobs = [];
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    expect(server.calls.some((call) => call.path === '/api/shell')).toBe(false);
+  });
+
+  it('waits for a descendant image and audits after the authoritative list becomes empty', async () => {
+    quiet();
+    let jobs = [{ kind: 'image', sessionID: 'ses_grandchild', status: 'running', time: { started: 1 } }];
+    const server = v2OpenCode({ messages: [assistantRecord()], jobResponse: () => Response.json({ data: jobs }) });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 5 });
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+    await vi.waitFor(() => expect(server.calls.some((call) => call.path === '/api/experimental/job')).toBe(true));
+    expect(generate).not.toHaveBeenCalled();
+    jobs = [];
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    expect(server.calls.some((call) => call.path === '/api/session' || call.path === '/api/shell')).toBe(false);
+  });
+
+  it.each([
+    () => new Response(null, { status: 503 }),
+    () => Response.json({ _tag: 'SessionNotFoundError' }, { status: 404 }),
+    () => Response.json({ data: [{ kind: 'image', sessionID: SESSION_ID, status: 'not-a-job-status', time: { started: 1 } }] }),
+    () => { throw new DOMException('Timed out', 'TimeoutError'); },
+  ])('keeps job failures unknown without auditing or falling back to old reads', async (jobResponse) => {
+    quiet();
+    const server = v2OpenCode({ messages: [assistantRecord()], jobResponse });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 1_000 });
+    await runTick(runtime);
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+    expect(server.calls.some((call) => call.path === '/api/session' || call.path === '/api/shell')).toBe(false);
+  });
+
+  it('rechecks jobs after reading messages so a newly started image holds the audit', async () => {
+    quiet();
+    let reads = 0;
+    const server = v2OpenCode({ messages: [assistantRecord()], jobResponse: () => Response.json({ data: ++reads === 1 ? [] : [
+      { kind: 'image', sessionID: SESSION_ID, status: 'running', time: { started: 15 } },
+    ] }) });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 1_000 });
+    await runTick(runtime);
+    expect(reads).toBe(2);
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+    expect(server.calls.some((call) => call.path === '/api/shell')).toBe(false);
+  });
+
+  it.each(['image', 'subagent', 'unknown'])('keeps a resumed Goal active when the post-message job check finds %s', async (kind) => {
+    quiet();
+    let reads = 0;
+    const server = v2OpenCode({ messages: [assistantRecord()], jobResponse: () => {
+      if (++reads === 1) return Response.json({ data: [] });
+      if (kind === 'unknown') return new Response(null, { status: 503 });
+      return Response.json({ data: [{ kind, sessionID: SESSION_ID, status: 'running', time: { started: 15 } }] });
+    } });
+    const goal = activeGoal({ turnsUsed: 1, statusReason: 'resumed' });
+    const seam = wired({ openchamber: { goal } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime, emitGoalNotification } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 1_000 });
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal } });
+    await vi.waitFor(() => expect(reads).toBeGreaterThan(0));
+    expect(reads).toBe(2);
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+    expect(emitGoalNotification).not.toHaveBeenCalled();
+    expect(goal.status).toBe('active');
+    expect(server.calls.some((call) => call.path === '/api/shell')).toBe(false);
+  });
+
+  it('keeps the explicit Resume exemption for native shell jobs after the job recheck', async () => {
+    quiet();
+    let reads = 0;
+    const server = v2OpenCode({ messages: [assistantRecord()], jobResponse: () => {
+      reads += 1;
+      return Response.json({ data: [{ kind: 'shell', sessionID: SESSION_ID, status: 'running', command: 'bun run dev', time: { started: 15 } }] });
+    } });
+    const goal = activeGoal({ turnsUsed: 1, statusReason: 'resumed' });
+    const seam = wired({ openchamber: { goal } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 1_000 });
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal } });
+    await vi.waitFor(() => expect(seam.persistSessionGoal.mock.calls.at(-1)?.[2].status).toBe('complete'));
+    expect(reads).toBe(2);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(server.calls.some((call) => call.path === '/api/shell')).toBe(false);
+  });
+
+  it('rechecks non-shell jobs before settling an errored turn', async () => {
+    quiet();
+    let reads = 0;
+    v2OpenCode({ messages: [assistantRecord({ error: { name: 'ProviderError' } })], jobResponse: () => Response.json({ data: ++reads === 1 ? [] : [
+      { kind: 'image', sessionID: SESSION_ID, status: 'running', time: { started: 15 } },
+    ] }) });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime, emitGoalNotification } = makeRuntime({ ...seam, recheckMs: 1_000 });
+    await runTick(runtime);
+    expect(reads).toBe(2);
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+    expect(emitGoalNotification).not.toHaveBeenCalled();
   });
 });

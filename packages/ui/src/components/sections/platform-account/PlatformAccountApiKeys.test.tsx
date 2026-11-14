@@ -332,9 +332,9 @@ test('an HTTP read failure remains an error until an explicit refresh recovers a
 });
 
 const runtimeRefusals = [
-  ['model_configuration_account_runtime_required', 'Use SuperWagie’s built-in OpenCode in Engine settings'],
-  ['model_configuration_account_runtime_unavailable', 'Wait for SuperWagie’s built-in OpenCode to finish starting'],
-  ['platform_runtime_unsupported', 'Use SuperWagie’s built-in OpenCode in Engine settings'],
+  ['model_configuration_account_runtime_required', 'Use SuperWagie’s built-in Kernel in Engine settings'],
+  ['model_configuration_account_runtime_unavailable', 'Wait for SuperWagie’s built-in Kernel to finish starting'],
+  ['platform_runtime_unsupported', 'Use SuperWagie’s built-in Kernel in Engine settings'],
 ] as const;
 
 test.each(runtimeRefusals)('a runtime read refusal gives actionable guidance without discarding the saved key: %s', async (code, guidance) => {
@@ -394,10 +394,10 @@ test('a runtime restart explains an interrupted model row without claiming failu
   next.activation.errorCode = 'model_configuration_account_runtime_unavailable';
   next.activation.tests[0].errorCode = next.activation.errorCode;
   readPayload = next; await render();
-  expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain('Wait for SuperWagie’s built-in OpenCode');
+  expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain('Wait for SuperWagie’s built-in Kernel');
   const row = host?.querySelector('[data-account-model-test="agent"]');
   expect(row?.getAttribute('data-test-status')).toBe('unknown');
-  expect(row?.textContent).toContain('Wait for SuperWagie’s built-in OpenCode');
+  expect(row?.textContent).toContain('Wait for SuperWagie’s built-in Kernel');
   expect(setupPanel().textContent).not.toContain('Connection test passed');
   expect(mutations()).toHaveLength(0);
 });
@@ -674,7 +674,7 @@ for (const errorCode of ['model_configuration_account_runtime_unavailable', 'acc
     next.activation.tests[0].applicationError = { status: 'failed', errorCode };
     readPayload = next;
     await render();
-    expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain(errorCode === 'model_configuration_account_runtime_unavailable' ? 'Wait for SuperWagie’s built-in OpenCode' : 'A connection test failed');
+    expect(setupPanel().querySelector('[role="alert"]')?.textContent).toContain(errorCode === 'model_configuration_account_runtime_unavailable' ? 'Wait for SuperWagie’s built-in Kernel' : 'A connection test failed');
     expectStep('Test connection', 'Failed');
     expect(host?.textContent).not.toContain('All model calls passed. Some feature settings need attention.');
     expect(mutations()).toHaveLength(0);

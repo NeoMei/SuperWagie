@@ -22,3 +22,12 @@ export const mergeSessions = (
   for (const session of live) byId.set(session.id, session);
   return [...byId.values()].sort((left, right) => right.updatedAt - left.updatedAt);
 };
+
+export type SessionStatusKey = 'session.running' | 'session.retrying' | 'session.waitingReply' | 'session.unread' | 'session.idle' | 'session.unknown';
+export const sessionStatusKey = (session: GuestSessionRecord): SessionStatusKey => {
+  if (session.pendingReply || session.activity === 'waiting-permission' || session.activity === 'waiting-question') return 'session.waitingReply';
+  if (session.activity === 'running') return 'session.running';
+  if (session.activity === 'retrying') return 'session.retrying';
+  if (session.unread) return 'session.unread';
+  return session.activity === 'idle' ? 'session.idle' : 'session.unknown';
+};

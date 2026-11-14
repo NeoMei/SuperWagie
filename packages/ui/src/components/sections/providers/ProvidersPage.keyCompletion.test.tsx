@@ -210,7 +210,7 @@ for (const failed of [false,true]) test(`held A ${failed?'failure':'success'} pr
 
 
 async function publishCredentialEvent(children: InstanceType<typeof ChildStoreManager>) {
- const events = translateWireEvent({id:'evt_DUMMY_CA21_ECHO',created:1000,type:'credential.updated',data:{}});
+ const events = translateWireEvent({id:'evt_DUMMY_CA21_ECHO',created:1000,type:'credential.updated',data:{integrationID:'google',credentialID:'credential-test'}});
  expect(events).toEqual([{type:'catalog.updated',properties:{kind:'credential'}}]);
  await act(async () => {
   for (const event of events) handleEvent('global',event,children,createEventRoutingIndex(),getRuntimeKey());

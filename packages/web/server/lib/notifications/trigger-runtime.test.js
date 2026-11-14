@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTriggerRuntime } from './runtime.js';
 import { createNotificationTemplateRuntime } from './template-runtime.js';
+import { notificationEventTag } from './event-identity.js';
 
 /**
  * The "ready" push is built from the translated `message.updated` events.
@@ -58,6 +59,7 @@ describe('ready notification on v2 step events', () => {
       const url = new URL(String(input));
       url.searchParams.sort();
       const request = `${options?.method ?? 'GET'} ${url.href}`;
+      if (url.pathname === '/api/experimental/job') return new Response(null, { status: 404 });
       if (!responses.has(request)) {
         unexpectedRequests.push(request);
         throw new Error('Unexpected notification fixture request');
@@ -139,6 +141,7 @@ describe('ready notification while background subagents run', () => {
   const stubOpenCode = ({ active, children }) => {
     vi.stubGlobal('fetch', vi.fn(async (input) => {
       const url = new URL(String(input));
+      if (url.pathname === '/api/experimental/job') return new Response(null, { status: 404 });
       if (url.pathname === '/api/session/active') return Response.json({ data: active() });
       if (url.pathname === '/api/session') return Response.json({ data: children, cursor: {} });
       return Response.json({});
@@ -162,14 +165,14 @@ describe('ready notification while background subagents run', () => {
     vi.unstubAllGlobals();
   });
 
-  it('announces the idle when the subagent check cannot be made', async () => {
+  it('stays silent when activity cannot be checked', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
     const { runtime, emitDesktopNotification } = makeRuntime();
 
     await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
     await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
-    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });
@@ -200,7 +203,7 @@ describe('push content in enterprise mode', () => {
 
   it('sends only the scenario title and the deep link, on both channels', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
+    vi.stubGlobal('fetch', vi.fn(async (input) => Response.json({ data: new URL(String(input)).pathname === '/api/experimental/job' ? [] : {} })));
     process.env.OPENCHAMBER_ENTERPRISE_MODE = 'true';
     try {
       const { runtime, sendPushToAllUiSessions, sendApnsToAllUiSessions } = makePushRuntime();
@@ -221,7 +224,7 @@ describe('push content in enterprise mode', () => {
 
   it('gives a phone with a push key the session name and the reply', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
+    vi.stubGlobal('fetch', vi.fn(async (input) => Response.json({ data: new URL(String(input)).pathname === '/api/experimental/job' ? [] : {} })));
     try {
       const { runtime, sendPushToAllUiSessions, sendApnsToAllUiSessions } = makePushRuntime();
       await runtime.maybeSendPushForTrigger(stepStarted('ses_p', 'msg_p'));
@@ -387,7 +390,7 @@ describe('input-needed notification for a page that waits for an answer', () => 
     vi.useRealTimers();
 
     expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({
-      kind: 'question', title: 'Input needed', body: 'Pick a session row layout', sessionId: 'ses_1', directory: '/repo', tag: 'question-ses_1',
+      kind: 'question', title: 'Input needed', body: 'Pick a session row layout', sessionId: 'ses_1', directory: '/repo', tag: notificationEventTag('page', { sessionId: 'ses_1', requestId: 'call_1', directory: '/repo' }),
     });
     expect(sendApnsToAllUiSessions.mock.calls[0][0].sealed).toEqual({ title: 'Sidebar cleanup', body: 'Question: Pick a session row layout' });
   });
@@ -519,6 +522,7 @@ describe('notifications for a chat of an isolated space', () => {
 
     await runtime.maybeSendPushForTrigger(stepStarted(SESSION, 'msg_1'), { spaceId: SPACE });
     await runtime.maybeSendPushForTrigger(turnEnded(SESSION), { spaceId: SPACE });
+    expect(inside.mock.calls.some(([url]) => new URL(String(url)).pathname === '/api/experimental/job')).toBe(false);
 
     expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
     expect(readSessionMetadata).not.toHaveBeenCalled();
@@ -580,7 +584,7 @@ describe('notifications for a chat of an isolated space', () => {
     expect(hostFetch).not.toHaveBeenCalled();
   });
 
-  it('falls back to the generic text, without the host\'s OpenCode, when the space cannot be asked', async () => {
+  it('stays silent without reading the host when the space cannot be asked', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { runtime, hostFetch, emitDesktopNotification, sendApnsToAllUiSessions } = makeSpaceRuntime({
       inside: vi.fn(async () => { throw new Error('space_not_running'); }),
@@ -589,8 +593,71 @@ describe('notifications for a chat of an isolated space', () => {
     await runtime.maybeSendPushForTrigger(stepStarted(SESSION, 'msg_1'), { spaceId: SPACE });
     await runtime.maybeSendPushForTrigger(turnEnded(SESSION), { spaceId: SPACE });
 
-    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
-    expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({ body: 'Session', sealed: undefined });
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
     expect(hostFetch).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('ready notification job authority', () => {
+  it('holds an active workflow child outside native jobs while ignoring an unrelated session', async () => {
+    const active = { ses_workflow: { type: 'running' }, ses_other: { type: 'running' } };
+    vi.stubGlobal('fetch', async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/experimental/job') return Response.json({ data: [] });
+      if (url.pathname === '/api/session/active') return Response.json({ data: active });
+      if (url.pathname === '/api/session/ses_workflow') return Response.json({ data: { id: 'ses_workflow', parentID: 'ses_1' } });
+      if (url.pathname === '/api/session/ses_other') return Response.json({ data: { id: 'ses_other', parentID: null } });
+      return Response.json({ data: {} });
+    });
+    const { runtime, emitDesktopNotification } = makeRuntime();
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    delete active.ses_workflow;
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+  });
+
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it('keeps two sessions independent and announces only an authoritatively empty job tree', async () => {
+    const reads = [];
+    vi.stubGlobal('fetch', async (input) => {
+      const url = new URL(String(input));
+      reads.push(url);
+      if (url.pathname === '/api/experimental/job') return Response.json({ data: url.searchParams.get('sessionID') === 'ses_a' ? [
+        { kind: 'image', sessionID: 'ses_grandchild', status: 'running', time: { started: 1 } },
+      ] : [] });
+      return Response.json({ data: {} });
+    });
+    const { runtime, emitDesktopNotification } = makeRuntime();
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_a', 'msg_a'));
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_b', 'msg_b'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_a'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_b'));
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0].tag).toBe('ready-ses_b');
+    expect(reads.some((url) => url.searchParams.has('parentID'))).toBe(false);
+  });
+
+  it.each([
+    () => new Response(null, { status: 503 }),
+    () => Response.json({ _tag: 'SessionNotFoundError' }, { status: 404 }),
+    () => Response.json({ data: [{ kind: 'image', sessionID: 'ses_1', status: 'not-a-job-status', time: { started: 1 } }] }),
+  ])('does not announce completion or fall back after a failed job read', async (jobResponse) => {
+    const reads = [];
+    vi.stubGlobal('fetch', async (input) => {
+      const url = new URL(String(input));
+      reads.push(url);
+      return url.pathname === '/api/experimental/job' ? jobResponse() : Response.json({ data: {} });
+    });
+    const { runtime, emitDesktopNotification } = makeRuntime();
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(reads.some((url) => url.searchParams.has('parentID'))).toBe(false);
   });
 });

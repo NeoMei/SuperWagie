@@ -95,3 +95,108 @@ describe('queue descendant activity', () => {
     expect(reads).toEqual(['child']);
   });
 });
+
+describe('running background jobs', () => {
+  const makeJobProbe = (answer, source = 'host') => {
+    const requests = [];
+    const probe = createSessionActivityProbe({
+      buildOpenCodeUrl: (route) => `http://${source}.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async (url, init) => {
+        requests.push({ url: new URL(url), headers: new Headers(init.headers) });
+        return answer(init);
+      },
+    });
+    return { probe, requests };
+  };
+
+  it('reads the session tree globally with its owner IDs and no directory startup', async () => {
+    const { probe, requests } = makeJobProbe(() => Response.json({ data: [
+      { kind: 'image', sessionID: 'grandchild', status: 'running', time: { started: 1 } },
+      { kind: 'shell', sessionID: 'root', status: 'running', command: 'bun test', time: { started: 2 } },
+      { kind: 'subagent', sessionID: 'root', status: 'completed', time: { started: 3 } },
+    ] }));
+    expect(await probe.fetchRunningBackgroundJobs('root')).toEqual([
+      { kind: 'image', sessionID: 'grandchild', command: undefined, startedAt: 1 },
+      { kind: 'shell', sessionID: 'root', command: 'bun test', startedAt: 2 },
+    ]);
+    expect(requests[0].url.pathname).toBe('/api/experimental/job');
+    expect(Object.fromEntries(requests[0].url.searchParams)).toEqual({ sessionID: 'root', descendants: 'true', status: 'running' });
+    expect(requests[0].headers.has('x-opencode-directory')).toBe(false);
+  });
+
+  it('distinguishes authoritative empty jobs from an explicitly absent route', async () => {
+    expect(await makeJobProbe(() => Response.json({ data: [] })).probe.fetchRunningBackgroundJobs('root')).toEqual([]);
+    expect(await makeJobProbe(() => new Response(null, { status: 404 })).probe.fetchRunningBackgroundJobs('root')).toBeUndefined();
+  });
+
+  it.each(['completed', 'error', 'cancelled'])('excludes a valid %s job from running work', async (status) => {
+    expect(await makeJobProbe(() => Response.json({ data: [
+      { kind: 'image', sessionID: 'root', status, time: { started: 1 } },
+    ] })).probe.fetchRunningBackgroundJobs('root')).toEqual([]);
+  });
+
+  it('keeps a session-only adapter on its explicit legacy capability without probing another runtime', async () => {
+    let reads = 0;
+    const probe = createSessionActivityProbe({
+      buildOpenCodeUrl: () => 'http://space.test', getOpenCodeAuthHeaders: () => ({}),
+      supportsBackgroundJobs: false,
+      fetchImpl: async () => { reads += 1; throw new Error('job route is outside this adapter'); },
+    });
+    expect(await probe.fetchRunningBackgroundJobs('root')).toBeUndefined();
+    expect(reads).toBe(0);
+  });
+
+  it.each([
+    () => Response.json({ _tag: 'SessionNotFoundError', message: 'missing session' }, { status: 404 }),
+    () => Response.json({ error: 'ambiguous 404' }, { status: 404 }),
+    () => new Response('broken json', { status: 404 }),
+    () => new Response(null, { status: 503 }),
+    () => Response.json({ data: {} }),
+    () => Response.json({ data: [{ kind: 'image', sessionID: '', status: 'running', time: { started: 1 } }] }),
+    () => Response.json({ data: [{ kind: 'image', sessionID: 'root', status: 'not-a-job-status', time: { started: 1 } }] }),
+    () => { throw new DOMException('Timed out', 'TimeoutError'); },
+  ])('keeps failed, malformed or missing-session job reads unknown', async (answer) => {
+    expect(await makeJobProbe(answer).probe.fetchRunningBackgroundJobs('root')).toBeNull();
+  });
+
+  it('keeps independent runtime results for the same session ID and refreshes every read', async () => {
+    let jobs = [{ kind: 'image', sessionID: 'root', status: 'running', time: { started: 1 } }];
+    const a = makeJobProbe(() => Response.json({ data: jobs }), 'instance-a');
+    const b = makeJobProbe(() => Response.json({ data: [] }), 'instance-b');
+    expect(await a.probe.fetchRunningBackgroundJobs('root')).toHaveLength(1);
+    expect(await b.probe.fetchRunningBackgroundJobs('root')).toEqual([]);
+    jobs = [];
+    expect(await a.probe.fetchRunningBackgroundJobs('root')).toEqual([]);
+    expect(a.requests.map((request) => request.url.hostname)).toEqual(['instance-a.test', 'instance-a.test']);
+    expect(b.requests[0].url.hostname).toBe('instance-b.test');
+  });
+
+  it('does not carry an old runtime capability result through an instance switch', async () => {
+    let origin = 'http://instance-a.test';
+    let legacy = true;
+    const probe = createSessionActivityProbe({
+      buildOpenCodeUrl: (route) => `${origin}${route}`, getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async (url) => {
+        if (new URL(url).hostname === 'instance-a.test') return legacy ? new Response(null, { status: 404 }) : Response.json({ data: [] });
+        return Response.json({ data: [{ kind: 'image', sessionID: 'root', status: 'running', time: { started: 1 } }] });
+      },
+    });
+    expect(await probe.fetchRunningBackgroundJobs('root')).toBeUndefined();
+    origin = 'http://instance-b.test';
+    expect(await probe.fetchRunningBackgroundJobs('root')).toHaveLength(1);
+    origin = 'http://instance-a.test';
+    legacy = false;
+    expect(await probe.fetchRunningBackgroundJobs('root')).toEqual([]);
+  });
+
+  it('keeps an expired job request unknown', async () => {
+    const probe = createSessionActivityProbe({
+      buildOpenCodeUrl: (route) => `http://instance.test${route}`, getOpenCodeAuthHeaders: () => ({}), timeoutMs: 1,
+      fetchImpl: async (_url, { signal }) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+    });
+    expect(await probe.fetchRunningBackgroundJobs('root')).toBeNull();
+  });
+});

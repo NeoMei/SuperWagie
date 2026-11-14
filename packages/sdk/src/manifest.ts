@@ -149,10 +149,31 @@ export const GUEST_TOOL_COLUMNS_MAX = 16;
 /** Characters in one column path. */
 export const GUEST_TOOL_COLUMN_MAX = 64;
 
-export const GUEST_TOOL_OUTPUTS = ['auto', 'text', 'json', 'markdown', 'code', 'table'] as const;
+/** How many `fields` a `card` may list. */
+export const GUEST_TOOL_CARD_FIELDS_MAX = 8;
+/** How many status texts a card's `status.tones` may map. */
+export const GUEST_TOOL_CARD_TONES_MAX = 16;
+/** Characters in one `status.tones` key, the status text it colours. */
+export const GUEST_TOOL_CARD_TONE_KEY_MAX = 64;
+/** Characters in the address a card's `link.url` renders to; a longer one shows no link. */
+export const GUEST_TOOL_CARD_URL_MAX = 2048;
+
+export const GUEST_TOOL_OUTPUTS = ['auto', 'text', 'json', 'markdown', 'code', 'table', 'card'] as const;
 
 /** How the expanded body of a matched tool call renders. `auto` keeps the host's own detection. */
 export type GuestToolOutput = (typeof GUEST_TOOL_OUTPUTS)[number];
+
+/** Theme meanings for passive host-rendered tool result cards. */
+export const GUEST_TONES = ['neutral', 'info', 'success', 'warning', 'error'] as const;
+export type GuestTone = (typeof GUEST_TONES)[number];
+/** Card text reads only the tool output. Links name one HTTPS output field. */
+export type GuestToolCard = {
+  label?: string;
+  title?: string;
+  status?: { value: string; tones?: { [status: string]: GuestTone } };
+  fields?: { label: string; value: string }[];
+  link?: { label: string; url: string };
+};
 
 /**
  * How a tool call looks in the chat, declared without code. `match` is the
@@ -173,6 +194,7 @@ export type GuestToolContribution = {
   output?: GuestToolOutput;
   language?: string;
   columns?: string[];
+  card?: GuestToolCard;
 };
 
 export type IntegrationSettingField = {

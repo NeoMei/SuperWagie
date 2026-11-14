@@ -17,6 +17,7 @@ import { useMarkdownPresentation } from './MarkdownPresentationContext';
 import { activateMarkdownFile, useOpenMarkdownFile } from './markdownFileReferences';
 import type { MarkdownCodePlugin } from './streamdownCode';
 import { MarkdownDiff } from './MarkdownDiff';
+import { MarkdownSvg } from './MarkdownSvg';
 import { MarkdownSuggestionContext, isSuggestionLanguage, suggestionPatch } from './markdownSuggestion';
 
 // Complete prefix rows keep their identity in the worker client, so appending
@@ -157,7 +158,7 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
     timer.current = setTimeout(() => setCopied(false), 2000);
   };
 
-  return (
+  const block = (
     <div
       data-code-wrap={wrap ? 'true' : 'false'}
       data-oc-code-source={copySource}
@@ -205,4 +206,6 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
       </CodeBlockContainer>
     </div>
   );
+  return presentation.passiveSvg && language.toLowerCase() === 'svg' && !incomplete && !purpose
+    ? <MarkdownSvg source={copySource}>{block}</MarkdownSvg> : block;
 }

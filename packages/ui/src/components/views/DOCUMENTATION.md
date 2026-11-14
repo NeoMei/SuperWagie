@@ -410,6 +410,12 @@ UI `*.vitest.tsx` fixtures; the isolated Bun runner intentionally does not.
 
 ## Archive page
 
+An archive query keeps title results separate from indexed body matches.
+`SessionContentSearch` uses the shared lifecycle-aware body endpoint with
+`archived`, filtering before pagination across the full index. It exposes
+disabled, unsupported, short-query, updating and failed states. Opening a body
+hit navigates to its exact message without restoring or mutating the archive.
+
 `ArchiveView` lists archived top-level sessions. A subsession whose parent is
 archived too is left out: it comes back when the parent is restored. A
 subsession archived while its parent stays active is listed, indented under a

@@ -1,4 +1,4 @@
-import type { Message, Part } from "@/lib/opencode/model"
+import type { Message, Part, SessionStatus } from "@/lib/opencode/model"
 import { mergeMessages } from "./optimistic"
 import type { SessionMaterializationReason } from "./event-reducer"
 import { sortMessagesChronologically } from "./message-ordering"
@@ -16,6 +16,7 @@ export type MaterializedMessageRecord = {
 export type MaterializedState = {
   message: Record<string, Message[]>
   part: Record<string, Part[]>
+  session_status?: Record<string, SessionStatus>
 }
 
 export type MaterializeSessionSnapshotsOptions = {
@@ -394,15 +395,29 @@ export function materializeSessionSnapshots(
   }
 }
 
+export type SessionMaterializationStatusOptions = {
+  /**
+   * The message loader holds this session's history (read from the server,
+   * not evicted or stream-invalidated since). Only its latest assistant
+   * may wait for parts, and only while the directory reports it busy/retrying.
+   */
+  historyCovered?: boolean
+}
+
 export function getSessionMaterializationStatus(
   state: MaterializedState,
   sessionID: string,
+  options: SessionMaterializationStatusOptions = {},
 ): SessionMaterializationStatus {
   const messages = state.message[sessionID]
   if (!messages) {
     return { hasMessages: false, renderable: false, missingPartMessageIDs: [] }
   }
 
+  const status = state.session_status?.[sessionID]
+  const latest = messages.at(-1)
+  const waitingMessageID = options.historyCovered && (status?.type === "busy" || status?.type === "retry")
+    && latest?.role === "assistant" && latest.time.completed === undefined ? latest.id : undefined
   const missingPartMessageIDs: string[] = []
   for (const message of messages) {
     if (message.role !== "assistant") continue
@@ -411,9 +426,13 @@ export function getSessionMaterializationStatus(
     // as renderable — otherwise sessions containing such a message can never
     // reach renderable state and ensure-renderable callers loop forever.
     const parts = state.part[message.id]
-    if (!parts) {
-      missingPartMessageIDs.push(message.id)
-    }
+    if (parts) continue
+    // OpenCode 2.x opens every step of a turn as a new assistant message and
+    // sends its parts once the model answers, seconds later. In a transcript
+    // the loader holds, that wait is expected: a lost part shows as an orphan
+    // delta, and a step that ends without parts is repaired on its completion.
+    if (message.id === waitingMessageID) continue
+    missingPartMessageIDs.push(message.id)
   }
 
   return {

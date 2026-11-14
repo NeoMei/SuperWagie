@@ -286,7 +286,7 @@ describe('managed agent tool runtime', () => {
     const tools = await loadTools(dataDir, 'knowledge-schema');
     const knowledge = tools.openchamber_knowledge;
     expect(knowledge.description).toContain('Project knowledge panel');
-    const actions = knowledge.input.properties.action.oneOf.map((entry) => entry.const);
+    const actions = knowledge.input.properties.action.enum;
     expect(actions).toEqual(['knowledge.list', 'knowledge.save', 'knowledge.delete', 'knowledge.show']);
     const parameters = knowledge.input.properties.parameters.properties;
     expect(Object.keys(parameters).sort()).toEqual(['body', 'completed', 'dependsOn', 'directory', 'expected', 'id', 'kind', 'planId', 'projectId', 'ready', 'sessionId']);
@@ -296,7 +296,7 @@ describe('managed agent tool runtime', () => {
     expect(parameters.planId.type).toEqual(['string', 'null']);
     expect(parameters.sessionId.type).toEqual(['string', 'null']);
     expect(parameters.dependsOn).toMatchObject({ type: 'array', items: { type: 'string' } });
-    expect(tools.openchamber.input.properties.action.oneOf.map((entry) => entry.const)).not.toContain('knowledge.list');
+    expect(tools.openchamber.input.properties.action.enum).not.toContain('knowledge.list');
     // The control tool keeps its own session id, a plain string.
     expect(tools.openchamber.input.properties.parameters.properties.sessionId).toEqual({ type: 'string' });
     for (const tool of ['openchamber', 'openchamber_web', 'openchamber_memory']) {
@@ -314,7 +314,7 @@ describe('managed agent tool runtime', () => {
     const tools = await loadTools(dataDir, 'library-tool');
     const library = tools.openchamber_library;
 
-    expect(library.input.properties.action.oneOf.map((entry) => entry.const).sort()).toEqual([
+    expect(library.input.properties.action.enum.sort()).toEqual([
       'library.inspect',
       'library.read',
       'library.search',
@@ -332,7 +332,7 @@ describe('managed agent tool runtime', () => {
     ]);
     expect(library.description).toContain('candidate');
     expect(library.input.properties.parameters.properties).not.toHaveProperty('projectId');
-    expect(tools.openchamber.input.properties.action.oneOf.map((entry) => entry.const)).not.toContain('library.search');
+    expect(tools.openchamber.input.properties.action.enum).not.toContain('library.search');
 
     await runtime.materializePlugin({ includeLibrary: false });
     expect(await loadTools(dataDir, 'library-disabled')).not.toHaveProperty('openchamber_library');
@@ -383,7 +383,7 @@ describe('managed agent tool runtime', () => {
     // OpenCode's own worktree_create makes a detached copy of the current commit.
     expect(tool.openchamber.description).toContain('Unlike git worktree add, the session moves along');
     expect(tool.openchamber.description).not.toContain('without asking');
-    expect(tool.openchamber.input.properties.action.oneOf.map((entry) => entry.const)).toContain('session.moveToWorktree');
+    expect(tool.openchamber.input.properties.action.enum).toContain('session.moveToWorktree');
     expect(tool.openchamber.input.properties.parameters.properties.carry).toEqual(expect.objectContaining({ type: 'array' }));
   });
 
@@ -400,19 +400,16 @@ describe('managed agent tool runtime', () => {
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_URL).toBe('http://127.0.0.1:3901/api/openchamber/agent-tool');
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(source).toContain('openchamber: {');
-    for (const { action, description } of OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS) {
-      expect(source).toContain(JSON.stringify({ const: action, description }));
-    }
     expect(source).not.toContain('"schedule.status"');
     const tool = await loadTools(dataDir, 'schema');
     expect(tool.openchamber.description).toContain('A dispatch returns at once');
     expect(tool.openchamber.description).toContain('returnResult brings its final answer back here');
     // Agents also have OpenCode's own subagent tool; the line between the two is drawn up front.
     expect(tool.openchamber.description).toContain('use the subagent tool');
-    expect(tool.openchamber.input.properties.action.oneOf).toContainEqual({
-      const: 'session.messages',
-      description: 'Text messages and sessionStatus of sessionId',
-    });
+    expect(tool.openchamber.input.properties.action.enum).toContain('session.messages');
+    for (const { action, description } of OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS) {
+      expect(tool.openchamber.input.properties.action.description).toContain(`${action}: ${description}`);
+    }
     // An agent never blocks on a session: no wait or timeout in its schema.
     const controlParameters = tool.openchamber.input.properties.parameters.properties;
     expect(controlParameters).not.toHaveProperty('wait');
@@ -430,8 +427,8 @@ describe('managed agent tool runtime', () => {
     await prepareManagedEnv(runtime);
     const tool = await loadTools(dataDir, 'both');
 
-    const controlActions = tool.openchamber.input.properties.action.oneOf.map((entry) => entry.const);
-    const webActions = tool.openchamber_web.input.properties.action.oneOf.map((entry) => entry.const);
+    const controlActions = tool.openchamber.input.properties.action.enum;
+    const webActions = tool.openchamber_web.input.properties.action.enum;
     expect(webActions).toContain('browser.open');
     expect(webActions).toContain('browser.close');
     expect(webActions).toContain('browser.select');
@@ -448,18 +445,20 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).not.toContain('path');
   });
 
-  it('keeps the action schema to one validator keyword', async () => {
-    // A node carrying both `enum` and `oneOf` is valid JSON Schema, but some
-    // OpenAI-compatible gateways reject it and answer with an empty completion
-    // instead of an error. `oneOf` is the keyword that stayed. Its branches
-    // carry the per-action descriptions the model reads.
+  it('declares multi-action choices as enum for gateways that ignore oneOf branches', async () => {
+    // This provider fixture consumes only string enums and property descriptions.
+    // A oneOf-only declaration therefore loses both the allowed actions and the
+    // action-specific instructions before the provider chooses a call.
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime);
     const tool = await loadTools(dataDir, 'validator');
 
     for (const entry of Object.values(tool)) {
-      expect(entry.input.properties.action.oneOf).toBeInstanceOf(Array);
-      expect(entry.input.properties.action).not.toHaveProperty('enum');
+      const schema = entry.input.properties.action;
+      expect(schema.enum).toBeInstanceOf(Array);
+      expect(schema).not.toHaveProperty('oneOf');
+      for (const action of schema.enum) expect(schema.description).toContain(`${action}: `);
+      expect(schema.enum).not.toContain('unknown.action');
     }
   });
 
@@ -526,7 +525,7 @@ describe('managed agent tool runtime', () => {
     await prepareManagedEnv(runtime, { includeControl: true, includeWorkflow: true });
     const tools = await loadTools(dataDir, 'workflow-tool');
 
-    expect(tools.openchamber_workflow.input.properties.action.oneOf.map((entry) => entry.const)).toEqual([
+    expect(tools.openchamber_workflow.input.properties.action.enum).toEqual([
       'workflow.check', 'workflow.run', 'workflow.status', 'workflow.result', 'workflow.stop', 'workflow.resume', 'workflow.save', 'workflow.list',
     ]);
     const parameters = tools.openchamber_workflow.input.properties.parameters.properties;
@@ -551,7 +550,7 @@ describe('managed agent tool runtime', () => {
     expect(tools.openchamber_render.input.properties.action).toEqual({ type: 'string', description: expect.stringContaining('render.page: ') });
     expect(tools.openchamber_render.input.required).toEqual([]);
     // A tool with several actions keeps its strict list.
-    expect(tools.openchamber.input.properties.action.oneOf.length).toBeGreaterThan(1);
+    expect(tools.openchamber.input.properties.action.enum.length).toBeGreaterThan(1);
     expect(tools.openchamber.input.required).toEqual(['action']);
 
     const sent = [];
@@ -723,9 +722,9 @@ describe('managed agent tool runtime', () => {
     const tools = await loadTools(dataDir, 'schedule');
 
     expect(Object.keys(tools)).toEqual(['openchamber', 'openchamber_schedule']);
-    const scheduleActions = tools.openchamber_schedule.input.properties.action.oneOf.map((entry) => entry.const);
+    const scheduleActions = tools.openchamber_schedule.input.properties.action.enum;
     expect(scheduleActions).toEqual(['schedule.list', 'schedule.create', 'schedule.update', 'schedule.run', 'schedule.delete', 'schedule.toggle']);
-    expect(tools.openchamber.input.properties.action.oneOf.map((entry) => entry.const).filter((action) => action.startsWith('schedule.'))).toEqual([]);
+    expect(tools.openchamber.input.properties.action.enum.filter((action) => action.startsWith('schedule.'))).toEqual([]);
     const scheduleParameters = tools.openchamber_schedule.input.properties.parameters.properties;
     expect(Object.keys(scheduleParameters)).toEqual(expect.arrayContaining(['taskId', 'daily', 'cron', 'prompt', 'model', 'projectId']));
     for (const field of ['taskId', 'daily', 'cron', 'disabled', 'targetSessionId']) {

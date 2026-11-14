@@ -161,19 +161,20 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
       reject(new OpenChamberControlError('The page stopped waiting before the user answered', 499));
       return;
     }
+    const identity = { sessionId, callId, directory: directory || null };
     const onAbort = () => {
       waiting.delete(key);
-      announce({ type: 'settled', sessionId, callId });
+      announce({ type: 'settled', ...identity });
       reject(new OpenChamberControlError('The page stopped waiting before the user answered', 499));
     };
     signal?.addEventListener('abort', onAbort, { once: true });
     waiting.set(key, (answer) => {
       waiting.delete(key);
       signal?.removeEventListener('abort', onAbort);
-      announce({ type: 'settled', sessionId, callId });
+      announce({ type: 'settled', ...identity });
       resolve(answer);
     });
-    announce({ type: 'waiting', sessionId, callId, title, directory: directory || null });
+    announce({ type: 'waiting', ...identity, title });
   });
 
   const answer = (input = {}) => {

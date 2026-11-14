@@ -41,6 +41,18 @@ describe('useGlobalSessionsStore', () => {
     });
   });
 
+  test('publishes cost and token changes without a timestamp change', () => {
+    const initial = buildSession('Usage');
+    useGlobalSessionsStore.getState().upsertSession(initial);
+    const changed = { ...initial, cost: 0.42, tokens: { ...initial.tokens, output: 37 } };
+    useGlobalSessionsStore.getState().upsertSession(changed);
+    expect(useGlobalSessionsStore.getState().activeSessions[0]?.cost).toBe(0.42);
+    expect(useGlobalSessionsStore.getState().activeSessions[0]?.tokens.output).toBe(37);
+    const same = useGlobalSessionsStore.getState().activeSessions;
+    useGlobalSessionsStore.getState().upsertSession({ ...changed, tokens: { ...changed.tokens } });
+    expect(useGlobalSessionsStore.getState().activeSessions).toBe(same);
+  });
+
   test('updates an existing session when its title changes', () => {
     useGlobalSessionsStore.getState().upsertSession(buildSession('First'));
     useGlobalSessionsStore.getState().upsertSession(buildSession('Second'));

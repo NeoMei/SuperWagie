@@ -56,8 +56,14 @@ before its entry exists. The tick then asks OpenCode, and unknown is never
 "over":
 
 1. `/api/session/active` lists it → running; its next idle event re-arms.
-2. A subagent of it runs → not over: the session runs again on the subagent's
-   result. Rechecked after 5 s (`../opencode/session-activity.js`).
+2. A subagent or image in its running job tree → not over. Successful empty
+   jobs permit the record read. Only an explicitly unavailable job API uses
+   legacy child activity queries; failed jobs remain unknown and retry.
+   Persistent shell jobs do not hold result delivery. The shared probe lives
+   in `../opencode/session-activity.js`.
+   App-created workflow descendants also hold delivery through active parent
+   lineage checks, since those sessions are not native jobs. Empty active maps
+   need no lineage requests and unrelated active trees remain independent.
 3. Its records, read newest first in pages of 50: OpenCode appends an
    `idle` record with `outcome` (`succeeded`, `failed`, `interrupted`) when a
    run ends. The dispatch route reads the newest one before the prompt goes

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createMessageSearchRuntime } from './runtime.js';
 
@@ -9,9 +9,12 @@ import { createMessageSearchRuntime } from './runtime.js';
 // disconnected so no background walk reaches for an OpenCode.
 const createHub = () => {
   const listeners = { event: 0, status: 0 };
+  let onEvent = () => {};
   return {
     listeners,
-    subscribeEvent: () => {
+    emit: (event) => onEvent(event),
+    subscribeEvent: (callback) => {
+      onEvent = callback;
       listeners.event += 1;
       return () => { listeners.event -= 1; };
     },
@@ -104,5 +107,20 @@ describe('message search runtime', () => {
     const db = new DatabaseSync(indexFile(), { readOnly: true });
     expect(db.prepare("SELECT value FROM meta WHERE key = 'reasoning'").get().value).toBe('0');
     db.close();
+  });
+
+  it('does not read the host OpenCode for an isolated-space event', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const runtime = createMessageSearchRuntime({ dataDir, globalEventHub: hub, readSettings: async () => ({ enabled: true }), buildOpenCodeUrl: () => 'http://127.0.0.1:1', getOpenCodeAuthHeaders: () => { reads += 1; return {}; }, isSpaceDirectory: directory => directory.startsWith('/spaces/'), logger: { warn: () => {} } });
+    try {
+      await runtime.status();
+      hub.emit({ directory: '/spaces/a/repo', translated: () => [{ type: 'session.idle', properties: { sessionID: 'ses_space' } }] });
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(reads).toBe(0);
+    } finally {
+      await runtime.stop();
+      vi.useRealTimers();
+    }
   });
 });

@@ -188,9 +188,11 @@ default and when to set it. Field names and JSON types carry the rest.
   `html`, is that input's description.
 - The tool exposes one shared parameter object rather than repeating parameters
   in a large per-action union.
-- The action schema carries `oneOf` and no `enum`. A node combining `enum` and
-  `oneOf` is valid JSON Schema, but some OpenAI-compatible gateways reject it
-  and answer with an empty completion instead of an error.
+- A multi-action tool declares its choices as one string `enum`, with each
+  action's instructions in the property's description. Compatible gateways
+  can drop descriptions attached to `oneOf` branches, and combining `enum`
+  with `oneOf` can cause an empty completion. Tool action allowlists and
+  disabled capability checks remain enforced by the callback runtime.
 - A tool with a single action (render, notify) declares `action` as a plain,
   optional string and always runs its one action. A weaker model put the whole
   render call into `action` as a JSON string, title included, with the html

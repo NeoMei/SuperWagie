@@ -1,5 +1,12 @@
 /** Locale resources stay inside the guest iframe; host ready events choose the active language. */
 const messages = {
+  'session.toolUnknown': { 'zh-CN': '当前工具未知', en: 'Current tool unknown' },
+  'session.running': { 'zh-CN': '运行中', en: 'Running' },
+  'session.retrying': { 'zh-CN': '重试中', en: 'Retrying' },
+  'session.waitingReply': { 'zh-CN': '待回复', en: 'Awaiting reply' },
+  'session.unread': { 'zh-CN': '未读', en: 'Unread' },
+  'session.idle': { 'zh-CN': '本轮已结束', en: 'Turn ended' },
+  'session.unknown': { 'zh-CN': '状态未知', en: 'Status unknown' },
   "taskLabel": { "zh-CN": "任务", en: "Task" },
   "tasks": { "zh-CN": "任务", en: "Tasks" },
   "title": { "zh-CN": "工作台", en: "Workbench" },

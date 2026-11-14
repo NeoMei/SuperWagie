@@ -14,6 +14,7 @@ import { useI18n } from '@/lib/i18n';
 import { PROJECT_NOTE_BODY_MAX_LENGTH, type ProjectNote, type ProjectRef } from '@/lib/projectContextApi';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
+import { useKnowledgeDraft } from './knowledgeDrafts';
 
 const NOTE_SAVE_DEBOUNCE_MS = 400;
 
@@ -134,17 +135,18 @@ const NoteCard: React.FC<{
  * active one.
  */
 const NoteView: React.FC<{
+  projectRef: ProjectRef;
   note: ProjectNote;
   pinned: boolean;
-  onSaveBody: (noteId: string, body: string) => void;
+  onSaveBody: (noteId: string, body: string) => Promise<boolean>;
   onTogglePinned: () => void;
   onDelete: () => void;
   onClose: () => void;
   showBack: boolean;
-}> = ({ note, pinned, onSaveBody, onTogglePinned, onDelete, onClose , showBack}) => {
+}> = ({ projectRef, note, pinned, onSaveBody, onTogglePinned, onDelete, onClose , showBack}) => {
   const { t } = useI18n();
-  const [draft, setDraft] = React.useState(note.body);
-  const lastSavedRef = React.useRef(note.body);
+  const { key: draftKey, text: draft, setText: setDraft, dirty, saving, save } = useKnowledgeDraft(projectRef, 'note-body', note.id, note.body);
+  const attemptedRef = React.useRef<string | null>(null);
   const debounceRef = React.useRef<number | null>(null);
 
   const cancelDebounce = React.useCallback(() => {
@@ -155,20 +157,7 @@ const NoteView: React.FC<{
   }, []);
 
   React.useEffect(() => {
-    if (note.body === lastSavedRef.current) {
-      return;
-    }
-    if (draft !== lastSavedRef.current) {
-      return;
-    }
-    lastSavedRef.current = note.body;
-    setDraft(note.body);
-  }, [draft, note.body]);
-
-  React.useEffect(() => {
-    if (draft === lastSavedRef.current) {
-      return;
-    }
+    if (!dirty || saving || `${draftKey}\0${draft}` === attemptedRef.current) return;
     debounceRef.current = window.setTimeout(() => {
       debounceRef.current = null;
       // An empty body is a rejected write, not a delete. Leave it unsaved so
@@ -176,28 +165,21 @@ const NoteView: React.FC<{
       if (!draft.trim()) {
         return;
       }
-      lastSavedRef.current = draft;
-      onSaveBody(note.id, draft);
+      attemptedRef.current = `${draftKey}\0${draft}`;
+      void save((text) => onSaveBody(note.id, text));
     }, NOTE_SAVE_DEBOUNCE_MS);
 
     return cancelDebounce;
-  }, [cancelDebounce, draft, note.id, onSaveBody]);
+  }, [cancelDebounce, dirty, draft, draftKey, note.id, onSaveBody, save, saving]);
 
   // Leaving the note (back, Escape, another section) must not drop the last
   // keystrokes still waiting for the debounce.
   const flushRef = React.useRef<() => void>(() => {});
   flushRef.current = () => {
     cancelDebounce();
-    if (draft === lastSavedRef.current) {
-      return;
-    }
-    if (!draft.trim()) {
-      // Restore rather than persist a blank: the server rejects it anyway.
-      setDraft(lastSavedRef.current);
-      return;
-    }
-    lastSavedRef.current = draft;
-    onSaveBody(note.id, draft);
+    if (!dirty || saving || !draft.trim()) return;
+    attemptedRef.current = `${draftKey}\0${draft}`;
+    void save((text) => onSaveBody(note.id, text));
   };
   React.useEffect(() => () => flushRef.current(), []);
 
@@ -316,19 +298,18 @@ export const NotesSection: React.FC<{
   );
 
   const handleSaveBody = React.useCallback(
-    (noteId: string, body: string) => {
-      void saveNoteBody(projectRef, noteId, body).then((ok: boolean) => {
-        if (!ok) {
-          reportFailure(t('rightSidebar.contextNotesTodo.toast.saveNotesFailed'));
-        }
-      });
+    async (noteId: string, body: string): Promise<boolean> => {
+      const ok = await saveNoteBody(projectRef, noteId, body);
+      if (!ok) reportFailure(t('rightSidebar.contextNotesTodo.toast.saveNotesFailed'));
+      return ok;
     },
     [projectRef, reportFailure, saveNoteBody, t]
   );
 
   const openView = openNote ? (
     <NoteView
-      key={openNote.id}
+      key={`${projectRef.path}:${openNote.id}`}
+      projectRef={projectRef}
       note={openNote}
       pinned={pinnedNoteIds.has(openNote.id)}
       onSaveBody={handleSaveBody}
@@ -342,6 +323,8 @@ export const NotesSection: React.FC<{
   const list = (
     <div className="space-y-2">
       <KnowledgeComposer
+        projectRef={projectRef}
+        form="notes"
         multiline
         placeholder={t('rightSidebar.contextNotesTodo.notes.placeholder')}
         addLabel={t('rightSidebar.contextNotesTodo.notes.addAria')}

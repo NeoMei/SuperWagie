@@ -24,3 +24,20 @@ Base UI 1.4 has no opening DOM event when a caller changes the controlled `open`
 ### Why update button labels share a grid cell
 
 Both idle and checking labels reserve their width, with only the active label visible and exposed to accessibility APIs. The icon has a fixed slot, so starting a check cannot resize the button.
+
+## Conversation search in the command palette
+
+The command palette holds IME draft text separately from its searchable query.
+Composition pauses file and indexed-message reads until the composed text is
+committed. Message hits use the shared body search and navigation contract;
+active and archived conversations have separate groups, as do title matches.
+Body indexing remains opt-in. Short queries continue searching titles and
+report the 3-character body minimum. Runtime switches retire query results and
+pending pages through `useMessageSearch`.
+
+## Read-only code editors
+
+`CodeMirrorEditor` configures both `EditorView.editable` and
+`EditorState.readOnly` in the same compartment. The state facet prevents
+history commands and other editing commands from changing a read-only view.
+Re-enabling editing retains the document's existing undo and redo history.

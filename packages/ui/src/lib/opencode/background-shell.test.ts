@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
 import {
-  findShellCancellation,
   findShellCompletion,
   readShellCancellation,
   shellCancellationNote,
@@ -142,7 +141,7 @@ describe("stopping a background command", () => {
     expect(/\bnever\b/i.test(note.text)).toBe(false)
   })
 
-  test("the note is recognised by its metadata and found per shell", () => {
+  test("the request note is recognised by its metadata", () => {
     const message: SyntheticMessage = {
       id: "msg_note",
       sessionID: "ses_1",
@@ -154,8 +153,6 @@ describe("stopping a background command", () => {
     }
     expect(readShellCancellation(message)).toEqual({ shellIDs: ["sh_1"], stoppedAt: 4000 })
     expect(readShellCancellation(completion())).toBeUndefined()
-    expect(findShellCancellation([completion(), message], "sh_1")).toEqual({ stoppedAt: 4000 })
-    expect(findShellCancellation([message], "sh_2")).toBeUndefined()
   })
 
   test("commands stopped together share one note that names each of them", () => {
@@ -168,11 +165,10 @@ describe("stopping a background command", () => {
     expect(grouped.text).toContain("fine to run later")
     expect(/\bnever\b/i.test(grouped.text)).toBe(false)
     const message = noteMessage(grouped.metadata)
-    expect(findShellCancellation([message], "sh_1")).toEqual({ stoppedAt: 4000 })
-    expect(findShellCancellation([message], "sh_2")).toEqual({ stoppedAt: 4000 })
+    expect(readShellCancellation(message)).toEqual({ shellIDs: ["sh_1", "sh_2"], stoppedAt: 4000 })
   })
 
-  test("a note written before stops were grouped still marks its shell stopped", () => {
+  test("a request note written before stops were grouped still names its shell", () => {
     const message = noteMessage({ openchamberShellCancellation: { shellID: "sh_old" } })
     expect(readShellCancellation(message)).toEqual({ shellIDs: ["sh_old"], stoppedAt: 4000 })
     expect(readShellCancellation(noteMessage({ openchamberShellCancellation: { shellIDs: [] } }))).toBeUndefined()

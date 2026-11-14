@@ -6,6 +6,7 @@ import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js
 import { discoverLoops } from './loops.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { createExistingSessionTasks } from './existing-session.js';
+import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -267,6 +268,7 @@ export const createScheduledTasksRuntime = (deps) => {
     // The session defaults a task with `useDefaults` runs on:
     // `(projectID) => { providerID, modelID, variant, agent }`, any of them null.
     readSessionDefaults = null,
+    resolveAutoSelection = null,
     messageQueueRuntime,
     resolvePrimaryWorktreeRoot,
     isSessionArchived,
@@ -647,19 +649,23 @@ export const createScheduledTasksRuntime = (deps) => {
     const baseUrl = openCodeOrigin();
     const authHeaders = getOpenCodeAuthHeaders();
     const client = createScopedClient(directory);
-    const selection = await resolveRunSelection(projectID, task);
+    let selection = await resolveRunSelection(projectID, task);
+    const autoRun = isAutoModel(selection);
 
     // Agent, model and variant belong to the session in v2: a scheduled run
     // fixes them here instead of repeating them on every prompt.
     let sessionID;
     try {
+      if (autoRun && !resolveAutoSelection) {
+        throw new Error('Auto routing is not available on this server. Choose a model.');
+      }
       const session = await client.session.create({
         title,
         location: { directory },
         // Marks a run of a task, so it stays out of In work: nobody sent it.
         metadata: { openchamber: { kind: 'scheduled' } },
         // No model or agent at all: OpenCode picks its own default.
-        ...(selection.providerID && selection.modelID ? {
+        ...(selection.providerID && selection.modelID && !autoRun ? {
           model: {
             providerID: selection.providerID,
             id: selection.modelID,
@@ -702,6 +708,32 @@ export const createScheduledTasksRuntime = (deps) => {
       } catch (error) {
         logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
       }
+    }
+
+    if (autoRun) {
+      const routed = await resolveAutoSelection({
+        sessionId: sessionID,
+        directory,
+        model: AUTO_MODEL_REF,
+        agent: selection.agent,
+        requestText: expandSnippets(task.execution.prompt, directory),
+      });
+      if (!routed?.model || isAutoModel(routed.model)) {
+        throw new Error('Auto routing did not select an available model. Choose a model.');
+      }
+      if (routed.decision?.reason === 'not-ready') {
+        throw new Error('Auto routing is not ready. Configure a classification provider and models in Settings > Routing.');
+      }
+      await client.session.switchModel({ sessionID, model: routed.model });
+      if (routed.agent && routed.agent !== selection.agent) {
+        await client.session.switchAgent({ sessionID, agent: routed.agent });
+      }
+      selection = {
+        providerID: routed.model.providerID,
+        modelID: routed.model.id,
+        variant: routed.model.variant ?? null,
+        agent: routed.agent ?? selection.agent,
+      };
     }
 
     const scheduledCommand = await resolveScheduledCommand({ client, projectPath: directory, task });

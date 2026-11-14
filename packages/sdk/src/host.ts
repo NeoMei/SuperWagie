@@ -1,3 +1,4 @@
+import type { GuestResultCardsRequest } from './result-cards.ts';
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSnapshot, type GuestWorktreesSnapshot, type GuestSessionsSnapshot, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestStorageOptions, type GuestStorageRequest, type GuestStorageResult } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
@@ -97,6 +98,7 @@ export type HostClientOptions = {
 };
 
 export type HostClient = {
+  setResultCards: (request: GuestResultCardsRequest) => Promise<void>;
   listProjects: () => Promise<GuestProjectsSnapshot>;
   listWorktrees: (projectId: string) => Promise<GuestWorktreesSnapshot>;
   listSessions: (projectId: string) => Promise<GuestSessionsSnapshot>;
@@ -882,6 +884,12 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     onPopoverClosed: (listener) => {
       popoverClosedListeners.add(listener);
       return () => { popoverClosedListeners.delete(listener); };
+    },
+    setResultCards: (payload) => {
+      if (lastReady?.features?.resultCards !== true) {
+        return Promise.reject(new HostRequestError('UNSUPPORTED', 'This host does not support result cards.'));
+      }
+      return request({ ...envelope, type: 'result-cards', id: nextId(ids), payload });
     },
     setStatusControls: (controls) => {
       if (lastReady?.features?.statusControls !== true) {

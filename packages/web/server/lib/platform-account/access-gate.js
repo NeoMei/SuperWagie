@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isMobileOfficialAuthRequest } from '../guests/mobile-official-auth.js';
 
 const API_PREFIX = '/api';
 const requiredCallback = z.function();
@@ -23,7 +24,7 @@ const methodOf = (req) => String(req?.method || 'GET').toUpperCase();
 const isBootstrapRequest = (req) => {
   const method = methodOf(req);
   const path = pathOf(req).toLowerCase();
-  if (method === 'OPTIONS') return true;
+  if (method === 'OPTIONS' || isMobileOfficialAuthRequest(req)) return true;
   if (method === 'GET' && ['/api/platform-account', '/api/platform-account/session', '/api/platform-account/auth-methods', '/api/platform-account/start', '/api/platform-account/callback'].includes(path)) return true;
   if (method === 'POST' && ['/api/platform-account/register', '/api/platform-account/password-login', '/api/platform-account/login', '/api/platform-account/logout'].includes(path)) return true;
   if (method === 'PUT' && path === '/api/platform-account/account') return true;

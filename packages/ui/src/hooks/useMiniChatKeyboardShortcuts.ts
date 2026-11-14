@@ -43,6 +43,8 @@ export const useMiniChatKeyboardShortcuts = () => {
     const next = favoriteModels[(currentIndex + delta + favoriteModels.length) % favoriteModels.length];
     setProvider(next.providerID);
     setModel(next.modelID);
+    const pickedSessionId = useSessionUIStore.getState().currentSessionId;
+    if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, next.providerID, next.modelID);
     addRecentModel(next.providerID, next.modelID);
     setLastSelectedModel(next.providerID, next.modelID);
   };

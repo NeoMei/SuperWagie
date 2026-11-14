@@ -17,6 +17,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { MobileStatusPane } from './MobileStatusPane';
+import { MobileOfficialPane } from './MobileOfficialPane';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
 
@@ -144,6 +145,7 @@ export const MobileWorkspaceDrawer: React.FC<{
     changes: { id: 'changes', label: t('mobile.menu.git'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
     files: { id: 'files', label: t('mobile.menu.files'), icon: <Icon name="file-text" className="h-3.5 w-3.5" /> },
     terminal: { id: 'terminal', label: t('mobile.menu.terminal'), icon: <Icon name="terminal" className="h-3.5 w-3.5" /> },
+    official: { id: 'official', label: t('mobile.official.title'), icon: <Icon name="file-text" className="h-3.5 w-3.5" /> },
     notes: { id: 'notes', label: t('contextRail.surface.notes'), icon: <Icon name="sticky-note" className="h-3.5 w-3.5" /> },
   } satisfies Record<MobileWorkspaceTab, SortableTabsStripItem>;
   // The user's tabs in their order (Settings > General), plus a hidden one
@@ -258,6 +260,9 @@ export const MobileWorkspaceDrawer: React.FC<{
               <TerminalView visible={open && tab === 'terminal'} />
             </ErrorBoundary>
           </div>
+        ) : null}
+        {visitedTabs.has('official') ? (
+          <div className={cn('h-full', tab !== 'official' && 'hidden')}><ErrorBoundary><MobileOfficialPane visible={open && tab === 'official'} /></ErrorBoundary></div>
         ) : null}
         {visitedTabs.has('notes') ? (
           <div className={cn('h-full', tab !== 'notes' && 'hidden')}>

@@ -104,15 +104,16 @@ before touching the filesystem). Rationale: metadata rides every
      goal's only pending work; an abort during an in-flight read lets the tick
      reach its own abort check and pause the goal;
    - authoritative live-activity check after the quiet window: re-read
-     `/api/session/active`, bail if the parent resumed; then list the
-      parent's subagent sessions through `GET /api/session?parentID=` (cursor
-      paged) and bail while any of them is active. The loop rechecks after
-      another quiet window so a missed parent idle event cannot strand the
-      goal when the child finishes. A status or children fetch failure is
-      unknown, not empty, so it skips the audit and retries after another quiet
-      window;
-     both reads live in `../opencode/session-activity.js`, shared with the
-     notification runtime;
+     `/api/session/active`, bail if the parent resumed; then read the session
+     tree's running background jobs on 2.2.6+. A subagent or image holds the
+     audit. Only an explicitly absent job interface uses the older paged
+     child-session query. Successful empty jobs are authoritative; failed job,
+     status or legacy child reads defer the audit and recheck after another
+     quiet window. The shared probe lives in `../opencode/session-activity.js`;
+     notifications and result delivery use the same job authority;
+     app-created workflow children are checked through the live active map's
+     bounded parent lineages because they are absent from native jobs. No
+     lineage requests run when the active map is empty;
    - messages come from `/api/session/:id/message` as v2's flat records
      (`type`, `content[]`, `model`, `finish`, `tokens`); `toLoopMessage`
      projects them into the `{ info, parts }` view the rest of the tick reads,
@@ -123,6 +124,13 @@ before touching the filesystem). Rationale: metadata rides every
      plumbing roles are dropped from the view;
    - quiescence check via the message tail (trailing user message or
      unfinished assistant reply → bail; the next idle transition re-arms);
+   - before auditing or settling a turn, re-read jobs after the message read.
+     A newly started image or subagent, or an unknown job result, holds the
+     audit and settlement even after Resume or an errored turn. Shell jobs from
+     this round, including descendants' shells, retain the existing bounded
+     wait; earlier persistent dev servers do not hold it. Engines without the
+     job interface use the existing directory shell read and own-session
+     filter. Explicit Resume and failed turns retain their prior shell policy;
    - token accounting as a SNAPSHOT of the latest completed assistant turn:
      `input + cache.read + output`. Earlier turns' inputs and outputs fold
      into the next turn's cache, so the latest snapshot already carries the

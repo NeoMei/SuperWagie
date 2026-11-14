@@ -1,3 +1,8 @@
+import { z } from 'zod';
+
+const withdrawRequestSchema = z.object({ tag: z.string().min(1).max(200) });
+const withdrawCallbackSchema = z.function();
+
 export const createNotificationEmitterRuntime = (dependencies) => {
   const {
     process,
@@ -18,6 +23,11 @@ export const createNotificationEmitterRuntime = (dependencies) => {
   let onDesktopNotification = typeof initialOnDesktopNotification === 'function'
     ? initialOnDesktopNotification
     : null;
+  let onDesktopNotificationWithdraw = null;
+  const setOnDesktopNotificationWithdraw = (callback) => {
+    const parsed = withdrawCallbackSchema.safeParse(callback);
+    onDesktopNotificationWithdraw = parsed.success ? parsed.data : null;
+  };
 
   const setOnDesktopNotification = (cb) => {
     onDesktopNotification = typeof cb === 'function' ? cb : null;
@@ -67,7 +77,7 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     const desktopNotificationDelivered = options.desktopNotificationDelivered === true;
 
     const syntheticPayload = {
-      type: 'openchamber:notification',
+      type: options.withdrawn === true ? 'openchamber:notification-withdrawn' : 'openchamber:notification',
       properties: {
         ...payload,
         // Tell local desktop UI whether a native channel already accepted this
@@ -116,10 +126,25 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     }
   };
 
+  const withdrawNotification = (payload) => {
+    const parsed = withdrawRequestSchema.safeParse(payload);
+    if (!parsed.success) return { native: 'unsupported', connectedClients: 'unknown', push: 'unsupported' };
+    const event = parsed.data;
+    broadcastUiNotification(event, { withdrawn: true });
+    let native = 'unsupported';
+    if (onDesktopNotificationWithdraw) {
+      try { native = onDesktopNotificationWithdraw(event)?.status ?? 'unknown'; } catch { native = 'unknown'; }
+    }
+    // A stream write cannot prove that a device received or removed a banner.
+    return { native, connectedClients: 'unknown', push: 'unsupported' };
+  };
+
   return {
     writeSseEvent,
     emitDesktopNotification,
     broadcastUiNotification,
     setOnDesktopNotification,
+    setOnDesktopNotificationWithdraw,
+    withdrawNotification,
   };
 };

@@ -24,6 +24,7 @@ const { useUIStore } = await import('@/stores/useUIStore');
 const { switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
 const { useMcpStore } = await import('@/stores/useMcpStore');
 const { McpPage } = await import('./McpPage');
+const { WorkStatusMcpSection } = await import('@/components/chat/work-status/WorkStatusMcpSection');
 
 const oauthIntegration: IntegrationInfo = {
   id: 'mcp_0123456789abcdef',
@@ -286,3 +287,26 @@ for (const change of ['directory', 'runtime'] as const) {
     }
   });
 }
+
+test('work status sign-in action starts the same OAuth flow exactly once', async () => {
+  const { useUIStore } = await import('@/stores/useUIStore');
+  useUIStore.setState({ workStatusExpandedSections: { mcp: true } });
+  await renderConnectedServer(true, oauthIntegration.methods, { needsAuth: true });
+  await act(async () => root?.unmount());
+  const container = document.createElement('div');
+  document.body.replaceChildren(container);
+  root = createRoot(container);
+  const loadConfig = spyOn(useMcpConfigStore.getState(), 'loadMcpConfigs').mockResolvedValue(true);
+  const connect = spyOn(sdk.integration.oauth, 'connect').mockImplementation(async () => { throw new Error('offline test runtime'); });
+  try {
+    await act(async () => root?.render(<I18nProvider><WorkStatusMcpSection sessionId="test-session" directory="/test" /></I18nProvider>));
+    expect(connect.mock.calls).toHaveLength(0);
+    const button = [...document.body.querySelectorAll('button')].find((node) => node.textContent?.trim() === 'Sign in');
+    if (!button) throw new Error('Expected work status sign-in action');
+    await act(async () => { button.click(); });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(connect.mock.calls).toHaveLength(1);
+    await act(async () => { button.click(); });
+    expect(connect.mock.calls).toHaveLength(1);
+  } finally { connect.mockRestore(); loadConfig.mockRestore(); }
+});

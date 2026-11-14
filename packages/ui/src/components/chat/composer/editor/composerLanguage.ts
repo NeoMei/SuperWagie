@@ -20,6 +20,7 @@ import { CHIP_TRAILING_PUNCTUATION, INLINE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_
 import { getFileTypeIconHref } from '@/lib/fileTypeIcons';
 import { findAttachmentCitationRanges } from '../../attachmentCitations';
 import { resolveHighlightSegments, DEFAULT_HIGHLIGHT_CLASS, type HighlightRange } from '../../composerHighlight';
+import { findWebLinks } from '../referenceLinks';
 import { findSessionLinks, sessionLinkKey } from '@/lib/sessionLinks';
 import { filterKnownTokens, scanPrefixTokens } from '../language/prefixTokens';
 import { tokenizeComposer, tokenizeMentions, type ComposerLanguageContext } from '../language/tokenize';
@@ -94,12 +95,12 @@ function technicalIsolates(ranges: HighlightRange[]): DecorationSet {
  * the caret steps over the chip and one Backspace removes it whole.
  */
 class ReferenceChipWidget extends WidgetType {
-    constructor(readonly label: string, readonly title: string, readonly iconHref: string) {
+    constructor(readonly label: string, readonly title: string, readonly iconHref: string, readonly open?: () => void) {
         super();
     }
 
     eq(other: ReferenceChipWidget): boolean {
-        return other.label === this.label && other.title === this.title && other.iconHref === this.iconHref;
+        return other.label === this.label && other.title === this.title && other.iconHref === this.iconHref && other.open === this.open;
     }
 
     toDOM(view: EditorView): HTMLElement {
@@ -107,6 +108,21 @@ class ReferenceChipWidget extends WidgetType {
         const chip = doc.createElement('span');
         chip.className = INLINE_REFERENCE_CHIP_CLASS;
         chip.title = this.title;
+        if (this.open) {
+            chip.setAttribute('role', 'button');
+            chip.tabIndex = 0;
+            chip.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                this.open?.();
+            });
+            chip.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                event.stopPropagation();
+                this.open?.();
+            });
+        }
         const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.setAttribute('class', 'block size-[1.1em] shrink-0');
         svg.setAttribute('aria-hidden', 'true');
@@ -123,7 +139,7 @@ class ReferenceChipWidget extends WidgetType {
 
     // Clicks on the chip place the caret like clicks on text.
     ignoreEvent(): boolean {
-        return false;
+        return Boolean(this.open);
     }
 }
 
@@ -198,6 +214,13 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
         for (const range of findSessionLinks(text, context.sessionLinkOrigins ?? [])) {
             const chip = context.sessionLinkChips.get(sessionLinkKey(range.target));
             if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref) });
+        }
+    }
+
+    if (context.referenceLinkChips?.size) {
+        for (const range of findWebLinks(text)) {
+            const chip = context.referenceLinkChips.get(range.link);
+            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, chip.open) });
         }
     }
 

@@ -451,3 +451,6 @@ preview's footer holds actions instead of what the agent gets.
   `features.referenceSearch` `#N` is also looked up for its labels and comment
   count, which the status does not carry.
 
+
+
+Explicit pasted links use resolveReferenceLink with the same connected repository read context and tracker detail reader as picker confirmation. Repository provider and instance must match before any request. Explicit project selectors retain the current connected account's SourceControlReadContext and the provider's repository access rules. A rejected or out-of-network read fails without changing that context or retrying with extra flags. PR links use the picker's default without the diff. The composer owns asynchronous paste lifetime and outgoing deduplication; no background scan resolves typed or restored URLs.

@@ -1,3 +1,4 @@
+import { createHyMemoryTidy, pruneHyTidyRevisions } from '../hy-memory/tidy.js';
 import { createConversationMemoryStore, memoryEntrySchema } from './store.js';
 import { looksLikeInjection } from '../agent-memory/threat-patterns.js';
 import { checkpointSchema, segmentSchema } from './reader.js';
@@ -242,6 +243,7 @@ export const createConversationMemoryRuntime = ({
         entry.status = forget ? 'forgotten' : 'superseded'; entry.cleanupPending = forget || !!withdrawal; entry.updatedAt = now();
       }
       invalidateDependentMethodologies(state, state.entries.filter((entry) => entry.sessionId === sessionId).map((entry) => entry.id), now());
+      pruneHyTidyRevisions(state);
       if (forget) eraseUnusedSources(state);
     });
     if (withdrawal) {
@@ -707,7 +709,7 @@ export const createConversationMemoryRuntime = ({
     return sessions;
   };
   const sourceStateSchema = z.object({ directory: z.string().min(1), revertId: z.string().min(1).nullable(), anchorMatches: z.boolean().optional() });
-  const verifyEntrySources = async ({ directory, entries, signal }) => {
+  const verifyEntrySources = async ({ directory, entries, signal, reconcile = true }) => {
     if (!readSessionSource) return new Set(entries.map((entry) => entry.id));
     const snapshot = await store.read();
     const sourcesByEntry = new Map(entries.map((entry) => [entry.id, sourceReferencesFor(snapshot, entry)]));
@@ -728,7 +730,7 @@ export const createConversationMemoryRuntime = ({
         if (source === null || source.data.directory !== session.directory || source.data.revertId !== parsed.data.revertId || source.data.anchorMatches === false) {
           await invalidateSession(sessionId, source === null);
           if (source !== null && source.data.directory === session.directory && source.data.directory === directory
-            && canProcess() && !signal.aborted) scheduleCapture(sessionId, directory);
+            && reconcile && canProcess() && !signal.aborted) scheduleCapture(sessionId, directory);
           return [sessionId, false];
         }
         return [sessionId, true];
@@ -897,7 +899,10 @@ export const createConversationMemoryRuntime = ({
     await start().catch(() => {});
     return currentStatus();
   };
+  const tidy = createHyMemoryTidy({ store, requireScope, now, verifySources: (input) => verifyEntrySources({ ...input, reconcile: false }) });
+
   return {
+    tidy,
     retrieve: async ({ directory, query = '', title, id, documentIds, limit = 10, mode = 'eligible' }) => {
       const revision = lifecycleRevision;
       const projectId = await requireScope(directory);
@@ -1015,6 +1020,7 @@ export const createConversationMemoryRuntime = ({
         const synthesis = state.syntheses.find((item) => item.id === current.segmentId);
         if (synthesis) { synthesis.state = 'done'; synthesis.error = null; }
         invalidateDependentMethodologies(state, [id], now());
+        pruneHyTidyRevisions(state);
       });
       const cleaned = await cleanup(entry);
       for (const dependent of (await store.read()).entries.filter((item) => item.kind === 'methodology' && item.cleanupPending && item.supportingEntryIds.includes(id))) await cleanup(dependent);

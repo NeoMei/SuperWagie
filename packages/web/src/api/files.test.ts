@@ -32,6 +32,22 @@ const urls: RuntimeUrlResolver = {
 };
 
 describe('createWebFilesAPI', () => {
+  it('keeps XLSX copy requests in the source runtime directory and parses the inspection contract', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ getDirectory: () => '/repo' });
+    const inspection = { version: 'source-version', sheets: [{ name: 'Main', truncated: false, cells: [{ address: 'A1', value: '4', editable: true }] }] };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(inspection));
+    const signal = new AbortController().signal;
+    await expect(api.inspectXlsxCopy!('/spaces/a1b2c3d4e5f6/repo/input.xlsx', signal)).resolves.toEqual(inspection);
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/xlsx-copy/inspect', expect.objectContaining({
+      signal, headers: { 'Content-Type': 'application/json', 'x-opencode-directory': '/spaces/a1b2c3d4e5f6' }, body: JSON.stringify({ path: '/spaces/a1b2c3d4e5f6/repo/input.xlsx' }),
+    }));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'changed', reason: 'source-changed' }, { status: 409 }));
+    await expect(api.saveXlsxCopy!('/repo/input.xlsx', { version: 'old', name: 'copy.xlsx', edits: [{ sheet: 'Main', address: 'A1', kind: 'number', value: '5' }] }, signal)).rejects.toThrow('source-changed');
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ version: 'bad', sheets: [{ name: 'Main', cells: [] }] }));
+    await expect(api.inspectXlsxCopy!('/repo/input.xlsx', signal)).rejects.toThrow();
+  });
+
   it('creates through the separate endpoint and keeps ordinary save on overwrite', async () => {
     const { createWebFilesAPI } = await import('./files');
     let directory = '/first';

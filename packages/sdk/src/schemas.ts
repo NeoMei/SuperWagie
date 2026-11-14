@@ -2,6 +2,7 @@
 // validate an untrusted guest's manifest and messages with zod. Guests import
 // `@openchamber/sdk`, which carries no schema library.
 export {
+  guestToolCardSchema,
   openChamberManifestSchema,
   PACKAGE_VERSION_PATTERN,
   packageManifestSchema,
@@ -34,3 +35,5 @@ export {
   surfaceViewerMessageSchema,
 } from './service-surface-schemas.ts';
 export type { SurfaceHostMessage, SurfaceViewerMessage } from './service-surface-schemas.ts';
+
+export { guestResultCardsSchema } from './result-card-schemas.ts';

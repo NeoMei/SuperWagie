@@ -20,3 +20,14 @@ describe('close tab target', () => {
     expect(closed).toEqual(['second', 'first']);
   });
 });
+
+test('covering settings stay the target when a file registers later', () => {
+  const closed: string[] = [];
+  const releaseSettings = registerCloseTabTarget(() => closed.push('settings'), 1);
+  const releaseFile = registerCloseTabTarget(() => closed.push('file'));
+  window.dispatchEvent(new Event('openchamber:close-tab'));
+  releaseSettings();
+  window.dispatchEvent(new Event('openchamber:close-tab'));
+  releaseFile();
+  expect(closed).toEqual(['settings', 'file']);
+});

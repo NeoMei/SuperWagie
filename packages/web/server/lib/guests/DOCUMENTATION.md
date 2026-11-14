@@ -136,3 +136,78 @@ and reaps nothing.
 Orphans are rare on Windows: libuv puts every spawned child in a job object that
 is killed with the host, even on a hard kill, so the Windows branch of the
 reaper is a safety net.
+
+
+## Official hosted-mobile snapshots
+
+`mobile-official.js` owns the read-only phone pilot. The ordinary guest catalog remains unavailable on mobile. Only the bundled, enabled workbench and creation with the `files` grant can supply selected material. The embedded native bootstrap alone can retain the in-process selection controller. Electron calls it through privileged IPC from the tracked application top frame. Public HTTP operations under `/api/official-selections` always return 403. A `desktop-local` label, password login, cookie, loopback socket, Origin, pairing or client-management credential grants no selection or revocation authority. An iframe has no corresponding SDK effect. Browser, remote-runtime, VS Code and mobile selectors remain unavailable, including for the same platform account.
+
+Every operation refreshes the existing platform session and binds the grant to its verified issuer, user and selected account. The runtime authentication credential, account session and native operation lease are rechecked after IO. Native account authentication preserves bearer and instance-port cookie namespaces; neither credential type supplies native authority. Caller cancellation, runtime switching, frame replacement, shutdown and account replacement retire pending operations. A selection canceled during publication removes its newly published snapshot. Two devices may have different authentication sessions but must have the same verified owner. The existing instance-owner access gate still applies. Missing platform login makes only this pilot unavailable and does not alter BYOK runtime access.
+
+Selection reads one registered project's canonical-contained relative file. Tasks are extracted by one unambiguous task ID from `任务.md`; other task rows never enter the snapshot. Session references are checked against the selected directory. The stored selection binds the canonical host project root and an immutable SHA-256 source revision. Space roots are refused before source reads, including canonical aliases. A rebound project ID, disabled extension, removed project, expired login or changed owner refuses access. No absolute source path, account credential or account key enters the public response.
+
+Selections are immutable version-2 files under the private instance data directory, with 32 grants per owner and a 5 MiB input cap. A SHA-256 digest covers the persisted owner, project binding, public card/version envelope and preview bytes, including task cards. Changed snapshots fail before serving. Card titles and versions are at most 200 characters; card text is at most 2000. Earlier pilot version-1 files lack that integrity envelope and fail closed without conversion or deletion. Owner writes serialize and rename a complete temporary file. PNG, JPEG, WebP and GIF snapshots have passive image previews; text formats up to 256 KiB have plain-text previews. Other formats show source/version metadata and explicitly unavailable preview. They are never executed or unpacked. The phone GET takes only a project ID for its list or an existing selection ID for content; it never reads an arbitrary caller path. Both route families are host-only in the space dispatcher and mount after the space/archive guards. The phone routes also refuse space directory hints when the optional dispatcher is off. Query, encoded directory headers, mixed hints and prefix addressing cannot select a host snapshot through a space. All non-GET methods under `/api/mobile-official` return 405. Native local-owner controls can revoke retained selections without changing desktop task files or creation state.
+
+### Why selection uses native local-owner authority
+
+A same-account phone is authorized to read previously selected material, so its platform identity cannot also prove the user selected a new host file. Possession of the controller in the native main process establishes that additional authority. Its IPC gate checks the actual current top frame of a tracked application window at the packaged app or exact configured HMR origin. The local client credential only authenticates the account after that check; it cannot acquire the controller over HTTP. This pilot deliberately leaves browser and remote desktop selection unavailable. It starts no listener, LAN access, relay, model call, guest service or native phone publication.
+
+## Existing desktop creation decisions
+
+`creation-decisions.js` owns durable admission for the existing bundled creation approval buttons in an authenticated local Electron runtime. It shares the in-process native controller's account authentication and actual application top-frame gate. `PluginPane` binds the request to the original bundled creation installation, frame document, current host project/session, runtime and account lifetime. No public route grants this capability. Ordinary browser, remote-runtime and BYOK confirmations retain their existing prompt behavior and display that coordination is unavailable. Those ordinary confirmations do not participate in this pilot's at-most-once guarantee.
+
+An inspection reads the current skill state and the referenced plan, prompt, chapter, render result, image/video, page and screenshot files within the registered host project. The observed text fields must match the bytes loaded by the panel; a file changed between panel load and inspection is stale. The fingerprint binds source bytes, the stage, decision ID and artifact revision. Claim repeats that inspection and refuses a stale fingerprint. It verifies the registered project, session, current bundled extension grants and original account again before publication. The claim key includes verified issuer/user/account ownership, registered project ID and canonical root, session, kind, stage, complete artifact fingerprint and decision ID. Different approval text for an existing key is a conflict.
+
+Records live under the private instance data directory in `creation-decisions/<owner hash>`. A second canonical source index includes account, registered project/root, kind, stage and artifact fingerprint, independently of caller-supplied session or decision IDs. Skill files lack historical originating-session provenance. The first explicit native confirmation atomically adopts its session and semantic decision ID before publishing the claim. Later inspection or claim from another same-project session refuses that source; changing a supplied ID cannot mint a new source owner.
+
+A complete `0600` temporary record is synced before an exclusive hard link publishes it. Only the caller that creates the claim link receives dispatch admission. Concurrent server/controller instances share filesystem exclusivity. A later caller receives the retained receipt and never sends again. The initial receipt records a claimed decision with an unknown dispatch outcome before any downstream send. The renderer can confirm prompt admission, producing `accepted`; it cannot declare generation `completed`. Lost claim/send responses, crashes, failed settlement and unreadable storage never authorize automatic replay. Source ownership and claimed records are retained across restarts and feature closure. POSIX publication syncs the containing directory; Windows has file sync plus atomic link publication and requires separate crash-durability validation.
+
+Publication rechecks the native/account/project/session owner after the exclusive link and directory sync. Dispatch admission checks it again after temporary-file cleanup. Cancellation or replacement during either interval refuses admission while retaining the published unknown claim. Native IPC and the host also reject ownership retired while their awaited result was pending. The retained claim still blocks replay after retry or restart.
+
+### Why message admission does not establish generation completion
+
+The existing skill engines do not provide an authoritative job-to-decision completion receipt. A successful prompt or changed stage cannot establish that a particular generation completed. The contract keeps `accepted`, `completed` and `unknown` distinct, while this pilot emits only `accepted` and `unknown` until an owning engine supplies that evidence. Phone C01 remains read-only. Adding phone approvals requires a separate user decision, a separately scoped write capability and a server ownership check; a result grant or the existing GET snapshot never supplies write authority.
+
+
+## Dedicated hosted-reader access
+
+`mobile-official-auth.js` owns the selected-material pilot's HttpOnly,
+instance-port-named cookie. The server maps a random credential to a separate
+platform session namespace. Its 12 hour process-local registry is bounded to
+128 entries, so restarting the server requires another pilot sign-in. The cookie
+is scoped to `/api/mobile-official`; exact method/path resolution is the actual
+authorization boundary. Cookie values never enter JSON, logs or source links.
+
+The dedicated auth/session, password-login, account and logout operations alter
+only that pilot namespace. They reuse configured platform authentication and
+verified memberships without calling financial projection, onSessionRead, model
+bootstrap or ordinary platform login routes. Runtime password/pairing/tunnel
+access remains required. These routes mount after the archive/space guards.
+
+`GET /api/mobile-official/projects` returns only selected-owner project IDs and
+names. It validates each retained selection's registered canonical project and
+grants before exposing metadata, and returns no root paths. Failures remain
+errors. Material GETs retain issuer/user/account ownership and immutable snapshot
+checks. All ordinary business routes ignore the pilot credential, including when
+it is manually copied outside its cookie path or sent as a bearer. A full
+credential already authorized through the ordinary login remains independently
+full-authorized; the pilot grants no additional business permission.
+
+
+## Explicit reader ownership and transport lifetime
+
+The dedicated pilot reads only `/api/mobile-official/reader`,
+`/reader/projects` and `/reader/:id/content`. These exact GET routes resolve the
+pilot namespace and never fall back to a full account. The existing full-reader
+list, projects and content paths retain their ordinary full-account resolver,
+regardless of any unsigned, different-account or logged-out pilot cookie.
+
+`mobile-official-transport.js` captures the original request's connection
+authority. Every full or pilot C01 read resolution rechecks it, including source
+IO completion. Local access uses the UI auth owner's read-only
+`hasRuntimeAccess`; tunnel access pins the original actual session and asks that
+session owner again. Revocation, cookie expiry, UI-controller replacement or a
+changed request scope refuses publication. Auth metadata responses recheck their
+transport before sending too. Transport failure returns 401 and no selected
+bytes. This check issues no cookies and does not alter passwordless open-host
+policy.

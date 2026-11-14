@@ -1,5 +1,5 @@
 import React from 'react';
-import { GUEST_TOOL_TEMPLATE_VALUE_MAX, type GuestToolContribution, type JsonValue } from '@openchamber/sdk';
+import { GUEST_TOOL_TEMPLATE_VALUE_MAX, GUEST_TOOL_CARD_URL_MAX, type GuestTone, type GuestToolCard, type GuestToolContribution, type JsonValue } from '@openchamber/sdk';
 import type { ToolInput } from '@/lib/opencode/model';
 
 import { isGuestActive } from './capabilities.ts';
@@ -221,4 +221,128 @@ export const guestToolTableRows = (output: TemplateValue): JsonValue[] | null =>
     if (isJsonArray(items)) return items;
   }
   return null;
+};
+
+/** Rows drawn for a list; the rest is a count line, as in a table. */
+const GUEST_TOOL_CARD_ROWS_MAX = 200;
+
+
+
+/**
+ * A value a card or a link can show: text that is not blank, a number or a
+ * boolean. Nothing, a blank string, an object and an array are all "missing":
+ * the JSON text of an object has no place in a card.
+ */
+const cardScalar = (value: TemplateValue): string | null => {
+  if (String(value) === value) return value.trim() === '' ? null : value;
+  return Number(value) === value || Boolean(value) === value ? String(value) : null;
+};
+
+/**
+ * One card template over one output. `null` when none of its placeholders
+ * resolves, which hides the part; a placeholder that misses beside one that
+ * resolves renders as nothing, the way it does in a title.
+ */
+const renderCardText = (template: string, output: TemplateValue): string | null => {
+  let resolved = false;
+  const text = template.replace(PLACEHOLDER, (written, root: string, rest: string) => {
+    if (root !== 'output') return written;
+    const value = cardScalar(readPath(output, rest.slice(1)));
+    if (value === null) return '';
+    resolved = true;
+    return stringifyTemplateValue(value);
+  }).trim();
+  return resolved && text !== '' ? text : null;
+};
+
+/**
+ * An address the host may put in an `href`: it parses, it is `https`, it
+ * carries no user name or password, and it is not longer than a link may be.
+ * Returns the address as the parser wrote it, so what was checked is what
+ * opens. `null` otherwise.
+ */
+export const safeHttpsAddress = (address: string): string | null => {
+  if (address.length > GUEST_TOOL_CARD_URL_MAX) return null;
+  let url: URL;
+  try {
+    url = new URL(address);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') return null;
+  return url.href.length > GUEST_TOOL_CARD_URL_MAX ? null : url.href;
+};
+
+/** Only a complete HTTPS output value can become a link. */
+const renderGuestToolLinkUrl = (template: string, output: TemplateValue): string | null => {
+  const match = /^\{output((?:\.[A-Za-z0-9_-]+)*)\}$/.exec(template);
+  if (!match) return null;
+  const value = readPath(output, (match[1] ?? '').slice(1));
+  return String(value) === value ? safeHttpsAddress(value.trim()) : null;
+};
+
+/** One card, or one row of a list, with the parts that resolved. */
+export type GuestToolCardView = {
+  label: string | null;
+  title: string | null;
+  status: { text: string; tone: GuestTone } | null;
+  fields: { label: string; value: string }[];
+  link: { label: string; url: string } | null;
+};
+
+export type GuestToolCardResult =
+  | { kind: 'card'; card: GuestToolCardView }
+  /** `hidden` counts the output items past the row cap. */
+  | { kind: 'list'; rows: GuestToolCardView[]; hidden: number };
+
+const cardView = (
+  card: GuestToolCard,
+  output: TemplateValue,
+  withLink: boolean,
+): GuestToolCardView | null => {
+  const label = card.label ? renderCardText(card.label, output) : null;
+  const title = card.title ? renderCardText(card.title, output) : null;
+  const statusText = card.status ? renderCardText(card.status.value, output) : null;
+  const tones = card.status?.tones;
+  const fields: GuestToolCardView['fields'] = [];
+  for (const field of card.fields ?? []) {
+    const value = renderCardText(field.value, output);
+    if (value !== null) fields.push({ label: field.label, value });
+  }
+  if (label === null && title === null && statusText === null && fields.length === 0) return null;
+  const url = withLink && card.link ? renderGuestToolLinkUrl(card.link.url, output) : null;
+  return {
+    label,
+    title,
+    status: statusText === null ? null : {
+      text: statusText,
+      tone: tones && Object.hasOwn(tones, statusText) ? tones[statusText] ?? 'neutral' : 'neutral',
+    },
+    fields,
+    link: url !== null && card.link ? { label: card.link.label, url } : null,
+  };
+};
+
+/**
+ * What `output: "card"` draws for a parsed output: one card for an object, a
+ * list for an array or an `items` array, one row per item from the same
+ * templates with `output` bound to the item. `null` when there is nothing to
+ * draw (not JSON data, no part of the card resolves, no row does), and the
+ * caller then shows the output the way it would without the rule. A list row
+ * carries no link.
+ */
+export const resolveGuestToolCard = (rule: GuestToolRule, output: TemplateValue): GuestToolCardResult | null => {
+  if (!rule.card) return null;
+  const items = guestToolTableRows(output);
+  if (!items) {
+    if (!isJsonObject(output)) return null;
+    const card = cardView(rule.card, output, true);
+    return card ? { kind: 'card', card } : null;
+  }
+  const rows: GuestToolCardView[] = [];
+  for (const item of items.slice(0, GUEST_TOOL_CARD_ROWS_MAX)) {
+    const row = cardView(rule.card, item, false);
+    if (row) rows.push(row);
+  }
+  return rows.length > 0 ? { kind: 'list', rows, hidden: Math.max(0, items.length - GUEST_TOOL_CARD_ROWS_MAX) } : null;
 };

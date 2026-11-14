@@ -133,6 +133,22 @@ describe('extension workspace projection', () => {
       { title: 'Own card', url: 'https://board.example/B-2', kind: 'issue', linkedAt: 5 },
     ]);
   });
+  test('live tool names have no arguments, expire on idle and never arise from history', () => {
+    const child = manager.ensureChild('/b-tree', { bootstrap: false });
+    child.setState({ sessionStatusReady: true });
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
+    expect(readB().sessions[0].tool).toBe(null);
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'message.part.updated', properties: { sessionID: 'b-session', part: {
+      id: 'tool-1', sessionID: 'b-session', messageID: 'message-1', type: 'tool', callID: 'call-1', tool: 'shell',
+      state: { status: 'running', input: { command: 'secret command' }, time: { start: 1 } },
+    } } });
+    expect(readB().sessions[0].tool).toEqual({ name: 'shell', target: null });
+    expect(JSON.stringify(readB().sessions[0])).not.toContain('secret command');
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.idle', properties: { sessionID: 'b-session' } });
+    expect(readB().sessions[0].tool).toBe(null);
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
+    expect(readB().sessions[0].tool).toBe(null);
+  });
   test('blocking requests and retries expose state without conversation data', () => {
     const child = manager.ensureChild('/b-tree', { bootstrap: false });
     applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'retry', attempt: 1, message: 'Wait', next: 1 } } });

@@ -87,11 +87,15 @@ other.
   16,000 characters as JSON) or the request is aborted. Nothing outlives the
   call, so a second answer, an answer for a call that ended, and an answer
   after a server restart are a `404`, never a silent success.
-  `onPageWaitChange` hears both ends of a wait. The server's wiring
-  (`index.js`) lists the page with the session's pending requests
+  `onPageWaitChange` hears both ends of a wait with the original session,
+  call and directory identity, including answer and abort settlement.
+  The server composes `page-wait-events.js` from `index.js`; it lists
+  the page with the session's pending requests
   (`trackWaitingPage` in `../opencode/session-runtime.js`), broadcasts
   `openchamber:page-waiting` / `openchamber:page-settled` to the clients, and
-  sends the same "Input needed" notification a form gets.
+  forwards both events to the notification trigger. Waiting sends the same
+  "Input needed" notification a form gets; settlement withdraws that page's
+  exact notification and suppresses preparation still in flight.
   `renderPageImageSources` lists the local images a page names by absolute
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP), every one of them.
   The image grant route (`../markdown-image-grants/`) allows exactly those, and
@@ -321,3 +325,12 @@ folder's model and agent before creating the session. Missing agent config is
 The retained checkout is not reported as a created session.
 
 Schedule create and update validate only an explicitly supplied model. Catalog lookup uses the effective target session directory, including worktrees and Chats. Provider/modelID and provider/id matches are accepted. An authoritative empty catalog preserves fallback behavior; failed or malformed catalog reads reject before persistence. Unrelated updates can retain a removed stored model.
+
+### Why page settlement retains the wait's directory
+
+Notification identity includes the source directory. The page owner captures
+that identity when waiting begins and reuses it for both answer and abort;
+looking up a directory later or omitting it would leave the original alert.
+The shared lifecycle handler forwards one complete envelope to both UI fanout
+and the notification trigger, since UI broadcasting alone does not settle a
+notification.

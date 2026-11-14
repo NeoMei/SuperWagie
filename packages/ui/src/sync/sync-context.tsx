@@ -76,6 +76,7 @@ import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
 import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
 import { useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
+import { subscribeSessionTodosSync } from "./session-todos-sync"
 import { subscribeSessionWarmingSync } from "./session-warming-sync"
 import { subscribeSessionFoldersSync } from "./session-folders-sync"
 import { subscribeSessionDraftsSync } from "./session-drafts-sync"
@@ -97,7 +98,7 @@ import { isDirectoryOfKnownSpace, isSpaceDirectoryStopped, isSpaceStopped, known
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendErrorNotification, markSessionViewed } from "./notification-store"
-import { isSessionUnread } from "./session-unread"
+import { isSessionTurnUnread } from "./session-unread"
 import { recordSessionError, responseBodyOf, summarizeOpenCodeError } from "./session-error-log"
 import {
   applyGlobalSessionStatusEvent,
@@ -798,7 +799,7 @@ function ensureViewedSessionWatcher() {
     if (state.entityById === previous.entityById) return
     const seeIfViewed = (directory: string, sessionId: string): void => {
       const session = state.entityById.get(sessionId)
-      if (!session || session === previous.entityById.get(sessionId) || !isSessionUnread(session)) return
+      if (!session || session === previous.entityById.get(sessionId) || !isSessionTurnUnread(session)) return
       if (isViewedInCurrentSession(directory, sessionId)) markSessionViewed(sessionId)
     }
     if (_activeDirectory && _activeSession) seeIfViewed(_activeDirectory, _activeSession)
@@ -3254,6 +3255,7 @@ export function SyncProvider(props: {
   useEffect(() => {
     const unsubscribeQueueEvents = subscribeMessageQueueSync(runtimeKey)
     const unsubscribeSessionWarming = subscribeSessionWarmingSync(runtimeKey)
+    const unsubscribeSessionTodos = subscribeSessionTodosSync(runtimeKey)
     const unsubscribeFolderEvents = subscribeSessionFoldersSync(runtimeKey)
     const unsubscribeDraftEvents = subscribeSessionDraftsSync(runtimeKey)
     const unsubscribeSpaceModes = subscribeSpacePermissionModes(runtimeKey)
@@ -3403,6 +3405,7 @@ export function SyncProvider(props: {
       pipeline.cleanup()
       unsubscribeQueueEvents()
       unsubscribeSessionWarming()
+      unsubscribeSessionTodos()
       unsubscribeFolderEvents()
       unsubscribeDraftEvents()
       unsubscribeSpaceModes()
@@ -4551,34 +4554,54 @@ export function readSessionMessageRecordsSnapshot(
 }
 
 export function useSessionRenderable(sessionID: string, directory?: string): boolean {
+  const runtime = useSyncRuntime()
   const store = useDirectoryStore(directory)
+  const resolvedDirectory = React.useSyncExternalStore(
+    runtime.currentDirectory.subscribe,
+    () => directory ?? runtime.currentDirectory.get(),
+  )
+  const { messageLoader } = runtime
   const renderableRef = useRef(false)
   const getSnapshot = useCallback(() => {
-    const renderable = Boolean(sessionID && getSessionMaterializationStatus(store.getState(), sessionID).renderable)
+    const renderable = Boolean(sessionID && getSessionMaterializationStatus(store.getState(), sessionID, {
+      historyCovered: messageLoader.coversHistory({ directory: resolvedDirectory, sessionID }),
+    }).renderable)
     renderableRef.current = renderable
     return renderable
-  }, [sessionID, store])
+  }, [messageLoader, resolvedDirectory, sessionID, store])
   const subscribe = useCallback(
-    (notify: () => void) => sessionID
-      ? subscribeDirectorySessionMessages(store, sessionID, (change) => {
-          const state = store.getState()
-          const remainsRenderable = change.partMessageIDs.every((messageID) => (
-            Object.prototype.hasOwnProperty.call(state.part, messageID)
-          ))
-          if (
-            !change.messagesChanged
-            && !change.reset
-            && change.partMessageIDs.length > 0
-            && renderableRef.current
-            && remainsRenderable
-          ) {
-            countSyncPerformance("sessionRenderableNotificationSkips")
-            return
-          }
-          notify()
-        })
-      : () => undefined,
-    [sessionID, store],
+    (notify: () => void) => {
+      if (!sessionID) return () => undefined
+      // History coverage decides whether a running step without parts counts
+      // as a gap, and the loader can change it without a store change.
+      const stopLoader = messageLoader.subscribe({ directory: resolvedDirectory, sessionID }, notify)
+      const stopStatus = store.subscribe((state, previous) => {
+        if (state.session_status[sessionID] !== previous.session_status[sessionID]) notify()
+      })
+      const stopMessages = subscribeDirectorySessionMessages(store, sessionID, (change) => {
+        const state = store.getState()
+        const remainsRenderable = change.partMessageIDs.every((messageID) => (
+          Object.prototype.hasOwnProperty.call(state.part, messageID)
+        ))
+        if (
+          !change.messagesChanged
+          && !change.reset
+          && change.partMessageIDs.length > 0
+          && renderableRef.current
+          && remainsRenderable
+        ) {
+          countSyncPerformance("sessionRenderableNotificationSkips")
+          return
+        }
+        notify()
+      })
+      return () => {
+        stopLoader()
+        stopStatus()
+        stopMessages()
+      }
+    },
+    [messageLoader, resolvedDirectory, sessionID, store],
   )
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }

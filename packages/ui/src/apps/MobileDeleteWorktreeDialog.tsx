@@ -9,6 +9,9 @@ import { cn } from '@/lib/utils';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeDisplayName, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { moveWorktreeSessionsThenRemove, readWorktreeSessions, worktreeKeepFailureDescription } from '@/lib/worktrees/worktreeRetention';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
+import { groupSessionTreesByFolder } from '@/lib/worktrees/worktreeRemovalFlow';
 import { archiveSessionsThenRemoveWorktree } from '@/lib/worktrees/worktreeRemovalFlow';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { BoundGitNetworkOperationError, GitOperationResultError } from '@/lib/boundGitNetworkOperation';
@@ -37,7 +40,7 @@ const getSessionDirectory = (session: Session): string => {
 
 /**
  * Mobile worktree-deletion confirmation. It mirrors the desktop flow: remove
- * the worktree first, then archive its linked sessions. Branch deletion is
+ * archives its linked sessions before removal, or moves them when explicitly selected. Branch deletion is
  * optional.
  */
 export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProps> = ({
@@ -55,6 +58,9 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const { git, sourceControl } = useRuntimeAPIs();
 
+  const [keepSessions, setKeepSessions] = React.useState(false);
+  const [keepSessionPreview, setKeepSessionPreview] = React.useState<Session[] | null>(null);
+  const [keepSessionPreviewFailed, setKeepSessionPreviewFailed] = React.useState(false);
   const [deleteLocalBranch, setDeleteLocalBranch] = React.useState(false);
   const [deleteRemoteBranch, setDeleteRemoteBranch] = React.useState(false);
   const [isDirty, setIsDirty] = React.useState(false);
@@ -100,8 +106,24 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     };
   }, [open, worktree?.path, worktree?.status?.isDirty]);
 
-  const removeWorktree = React.useCallback(async (target: WorktreeMetadata): Promise<boolean> => {
+  React.useEffect(() => {
+    setKeepSessions(false);
+    setKeepSessionPreview(null);
+    setKeepSessionPreviewFailed(false);
+    if (!open || !worktreePath) return;
+    let cancelled = false;
+    const isCurrent = captureRuntimeInstance();
+    void readWorktreeSessions(worktreePath, isCurrent).then((sessions) => {
+      if (!cancelled && isCurrent()) setKeepSessionPreview(sessions);
+    }).catch(() => {
+      if (!cancelled) setKeepSessionPreviewFailed(true);
+    });
+    return () => { cancelled = true; };
+  }, [open, worktreePath]);
+
+  const removeWorktree = React.useCallback(async (target: WorktreeMetadata, retentionGuard?: { beforeRemove: () => Promise<void>; isCurrent: () => boolean }): Promise<boolean> => {
     await removeProjectWorktree(project, target, {
+      ...retentionGuard,
       deleteRemoteBranch: hasBranch && deleteRemoteBranch,
       deleteLocalBranch: hasBranch && deleteLocalBranch,
       remoteName: remoteName ?? undefined,
@@ -118,13 +140,23 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   }, [currentDirectory, deleteLocalBranch, deleteRemoteBranch, git, hasBranch, project, remoteName, sourceControl, worktreePath]);
   // The sessions are archived while their folder still exists, and come back
   // if the removal fails (`archiveSessionsThenRemoveWorktree`).
-  const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[]) => {
+  const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[], retain: boolean) => {
     const name = getWorktreeDisplayName(target);
     const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name }));
     // The row shows it from here, through archiving the sessions too.
     markWorktreeRemoving(target.path);
     void (async () => {
       try {
+        if (retain) {
+          const result = await moveWorktreeSessionsThenRemove({ worktreePath: target.path, projectDirectory: project.path, removeWorktree: (guard) => removeWorktree(target, guard) });
+          if (result.removed) {
+            toast.success(t('sessions.sidebar.worktreeKeep.success'), { id: toastId, description: name });
+            onDeleted?.();
+          } else {
+            toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), { id: toastId, description: t('sessions.sidebar.worktreeKeep.partial', { count: result.movedIds.length }) });
+          }
+          return;
+        }
         const result = await archiveSessionsThenRemoveWorktree({
           sessionIds,
           removeWorktree: () => removeWorktree(target),
@@ -153,7 +185,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
       } catch (error) {
         // The remote branch could not be deleted, so the worktree was kept: say
         // that, with the reason when there is one, instead of a bare code.
-        const description = error instanceof GitOperationResultError
+        const description = retain ? worktreeKeepFailureDescription(error instanceof Error ? error : null, t) : error instanceof GitOperationResultError
           ? error.message || t('sessions.sidebar.dialogs.deleteResult.tryAgain')
           : error instanceof PendingGitOperationError || (error instanceof BoundGitNetworkOperationError && !error.message.includes(' '))
             ? t('gitView.publish.remoteNotGranted')
@@ -163,11 +195,11 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
         clearWorktreeRemoval(target.path);
       }
     })();
-  }, [archiveSessions, deleteRemoteBranch, hasBranch, onDeleted, removeWorktree, t, unarchiveSessions]);
+  }, [archiveSessions, deleteRemoteBranch, hasBranch, onDeleted, project.path, removeWorktree, t, unarchiveSessions]);
 
   const handleConfirm = () => {
     if (!worktree || isProcessing) return;
-    removeWorktreeInBackground(worktree, linkedSessions.map((session) => session.id));
+    removeWorktreeInBackground(worktree, linkedSessions.map((session) => session.id), keepSessions);
     onClose();
   };
 
@@ -238,7 +270,26 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           </p>
         ) : null}
 
-        {linkedSessions.length > 0 ? (
+        <div className="space-y-1">
+          <Button variant="chip" size="sm" aria-pressed={keepSessions} disabled={isProcessing || keepSessionPreview === null} onClick={() => setKeepSessions((value) => !value)}>
+            {t('sessions.sidebar.worktreeKeep.label')}
+          </Button>
+          <p className="typography-micro min-h-4 text-muted-foreground" role="status">
+            {keepSessionPreviewFailed ? t('sessions.sidebar.worktreeKeep.previewFailed') : keepSessionPreview === null ? t('sessions.sidebar.worktreeKeep.loading') : keepSessions ? t('sessions.sidebar.worktreeKeep.note') : t('sessions.sidebar.worktreeKeep.archiveDefault')}
+          </p>
+          {keepSessions && keepSessionPreview ? (
+            <ul className="max-h-48 overflow-auto space-y-1 typography-meta">
+              {groupSessionTreesByFolder(keepSessionPreview).flatMap((tree) => [tree.root, ...[...tree.descendants].reverse()]).map((session) => (
+                <li key={session.id} dir="auto" className="oc-ui-start-align truncate">
+                  {session.title || t('sessions.sidebar.session.untitled')}
+                  {session.parentID && keepSessionPreview.some((parent) => parent.id === session.parentID) ? <span className="block typography-micro text-muted-foreground">{t('sessions.sidebar.worktreeKeep.childOf', { title: keepSessionPreview.find((parent) => parent.id === session.parentID)?.title || t('sessions.sidebar.session.untitled') })}</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+
+        {!keepSessions && linkedSessions.length > 0 ? (
           <p className="typography-meta text-muted-foreground">
             {t('mobile.projectEdit.deleteWorktreeArchiveNote', { count: linkedSessions.length })}
           </p>

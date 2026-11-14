@@ -36,7 +36,8 @@ Search is off until `messageSearchEnabled` (instance scope, `settings.json`)
 is turned on in Settings → Chat (maintainer decision, 2026-10-01: indexing
 must cost nothing on weak hardware unless asked for). Off means no index file
 is opened, no event is looked at, no backfill runs, the route answers 503, and
-the UI shows no message search (no Cmd+P group, Cmd+F left alone).
+the UI keeps title search and reports that body indexing is off. Existing
+users and new users retain the same opt-in default. Cmd+F remains unchanged.
 
 The runtime reads the setting at startup; `persistSettings` calls
 `setEnabled` when the key changes. Switching off stops the indexer (after the
@@ -53,7 +54,9 @@ after another in the order asked.
 - `store.js` owns the file `<dataDir>/message-search.sqlite`: `sessions`,
   `messages`, and an external-content FTS5 index with the trigram tokenizer
   (any 3+ characters inside a word, any script, case-insensitive). The schema
-  version lives in `meta`; a mismatch drops and rebuilds, the file is derived.
+  version lives in `meta`. Schema 4 adds archive state transactionally to
+  schema 3, preserving indexed text and cursors; other mismatches rebuild the
+  derived file. A failed migration rolls back and can be retried.
   It also builds snippets: FTS5's `snippet()` counts trigrams and cuts a hit to
   a few characters, so the window is taken in JS on the returned hits.
 - `indexer.js` keeps the index in step with OpenCode.
@@ -61,6 +64,7 @@ after another in the order asked.
   while on, answers queries, reports status (state, file size, progress) and
   deletes the file (while on, a fresh index starts at once: "rebuild").
 - `routes.js` serves `GET /api/openchamber/message-search`,
+  `GET .../message-search/sessions` for one representative per conversation,
   `GET .../message-search/status` and `DELETE .../message-search/index`.
 
 ## Keeping in step
@@ -88,6 +92,20 @@ after another in the order asked.
   is not an empty list.
 - `session.updated` (rename, move) and `session.deleted` apply directly.
 
+Archive state combines OpenCode records with the existing archive-store
+overlay through `applyOwnedArchiveState`. The same overlay owns session lists
+and search. A number archives, explicit null restores, and absence keeps the
+upstream state. The index records whether a session's lifecycle is known and
+whether a complete lifecycle walk has succeeded. An unknown row stays out of
+active/archive scoped queries until reconciled; the UI reports an incomplete
+index. Failed walks retain prior indexed rows and established completeness.
+Lifecycle revisions protect archive, restore and deletion events from reads
+started earlier. Shutdown drains pending lifecycle overlays too.
+
+The host index consumes host OpenCode records. Isolated-space events are
+ignored before a host session or message read. The server does not redirect
+those events into host history.
+
 ## Queries
 
 Hits carry the message id; pages are cut by row id, since a reply and its
@@ -96,3 +114,23 @@ be looked up and are left out, and a query made only of them answers
 `query-too-short` rather than everything. Newest first by default; `before`
 pages by creation time with the message id breaking ties, so pages never
 repeat or skip. Snippets mark matches with U+E000 / U+E001 and are plain text.
+
+`lifecycle=active|archived|all` filters in SQL before pagination. Grouped
+queries scan the complete index for matching conversations without a candidate
+session cap. They retain the newest matching message as the navigation target
+and count distinct matching message ids. Optional totals are omitted when
+20,000 matching rows are reached; result pagination still covers the full
+matching scope.
+
+The UI uses the same body query and source navigation in the sidebar, Archive
+and command palette. Active and archived results have separate labels. Two
+Chinese characters still search titles and display the 3-character body
+requirement. Composition does not issue searches. A runtime switch retires
+requests and pagination, including an A-to-B-to-A switch. Failed pages keep
+loaded hits and expose retry; failure never becomes an empty success.
+
+### Why lifecycle filtering happens before paging
+
+Filtering only the first result page against the client's session list can
+hide older indexed conversations. Database lifecycle filtering covers every
+indexed session and preserves stable cursors across active/archive searches.

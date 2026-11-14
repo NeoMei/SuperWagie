@@ -667,12 +667,12 @@ export const createSessionGoalRuntime = ({
     }
     if (isWorkingStatus(statuses[sessionId])) return;
 
-    const childrenWorking = await activityProbe.hasWorkingChildren(sessionId, statuses);
-    if (childrenWorking === null) {
-      armTimer(sessionId, directory, recheckMs);
-      return;
-    }
-    if (childrenWorking) {
+    const backgroundJobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    const childrenWorking = backgroundJobs === undefined
+      ? await activityProbe.hasWorkingChildren(sessionId, statuses)
+      : backgroundJobs === null ? null : backgroundJobs.some((job) => job.kind !== 'shell')
+        || await activityProbe.hasWorkingDescendants(sessionId, statuses);
+    if (childrenWorking !== false) {
       armTimer(sessionId, directory, recheckMs);
       return;
     }
@@ -780,21 +780,32 @@ export const createSessionGoalRuntime = ({
 
     const assistantText = messagePartsToText(lastAssistant);
 
+    // Native images/subagents and unknown job reads hold every settlement,
+    // including Resume and error turns. Re-read after the message snapshot so
+    // work started by that turn cannot be mistaken for completed work.
+    const jobs = backgroundJobs === undefined ? undefined : await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    if (backgroundJobs !== undefined && (!jobs || jobs.some((job) => job.kind !== 'shell'))) {
+      armTimer(sessionId, directory, recheckMs);
+      return;
+    }
+
     // A command the agent left running in the background this round (tests,
     // a build) is part of the turn: OpenCode wakes the session with its result.
     // Auditing now reads "waiting for the tests" as unfinished and nudges the
     // agent over a running command. Commands from earlier rounds, such as a dev
-    // server, are not waited for. After an explicit Resume nothing is waited
-    // for, and a failed or aborted turn settles below without waiting.
+    // server, are not waited for. Explicit Resume and failed or aborted turns
+    // keep their shell exemption; other native work was checked above.
     if (goal.statusReason !== 'resumed' && !lastAssistantInfo.error) {
       const shellDirectory = asNonEmptyString(session.location?.directory) ?? directory;
-      const shells = shellDirectory ? await activityProbe.fetchRunningShells(shellDirectory) : null;
+      const shells = backgroundJobs === undefined
+        ? shellDirectory ? await activityProbe.fetchRunningShells(shellDirectory) : null
+        : jobs?.filter((job) => job.kind === 'shell');
       if (!shells) {
         armTimer(sessionId, directory, recheckMs);
         return;
       }
       const roundStartedAt = lastUserMessageCreatedAt(messages, goal.createdAt);
-      const waitingOn = shells.filter((shell) => shell.sessionID === sessionId && shell.startedAt >= roundStartedAt);
+      const waitingOn = shells.filter((shell) => (backgroundJobs !== undefined || shell.sessionID === sessionId) && shell.startedAt >= roundStartedAt);
       // Past the wait the command is most likely a server left running: the
       // turn is audited as it stands instead of stopping the goal over it.
       const stillWaiting = waitingOn.some((shell) => Date.now() - shell.startedAt < BACKGROUND_SHELL_WAIT_MS);

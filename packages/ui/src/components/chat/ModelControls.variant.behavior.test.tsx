@@ -152,6 +152,9 @@ const useConfigStore = create<ConfigState>((set, get) => ({
 
 type SelectionState = {
   savedVariant: VariantChoice;
+  pendingModels: Map<string, { providerId: string; modelId: string }>;
+  pickSessionModel: (sessionId: string, providerId: string, modelId: string) => void;
+  getSessionModelPick: (sessionId: string) => { providerId: string; modelId: string } | null;
   sessionAgentSelections: Map<string, string>;
   sessionFollowedAgents: Map<string, string>;
   sessionFollowedModels: Map<string, string>;
@@ -176,6 +179,9 @@ type SelectionState = {
 
 const useSelectionStore = create<SelectionState>((set, get) => ({
   savedVariant: undefined,
+  pendingModels: new Map(),
+  pickSessionModel: (sessionId, providerId, modelId) => set((state) => ({ pendingModels: new Map(state.pendingModels).set(sessionId, { providerId, modelId }) })),
+  getSessionModelPick: (sessionId) => get().pendingModels.get(sessionId) ?? null,
   sessionAgentSelections: new Map([[SESSION_ID, AGENT]]),
   sessionFollowedAgents: new Map(),
   sessionFollowedModels: new Map(),
@@ -437,6 +443,7 @@ describe('ModelControls effort restore', () => {
     useSessionUIStore.setState({ currentSessionId: SESSION_ID });
     useUIStore.setState({ isMobile: false, isModelSelectorOpen: false });
     useSelectionStore.setState({
+      pendingModels: new Map(),
       savedVariant: undefined,
       sessionAgentSelections: new Map([[SESSION_ID, AGENT]]),
       sessionFollowedAgents: new Map(),
@@ -1042,6 +1049,20 @@ describe('ModelControls effort restore', () => {
         await act(async () => setSessionRecord(recordWith(THIRD_MODEL_ID)));
         expect(useConfigStore.getState().currentModelId).toBe(THIRD_MODEL_ID);
         // A switch made elsewhere is not this person's pick.
+        expect(lastSelectedWrites).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('an unapplied model pick survives a late record model switch', async () => {
+      withModels();
+      useSelectionStore.getState().pickSessionModel(SESSION_ID, PROVIDER_ID, MODEL_ID);
+      setSessionRecord(recordWith(OTHER_MODEL_ID));
+      const { cleanup } = await renderModelControls();
+      try {
+        await act(async () => setSessionRecord(recordWith(THIRD_MODEL_ID)));
+        expect(useConfigStore.getState().currentModelId).toBe(MODEL_ID);
         expect(lastSelectedWrites).toEqual([]);
       } finally {
         await cleanup();

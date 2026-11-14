@@ -34,3 +34,26 @@ A file URL has an authority and an encoded path. Removing only `file://` loses U
 ### Why opening a file does not select its owning project
 
 The visible context panel follows its chat/session/draft, not the active project. Switching projects and keying the tab by the file owner can hide the result behind the unchanged chat. Opening beside that chat preserves navigation, while checking its content root prevents FilesView from routing the file to the wrong host or space. Hook-derived refs retain the visible column's live directory rather than imposing the main chat's imperative directory on every guest surface.
+
+
+## Passive results and hosted phone selections
+
+The SDK owns result-card types and parsing. `PluginPane` accepts plain cards only from the bundled workbench and creation while that frame owns the visible directory/session. It clears them when that authority changes. `GuestResultCards` draws the text and owns local desktop selection/revocation controls; an iframe receives no account key or selection credential. Selection uses the optional `RuntimeAPIs.officialSelections` capability. The web adapter reaches privileged native IPC only in the Electron local runtime; every unsupported runtime reports `mobile_selector_unsupported`. Account/project changes cancel the caller's pending operation, and runtime switches cancel the native lease. Selection-list ownership includes the runtime instance so an old response cannot restore previous titles.
+
+`mobile-official.ts` parses the separate phone projection. The ordinary mobile and VS Code guest catalogs remain unsupported. A phone mounts no guest iframe and receives no files, filesystem, Downloads, prompt, service or background grant. Hosted mobile reads selected server snapshots through `MobileOfficialPane`; Capacitor shows explicit unsupported copy. Account changes invalidate cached lists, pending responses and previews. Runtime/project keys prevent old titles appearing after navigation.
+
+### Why result metadata does not grant file access
+
+A guest can name a path in a passive card because the existing host preview owns any actual file operation. Phone selection is a separate host control whose server checks native local-owner authority, registered project containment and verified account ownership. A manifest or a viewport cannot grant that authority.
+
+## Creation approval admission
+
+`creation-approval.ts` owns the host-side inspection, claim and prompt sequence for the bundled creation panel's `/api/creation/decision` SDK request. This is an intercepted iframe request, not a public HTTP write route. `PluginPane` remains a thin frame/grant/context boundary. The optional native `RuntimeAPIs.creationApprovals` capability returns parsed inspection and receipt unions. Inspection unavailability preserves the existing ordinary confirmation path with visible coordination-unavailable copy. A stale inspection or unreadable claim/receipt blocks coordinated dispatch.
+
+The server persists an unknown receipt before returning admission. The host sends at most once for a newly admitted claim, verifies its original frame/project/session/runtime/account first, and never retries after claim or dispatch ambiguity. A retained claim only returns its receipt. Prompt admission changes the receipt to accepted; generation completion needs independent engine evidence. These receipts neither grant mobile writes nor prove notification removal.
+
+The native result is rechecked after awaited controller IO, and the host checks its original owner immediately after native admission resolves. A lease canceled during durable publication receives no dispatch permission. The durable unknown claim remains readable by its original verified owner and prevents replay across controller restart.
+
+### Why approval dispatch stays in the host
+
+Returning a dispatch token to a guest would let a reloaded or replaced frame reuse it after its source ownership ended. The host holds the original frame lifetime and sends through the existing session prompt flow once. Native account authentication supplies verified ownership and leaves the session's existing model and payer selection unchanged.

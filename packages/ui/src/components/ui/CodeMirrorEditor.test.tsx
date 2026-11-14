@@ -20,6 +20,8 @@ Object.assign(globalThis, {
 
 const { EditorView } = await import('@codemirror/view');
 const { CodeMirrorEditor } = await import('./CodeMirrorEditor');
+const { undo, redo } = await import('@codemirror/commands');
+const { EditorState } = await import('@codemirror/state');
 
 type EditorProps = React.ComponentProps<typeof CodeMirrorEditor>;
 
@@ -107,5 +109,27 @@ describe('CodeMirrorEditor reconfiguration', () => {
     await render({ highlightLines: { start: 2, end: 3 }, readOnly: true });
     expect(reconfigures).toBe(2);
     expect(view?.state.facet(EditorView.editable)).toBe(false);
+  });
+});
+
+
+describe('CodeMirrorEditor read-only history', () => {
+  test('undo and redo cannot change a read-only document, and resume after editing is enabled', async () => {
+    const changes: string[] = [];
+    await render({ onChange: (value) => changes.push(value) });
+    const current = view;
+    if (!current) throw new Error('editor did not mount');
+    await act(async () => current.dispatch({ changes: { from: 0, to: 3, insert: 'edited' } }));
+    await render({ value: 'edited\ntwo\nthree', readOnly: true, onChange: (value) => changes.push(value) });
+    expect(current.state.facet(EditorState.readOnly)).toBe(true);
+    const count = changes.length;
+    await act(async () => { expect(undo(current)).toBe(false); expect(redo(current)).toBe(false); });
+    expect(current.state.doc.toString()).toBe('edited\ntwo\nthree');
+    expect(changes.length).toBe(count);
+    await render({ value: 'edited\ntwo\nthree', readOnly: false });
+    await act(async () => { expect(undo(current)).toBe(true); });
+    expect(current.state.doc.toString()).toBe('one\ntwo\nthree');
+    await act(async () => { expect(redo(current)).toBe(true); });
+    expect(current.state.doc.toString()).toBe('edited\ntwo\nthree');
   });
 });

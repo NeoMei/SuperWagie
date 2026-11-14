@@ -3,6 +3,9 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { useMcpStore } from '@/stores/useMcpStore';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { opencodeClient } from '@/lib/opencode/client';
+import { isIntegrationDenied } from '@/lib/opencode/projection';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
@@ -11,6 +14,8 @@ import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusRowAction } from
 import { useReportWorkStatusPresence } from './presenceContext';
 import { WorkStatusTouchContext } from './touchContext';
 import { useMcpDirectory } from '@/components/mcp/useMcpDirectory';
+import { McpOAuthSignIn } from '@/components/sections/mcp/McpOAuthSignIn';
+import { useRuntimeInstance } from '@/hooks/useRuntimeInstance';
 
 type Props = {
   sessionId: string | null;
@@ -34,6 +39,32 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
   const setEnabled = useMcpStore((state) => state.setEnabled);
   const isConnected = useConfigStore((state) => state.isConnected);
   const [busyServer, setBusyServer] = React.useState<string | null>(null);
+  const isCurrentRuntime = useRuntimeInstance();
+  const signInScope = React.useMemo(() => ({ directory, sessionId, isCurrentRuntime }), [directory, sessionId, isCurrentRuntime]);
+  const scopeRef = React.useRef(signInScope);
+  scopeRef.current = signInScope;
+  useMcpConfigStore((state) => state.serversByDirectory);
+  const busyOperation = React.useRef<symbol | null>(null);
+  const authIntent = React.useRef<{ server: string; directory: string } | null>(null);
+  const [signIn, setSignIn] = React.useState<{ server: string; directory: string; sessionId: string | null; owner: () => boolean } | null>(null);
+  const liveSignIn = signIn?.directory === directory && signIn.sessionId === sessionId && signIn.owner() && mcpStatus?.[signIn.server]?.status.status === 'needs_auth' && useMcpConfigStore.getState().getMcpByName(signIn.server, directory)?.disabled !== true ? signIn : null;
+  const signInRef = React.useRef(liveSignIn);
+  signInRef.current = liveSignIn;
+  React.useEffect(() => {
+    busyOperation.current = null;
+    authIntent.current = null;
+    setBusyServer(null);
+    setSignIn(null);
+  }, [directory, sessionId, isCurrentRuntime]);
+  React.useEffect(() => useMcpConfigStore.subscribe(() => {
+    const intent = authIntent.current;
+    if (!intent) return;
+    const config = useMcpConfigStore.getState().getMcpByName(intent.server, intent.directory);
+    if (!config || config.type !== 'remote' || config.disabled || config.oauth === false) {
+      authIntent.current = null;
+      setSignIn(null);
+    }
+  }), []);
 
   // The panel must not depend on the header dropdown having been mounted or
   // opened to know its MCP servers. Silent and background-gated, so it cannot
@@ -57,35 +88,55 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
     [mcpServers],
   );
 
-  // A server waiting on authorization cannot be reconnected into working
-  // order: `connect` just repeats the attempt that produced `needs_auth`.
-  // OpenCode v2 owns the OAuth flow now, so the panel says what is missing
-  // instead of pretending it can start it.
-  const reportNeedsAuth = React.useCallback(() => {
-    toast.message(t('chat.workStatus.mcp.needsAuthHint'));
-  }, [t]);
+  const startSignIn = React.useCallback(async (name: string) => {
+    if (!directory || !isCurrentRuntime() || scopeRef.current !== signInScope) return;
+    if (signInRef.current?.server === name) return;
+    const scope = signInScope;
+    const operation = Symbol();
+    busyOperation.current = operation;
+    const current = () => scopeRef.current === scope && isCurrentRuntime() && busyOperation.current === operation;
+    setBusyServer(name);
+    try {
+      if (!await useMcpConfigStore.getState().loadMcpConfigs({ directory })) return;
+      const config = useMcpConfigStore.getState().getMcpByName(name, directory);
+      if (!current() || !config || config.type !== 'remote' || config.disabled || config.oauth === false) return;
+      const intent = { server: name, directory };
+      authIntent.current = intent;
+      const policies = await opencodeClient.getIntegrationPolicies(directory);
+      if (!current() || authIntent.current !== intent || isIntegrationDenied(policies, `mcp:${name}`)) return;
+      setSignIn((previous) => previous?.server === name && previous.directory === directory && previous.sessionId === sessionId && previous.owner()
+        ? previous : { server: name, directory, sessionId, owner: () => isCurrentRuntime() && authIntent.current === intent });
+    } catch (error) {
+      if (current()) toast.error(error instanceof Error ? error.message : t('mcpDropdown.status.unknownError'));
+    } finally {
+      if (current()) setBusyServer(null);
+    }
+  }, [directory, isCurrentRuntime, sessionId, signInScope, t]);
 
   const handleToggle = React.useCallback(async (name: string, next: boolean) => {
-    if (!directory) return;
+    if (!directory || scopeRef.current !== signInScope || !isCurrentRuntime()) return;
     // Switching on a server that is waiting for sign-in cannot connect: it only
     // repeats the attempt that produced `needs_auth`. Authorization is the real
     // action, and the dropdown already routes the same switch that way — the
     // two surfaces must not disagree about what this control does.
     const status = (mcpStatus ?? {})[name]?.status.status;
     if (next && status === 'needs_auth') {
-      reportNeedsAuth();
+      void startSignIn(name);
       return;
     }
 
+    const operation = Symbol();
+    busyOperation.current = operation;
+    const current = () => scopeRef.current === signInScope && isCurrentRuntime() && busyOperation.current === operation;
     setBusyServer(name);
     try {
       await setEnabled(name, next, directory);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('mcpDropdown.status.unknownError'));
+      if (current()) toast.error(error instanceof Error ? error.message : t('mcpDropdown.status.unknownError'));
     } finally {
-      setBusyServer((current) => (current === name ? null : current));
+      if (current()) setBusyServer(null);
     }
-  }, [directory, mcpStatus, reportNeedsAuth, setEnabled, t]);
+  }, [directory, isCurrentRuntime, mcpStatus, signInScope, startSignIn, setEnabled, t]);
 
   useReportWorkStatusPresence('mcp', mcpServers.length > 0);
 
@@ -119,7 +170,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
           <WorkStatusRowAction
             tone="warning"
             disabled={busy}
-            onClick={reportNeedsAuth}
+            onClick={() => { void startSignIn(name); }}
           >
             {t('chat.workStatus.mcp.needsAuth')}
           </WorkStatusRowAction>
@@ -133,8 +184,8 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
           </WorkStatusRowAction>
         ) : null;
         return (
+          <React.Fragment key={name}>
           <WorkStatusRow
-            key={name}
             // On the phone a switch goes on the row's end, full size, as
             // settings rows put it; the icon column is too narrow for one.
             leading={touch ? undefined : toggle}
@@ -142,6 +193,20 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
             muted={!connected}
             value={touch ? <>{stateAction}{toggle}</> : stateAction ?? undefined}
           />
+          {liveSignIn?.server === name ? (
+            <McpOAuthSignIn
+              serverName={name}
+              directory={liveSignIn.directory}
+              autoStart
+              showStartButton={false}
+              onConnected={async () => {
+                if (signInRef.current !== liveSignIn || !liveSignIn.owner() || useMcpConfigStore.getState().getMcpByName(name, liveSignIn.directory)?.disabled === true) return;
+                await setEnabled(name, true, liveSignIn.directory);
+                if (signInRef.current === liveSignIn && liveSignIn.owner()) setSignIn(null);
+              }}
+            />
+          ) : null}
+          </React.Fragment>
         );
       })}
     </WorkStatusCollapsibleSection>

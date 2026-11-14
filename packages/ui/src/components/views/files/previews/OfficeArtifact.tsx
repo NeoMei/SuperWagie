@@ -13,6 +13,8 @@ import { formatArtifactSize } from './artifactMeta';
 import type { OfficeKind, OfficeViewerMount } from './officeViewer';
 import type { ViewerHandle } from 'omni-viewer-core/viewers/types';
 import { OfficePreviewSizeError } from './officePreviewBytes';
+import { XlsxCopyPanel, type XlsxCopyAPI } from './XlsxCopyPanel';
+import type { TableQuote } from './tableSelection';
 
 const officeKind = (name: string): OfficeKind | null => {
   const extension = getFileExtension(name);
@@ -57,7 +59,9 @@ export const OfficeArtifact: React.FC<{
   readBytes: (signal: AbortSignal) => Promise<Uint8Array>;
   mountViewer?: OfficeViewerMount;
   download?: React.ReactNode;
-}> = ({ name, path, sizeBytes, revision, readBytes, mountViewer = mountDefault, download }) => {
+  copyAPI?: XlsxCopyAPI;
+  onQuote?: (quote: TableQuote) => boolean;
+}> = ({ name, path, sizeBytes, revision, readBytes, mountViewer = mountDefault, download, copyAPI, onQuote }) => {
   const { t } = useI18n();
   const kind = officeKind(name);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -65,6 +69,8 @@ export const OfficeArtifact: React.FC<{
   readBytesRef.current = readBytes;
   const [attempt, retry] = React.useReducer((value: number) => value + 1, 0);
   const [state, setState] = React.useState<{ status: 'loading' | 'ready' } | { status: 'error'; error: Error }>({ status: 'loading' });
+  const [copyOpen, setCopyOpen] = React.useState(false);
+  const [copyVisited, setCopyVisited] = React.useState(false);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -102,6 +108,7 @@ export const OfficeArtifact: React.FC<{
         items={[kind ? kind.toUpperCase() : '', formatArtifactSize(sizeBytes)]}
         actions={(
           <>
+            {copyAPI && getFileExtension(name) === 'xlsx' ? <Button type="button" size="sm" variant="chip" aria-pressed={copyOpen} onClick={() => { setCopyOpen((open) => !open); setCopyVisited(true); }}>{t('filesView.xlsx.open')}</Button> : null}
             <Button
               type="button"
               variant="outline"
@@ -119,7 +126,8 @@ export const OfficeArtifact: React.FC<{
           </>
         )}
       />
-      <div className="relative min-h-0 flex-1">
+      {copyVisited && copyAPI ? <div className={copyOpen ? 'min-h-0 flex-1' : 'hidden'}><XlsxCopyPanel key={JSON.stringify([path, revision])} path={path} name={name} api={copyAPI} onQuote={onQuote} /></div> : null}
+      <div className={copyOpen ? 'hidden' : 'relative min-h-0 flex-1'}>
         {state.status === 'loading' ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center typography-ui text-muted-foreground">{t('filesView.artifact.office.loading')}</div>
         ) : null}

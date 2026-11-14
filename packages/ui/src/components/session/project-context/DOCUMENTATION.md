@@ -25,6 +25,10 @@ drawer.
 | `knowledgeFormat.ts` | note title from the first line, entry dates |
 | `useProjectTodoSend.ts` | sending a todo to a current/new/worktree session |
 
+Knowledge drafts expose separate text replacement and captured-text update
+callbacks. Dictation uses the latter so a delayed transcript appends to its
+original runtime/project/entry draft, even after another entry becomes visible.
+
 ## Layout
 
 The section tabs are the context panel's header, with a search button at their
@@ -86,10 +90,21 @@ Todos and plan titles are one line, and pasted line breaks become spaces. The le
 only near the limit. An empty, always-open 3000-character box used to take a
 third of the panel above notes that are read far more often than written.
 
-The field clears as soon as an entry is sent and stays enabled while it saves,
-so the next entry can be typed right away; a failed add puts the text back if
-nothing new was typed. Disabling the field during the save dropped its focus,
-and an entry typed straight after the first one went nowhere.
+Drafts are held for this process by runtime, project owner, form and entry id.
+Switching sections, projects or runtimes and remounting the panel preserves
+each draft. A successful save clears only the submitted revision. Failed saves
+leave text editable, and a delayed callback cannot clear newer typing. Todos
+wait for the store's confirmed write too. Drafts have their own memory store
+with no retention eviction; they do not share chat-history cache limits.
+This contract covers web, desktop, VS Code, hosted mobile and Capacitor in the
+same running renderer. Restart and cross-device draft restoration are outside
+this store's durability contract.
+
+### Why drafts stay until confirmation
+
+Clearing optimistically leaves no editable copy when a save fails after the
+panel unmounts. Keeping the submitted revision also lets another mounted
+panel show the same draft and protects edits made while a save is pending.
 
 With no notes yet, the notes tab shows only the field: its placeholder already
 says what goes there, and a second line repeating it was noise.
@@ -415,3 +430,22 @@ not VS Code). The transcript continues the field's text instead of adding the
 entry, so a misheard word can be fixed first. It does not answer the
 `toggle_dictation` shortcut: that key belongs to the chat composer, and two
 listeners would start two recordings.
+
+## Memory review
+
+The "Review memory" action opens a project-scoped local proposal dialog beside
+existing explicit Tidy up. It shows each item's original type and verification,
+source message references, current/proposed content and reasons. Checkbox
+selection controls apply and the separate rule-export preview. Each committed
+revision has its own undo action; conflicts preserve later edits.
+
+AGENTS.md export has its own displayed target and complete before/after content.
+Cancellation writes nothing. A file-version conflict refreshes that diff and
+requires another confirmation. Review never writes a skill or exports as a side
+effect of applying memory changes.
+
+The dialog loads only after an explicit click. Read failures remain errors;
+unavailable proposal and revision sources remain visible warnings. Changing
+project/runtime or closing the dialog retires its requests and clears its data.
+The shared context panel supplies this UI to web, Electron, hosted mobile and
+Capacitor. VS Code and isolated spaces show a disabled action with a reason.

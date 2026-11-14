@@ -23,12 +23,15 @@ const hitSchema = z.object({
   sessionTitle: z.string(),
   directory: z.string(),
   snippet: z.string(),
+  archived: z.boolean().optional(),
+  matchCount: z.number().optional(),
 });
 
 const indexSchema = z.object({
   backfill: z.object({ state: z.enum(['idle', 'running', 'done']), total: z.number(), done: z.number() }),
   sessions: z.number(),
   messages: z.number(),
+  lifecycleComplete: z.boolean().optional().default(true),
 }).nullable();
 
 const responseSchema = z.discriminatedUnion('status', [
@@ -57,7 +60,16 @@ type MessageSearchRequest = {
   before?: string | null;
   limit: number;
   signal?: AbortSignal;
+  lifecycle?: MessageSearchLifecycle;
+  groupBySession?: boolean;
 };
+
+export type MessageSearchLifecycle = 'active' | 'archived' | 'all';
+
+const groupedResponseSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), hits: z.array(hitSchema.omit({ id: true }).extend({ messageId: z.string().min(1) })), next: z.string().nullable(), index: indexSchema }),
+  z.object({ status: z.literal('query-too-short') }),
+]);
 
 /** True when the query has a word the index can look up (3+ characters). */
 export const isSearchableQuery = (query: string): boolean => (
@@ -76,10 +88,19 @@ export const searchMessages = async (request: MessageSearchRequest): Promise<Mes
   if (request.includeReasoning === false) params.set('reasoning', '0');
   if (request.order) params.set('order', request.order);
   if (request.before) params.set('before', request.before);
-  const response = await runtimeFetch(`/api/openchamber/message-search?${params.toString()}`, { signal: request.signal });
+  if (request.lifecycle) params.set('lifecycle', request.lifecycle);
+  const route = request.groupBySession ? '/api/openchamber/message-search/sessions' : '/api/openchamber/message-search';
+  const response = await runtimeFetch(`${route}?${params.toString()}`, { signal: request.signal });
   if (response.status === 503 || response.status === 404) return { status: 'unavailable' };
   if (!response.ok) throw new Error(`Message search failed (${response.status})`);
-  const parsed = responseSchema.safeParse(await response.json());
+  const body: unknown = await response.json();
+  if (request.groupBySession) {
+    const parsed = groupedResponseSchema.safeParse(body);
+    if (!parsed.success) throw new Error('Conversation search answered in an unknown shape');
+    if (parsed.data.status === 'query-too-short') return parsed.data;
+    return { ...parsed.data, hits: parsed.data.hits.map(({ messageId, ...hit }) => ({ ...hit, id: messageId })) };
+  }
+  const parsed = responseSchema.safeParse(body);
   if (!parsed.success) throw new Error('Message search answered in an unknown shape');
   return parsed.data;
 };

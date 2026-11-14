@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import type { ReferencePickerConfirmFailure } from './ReferencePickerDialog';
 import type { ReferencePickerSelection } from './referencePickerItems';
 import { readTrackerItemDetail, useRepositoryReadContext } from './referenceSources';
-import { resolveComposerReferences } from './resolveComposerReferences';
+import { resolveComposerReferences, resolveReferenceLink, type ReferenceLinkTarget } from './resolveComposerReferences';
 import { readTrackerDescriptor } from '@/lib/trackers/registry';
 
 /**
@@ -41,4 +41,19 @@ export function useAttachReferences(
             }),
         };
     }, [repositoryContext, trackers, onAttach, sourceControl, t]);
+}
+
+
+/** Pasted links use the same account and reads as the explicit picker. */
+export function useReadReferenceLink(directory: string | null) {
+    const { sourceControl, trackers } = useRuntimeAPIs();
+    const context = useRepositoryReadContext(directory);
+    return React.useCallback((target: ReferenceLinkTarget) => resolveReferenceLink(target, {
+        sourceControl,
+        context: context && context !== 'missing' ? context : null,
+        readTrackerDetail: (provider, itemId) => trackers
+            ? readTrackerItemDetail(trackers, provider, itemId)
+            : Promise.reject(new Error('Trackers are not available here')),
+        trackerName: (provider) => readTrackerDescriptor(provider).name,
+    }), [context, sourceControl, trackers]);
 }

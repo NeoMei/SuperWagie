@@ -19,8 +19,8 @@ export type BackgroundShellPhase =
     /** OpenCode reported how the command ended. */
     | { kind: 'finished'; completion: ShellCompletion }
     /**
-     * The user stopped it. OpenCode reports that as an error, which is not
-     * what happened, so the row shows the stop instead (`notice`, translated).
+     * A native cancellation or observed removal confirmed the stop. OpenCode
+     * can report removal as an error; the row shows the translated notice.
      */
     | { kind: 'stopped'; endedAt: number; notice: string }
     /**

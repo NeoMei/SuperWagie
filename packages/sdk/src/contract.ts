@@ -1,3 +1,4 @@
+import type { GuestResultCardsRequest } from './result-cards.ts';
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSnapshotResultPayload } from './file-editor.ts';
@@ -235,6 +236,7 @@ export type HostReadyContext = {
     projectDialog?: true;
     deviceStorage?: true;
     statusControls?: true;
+    resultCards?: true;
     popovers?: true;
     /** The host keeps `generate` answers that arrive after their frame is gone (`onLateGenerateResult`). */
     lateGenerateResults?: true;
@@ -727,6 +729,7 @@ export type GuestShellOutputMessage = GuestCall<'shell-output', GuestShellOutput
 export type GuestShellStopMessage = GuestCall<'shell-stop', { shellId: string }>;
 
 export type GuestMessage =
+  | GuestCall<'result-cards', GuestResultCardsRequest>
   | GuestCall<'workspace-read', GuestWorkspaceQuery>
   | GuestCall<'workspace-subscribe', GuestWorkspaceSubscription>
   | GuestCall<'workspace-unsubscribe', { subscriptionId: string }>

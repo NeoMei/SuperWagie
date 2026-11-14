@@ -4,6 +4,7 @@ import { toast } from '@/components/ui';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useUIStore } from '@/stores/useUIStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const isFocused = () => {
   if (!globalThis.document) return true;
@@ -32,13 +33,19 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
   const enabled = options?.enabled ?? true;
 
   React.useEffect(() => {
-    if (!enabled || isDesktopShell() || !isWebRuntime() || !globalThis.window) {
+    if (!enabled || (!isDesktopShell() && !isWebRuntime()) || !globalThis.window) {
       return;
     }
 
     // The control stream already belongs to this runtime and reconnects with it.
     // A second EventSource consumed another HTTP/1.1 slot in every browser tab.
     return subscribeOpenchamberEvents((event) => {
+      if (event.type === 'notification-withdrawn') {
+        toast.dismiss(event.tag);
+        void getRegisteredRuntimeAPIs()?.notifications.withdraw?.({ tag: event.tag, runtimeKey: getRuntimeKey() });
+        return;
+      }
+      if (isDesktopShell()) return;
       if (event.type !== 'notification') return;
       const settings = useUIStore.getState();
       if (!settings.nativeNotificationsEnabled) return;
@@ -54,7 +61,7 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
       // Keep the identity fields so the runtime API deduplicates this delivery
       // against the same notification arriving through the main event WebSocket.
       const apis = getRegisteredRuntimeAPIs();
-      void apis?.notifications?.notifyAgentCompletion(event.payload);
+      void apis?.notifications?.notifyAgentCompletion({ ...event.payload, runtimeKey: getRuntimeKey() });
     });
   }, [enabled]);
 };

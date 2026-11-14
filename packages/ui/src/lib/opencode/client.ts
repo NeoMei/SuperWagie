@@ -560,6 +560,12 @@ type DirectoryAvailability = "available" | "missing" | "unknown"
 type PendingRequestListOptions = {
   directories?: Array<string | null | undefined>
 }
+const activityRequestOwnersSchema = z.array(z.object({ sessionID: z.string().min(1) }))
+const activityJobsSchema = z.array(z.object({
+  id: z.string().min(1), sessionID: z.string().min(1),
+  kind: z.enum(['shell', 'subagent', 'image']), status: z.enum(['running', 'completed', 'error', 'cancelled']),
+}))
+const activityInboxSchema = z.array(z.object({ id: z.string().min(1) }))
 const directoryStatsSchema = z.object({
   results: z.array(z.object({
     path: z.string(),
@@ -1066,8 +1072,8 @@ class OpencodeService {
     return projectSession(info)
   }
 
-  async getSession(id: string, directory?: string | null): Promise<Session> {
-    const info = await call("session.get", () => this.clientFor(directory).session.get({ sessionID: id }))
+  async getSession(id: string, directory?: string | null, signal?: AbortSignal): Promise<Session> {
+    const info = await call("session.get", () => this.clientFor(directory).session.get({ sessionID: id }, { signal }))
     return projectSession(info)
   }
 
@@ -1370,20 +1376,26 @@ class OpencodeService {
    * Puts a session on the requested model/agent before a prompt. v2 selects
    * both per session, not per prompt; the choice persists until switched.
    */
-  private async applySendSelection(
+  async applySendSelection(
     sessionID: string,
     selection: { model?: ModelSelection; agent?: string },
     directory: string | null | undefined,
     runtimeKey: string | undefined,
   ): Promise<void> {
-    if (selection.model) {
+    const isCurrentRuntime = captureRuntimeInstance()
+    const assertCurrent = () => {
       this.assertRuntimeUnchanged(runtimeKey)
+      if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
+    }
+    if (selection.model) {
+      assertCurrent()
       await this.switchSessionModel(sessionID, selection.model, directory)
     }
     if (selection.agent) {
-      this.assertRuntimeUnchanged(runtimeKey)
+      assertCurrent()
       await this.switchSessionAgent(sessionID, selection.agent, directory)
     }
+    assertCurrent()
   }
 
   /**
@@ -1577,8 +1589,8 @@ class OpencodeService {
    * agent is told to move on, and the result is handed back when it settles.
    * A no-op when nothing blocks.
    */
-  async backgroundSessionWork(id: string, directory?: string | null): Promise<void> {
-    await call("session.background", () => this.clientFor(directory).session.background({ sessionID: id }))
+  async backgroundSessionWork(id: string, directory?: string | null, signal?: AbortSignal): Promise<void> {
+    await call("session.background", () => this.clientFor(directory).session.background({ sessionID: id }, { signal }))
   }
 
   /** Runs a shell command inside the session transcript. Returns the shell message id. */
@@ -1655,6 +1667,26 @@ class OpencodeService {
     } catch {
       return null
     }
+  }
+
+  /** Destructive moves require fresh agent, request, inbox and background-job coverage. */
+  async readSessionActivity(sessionIds: string[], directory: string, signal: AbortSignal): Promise<'active' | 'idle'> {
+    const client = this.clientFor(directory)
+    const globalClient = isSpaceDirectory(directory) ? client : this.client
+    const ids = new Set(sessionIds)
+    const [active, permissions, forms, jobs, inboxes] = await Promise.all([
+      call('session.active', () => globalClient.session.active({ signal })).then((value) => activeSessionSnapshotSchema.parse(value)),
+      call('permission.request.list', () => client.permission.request.list(undefined, { signal })),
+      call('form.list', () => client.form.list(undefined, { signal })),
+      Promise.all(sessionIds.map((sessionID) => call('job.list', () => client.experimental.job.list({ sessionID, descendants: true, status: 'running' }, { signal })))),
+      Promise.all(sessionIds.map((sessionID) => call('session.inbox.list', () => client.session.inbox.list({ sessionID }, { signal })))),
+    ])
+    return sessionIds.some((id) => active[id])
+      || activityRequestOwnersSchema.parse(permissions.data).some((request) => ids.has(request.sessionID))
+      || activityRequestOwnersSchema.parse(forms.data).some((form) => ids.has(form.sessionID))
+      || jobs.some((list) => activityJobsSchema.parse(list).some((job) => job.status === 'running'))
+      || inboxes.some((list) => activityInboxSchema.parse(list).length > 0)
+      ? 'active' : 'idle'
   }
 
   /**
@@ -1872,7 +1904,9 @@ class OpencodeService {
     sessionID: string
     sessionDirectory?: string | null
     shells: readonly [ShellToStop, ...ShellToStop[]]
+    signal?: AbortSignal
   }): Promise<void> {
+    const isCurrent = captureRuntimeInstance()
     const note = shellCancellationNote(params.shells)
     await call("session.synthetic", () =>
       this.clientFor(params.sessionDirectory).session.synthetic({
@@ -1881,13 +1915,16 @@ class OpencodeService {
         description: note.description,
         metadata: note.metadata,
         resume: false,
-      }),
+      }, { signal: params.signal }),
     )
+    if (!isCurrent()) throw new Error("The runtime changed before the command was stopped.")
+    params.signal?.throwIfAborted()
     const removals = await Promise.allSettled(params.shells.map((shell) =>
-      call("shell.remove", () => this.clientFor(shell.shellDirectory).shell.remove({ id: shell.shellID })),
+      call("shell.remove", () => this.clientFor(shell.shellDirectory).shell.remove({ id: shell.shellID }, { signal: params.signal })),
     ))
     const failure = removals.find((result) => result.status === "rejected")
     if (failure) throw failure.reason
+    if (!isCurrent()) throw new Error("The runtime changed before the command was stopped.")
   }
 
   /**

@@ -65,7 +65,8 @@ locales to the page, rail and background action.
   back to server instance storage.
 - Workbench note sorting runs on web and Electron, including a relayed host.
   VS Code, hosted mobile and Capacitor retain their existing unsupported
-  built-in-extension behavior. Narrow web layouts use the same wrapping grid
+  iframe behavior. Hosted mobile can separately read an explicitly selected
+  project task snapshot; notes and global tasks stay outside that projection. Narrow web layouts use the same wrapping grid
   and expose long-press dragging through the handle.
 
 ## Decisions
@@ -109,3 +110,8 @@ advertises project-dialog support. It requires no prompt and preserves the
 composer draft on cancellation. The SDK request opens the same directory dialog
 as the sidebar, so the host owns folder selection, creation and activation.
 The guest cannot supply a path or write a project through this entry.
+
+
+### Why task cards keep completion separate from session activity
+
+A task's Markdown state belongs to its author. The SDK reports live session activity and OpenCode's unread watermark independently, and labels idle as a turn ending. Neither a session ending nor a phone reading a task writes its Markdown state or accepts a project delivery.

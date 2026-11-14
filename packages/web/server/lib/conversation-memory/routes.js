@@ -19,6 +19,14 @@ export const registerConversationMemoryRoutes = (app, { runtime }) => {
       return res.status(status).json({ error: code, code });
     }
   };
+  const tidyScope = z.object({ directory: directorySchema }).strict();
+  const ids = z.array(z.string().min(1).max(1040)).min(1).max(200);
+  app.post('/api/conversation-memory/tidy/preview', json, run((req) => runtime.tidy.preview(tidyScope.parse(req.body))));
+  app.get('/api/conversation-memory/tidy/revisions', run((req) => runtime.tidy.revisions(tidyScope.parse(req.query))));
+  app.post('/api/conversation-memory/tidy/apply', json, run((req) => runtime.tidy.apply(tidyScope.extend({ previewId: z.string().uuid(), selectedIds: ids }).strict().parse(req.body))));
+  app.post('/api/conversation-memory/tidy/undo', json, run((req) => runtime.tidy.undo(tidyScope.extend({ revisionIds: ids }).strict().parse(req.body))));
+  app.post('/api/conversation-memory/tidy/export/preview', json, run((req) => runtime.tidy.exportPreview(tidyScope.extend({ items: z.array(z.object({ id: z.string().min(1).max(1024), kind: z.enum(['manual', 'inference']) }).strict()).min(1).max(30) }).strict().parse(req.body))));
+  app.post('/api/conversation-memory/tidy/export/confirm', json, run((req) => runtime.tidy.exportConfirm(tidyScope.extend({ exportId: z.string().uuid(), confirmed: z.literal(true) }).strict().parse(req.body))));
   app.get('/api/conversation-memory/status', run(() => runtime.status()));
   app.put('/api/conversation-memory/settings', json, run((req) => runtime.setEnabled(z.object({ enabled: z.boolean() }).strict().parse(req.body).enabled)));
   app.get('/api/conversation-memory/entries', run((req) => runtime.listEntries(listSchema.parse(req.query))));

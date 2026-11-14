@@ -1,4 +1,4 @@
-import { connectHost, HostRequestError, type HostReadyContext, type SessionSnapshot, type SessionLifecycleEvent } from '@openchamber/sdk';
+import { connectHost, HostRequestError, type GuestResultCard, type HostReadyContext, type SessionSnapshot, type SessionLifecycleEvent } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 import {
@@ -24,11 +24,15 @@ import {
 } from './readers.ts';
 import { el, installStyles, notice } from './styles.ts';
 import { creationLocale, creationText, type CreationMessageKey } from './i18n.ts';
+import { readApprovalAnswer, type Inspection, type ApprovalReceipt } from './approvals.ts';
 
 const host = connectHost();
 const root = document.querySelector('#root');
 if (!root) throw new Error('缺少根节点');
 const hostNotice = notice();
+let approvalInspection: Inspection | null = null;
+let approvalReceipt: ApprovalReceipt | null = null;
+let approvalAvailability: 'loading' | 'ready' | 'unavailable' | 'blocked' | 'original-session' = 'loading';
 
 type Phase = 'wizard' | 'work';
 
@@ -280,6 +284,24 @@ const collectFiles = async (kind: Kind, stateRaw: string): Promise<WorkFiles> =>
 // Session and directory events can start a read while an older one is still
 // in flight. Only the newest read is allowed to paint.
 let reloadSeq = 0;
+let workOwner: { directory: string | null; sessionId: string | null; generation: number } | null = null;
+const currentOwner = () => ({ directory: state.ready?.directory ?? null, sessionId: state.ready?.session?.id ?? null });
+const ownsWork = (): boolean => {
+  const owner = currentOwner();
+  return workOwner !== null && workOwner.directory === owner.directory && workOwner.sessionId === owner.sessionId
+    && workOwner.generation === reloadSeq;
+};
+const retireWork = (): void => {
+  reloadSeq++;
+  workOwner = null;
+  state.view = null;
+  state.workFiles = null;
+  approvalInspection = null;
+  approvalReceipt = null;
+  approvalAvailability = 'loading';
+  if (state.phase === 'work') { state.phase = 'wizard'; state.kind = null; }
+  syncSentDecision(null);
+};
 
 // A new gate means the confirming decision is settled or replaced: drop the
 // sent lock so the next decision can be sent. A failed send's error notice stays.
@@ -329,9 +351,12 @@ const reload = async (): Promise<boolean> => {
   // same for a project that already holds a work.
   if (state.fresh || state.forceNew) return false;
   const seq = ++reloadSeq;
+  const owner = currentOwner();
+  const isCurrent = () => seq === reloadSeq && owner.directory === currentOwner().directory
+    && owner.sessionId === currentOwner().sessionId && !state.fresh && !state.forceNew;
   const brief = await readText('需求.md');
   const kind = kindFromBrief(brief);
-  if (seq !== reloadSeq || state.fresh || state.forceNew) return false;
+  if (!isCurrent()) return false;
   if (!kind) {
     // No work here: stay in the wizard, whatever the session events say.
     if (state.phase === 'work') {
@@ -347,16 +372,44 @@ const reload = async (): Promise<boolean> => {
     return false;
   }
   const stateRaw = await readText(STATE_FILE[kind]);
-  if (seq !== reloadSeq || state.fresh || state.forceNew) return false;
+  if (!isCurrent()) return false;
   const view = stateRaw ? await collectFiles(kind, stateRaw) : null;
-  if (seq !== reloadSeq || state.fresh || state.forceNew) return false;
+  if (!isCurrent()) return false;
   state.phase = 'work';
   state.kind = kind;
   state.workFiles = view;
+  workOwner = { ...owner, generation: seq };
   state.view = view ? readWorkView(kind, view, state.ready?.locale) : null;
+  const previousReceipt = approvalReceipt;
+  approvalInspection = null;
+  approvalReceipt = null;
+  approvalAvailability = 'loading';
   syncSentDecision(state.view);
   landWork();
   render();
+  if (stateRaw && state.view?.gate?.decisionId && state.ready?.session) {
+    const observed = { plan: view?.plan ?? null, prompts: view?.prompts ?? null, directions: view?.directions ?? null, artifact: view?.artifact ?? null, result: view?.result ?? null };
+    void host.request({ method: 'POST', path: '/api/creation/decision', body: JSON.stringify({ action: 'inspect', kind, state: stateRaw, observed }) }).then((response) => {
+      if (!isCurrent()) return;
+      const answer = readApprovalAnswer(response.body, kind);
+      if (answer.inspection && (answer.inspection.stage !== state.view?.gate?.key || answer.inspection.decisionId !== state.view.gate.decisionId)) {
+        approvalAvailability = 'blocked';
+      } else {
+        approvalInspection = answer.inspection;
+        approvalReceipt = answer.receipt;
+        approvalAvailability = answer.availability;
+      }
+      render();
+    }).catch(() => { if (isCurrent()) { approvalAvailability = 'unavailable'; render(); } });
+  } else {
+    approvalAvailability = 'unavailable'; render();
+    if (previousReceipt) void host.request({ method: 'POST', path: '/api/creation/decision', body: JSON.stringify({ action: 'read', id: previousReceipt.id }) }).then((response) => {
+      if (!isCurrent()) return;
+      const answer = readApprovalAnswer(response.body, kind);
+      approvalReceipt = answer.receipt;
+      render();
+    }).catch(() => {});
+  }
   return true;
 };
 
@@ -468,7 +521,25 @@ const startWork = async (): Promise<void> => {
   }
 };
 
+const publishResultCards = (): void => {
+  const directory = state.ready?.directory;
+  if (!directory || !state.ready?.features?.resultCards) return;
+  const view = state.phase === 'work' && ownsWork() ? state.view : null;
+  const samplePath = view?.gate?.media?.[0]?.path
+    ?? (state.kind && state.workFiles?.state ? workFilePaths(state.kind, state.workFiles.state).artifact : undefined);
+  const cards: GuestResultCard[] = [];
+  if (view?.deliveredPath) cards.push({ title: t('delivered'), path: view.deliveredPath });
+  else if (view?.gate) {
+    const card: GuestResultCard = { title: view.gate.title, version: view.gate.version, text: view.gate.excerpt.slice(0, 2000) };
+    if (samplePath) card.path = samplePath;
+    cards.push(card);
+  }
+  // Text and the existing preview controls remain usable if a host rejects a path.
+  void host.setResultCards({ directory, cards }).catch(() => {});
+};
+
 const render = (): void => {
+  publishResultCards();
   const focused = document.activeElement;
   const editing = focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement ? focused : null;
   const control = editing?.dataset.control;
@@ -508,6 +579,7 @@ const renderWork = (): HTMLElement => {
   }
   wrap.append(renderStrip(state.view));
   wrap.append(state.view.deliveredPath ? renderDelivered(state.view.deliveredPath) : renderGate(state.view));
+  if (!state.view.gate && approvalReceipt) wrap.append(el('p', 'cr-meta', t(`receipt.${approvalReceipt.status}`, { id: approvalReceipt.id.slice(0, 12) })));
   return wrap;
 };
 
@@ -780,7 +852,7 @@ const renderGate = (view: WorkView): HTMLElement => {
   const decisionId = current.decisionId ?? null;
   const sent = decisionId !== null && state.sentDecision === decisionId;
   const confirm = el('button', 'cr-primary', sent ? t('sent') : canSend ? label : t('confirmViaChat'));
-  confirm.disabled = state.busy || sent || sessionBusy;
+  confirm.disabled = state.busy || sent || sessionBusy || approvalAvailability === 'loading' || approvalAvailability === 'blocked' || approvalAvailability === 'original-session' || approvalReceipt !== null;
   confirm.addEventListener('click', () => {
     if (!canSend) {
       hostNotice.show(() => t('openSessionFirst'));
@@ -794,6 +866,10 @@ const renderGate = (view: WorkView): HTMLElement => {
   talk.addEventListener('click', () => void openChat());
   row.append(talk);
   card.append(row);
+  card.append(el('p', 'cr-meta', approvalReceipt ? t(`receipt.${approvalReceipt.status}`, { id: approvalReceipt.id.slice(0, 12) })
+    : approvalAvailability === 'loading' ? t('receipt.loading')
+      : approvalAvailability === 'unavailable' ? t('receipt.unavailable')
+        : approvalAvailability === 'blocked' ? t('receipt.stale') : approvalAvailability === 'original-session' ? t('receipt.originalSession') : t('receipt.coordinated')));
   return card;
 };
 
@@ -812,10 +888,23 @@ const failReason = (error: Error | null): string => {
 
 const sendConfirm = async (message: string | null, decisionId: string | null): Promise<void> => {
   if (!message || state.busy) return;
+  const inspection = approvalInspection;
+  const owner = currentOwner();
+  const generation = reloadSeq;
+  const isCurrent = () => generation === reloadSeq && owner.directory === currentOwner().directory && owner.sessionId === currentOwner().sessionId;
   state.busy = true;
   hostNotice.show(() => t('sent'));
   render();
   try {
+    if (inspection) {
+      const response = await host.request({ method: 'POST', path: '/api/creation/decision', body: JSON.stringify({ action: 'submit', inspection, text: message }) });
+      if (!isCurrent()) return;
+      const answer = readApprovalAnswer(response.body, inspection.kind);
+      approvalReceipt = answer.receipt;
+      approvalAvailability = answer.availability;
+      state.sentDecision = decisionId;
+      return;
+    }
     const result = await host.prompt({ text: message, send: true });
     if (result.sent !== 'sent') {
       hostNotice.show(() => failText(result.sent === 'no-model' ? t('reason.noModel') : t('reason.rejected')), 'error');
@@ -823,7 +912,10 @@ const sendConfirm = async (message: string | null, decisionId: string | null): P
     }
     state.sentDecision = decisionId;
   } catch (error) {
-    hostNotice.show(() => failText(failReason(error instanceof Error ? error : null)), 'error');
+    if (inspection && isCurrent()) {
+      state.sentDecision = decisionId;
+      hostNotice.show(() => t('receipt.unknownResponse'), 'error');
+    } else if (!inspection && isCurrent()) hostNotice.show(() => failText(failReason(error instanceof Error ? error : null)), 'error');
   } finally {
     state.busy = false;
     render();
@@ -850,24 +942,30 @@ host.onSessionLifecycle((event) => {
 host.onSession((session) => {
   const changed = lastSession === undefined || lastSession?.id !== session?.id || lastSession?.busy !== session?.busy;
   lastSession = session;
+  if (state.ready?.session?.id !== session?.id) retireWork();
   if (state.ready) state.ready = { ...state.ready, session };
   if (!changed) return;
   lastLifecycle = null;
+  render();
   void reload();
 });
 let lastDirectory: string | null | undefined;
 host.onDirectory((directory) => {
   if (directory === lastDirectory) return;
   lastDirectory = directory;
+  if (state.ready?.directory !== directory) retireWork();
   if (state.ready) state.ready = { ...state.ready, directory };
   state.fresh = false;
+  render();
   void reload();
 });
 
 host.onReady((ready) => {
   const previous = state.ready;
+  const ownerChanged = previous?.directory !== ready.directory || previous?.session?.id !== ready.session?.id;
+  if (ownerChanged) retireWork();
   state.ready = ready;
-  if (state.kind && state.workFiles) state.view = readWorkView(state.kind, state.workFiles, ready.locale);
+  if (ownsWork() && state.kind && state.workFiles) state.view = readWorkView(state.kind, state.workFiles, ready.locale);
   document.documentElement.lang = creationLocale(ready.locale);
   document.title = t('title');
   document.documentElement.dataset.surface = ready.surface;
@@ -875,7 +973,7 @@ host.onReady((ready) => {
   if (!previous || previous.directory !== ready.directory) hostNotice.clear();
   else hostNotice.refresh();
   render();
-  if (!previous || previous.directory !== ready.directory) void reload();
+  if (ownerChanged) void reload();
 });
 
 const intentFromHash = (): Kind | null => {

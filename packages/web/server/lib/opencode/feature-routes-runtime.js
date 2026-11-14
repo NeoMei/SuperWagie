@@ -6,6 +6,7 @@ import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerProductHelpRoutes } from '../product-help/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
+import { registerSessionTodosRoutes } from '../session-todos/routes.js';
 import { registerSessionWarmingRoutes } from '../session-warming/routes.js';
 import { setWarmingDuration, setWarmingEnabled } from './websearch-config.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
@@ -220,6 +221,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolvePlatformIdentity,
       resolveAuthContext,
       sessionWarmingRuntime,
+      sessionTodosRuntime,
       crypto,
       fs,
       os,
@@ -822,6 +824,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerKnowledgeLibraryRoutes(app, { runtime: knowledgeLibraryRuntime });
     registerConversationMemoryRoutes(app, { runtime: conversationMemoryRuntime });
     registerModelConfigurationRoutes(app, { runtime: modelConfigurationRuntime, bootstrapRuntime: modelBootstrapRuntime, resolveIdentity: resolvePlatformIdentity, resolveOwner: resolveAuthContext });
+    registerSessionTodosRoutes(app, { sessionTodosRuntime });
     registerSessionWarmingRoutes(app, {
       sessionWarmingRuntime,
       setGlobalWarming: setWarmingEnabled,

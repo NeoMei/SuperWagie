@@ -57,6 +57,11 @@ consuming the main composer's armed goal. Replies, deliberate dismissal,
 completed tools and location shutdown veto recovery. The send rechecks this
 authority immediately before dispatch and shares concurrent submissions.
 
+Model picks in both the main and pinned composers retain pending intent until
+a confirmed send or model write. A retry wait may apply a BYOK pick through
+`useRetryModelPick`; Auto and account tasks keep their existing send path.
+The hook changes configuration only and leaves the copper stop behavior intact.
+
 Form answers remain in bounded memory scoped by runtime, directory, session and
 form. Dock and inline card share those drafts. Runtime reset clears them, and a
 response for an older form cannot hide a newer request. Long-answer deletion
@@ -1161,3 +1166,24 @@ a distinct directory or file-URL host remains a distinct file, and a VS Code
 selection does not stand in for the whole file. This keeps a large desktop
 reference's bounded note from being accompanied by an automatically ingested
 copy of its original. Prompt-history restoration retains this identity.
+
+
+## Main composer attachment target
+
+`comment/mainComposerDraftTarget` publishes the committed main composer's
+existing inline-comment target before paint. File-table quotes call this owner
+instead of deriving a session from the global selection. Expanded BTW therefore
+uses its child or pending BTW key; collapsed BTW and a new-session draft use the
+same target the visible composer consumes. Pinned, inactive, exiting and
+form-owned composers do not publish a main target. Each publication owns its
+cleanup and captures the runtime instance. Unmount, replacement or a runtime
+round trip revokes it. A rejected quote stays selected in the table.
+
+
+## Pasted repository and tracker links
+
+Explicitly pasted issue, pull request and tracker links resolve through the current project's connected provider account. Unknown providers, disconnected trackers, missing repository read contexts and credential-bearing URLs remain text without an item request. Each paste reads at most 16 distinct supported links and leaves the remainder visible as text with a limit notice. Each read has a 15-second deadline; lookup failure retains the original URL.
+
+The editor retains the URL as its text and draws the resolved title in place. Clicking the chip opens the escaped captured context; deleting the chip or removing it in the preview removes its outgoing context. Picker and pasted references share composerReferenceKey deduplication, with explicit picker options taking precedence. Both Send and Queue wait for an in-progress paste lookup before consuming context. Repeated Enter during that wait is rejected, and editing the draft during the wait cancels the old send.
+
+The visible composer owns pending reads by runtime instance, draft identity, project, connected account, reader and provider URL matchers. The hook captures those owners together; each manager reads only from its captured scope. Switching any owner withdraws results and pending sends. A late result cannot attach to the new owner. Locale changes preserve resolved context. Web, Electron, hosted mobile and Capacitor use the existing connected server adapters. VS Code preserves ordinary text and its existing picker support limits.

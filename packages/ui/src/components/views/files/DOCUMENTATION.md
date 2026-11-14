@@ -637,3 +637,175 @@ The preview disables browser scroll anchoring while its virtualizer owns offsets
 `node --test scripts/csv-preview.browser.test.mjs` verifies the real component in
 Chrome against a 2,000-row, 300-column fixture, including its final row and a
 1,000-character cell. The check skips explicitly when Chrome is unavailable.
+
+## Preview failure ownership
+
+Built-in image, media, font, Office, binary and delimited-table components load
+on demand through `LazyFilePreview`. Its boundary belongs to the runtime,
+directory, file path and content revision. Retry recreates the rejected lazy
+component for that file. `FileMarkdownPreview` sends Markdown and Mermaid
+through the shared module importer directly, within this file-local recovery
+owner. Its failure never invokes the chat wrapper's application reload policy.
+Changing files retires the failed boundary. JSON,
+Markdown and Mermaid boundaries use the same document identity. File read
+failures retain their selected tab and offer a read retry.
+
+Office continues to use Omni's Word, Excel and PowerPoint viewers for
+DOC/DOCX, XLS/XLSX and PPT/PPTX. Its original-byte reader, 30 MiB bound,
+AbortSignal ownership, viewer disposal and live theme variables remain owned by
+`OfficeArtifact`, `officePreviewBytes` and `officeViewer`.
+
+## Table columns and quotes
+
+Table previews window columns as well as rows. The horizontal virtualizer uses
+fixed widths derived from retained data and a measured monospace character.
+Three columns on either side provide the horizontal buffer. Spacer columns
+preserve the complete scroll extent; headers and cells share that window. Data
+coordinates stay left-to-right in every UI language.
+
+Click and drag, or click then Shift-click, selects a CSV/TSV rectangle. Touch
+scroll remains native, and a touch tap selects one cell. Quote attaches the
+selected values to the existing inspectable and removable file-quote draft.
+The label contains the filename, format and original source range. CSV and TSV
+have one table and no workbook sheet identity. Values are a JSON matrix so
+spaces, empty strings, embedded newlines and literal formula text survive.
+No path, surrounding cells or complete table accompanies the quote.
+
+`delimitedText` retains logical record numbers before filtering blank records.
+An unterminated or malformed quoted record, a rectangle crossing a filtered
+blank record, or an invalid coordinate prevents quoting. Selections over 1,000
+cells or 64 KiB of serialized values show the limit and cannot be attached.
+Limits reject the complete selection; values are never shortened. Content,
+file and runtime changes retire selection. The host attaches only within its
+current runtime, project and session/draft using the existing comment store.
+Excel selection and file writes are outside this contract.
+
+## Markdown reading
+
+The headings menu observes committed headings in the current preview. It jumps
+to the element itself, so repeated and non-Latin titles need no synthesized ID.
+An empty document has an explicit empty menu; changing the document remounts
+the owner. File previews opt into passive SVG fences. The shared Markdown
+renderer leaves chat fences, standalone SVG files and Mermaid unchanged.
+
+The main ChatInput publishes its committed inline-comment draft target through
+`composer/comment/mainComposerDraftTarget`. Table quotes attach through that
+owner, including expanded BTW child and pending BTW keys. Inactive, pinned,
+exiting or form-owned composers do not publish a main target. Runtime instance
+retirement and unmount revoke the owner. A missing or mismatched target rejects
+the quote and retains its selection. Filename, format and range share one
+basename-safe label separated with middle dots, so composer inspection retains
+all three fields.
+
+## Read-only data previews
+
+`DataFileArtifact` owns ZIP directory and Notebook static text previews. It uses
+FilesView's authenticated, bounded raw-file read and the existing per-file lazy
+error boundary. File path, runtime scope and content revision key the preview;
+switching or closing aborts the read and late completions cannot publish.
+Notebook files join the non-editable preview path, including save and autosave
+guards. Office keeps Omni and its separate 30 MiB limit.
+
+ZIP input is limited to 10 MiB and 2,000 central-directory entries. Directory
+metadata is validated before JSZip receives the input. No archive member is
+inflated or written. Unsupported archive variants retain the original download.
+Notebook v4 input is limited to 5 MiB, 500 cells, 1,000 outputs and 1,000,000 text
+characters. Source, stream outputs, text/plain results and stored errors render
+as plain text. Rich outputs are omitted with a visible count. No cell executes,
+and notebook markup cannot fetch remote resources.
+
+SQLite and Parquet use `DataTableArtifact` and the approved SQL.js 1.15.2,
+hyparquet 1.32.0 and hyparquet-compressors 1.1.3 packages. Input is limited to
+20 MiB per file. Each page runs in a disposable worker; abort, file switching,
+unmount, malformed responses and the 8 second deadline terminate its CPU owner.
+There is no main-thread decoder fallback. The worker accepts bytes, a table name
+and a bounded page number, with no arbitrary SQL or external URL. Response parsing
+limits authority to the expected table, columns and bounded text rows.
+
+SQL.js uses a lazily loaded bundled WASM asset, limited to 4 MiB. Only that
+trusted app asset is fetched. The worker receives its bytes and makes no decoder
+network requests. A copied input buffer protects both normal Uint8Array and
+Buffer callers from transfer detachment. The original file has no write route.
+The preview retains one authorized snapshot while tables and pages change.
+
+SQLite enables query-only and disables trusted schema, then enumerates ordinary
+main-database tables. Views, virtual/shadow table namespaces, hidden columns and
+generated columns are excluded before a SELECT is built from quoted names.
+Unavailable virtual modules can report shadow tables as ordinary, so all names
+under a virtual table's prefix are conservatively excluded. WAL-dependent inputs
+remain unsupported because the preview cannot certify an absent sidecar. The
+picker lists at most 200 tables. Pages contain at most 100 rows and 64 physical
+columns, with no full COUNT scan. Integer values preserve bigint precision.
+
+Parquet accepts local bytes and rejects external column files. Metadata is
+limited to 1 MiB, 1,000 schema nodes, depth 8 and 1,000 row groups. Every page
+header is checked before decoding: 16 MiB per column/page, 64 MiB total declared
+and actual uncompressed page bytes, 1,000,000 values per column/page and 4,000,000
+values across page headers. The ZSTD decoder receives a fixed bounded output
+buffer. Nested values remain inside the worker and become bounded cell text.
+These are decode budgets, not a claim about total parser heap.
+
+Both table formats cap each cell at 1,000 characters plus a visible shortening
+marker, nested display at depth 4 and 100 visited nodes, and a page at 200,000
+text characters. The UI states when cells are shortened. Failed, timed-out and
+unsupported files retain the original download. CSV/TSV retain their existing
+grid and source editor paths; this preview module adds no cell-writing behavior.
+
+Web, Electron desktop, hosted mobile and Capacitor use their connected runtime's
+existing authorized raw-file route. Isolated-space file requests remain scoped
+to that space. VS Code does not mount this Files view and receives no new host
+filesystem capability.
+
+### Why notebook output stays plain text
+
+HTML and rich output can execute scripts or fetch remote content. Plain text
+preserves code, prose and recorded text results while making the passive-read
+contract checkable. Omitted rich output remains visible as a count.
+
+### Why each data page gets a disposable worker
+
+SQLite schema expressions and nested or compressed Parquet can consume CPU before
+a row cap is reached. Worker termination gives file switches and the deadline an
+enforceable CPU boundary. It also releases decoder memory between pages without
+keeping old file owners alive. The table picker and pager reuse the authorized
+file bytes while each worker receives its own copy.
+
+## Selected XLSX cells and copies
+
+Omni remains the default Office renderer for all six formats and keeps its
+30 MiB raw-input limit. A workspace XLSX on a server-backed runtime offers a
+separate selected-cell panel. Opening the panel preserves the Omni mount;
+closing it preserves applied draft edits. The panel reads the server's supported
+snapshot, selects one exact visible sheet/cell at a time, and stages only explicit
+cell changes. Saving creates a new sibling XLSX. Existing destinations and
+changed sources fail visibly with the draft retained. The original has no save
+path in this panel.
+
+Selected-cell quoting sends only the selected source value and its quoted
+sheet/address into the current main composer draft. It does not attach the
+workbook or hidden sheets. Copy edits do not silently change a source quote.
+Source/path/revision/runtime replacement retires reads and saves, so their late
+completions cannot publish feedback in another file. A dispatched server save
+may still finish after its view closes; an uncertain failure asks the user to
+check the destination before retrying.
+
+The server's supported-format and publication contract is in
+`packages/web/server/lib/fs/DOCUMENTATION.md`. The panel does not implement
+formula evaluation: dependent formulas recalculate in Excel or WPS. Chart-bearing
+workbooks are refused before editing and remain available in the Omni viewer. VS Code does not expose this capability. English and Simplified Chinese
+labels resolve at render time without resetting the staged draft.
+
+The data Worker adapter keeps the literal `new Worker(new URL(..., import.meta.url),
+{ type: 'module' })` form. Vite's asset transform depends on that constructor
+syntax; an alias can inline raw TypeScript instead of emitting a compiled Worker.
+Capability checks run before construction without replacing the recognized form.
+Source-level Worker tests do not replace final built-asset browser acceptance.
+
+### Why preview retry remounts its loader owner
+
+The keyed error boundary contains a separate loader owner, whose memoized lazy
+component sits above its own Suspense boundary. Retrying remounts that owner and
+creates a fresh lazy component. A dependency used only as a retry signal can be
+optimized out; placing the owner below Suspense can recreate it on every initial
+suspension. The real bundled-browser check blocks one preview chunk, unblocks
+it, and verifies retry recovery without navigation or loss of the composer draft.

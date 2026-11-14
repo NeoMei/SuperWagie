@@ -1,3 +1,7 @@
+import { GuestResultCards } from './GuestResultCards';
+import { runCreationApprovalRequest } from '@/lib/guests/creation-approval';
+import { subscribePlatformAccountState } from '@/lib/platformAccount';
+import type { GuestResultCardsRequest } from '@openchamber/sdk';
 import { localizeBuiltInGuest } from '@/lib/guests/built-in-copy';
 import React from 'react';
 import {
@@ -204,6 +208,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const session = useSession(currentSessionId, directory || undefined);
   const sessionStatus = useSessionStatus(currentSessionId ?? '', directory || undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const [resultCards, setResultCards] = React.useState<(GuestResultCardsRequest & { sessionId: string | null }) | null>(null);
   const [activePopover, setActivePopover] = React.useState<{ request: GuestPopoverRequest; position: GuestPopoverPosition; entry: string; directory: string; activation: GuestPopoverActivation } | null>(null);
   const activePopoverRef = React.useRef<typeof activePopover>(null);
   const popoverCloseTimerRef = React.useRef<number | null>(null);
@@ -255,6 +260,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const pageColors = usePageColors();
   const ready = React.useMemo<HostReadyContext>(() => {
     const features: NonNullable<HostReadyContext['features']> = {};
+    if (!headless && !isVSCodeRuntime() && !isMobileSurfaceRuntime() && guest?.source === 'bundled'
+      && (guest.id === 'openchamber-builtin-creation' || guest.id === 'openchamber-builtin-workbench')
+      && (surface === 'panel' || surface === 'page')) features.resultCards = true;
     if (!headless && !isVSCodeRuntime() && !isMobileSurfaceRuntime()
       && (surface === 'page' || surface === 'panel')) features.projectDialog = true;
     if (guest?.storageId && globalThis.indexedDB) features.deviceStorage = true;
@@ -315,7 +323,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     popover: popoverHost?.context ?? popover,
     features,
     };
-  }, [currentTheme, pageColors, readableColors, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
+  }, [currentTheme, pageColors, readableColors, directory, guest?.id, guest?.source, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
 
   const fileEditorEntry = surface === 'file' && fileEditor
     ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null
@@ -678,6 +686,12 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         },
         storage: (request) => guestStorageOperation(requestingGuestId, request,
           installation?.storageId ? { runtimeKey, storageId: installation.storageId, authorize: ownsFrame } : undefined),
+        setResultCards: (request) => {
+          if (!ownsFrame() || !readyRef.current.features?.resultCards) throw new HostRequestError('UNSUPPORTED', 'Result cards are unavailable.');
+          if (request.directory !== readyRef.current.directory) throw new HostRequestError('NO_DIRECTORY', 'The result belongs to another project.');
+          const next = { ...request, sessionId: readyRef.current.session?.id ?? null };
+          setResultCards((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+        },
         setStatusControls: (controls) => {
           if (surface !== 'status' || !onStatusControlsRef.current) throw new HostRequestError('UNSUPPORTED', 'This frame has no status header.');
           statusControls.set(controls);
@@ -865,6 +879,31 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
               message: 'This extension is disabled in Settings → Extensions.',
             };
           }
+          if (request.path === '/api/creation/decision' && request.method === 'POST') {
+            const directory = directoryRef.current || null;
+            const sessionId = sessionIdRef.current;
+            let accountRetired = false;
+            const unsubscribeAccount = subscribePlatformAccountState((_state, key) => { if (key === runtimeKey) accountRetired = true; });
+            const assertCurrent = () => {
+              const candidate = currentGuest();
+              if (accountRetired || frameDocumentRef.current !== requestDocument || !ownsFrame() || !candidate || candidate.id !== 'openchamber-builtin-creation' || candidate.source !== 'bundled'
+                || !guestMay(candidate, 'prompt') || !guestMay(candidate, 'files') || !guestMay(candidate, 'sessions')
+                || directoryRef.current !== directory || sessionIdRef.current !== sessionId || isMobileSurfaceRuntime() || isVSCodeRuntime()
+                || !directory || spaceIdOfDirectory(directory)) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
+            };
+            try {
+              const result = await runCreationApprovalRequest({
+                request, api: getRegisteredRuntimeAPIs()?.creationApprovals, directory, sessionId, assertCurrent,
+                send: async (text) => {
+                  const prompted = await promptGuestSession({ request: { text, send: true }, sessionId, directory, busy: sessionBusyRef.current,
+                    compose: (value, mode) => useInputStore.getState().setPendingInputText(value, mode), t: translateRef.current });
+                  if (!prompted.ok) throw new Error(prompted.message);
+                  return prompted.result;
+                },
+              });
+              return { ok: true, result };
+            } finally { unsubscribeAccount(); }
+          }
           const hosted = await fetchHostLinearIssueGet(guestAuthRef.current, request);
           if (hosted !== undefined) {
             if (!hosted) {
@@ -1045,6 +1084,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   // A project switch retires header callbacks, not the still-mounted frame's
   // workspace observers or unrelated in-flight requests.
   React.useLayoutEffect(() => { statusControlsRef.current?.retire(); }, [statusContextKey]);
+  React.useLayoutEffect(() => { setResultCards(null); }, [frameKey, directory, currentSessionId]);
 
   React.useEffect(() => {
     if (backgroundAction && (frameStatus === 'error' || !guestEnabled)) {
@@ -1113,6 +1153,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
   return (
     <>
+      {resultCards && resultCards.directory === directory && resultCards.sessionId === currentSessionId && resultCards.cards.length > 0 ? (
+        <GuestResultCards request={resultCards} guestId={guestId} sessionId={currentSessionId} />
+      ) : null}
       <iframe
       ref={iframeRef}
       key={frameKey}

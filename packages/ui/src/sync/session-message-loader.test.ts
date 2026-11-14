@@ -5,6 +5,7 @@ import type { Message, Part, Session, UserMessage } from "@/lib/opencode/model"
 import { ChildStoreManager } from "./child-store"
 import { SessionMessageLoader, type SessionMessagePageSource } from "./session-message-loader"
 import { olderMessagesCursor } from "@/lib/opencode/messageCursor"
+import { createRuntimeUrlAuthFixture } from "@/lib/runtime-url-auth.fixture"
 import {
   createFirstVisibleSessionPerformanceTracker,
   startSessionLoadPerformanceEvent,
@@ -64,6 +65,108 @@ const createLoader = (
 }
 
 describe("SessionMessageLoader", () => {
+  test("does not fetch each new live step but repairs completion and invalidated history", async () => {
+    let calls = 0
+    const target = { directory: "/repo", sessionID: "session-live" }
+    const initial = createRecord(target.sessionID)
+    const { childStores, loader } = createLoader(async () => { calls += 1; return response([initial]) })
+    try {
+      expect(loader.coversHistory(target)).toBe(false)
+      await loader.ensure(target)
+      expect(loader.coversHistory(target)).toBe(true)
+      expect(loader.coversHistory({ ...target, directory: "/other" })).toBe(false)
+      const store = childStores.ensureChild(target.directory, { bootstrap: false })
+      const running = createRecord(target.sessionID, "live-step", 2, "assistant").info
+      if (running.role !== "assistant") throw new Error("Expected assistant fixture")
+      store.setState({ message: { ...store.getState().message, [target.sessionID]: [initial.info, running] }, session_status: { [target.sessionID]: { type: "busy" } } })
+      await loader.ensure(target)
+      await loader.ensure(target)
+      expect(calls).toBe(1)
+      store.setState({ message: { ...store.getState().message, [target.sessionID]: [initial.info, { ...running, time: { created: 2, completed: 3 } }] } })
+      await loader.ensure(target)
+      expect(calls).toBe(2)
+      loader.invalidateSession(target)
+      expect(loader.coversHistory(target)).toBe(false)
+      await loader.ensure(target)
+      expect(calls).toBe(3)
+    } finally {
+      loader.dispose()
+      childStores.disposeAll()
+    }
+  })
+
+  test("event-only cache is renderable without becoming server-read coverage", async () => {
+    let calls = 0;
+    const target = { directory: "/review-event-cache", sessionID: "review-event-cache" };
+    const user = createRecord(target.sessionID, "user", 20);
+    const { childStores, loader } = createLoader(async () => { calls += 1; return response([user]); });
+    const store = childStores.ensureChild(target.directory, { bootstrap: false });
+    try {
+      store.setState({ message: { [target.sessionID]: [user.info] }, part: {} });
+      await loader.ensure(target, { reason: "prefetch" });
+      expect(calls).toBe(0);
+      expect(loader.coversHistory(target)).toBe(false);
+      const assistant = createRecord(target.sessionID, "current-unknown", 21, "assistant").info;
+      store.setState({ message: { [target.sessionID]: [user.info, assistant] }, session_status: { [target.sessionID]: { type: "busy" } } });
+      await loader.ensure(target, { reason: "prefetch" });
+      expect(calls).toBe(1);
+      expect(loader.coversHistory(target)).toBe(true);
+    } finally { loader.dispose(); childStores.disposeAll(); }
+  });
+
+  test("covered history does not hide an older missing assistant before a later user", async () => {
+    let calls = 0;
+    const target = { directory: "/review-history-gap", sessionID: "review-history-gap" };
+    const user = createRecord(target.sessionID, "user-new", 20);
+    const old = createRecord(target.sessionID, "assistant-old", 10, "assistant");
+    const { childStores, loader } = createLoader(async () => { calls += 1; return response(calls > 1 ? [old, user] : [user]); });
+    try {
+      await loader.ensure(target, { reason: "prefetch" });
+      const store = childStores.ensureChild(target.directory, { bootstrap: false });
+      store.setState({ message: { [target.sessionID]: [old.info, user.info] }, part: {}, session_status: { [target.sessionID]: { type: "busy" } } });
+      await loader.ensure(target, { reason: "prefetch" });
+      expect(calls).toBe(2);
+      expect(store.getState().part[old.info.id]).toEqual(old.parts);
+    } finally { loader.dispose(); childStores.disposeAll(); }
+  });
+
+  test("coverage is revoked by a stream gap and a replaced directory owner", async () => {
+    const target = { directory: "/review-scope", sessionID: "review-scope" };
+    const user = createRecord(target.sessionID);
+    const { childStores, loader } = createLoader(async () => response([user]));
+    try {
+      await loader.ensure(target);
+      expect(loader.coversHistory(target)).toBe(true);
+      expect(loader.coversHistory({ ...target, sessionID: "another-session" })).toBe(false);
+      loader.markHistoryStale();
+      expect(loader.coversHistory(target)).toBe(false);
+      await loader.refreshTail(target, 30);
+      expect(loader.coversHistory(target)).toBe(true);
+      expect(childStores.disposeDirectory(target.directory)).toBe(true);
+      childStores.ensureChild(target.directory, { bootstrap: false });
+      expect(loader.coversHistory(target)).toBe(false);
+    } finally { loader.dispose(); childStores.disposeAll(); }
+  });
+
+  test("a runtime round trip retires old server-history coverage", async () => {
+    const runtime = createRuntimeUrlAuthFixture(['http://history-a.test', 'http://history-b.test']);
+    runtime.switchEndpoint({ apiBaseUrl: 'http://history-a.test', runtimeKey: 'history-a' });
+    const target = { directory: "/review-runtime", sessionID: "review-runtime" };
+    const { childStores, loader } = createLoader(async () => response([createRecord(target.sessionID)]));
+    try {
+      await loader.ensure(target);
+      expect(loader.coversHistory(target)).toBe(true);
+      runtime.switchEndpoint({ apiBaseUrl: 'http://history-b.test', runtimeKey: 'history-b' });
+      expect(loader.coversHistory(target)).toBe(false);
+      runtime.switchEndpoint({ apiBaseUrl: 'http://history-a.test', runtimeKey: 'history-a' });
+      expect(loader.coversHistory(target)).toBe(false);
+      await loader.ensure(target, { force: true });
+      expect(loader.coversHistory(target)).toBe(true);
+      loader.configure({ sdk: { getSessionMessages: async () => response([]) }, runtimeKey: 'history-b' });
+      expect(loader.coversHistory(target)).toBe(false);
+    } finally { loader.dispose(); childStores.disposeAll(); await runtime.restore(); }
+  });
+
   test("opens a confirmed new session without fetching history", async () => {
     let calls = 0
     const { childStores, loader } = createLoader(async () => {
@@ -73,6 +176,7 @@ describe("SessionMessageLoader", () => {
     const target = { directory: "/created-repo", sessionID: "session-created" }
 
     loader.initializeCreatedSession(target)
+    expect(loader.coversHistory(target)).toBe(true)
     await loader.ensure(target, { reason: "navigation" })
     await loader.ensure(target, { reason: "reactive" })
 

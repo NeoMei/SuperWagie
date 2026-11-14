@@ -17,7 +17,7 @@
 - `disabledGuests` persists the user's decision independently of code paths and versions. Provider credentials and extension storage stay in the instance data directory. Disable stops services and API access while retaining data and credentials.
 - A built-in may take a service role (`provides: ["browser"]` or `["source-control"]`) under the same rules as a user install: the same manifest contribution, the same host-derived provider id (`ext-<id>`, so the id must be at most 28 characters, which leaves eight after the `openchamber-builtin-` prefix), the same outbound proxy and host-owned accounts, and Disable withdraws the provider while keeping its accounts. Built-in status grants nothing beyond what the role grants any extension. A Git host the app should own outright (device flow, uploads, review threads, creating changes by push) belongs in core as a provider module instead (`packages/web/server/lib/source-control/DOCUMENTATION.md`).
 - Settings puts enabled built-in token/OAuth cards inside Built-in integrations. Other extension accounts stay in their existing section.
-- Current renderer support remains web and Electron, direct or relay. VS Code and mobile keep the existing explicit unsupported behavior. Migrate an existing core feature only after deciding its behavior on every surface where it already exists.
+- Current iframe renderer support remains web and Electron, direct or relay. VS Code and mobile keep the existing explicit unsupported behavior. Hosted mobile has a separate account-bound read-only projection of explicitly selected official material, described in `server/lib/guests/DOCUMENTATION.md`; it loads no extension code or ordinary grants. Migrate an existing core feature only after deciding its behavior on every surface where it already exists.
 
 ## Current built-ins
 
@@ -57,3 +57,12 @@ stable; user content is never translated by the interface.
 3. Add source type-check/lint coverage to the root checks when introducing executable package source. Run the build command in the README and the focused build/catalog/route tests.
 4. Check Enable/Disable, retained data, automatic grants, and account placement. A newly requested capability should appear in the server's granted set without an approval dialog.
 5. Verify the web tarball includes the registry and built files. Native services also need the unpacked Electron resource path.
+
+
+## Passive result consumers
+
+The workbench displays SDK session activity, pending reply, unread state and current live tool name. A missing status/tool source is unknown. Selecting one project task publishes its plain result card to the host; global tasks and device-local notes do not enter phone selection.
+
+Creation retires its work view and cards synchronously when the directory or session owner changes. A nonempty publication requires source data accepted for that owner and the current load generation, so delayed or failed reads cannot attach the previous work to a new project. Creation publishes the current sample or delivered artifact through `setResultCards` when advertised, retaining its existing text and preview controls for older hosts or refused cards. The host owns phone selection; the guest cannot request a grant, approve a sample through a phone, mark project acceptance, generate a new result or call an account service through the passive card.
+
+Existing creation approval buttons first inspect `/api/creation/decision` through the SDK host bridge. Supported native local account sessions receive a source-bound inspection and a durable receipt. Submit goes back through that host bridge, which owns the claim and the single existing prompt send. The panel disables a retained decision and displays accepted or unknown receipts separately from generation completion. Reopening rereads the receipt. A stale sample blocks confirmation. Browser, remote-runtime, unavailable-account and older-host connections retain the existing prompt action with visible coordination-unavailable copy. Those actions carry no cross-client guarantee. Phone result cards remain passive.

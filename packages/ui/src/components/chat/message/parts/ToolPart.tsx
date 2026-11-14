@@ -14,8 +14,9 @@ import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionBlockingRequests, useSessionDirectory, useSessionMessages } from '@/sync/sync-context';
-import { useRunningShell } from '@/sync/background-shells';
-import { findShellCancellation, findShellCompletion, readBackgroundShellID } from '@/lib/opencode/background-shell';
+import { useBackgroundShellsStore, useRunningShell } from '@/sync/background-shells';
+import { stopForegroundShell, useForegroundShellStopping } from './foregroundShellStop';
+import { findShellCompletion, readBackgroundShellID, readRunningShellID } from '@/lib/opencode/background-shell';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { State } from '@/sync/types';
 import { useUIStore } from '@/stores/useUIStore';
@@ -47,8 +48,10 @@ import { useDefaultDiffViewMode } from '../useDefaultDiffViewMode';
 import { MinDurationShineText } from './MinDurationShineText';
 import { getToolIcon } from './toolPresentation';
 import { GuestToolTable } from './GuestToolTable';
+import { GuestToolCard } from './GuestToolCard';
 import {
     guestToolTableRows,
+    resolveGuestToolCard,
     guestToolHeaderReadsOutput,
     renderGuestToolHeader,
     useGuestToolPresentation,
@@ -784,6 +787,11 @@ const ToolScrollableTextOutput: React.FC<{
                 <SimpleMarkdownRenderer content={renderedOutput} variant="tool" onShowPopup={onShowPopup} />
             </div>
         );
+    }
+
+    if (forcedMode === 'card' && presentation && jsonResult.isJson) {
+        const result = resolveGuestToolCard(presentation, jsonResult.data);
+        if (result) return <GuestToolCard result={result} />;
     }
 
     if (forcedMode === 'table' && presentation?.columns?.length) {
@@ -2137,6 +2145,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 onClick={(event) => { event.stopPropagation(); header.stop?.onStop(); }}
                                 className="-my-0.5 flex-shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
                                 aria-label={header.stop.ariaLabel}
+                                title={header.stop.ariaLabel}
                                 disabled={header.stop.disabled}
                             >
                                 <Icon name="stop" className="size-3" />
@@ -2245,22 +2254,25 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
     const { t } = useI18n();
     const directory = useEffectiveDirectory();
     const running = useRunningShell(shellID);
+    const ended = useBackgroundShellsStore(React.useCallback((state) => state.ended.get(shellID), [shellID]));
     const messages = useSessionMessages(props.part.sessionID, directory);
     const completion = React.useMemo(() => findShellCompletion(messages, shellID), [messages, shellID]);
-    const cancellation = React.useMemo(() => findShellCancellation(messages, shellID), [messages, shellID]);
     const isRunning = !completion && running !== undefined;
     const liveOutput = useBackgroundShellOutput(shellID, running?.directory, isRunning && props.isExpanded);
     const [stopping, setStopping] = React.useState(false);
+    const stoppedFromForeground = useForegroundShellStopping(shellID);
 
-    // A stop the user asked for wins over the error OpenCode reports for it,
-    // but not over a command that is somehow still running.
+    // A request note can precede a failed removal. Only a native cancellation
+    // or an observed stop confirms it; a normal completion keeps its result.
     const phase = React.useMemo((): BackgroundShellPhase => {
         if (isRunning) return { kind: 'running', output: liveOutput };
-        if (cancellation) {
-            return { kind: 'stopped', endedAt: completion?.endedAt ?? cancellation.stoppedAt, notice: t('chat.toolPart.background.stoppedNotice') };
+        const stoppedAt = completion?.state === 'cancelled' ? completion.endedAt
+            : ended?.status === 'stopped' && (!completion || completion.state === 'error') ? ended.endedAt : undefined;
+        if (stoppedAt !== undefined) {
+            return { kind: 'stopped', endedAt: stoppedAt, notice: t('chat.toolPart.background.stoppedNotice') };
         }
         return completion ? { kind: 'finished', completion } : { kind: 'unknown' };
-    }, [cancellation, completion, isRunning, liveOutput, t]);
+    }, [completion, ended, isRunning, liveOutput, t]);
     const part = React.useMemo(() => toBackgroundShellPart(props.part, phase), [phase, props.part]);
 
     const stop = React.useCallback(() => {
@@ -2283,13 +2295,52 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
             header={{
                 status: phase.kind === 'stopped' ? 'stopped'
                     : phase.kind === 'unknown' ? 'unknown'
-                        : stopping && isRunning ? 'stopping'
+                        : (stopping || stoppedFromForeground) && isRunning ? 'stopping'
                             : part.state.status === 'error' ? 'failed' : part.state.status,
                 durationUnknown: phase.kind === 'unknown',
-                stop: isRunning ? { onStop: stop, ariaLabel: t('chat.toolPart.background.stop'), disabled: stopping } : undefined,
+                stop: isRunning ? { onStop: stop, ariaLabel: t('chat.toolPart.background.stop'), disabled: stopping || stoppedFromForeground } : undefined,
             }}
         />
     );
+};
+
+/**
+ * A shell call the turn waits for. OpenCode reports only the command's id
+ * while it runs, so the expanded row reads the output from the shell service,
+ * as a background row does, until the call settles with its final output.
+ */
+const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
+    const { t } = useI18n();
+    const directory = useEffectiveDirectory();
+    const shellID = readRunningShellID(props.part);
+    const running = useRunningShell(shellID);
+    const stopping = useForegroundShellStopping(shellID);
+    const liveOutput = useBackgroundShellOutput(shellID ?? '', running?.directory, shellID !== undefined && props.isExpanded);
+    const part = React.useMemo((): ToolPartType => {
+        const { state } = props.part;
+        if (!liveOutput || state.status !== 'running') return props.part;
+        return { ...props.part, state: { ...state, metadata: { ...state.metadata, output: liveOutput } } };
+    }, [liveOutput, props.part]);
+
+    // Stopped through the background (see `foregroundShellStop.ts`). The
+    // index's `background` flag is not checked: a list read sets it for a
+    // command this call may still wait for.
+    const stop = React.useCallback(() => {
+        if (!running) return;
+        stopForegroundShell({
+            sessionID: props.part.sessionID,
+            sessionDirectory: directory,
+            shell: { shellID: running.id, shellDirectory: running.directory, command: running.command },
+        }).catch(() => {
+            toast.error(t('chat.toolPart.background.stopFailed'));
+        });
+    }, [directory, props.part.sessionID, running, t]);
+
+    const header: ToolRowHeader | undefined = running && !stopping
+        ? { stop: { onStop: stop, ariaLabel: t('chat.toolPart.foreground.stop') } }
+        : undefined;
+
+    return <ToolPartContent {...props} part={part} header={header} />;
 };
 
 /**
@@ -2402,7 +2453,9 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
                 ? <BackgroundShellToolPartContent {...props} shellID={backgroundShellID} />
                 : isSubagentTool(toolName)
                     ? <SubagentToolPartContent {...props} />
-                    : <ToolPartContent {...props} />}
+                    : isShellTool(toolName)
+                        ? <ShellToolPartContent {...props} />
+                        : <ToolPartContent {...props} />}
         </ToolPartErrorBoundary>
     );
 };

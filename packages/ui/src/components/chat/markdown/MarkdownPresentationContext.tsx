@@ -24,6 +24,7 @@ export interface MarkdownPresentation {
   theme: Theme;
   mermaidControls: MermaidControls;
   allowMermaidWheelEvents?: boolean;
+  passiveSvg?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
   onExportCode?: (source: string, language: string) => void;
   confirmFile: (source: string, inputKind?: FileReferenceSource) => Promise<string | null>;

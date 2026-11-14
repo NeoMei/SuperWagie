@@ -378,6 +378,8 @@ export const useKeyboardShortcuts = () => {
     const next = state.favoriteModels[(index + delta + state.favoriteModels.length) % state.favoriteModels.length];
     config.setProvider(next.providerID);
     config.setModel(next.modelID);
+    const pickedSessionId = useSessionUIStore.getState().currentSessionId;
+    if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, next.providerID, next.modelID);
     state.addRecentModel(next.providerID, next.modelID);
     state.setLastSelectedModel(next.providerID, next.modelID);
   }

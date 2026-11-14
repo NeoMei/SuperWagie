@@ -261,6 +261,7 @@ export interface MarkdownContentProps {
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControls;
   allowMermaidWheelEvents?: boolean;
+  passiveSvg?: boolean;
   purpose?: 'copy' | 'image';
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
@@ -286,6 +287,7 @@ export function MarkdownContent({
   onShowPopup,
   mermaidControls = defaultMermaidControls,
   allowMermaidWheelEvents,
+  passiveSvg = false,
   purpose,
   preparedHighlights,
   onExportCode,
@@ -388,13 +390,14 @@ export function MarkdownContent({
     theme,
     mermaidControls,
     allowMermaidWheelEvents,
+    passiveSvg,
     onShowPopup,
     onExportCode,
     confirmFile,
     code,
   }), [
     directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, disableLinkSafety, theme,
-    mermaidControls, allowMermaidWheelEvents, onShowPopup, onExportCode, confirmFile, code,
+    mermaidControls, allowMermaidWheelEvents, passiveSvg, onShowPopup, onExportCode, confirmFile, code,
   ]);
 
   let body = (

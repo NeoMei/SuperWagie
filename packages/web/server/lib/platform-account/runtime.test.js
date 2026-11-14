@@ -784,3 +784,18 @@ describe('daily activity collector lifecycle', () => {
     } finally { await denied.dispose(); }
   });
 });
+
+it('identity-only account scope verifies memberships without financial or model projection', async () => {
+  const f = await fixture();
+  await f.runtime.callback(await f.begin(identity));
+  f.failCredits();
+  const initial = await f.runtime.identityAccounts(identity);
+  expect(initial).toEqual({ accounts: [{ id: 'personal-a', name: 'Alice' }, { id: 'team-a', name: 'Team A' }], accountId: 'personal-a' });
+  expect(f.runtime.actor(identity).billingAccountId).toBe('personal-a');
+  const selected = await f.runtime.identityAccounts(identity, 'team-a');
+  expect(selected.accountId).toBe('team-a');
+  expect(f.runtime.actor(identity).billingAccountId).toBe('team-a');
+  await expect(f.runtime.identityAccounts(identity, 'foreign-account')).rejects.toMatchObject({ code: 'platform_account_forbidden' });
+  expect(f.runtime.actor(identity).billingAccountId).toBe('team-a');
+  expect((await f.runtime.identitySession(secondIdentity)).status).toBe('signed-out');
+});

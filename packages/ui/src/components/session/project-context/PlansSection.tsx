@@ -258,6 +258,8 @@ export const PlansSection: React.FC<{
         }}
       />
       <KnowledgeComposer
+        projectRef={projectRef}
+        form="plans"
         placeholder={t('rightSidebar.contextNotesTodo.plans.newPlaceholder')}
         addLabel={t('rightSidebar.contextNotesTodo.plans.create')}
         maxLength={PROJECT_PLAN_TITLE_MAX_LENGTH}

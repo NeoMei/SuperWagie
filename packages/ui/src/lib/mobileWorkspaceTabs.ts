@@ -5,7 +5,7 @@
  * release shows up for everyone, in its default place within a saved order.
  * An id no longer listed (the old `mcp` tab, now a Status section) drops out.
  */
-const MOBILE_WORKSPACE_TABS = ['status', 'changes', 'files', 'terminal', 'notes'] as const;
+const MOBILE_WORKSPACE_TABS = ['status', 'changes', 'files', 'terminal', 'notes', 'official'] as const;
 
 export type MobileWorkspaceTab = (typeof MOBILE_WORKSPACE_TABS)[number];
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { RepositoryDiscussionReference, RepositoryItemRef, RepositoryReferenceDetail, SourceControlAPI, SourceControlReadContext } from '@/lib/api/types';
 
-import { resolveComposerReferences } from './resolveComposerReferences';
+import { resolveComposerReferences, resolveReferenceLink } from './resolveComposerReferences';
 
 const context: SourceControlReadContext = {
     directory: '/repo', provider: 'github', instance: 'github.com', repositoryId: 'repo-one', accountId: 'acc', bindingRevision: 1, primaryRemote: 'origin',
@@ -88,5 +88,47 @@ describe('resolveComposerReferences', () => {
         });
         expect(result.references).toEqual([]);
         expect(result.failures).toEqual([{ key: 'github:acme/app~5', label: '#5', error: 'Discussion not found' }]);
+    });
+});
+
+describe('resolveReferenceLink', () => {
+    const unexpected = () => Promise.reject(new Error('not read for an issue'));
+    const issueLink = { source: 'repository', provider: 'github', instance: 'github.com', owner: 'other', repo: 'lib', kind: 'issue', number: 9 } as const;
+
+    test('reads a pasted issue with its explicit project and the current connected account context', async () => {
+        const reads: Array<{ context: SourceControlReadContext; project: { owner: string; name: string } | undefined }> = [];
+        const sourceControl: Pick<SourceControlAPI, 'issueGet' | 'issueComments' | 'changeRequestContext' | 'referenceDetail'> = {
+            issueGet: async (through, number, project) => {
+                reads.push({ context: through, project });
+                return {
+                    provider: 'github', instance: 'github.com', id: 'I_9', number, title: 'Crash', url: 'https://github.com/other/lib/issues/9', state: 'open',
+                    project: { provider: 'github', instance: 'github.com', id: 'other/lib', owner: 'other', name: 'lib', url: 'https://github.com/other/lib' },
+                    author: { provider: 'github', instance: 'github.com', id: '1', username: 'reporter' },
+                };
+            },
+            issueComments: async (through, _number, project) => { reads.push({ context: through, project }); return []; },
+            changeRequestContext: unexpected,
+            referenceDetail: unexpected,
+        };
+        const reference = await resolveReferenceLink(issueLink, { sourceControl, context, readTrackerDetail: unexpected, trackerName: () => '' });
+        expect(reads).toEqual([{ context, project: { owner: 'other', name: 'lib' } }, { context, project: { owner: 'other', name: 'lib' } }]);
+        expect(reads[0]?.context).toBe(context);
+        expect(reference).toMatchObject({ kind: 'repository-issue', number: 9, title: 'Crash', author: { login: 'reporter' } });
+    });
+
+    test('a rejected account-bound read cannot retry with invented context properties', async () => {
+        let reads = 0;
+        const deps = {
+            sourceControl: { issueGet: async () => { reads += 1; throw new Error('Not in this repository network'); },
+                issueComments: async () => [], changeRequestContext: unexpected, referenceDetail: unexpected },
+            context, readTrackerDetail: unexpected, trackerName: () => '',
+        };
+        await expect(resolveReferenceLink(issueLink, deps)).rejects.toThrow('Not in this repository network');
+        expect(reads).toBe(1);
+    });
+
+    test('reads nothing for a link on another host than the project', async () => {
+        const deps = { sourceControl: { issueGet: unexpected, issueComments: unexpected, changeRequestContext: unexpected, referenceDetail: unexpected }, context, readTrackerDetail: unexpected, trackerName: () => '' };
+        await expect(resolveReferenceLink({ ...issueLink, provider: 'gitlab', instance: 'gitlab.com' }, deps)).rejects.toThrow('The repository is not available here');
     });
 });

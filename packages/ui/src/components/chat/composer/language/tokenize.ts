@@ -62,6 +62,8 @@ export interface ComposerLanguageContext {
     sessionLinkChips?: ReadonlyMap<string, { label: string; title: string; iconHref: string }>;
     /** This instance's web addresses, which a web session link must point at (`parseSessionLink`). */
     sessionLinkOrigins?: readonly string[];
+    /** Explicitly pasted repository or tracker links resolved for this draft. */
+    referenceLinkChips?: ReadonlyMap<string, { label: string; title: string; iconHref: string; open?: () => void }>;
 }
 
 /** Mention ranges alone — the composer also needs these to resolve references. */

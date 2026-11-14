@@ -151,6 +151,8 @@ const getSessionSignature = (session: Session): string => {
     // A view changes no `updated`; without these it would read as no change.
     session.time?.idle ?? 0,
     session.time?.viewed ?? 0,
+    session.cost ?? 0,
+    JSON.stringify(session.tokens ?? null),
     JSON.stringify(session.metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
   ].join(':');
