@@ -1008,6 +1008,7 @@ describe('live Activity with the real message body', () => {
         // The command is visible in a bounded priority preview while it runs.
         expect(container.querySelector('[data-live-command-preview="true"]')).not.toBeNull();
         expect(container.querySelector('[data-live-command-preview="true"]')?.textContent).toContain('running test suite');
+        expect(container.textContent).not.toContain('Checking');
         await act(async () => header?.click());
         expect(header?.textContent).not.toContain('npm test');
         expect(container.textContent).toContain('npm test');
@@ -1022,6 +1023,28 @@ describe('live Activity with the real message body', () => {
 
         await act(async () => root.render(<Harness record={turn([assistant('final', [text('final', 'Done')], 'stop')])} working={false} />));
         expect(container.querySelector('[data-live-reasoning-preview="true"]')).toBeNull();
+    });
+
+    test('keeps settled thought and command details behind the expandable fold', async () => {
+        const thought: Part = {
+            type: 'reasoning', id: 'settled-thought', sessionID: 'session', messageID: 'final',
+            text: 'Recorded thought', time: { start: 1, end: 2 },
+        };
+        const shell: Part = {
+            type: 'tool', tool: 'shell', id: 'settled-shell', callID: 'settled-shell', sessionID: 'session', messageID: 'final',
+            state: { status: 'completed', input: { command: 'npm test' }, output: 'all tests passed', metadata: {}, time: { start: 2, end: 3 } },
+        };
+        const final = assistant('final', [thought, shell, text('answer', 'Done')], 'stop');
+        await act(async () => root.render(<Harness record={turn([final])} working={false} />));
+        const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        expect(header?.getAttribute('aria-expanded')).toBe('false');
+        expect(container.querySelector('[data-live-command-preview="true"]')).toBeNull();
+        expect(container.textContent).not.toContain('Recorded thought');
+        expect(container.textContent).not.toContain('all tests passed');
+
+        await act(async () => header?.click());
+        expect(container.textContent).toContain('Recorded thought');
+        expect(container.textContent).toContain('npm test');
     });
 
     test('draws a page the agent showed above the answer, outside the folded Activity', async () => {
