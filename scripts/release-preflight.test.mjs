@@ -5,7 +5,7 @@ import { checkExistingOwnTag, checkMainLine, checkRelease, releaseTagsToCheck } 
 
 const ancestors = (list) => (tag) => list.includes(tag);
 
-test('打 tag 前的 --require-main 拦住旁支发版', () => {
+test('preflight refuses a release from a branch outside origin/main', () => {
   assert.deepEqual(checkMainLine(true), []);
   assert.match(checkMainLine(false)[0], /还没进 origin\/main/);
 });

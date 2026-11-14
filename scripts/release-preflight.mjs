@@ -8,7 +8,7 @@
 //   2. 小于本版的最大 tag 必须是 HEAD 的祖先（本版包含上一版的全部内容）。
 //
 // 用法：bun run release:preflight（RELEASE_PREFLIGHT_SKIP=1 可临时跳过）
-// 打 tag 前加 --require-main：本版提交必须已进 origin/main，拦住"在旁支发版"。
+// 默认要求本版提交已进 origin/main，拦住"在旁支发版"。
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -130,7 +130,7 @@ const run = () => {
   }
   const problems = checkRelease({ version, tags, isAncestor });
   problems.push(...checkExistingOwnTag({ version, tags, tagCommit: ownTagCommit, headCommit }));
-  if (process.argv.includes('--require-main')) problems.push(...checkMainLine(headOnMain()));
+  problems.push(...checkMainLine(headOnMain()));
   if (problems.length) {
     console.error(`release:preflight 未通过（版本 ${version}）：`);
     for (const problem of problems) console.error(`  - ${problem}`);
