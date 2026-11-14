@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.7.97",
+    "date": "2026-11-14",
+    "title": "Cleaner command output",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [
+        "**Chat:** The latest running command shows live output in a bounded activity panel; it folds when the command ends, while the full result stays available on expansion."
+      ],
+      "fixes": [],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.96",
     "date": "2026-11-14",
     "title": "Wallet and orders read again",

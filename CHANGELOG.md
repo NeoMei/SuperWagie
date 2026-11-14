@@ -2,6 +2,12 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.97] - 2026-11-14
+
+### Improvements
+
+- **Chat:** The latest running command shows live output in a bounded activity panel; it folds when the command ends, while the full result stays available on expansion.
+
 ## [2.7.96] - 2026-11-14
 
 ### Fixes
