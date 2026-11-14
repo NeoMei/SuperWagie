@@ -43,6 +43,7 @@ import {
 } from '../lib/turns/revealedText';
 import { RevealedTextTurnContext, type LivePinnedMessagePresentation } from './revealedTextContext';
 import { PinnedMessage } from './withPinnedMessage';
+import { LiveCommandPreview } from './liveCommandPreview';
 
 const SHIMMER_STABLE_DELAY_MS = 1000;
 const subscribeRuntimeKey = (notify: () => void): (() => void) => subscribeRuntimeEndpointChanged(() => notify());
@@ -439,6 +440,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                         </Button>
                     </div>
                 </div>
+                <LiveCommandPreview activities={turn.activityParts} directory={directory} visible={!isExpanded} />
                 <LiveActivityCollapse expanded={isExpanded} id={contentId} animate={expanded !== undefined}>
                     <div>
                         <TurnMessageWindow turnId={turn.turnId} messages={messagesAboveInteractions} renderMessage={renderMessage} />

@@ -106,6 +106,12 @@ or the live turn's revealed prose boundary.
     visibility use the effective state.
     The open execution shows progress prose and compact thought/tool rows;
     reasoning text and tool output remain behind their own requested details.
+    While the activity fold is closed, the latest authoritative running shell
+    may show a plain-text live output preview below the header. The preview is
+    capped and scrolls inside its own box, follows new output until the reader
+    scrolls upward, and disappears when that shell settles. Full output remains
+    owned by `ToolPart` and is available after opening the activity or tool row.
+    A missing shell ID, directory or running state produces no preview.
   - Background children and shells keep the process active only while the
     existing live indexes report work or a scoped permission/form waits. A
     parent's answer does not finish its background work. Terminal reports win;
