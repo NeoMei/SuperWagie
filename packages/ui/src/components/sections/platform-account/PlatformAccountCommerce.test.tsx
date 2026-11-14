@@ -39,9 +39,30 @@ let currentMembership: Extract<PlatformAccountState, { status: 'signed-in' }>['m
 let upgradeQuote: PlatformUpgradeQuote | undefined;
 let loseUpgradeResponse = false;
 let upgradeRejection: 'failed' | 'http' | 'conflict' | null = null;
+let commerceReadFailures = 0;
+let commerceReads = 0;
+let purchaseFailure: 'operation' | 'read' | null = null;
+let checkoutActionFailure: 'operation' | 'read' | null = null;
+let paymentMutationsBeforePurchase = 0;
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   const path = String(input instanceof Request ? input.url : input);
   if (init?.method && init.method !== 'GET') { writes++; mutations.push({ path, body: String(init.body) }); }
+  const pathname = new URL(path, 'http://localhost').pathname;
+  const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+  if (pathname === '/api/platform-account/commerce' && method === 'GET') {
+    commerceReads++;
+    if (commerceReadFailures > 0 || purchaseFailure === 'read' && paymentMutations().length > paymentMutationsBeforePurchase || checkoutActionFailure === 'read' && mutations.some((item) => item.path.endsWith('/waiting-checkout/reconcile'))) {
+      commerceReadFailures--;
+      return Response.json({ error: 'platform_commerce_unavailable' }, { status: 503 });
+    }
+    return Response.json(commerce);
+  }
+  if (purchaseFailure === 'operation' && (path.endsWith('/purchases') || path.endsWith('/checkouts') || path.endsWith('/upgrade-purchases'))) return Response.json({ error: 'platform_unavailable' }, { status: 503 });
+  if (checkoutActionFailure === 'operation' && path.includes('/waiting-checkout/')) return Response.json({ error: 'platform_unavailable' }, { status: 503 });
+  const waitingCheckout = commerce.checkouts?.find((item) => item.id === 'waiting-checkout');
+  if (waitingCheckout && path.includes('/waiting-checkout/') && path.endsWith('/reconcile')) return Response.json(waitingCheckout);
+  if (waitingCheckout && path.includes('/waiting-checkout/') && path.endsWith('/close')) return Response.json({ ...waitingCheckout, payment_status: 'CLOSED' });
+  if (method === 'GET' && (path.includes('/usage/') || path.includes('/activity'))) return Response.json({ error: 'not_found' }, { status: 404 });
   if (path.endsWith('/checkouts')) {
     const body = JSON.parse(String(init?.body));
     const rejection = upgradeRejection; upgradeRejection = null;
@@ -70,7 +91,7 @@ let host: HTMLDivElement | undefined;
 const render = async (view: 'overview' | 'orders') => {
   if (!root) { host = document.createElement('div'); document.body.append(host); root = createRoot(host); }
   useI18nStore.getState().setLocale('en');
-  await act(async () => root?.render(<I18nProvider><PlatformAccountCommerce accountId="team-a" payer="Team A" view={view} hasActiveMembership={activeMembership} currentMembership={currentMembership} membershipSummary={({ openMembership, openAddon }) => <><p>Current membership</p><button type="button" onClick={openMembership}>Subscribe</button><button type="button" onClick={openAddon}>Buy extra credits</button></>} onAccountRefresh={() => { accountRefreshes++; }} /></I18nProvider>));
+  await act(async () => root?.render(<I18nProvider><PlatformAccountCommerce accountId="team-a" payer="Team A" view={view} hasActiveMembership={activeMembership} currentMembership={currentMembership} membershipSummary={({ openMembership, openAddon, membershipOpen, addonOpen, disabled }) => <><p>Current membership</p><button type="button" disabled={disabled} aria-pressed={membershipOpen} onClick={openMembership}>Subscribe</button><button type="button" disabled={disabled} aria-pressed={addonOpen} onClick={openAddon}>Buy extra credits</button></>} onAccountRefresh={() => { accountRefreshes++; }} /></I18nProvider>));
 };
 const button = (text: string) => {
   const found = [...(host?.querySelectorAll('button') ?? [])].find(item => item.textContent === text);
@@ -79,7 +100,7 @@ const button = (text: string) => {
 };
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined; host?.remove(); host = undefined;
-  writes = 0; accountRefreshes = 0; mutations.length = 0; Object.assign(commerce, structuredClone(initialCommerce)); activeMembership = true; currentMembership = undefined; upgradeQuote = undefined; loseUpgradeResponse = false; upgradeRejection = null; usePlatformAccountTabStore.getState().setTab('billing');
+  writes = 0; accountRefreshes = 0; mutations.length = 0; Object.assign(commerce, structuredClone(initialCommerce)); activeMembership = true; currentMembership = undefined; upgradeQuote = undefined; loseUpgradeResponse = false; upgradeRejection = null; commerceReadFailures = 0; commerceReads = 0; purchaseFailure = null; checkoutActionFailure = null; paymentMutationsBeforePurchase = 0; usePlatformAccountTabStore.getState().setTab('billing');
 });
 afterAll(async () => {
   fetchFixture.mockRestore(); await browser.happyDOM.close();
@@ -106,6 +127,150 @@ test('overview opens a buying task deliberately and preserves its offer while vi
   expect(host?.querySelector('[role="radio"][aria-label="SuperWagie Plus"]')).not.toBeNull();
   expect(host?.querySelectorAll('[role="radio"]')).toHaveLength(1);
   expect(writes).toBe(0);
+});
+
+test('an unread commerce state disables purchase entries and restores plans after an authoritative refresh', async () => {
+  commerceReadFailures = 1;
+  await render('overview');
+  expect(host?.querySelector('[role="alert"]')?.textContent).toContain('Could not read wallets or orders. Refresh to check the authoritative status.');
+  expect(button('Subscribe').disabled).toBe(true);
+  expect(button('Buy extra credits').disabled).toBe(true);
+  expect(button('Subscribe').getAttribute('aria-pressed')).toBe('false');
+  await act(async () => button('Subscribe').click());
+  await act(async () => button('Buy extra credits').click());
+  expect(button('Subscribe').getAttribute('aria-pressed')).toBe('false');
+  expect(writes).toBe(0);
+  expect(paymentMutations()).toHaveLength(0);
+  expect(accountRefreshes).toBe(0);
+  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  await act(async () => button('Refresh wallets and orders').click());
+  expect(host?.textContent).not.toContain('Could not read wallets or orders.');
+  expect(commerceReads).toBe(2);
+  expect(button('Subscribe').disabled).toBe(false);
+  expect(button('Buy extra credits').disabled).toBe(false);
+  await act(async () => button('Subscribe').click());
+  expect(host?.querySelector('[role="radio"][aria-label="SuperWagie Plus"]')).not.toBeNull();
+  expect(writes).toBe(0);
+  expect(paymentMutations()).toHaveLength(0);
+});
+
+test('an unavailable wallets-and-orders read disables purchase entries until an authoritative read succeeds', async () => {
+  activeMembership = false;
+  await render('overview');
+  expect(host?.querySelector('[role="radio"][aria-label="SuperWagie Plus"]')).not.toBeNull();
+  await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
+  const purchase = () => [...(host?.querySelectorAll('button') ?? [])].find((item) => item.textContent?.startsWith('Buy SuperWagie Plus'));
+  commerceReadFailures = 1;
+  await act(async () => button('Refresh wallets and orders').click());
+  expect(host?.querySelector('[role="alert"]')?.textContent).toContain('Could not read wallets or orders. Refresh to check the authoritative status.');
+  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  expect(purchase()).toBeUndefined();
+  expect(button('Subscribe').disabled).toBe(true);
+  expect(button('Buy extra credits').disabled).toBe(true);
+  expect(button('Subscribe').getAttribute('aria-pressed')).toBe('false');
+  await act(async () => button('Subscribe').click());
+  await act(async () => button('Buy extra credits').click());
+  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  expect(writes).toBe(0);
+  expect(paymentMutations()).toHaveLength(0);
+  expect(accountRefreshes).toBe(0);
+  await act(async () => button('Refresh wallets and orders').click());
+  expect(commerceReads).toBe(3);
+  expect(host?.querySelector('[role="alert"]')).toBeNull();
+  expect(button('Subscribe').disabled).toBe(false);
+  expect(button('Buy extra credits').disabled).toBe(false);
+  await act(async () => button('Subscribe').click());
+  expect(host?.querySelector('[role="radio"][aria-label="SuperWagie Plus"]')?.getAttribute('aria-checked')).toBe('true');
+  expect(writes).toBe(0);
+  expect(paymentMutations()).toHaveLength(0);
+});
+
+test('a failed follow-up read after a purchase disables purchase entries until an authoritative refresh', async () => {
+  activeMembership = false;
+  await render('overview');
+  await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
+  const purchase = () => [...(host?.querySelectorAll('button') ?? [])].find((item) => item.textContent?.startsWith('Buy SuperWagie Plus'));
+  expect(purchase()?.disabled).toBe(false);
+  purchaseFailure = 'read';
+  paymentMutationsBeforePurchase = paymentMutations().length;
+  await act(async () => purchase()?.click());
+  expect(paymentMutations()).toHaveLength(1);
+  expect(host?.querySelector('[role="alert"]')?.textContent).toContain('Could not read wallets or orders. Refresh to check the authoritative status.');
+  expect(purchase()).toBeUndefined();
+  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  expect(button('Subscribe').disabled).toBe(true);
+  expect(button('Buy extra credits').disabled).toBe(true);
+  expect(button('Subscribe').getAttribute('aria-pressed')).toBe('false');
+  await act(async () => button('Subscribe').click());
+  await act(async () => button('Buy extra credits').click());
+  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  expect(paymentMutations()).toHaveLength(1);
+  purchaseFailure = null;
+  await act(async () => button('Refresh wallets and orders').click());
+  expect(commerceReads).toBe(3);
+  expect(host?.querySelector('[role="alert"]')).toBeNull();
+  expect(button('Subscribe').disabled).toBe(false);
+  expect(button('Buy extra credits').disabled).toBe(false);
+  expect(paymentMutations()).toHaveLength(1);
+});
+
+test('a failed purchase operation keeps the last authoritative purchase entries available', async () => {
+  activeMembership = false;
+  await render('overview');
+  await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
+  const purchase = () => [...(host?.querySelectorAll('button') ?? [])].find((item) => item.textContent?.startsWith('Buy SuperWagie Plus'));
+  purchaseFailure = 'operation';
+  await act(async () => purchase()?.click());
+  expect(paymentMutations()).toHaveLength(1);
+  expect(host?.querySelector('[role="alert"]')?.textContent).toContain('This payment has no confirmed result yet');
+  expect(button('Subscribe').disabled).toBe(false);
+  expect(button('Buy extra credits').disabled).toBe(false);
+  expect(purchase()?.disabled).toBe(true);
+  expect(host?.textContent).toContain('Submit it again to settle it before starting another one.');
+  expect(paymentMutations()).toHaveLength(1);
+  purchaseFailure = null;
+  await act(async () => button('Refresh wallets and orders').click());
+  expect(host?.querySelector('[role="alert"]')).toBeNull();
+  expect(button('Subscribe').disabled).toBe(false);
+  expect(paymentMutations()).toHaveLength(1);
+});
+
+test('a failed follow-up read after a payment status action disables purchase entries until an authoritative refresh', async () => {
+  commerce.checkouts = [{ id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2027-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z', session: { kind: 'qr', url: 'weixin://wxpay/bizpayurl?pr=fixture', expires_at: '2027-01-01T00:00:00Z' } }];
+  await render('overview');
+  expect(button('Refresh status').disabled).toBe(false);
+  checkoutActionFailure = 'read';
+  await act(async () => button('Refresh status').click());
+  expect(mutations.some((item) => item.path.endsWith('/waiting-checkout/reconcile'))).toBe(true);
+  expect(host?.querySelector('[role="alert"]')?.textContent).toContain('Could not read wallets or orders. Refresh to check the authoritative status.');
+  expect(button('Subscribe').disabled).toBe(true);
+  expect(button('Buy extra credits').disabled).toBe(true);
+  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  checkoutActionFailure = null;
+  await act(async () => button('Refresh wallets and orders').click());
+  expect(host?.querySelector('[role="alert"]')).toBeNull();
+  expect(button('Subscribe').disabled).toBe(false);
+});
+
+test('a failed payment operation keeps the last authoritative purchase entries available', async () => {
+  commerce.checkouts = [{ id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2027-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z', session: { kind: 'qr', url: 'weixin://wxpay/bizpayurl?pr=fixture', expires_at: '2027-01-01T00:00:00Z' } }];
+  await render('overview');
+  checkoutActionFailure = 'operation';
+  await act(async () => button('Close payment attempt').click());
+  expect(host?.querySelector('[role="alert"]')?.textContent).toContain('Could not read wallets or orders. Refresh to check the authoritative status.');
+  expect(button('Subscribe').disabled).toBe(false);
+  expect(button('Buy extra credits').disabled).toBe(false);
+  checkoutActionFailure = null;
+  await act(async () => button('Refresh wallets and orders').click());
+  expect(host?.querySelector('[role="alert"]')).toBeNull();
+  expect(button('Subscribe').disabled).toBe(false);
+});
+
+test('a failed order read keeps one refresh action on the orders page', async () => {
+  commerceReadFailures = 1;
+  await render('orders');
+  expect([...(host?.querySelectorAll('button') ?? [])].filter((item) => item.textContent === 'Refresh wallets and orders')).toHaveLength(1);
+  expect(host?.querySelector('[role="alert"]')?.textContent).toContain('Could not read wallets or orders. Refresh to check the authoritative status.');
 });
 
 test('model funding navigation opens add-on plans without creating a payment', async () => {
@@ -146,6 +311,15 @@ test('an unconfirmed intent settles itself and keeps its record out of the buyin
   await render('orders');
   expect(button('Check again').disabled).toBe(false);
   expect(host?.textContent).toContain('Previous membership');
+});
+
+test('a saved provider query error describes the old payment without claiming a failed commerce read', async () => {
+  commerce.intents = [{ idempotencyKey: 'old-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '9800000', provider: 'wechat', status: 'PENDING', errorCode: 'provider_query_unknown', createdAt: '2026-11-10T00:00:00Z' }];
+  await render('orders');
+  expect(host?.textContent).toContain('Awaiting settlement or fulfillment');
+  expect(host?.textContent).toContain('This payment has no confirmed result yet');
+  expect(host?.textContent).not.toContain('Could not read wallets or orders.');
+  expect(button('Check again').disabled).toBe(false);
 });
 
 test('an unsubscribed account opens published plans without inventing candidate prices', async () => {
@@ -287,6 +461,26 @@ test('a new account does not show an empty point overview ahead of the plans', a
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root?.render(<I18nProvider><PlatformMembershipSummary account={account} actions={null} /></I18nProvider>));
   expect(host.textContent).toBe('');
+  expect(writes).toBe(0);
+});
+
+test('membership purchase entries expose their pressed and disabled states', async () => {
+  const account: Extract<PlatformAccountState, { status: 'signed-in' }> = {
+    status: 'signed-in', user: { id: 'actor-a', name: 'Alice', email: '' }, accounts: [], accountId: 'team-a', expiresAt: '2099-12-01T00:00:00Z',
+    membership: [{ id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-01T00:00:00Z', offer: { name: 'SuperWagie Plus' } }],
+    credits: { available: '1000000', reserved: '0', batches: [] }, consoleUrl: null, modelService: 'unavailable',
+  };
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  useI18nStore.getState().setLocale('en');
+  const actions = { openMembership: () => {}, openAddon: () => {}, membershipOpen: true, addonOpen: false, disabled: true };
+  await act(async () => root?.render(<I18nProvider><PlatformMembershipSummary account={account} actions={actions} /></I18nProvider>));
+  expect(button('Manage membership').disabled).toBe(true);
+  expect(button('Manage membership').getAttribute('aria-pressed')).toBe('true');
+  expect(button('Buy extra credits').disabled).toBe(true);
+  expect(button('Buy extra credits').getAttribute('aria-pressed')).toBe('false');
+  await act(async () => root?.render(<I18nProvider><PlatformMembershipSummary account={account} actions={{ ...actions, disabled: false }} /></I18nProvider>));
+  expect(button('Manage membership').disabled).toBe(false);
+  expect(button('Buy extra credits').disabled).toBe(false);
   expect(writes).toBe(0);
 });
 

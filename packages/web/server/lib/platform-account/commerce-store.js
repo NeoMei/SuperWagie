@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { acquireModelWriterLock } from '../platform-model/writer-lock.js';
 
 const identifier = z.string().min(1).max(200);
 export const refundReasonSchema = z.string().min(1).refine((reason) => Buffer.byteLength(reason, 'utf8') <= 80);
@@ -35,15 +36,9 @@ export const openCommerceStore = async (dataDir) => {
   const directory = path.join(dataDir, 'unihub-commerce');
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   if (!(await fs.lstat(directory)).isDirectory()) throw new Error('platform_commerce_store_unsafe');
-  const lockPath = path.join(directory, 'writer.lock');
-  const lockValue = `${process.pid}:${crypto.randomUUID()}`;
-  try {
-    const lock = await fs.open(lockPath, 'wx', 0o600);
-    try { await lock.writeFile(lockValue); await lock.sync(); } finally { await lock.close(); }
-  } catch { throw new Error('platform_commerce_store_busy'); }
-  const release = async () => {
-    if (await fs.readFile(lockPath, 'utf8').catch(() => '') === lockValue) await fs.unlink(lockPath);
-  };
+  let release;
+  try { release = await acquireModelWriterLock(directory); }
+  catch (error) { throw new Error(error?.message === 'platform_store_unavailable' ? 'platform_commerce_store_unavailable' : error?.message === 'platform_store_unsafe' ? 'platform_commerce_store_unsafe' : 'platform_commerce_store_busy'); }
   const filename = path.join(directory, 'state.json');
   let state;
   try {
