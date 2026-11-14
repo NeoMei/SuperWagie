@@ -1,9 +1,11 @@
 import { isShellTool } from '@/lib/opencode/tools';
-import { readRunningShellID } from '@/lib/opencode/background-shell';
+import { readRunningShellID, readRunningShellOutput } from '@/lib/opencode/background-shell';
 import type { TurnActivityRecord } from '../lib/turns/types';
 
 type RunningShellPreview = {
-    shellID: string;
+    key?: string;
+    shellID?: string;
+    output?: string;
 };
 
 export const shouldRenderLiveCommandPreview = (
@@ -25,9 +27,8 @@ export const latestRunningShellPreview = (
             continue;
         }
         const shellID = readRunningShellID(activity.part);
-        if (shellID) {
-            return { shellID };
-        }
+        const output = readRunningShellOutput(activity.part);
+        if (shellID || output) return { key: activity.id, shellID, output };
     }
     return undefined;
 };

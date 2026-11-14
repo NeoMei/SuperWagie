@@ -17,12 +17,13 @@ export const LiveCommandPreview: React.FC<LiveCommandPreviewProps> = ({ activiti
     const shell = React.useMemo(() => latestRunningShellPreview(activities), [activities]);
     if (!visible || !shell) return null;
 
-    return <LiveCommandPreviewBody key={shell.shellID} shellID={shell.shellID} directory={directory} />;
+    return <LiveCommandPreviewBody key={shell.key ?? shell.shellID ?? 'metadata'} shellID={shell.shellID} fallbackOutput={shell.output} directory={directory} />;
 };
 
-const LiveCommandPreviewBody: React.FC<{ shellID: string; directory?: string }> = ({ shellID, directory }) => {
+const LiveCommandPreviewBody: React.FC<{ shellID?: string; fallbackOutput?: string; directory?: string }> = ({ shellID, fallbackOutput, directory }) => {
     const { t } = useI18n();
-    const output = useBackgroundShellOutput(shellID, directory, true);
+    const polledOutput = useBackgroundShellOutput(shellID ?? '', directory, shellID !== undefined);
+    const output = polledOutput || fallbackOutput || '';
     const scrollRef = React.useRef<HTMLElement>(null);
     const followEndRef = React.useRef(true);
     const lastScrollTopRef = React.useRef(0);

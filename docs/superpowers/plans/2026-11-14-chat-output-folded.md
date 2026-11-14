@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a bounded live shell-output preview to the OpenChamber-style activity fold, then hide it automatically when the command settles.
+**Goal:** Add a bounded live shell-output and reasoning preview to the OpenChamber-style activity fold, then hide it automatically when the command or thought settles.
 
-**Architecture:** Add a focused `LiveCommandPreview` component under the chat components folder. It derives the latest running shell from the existing turn activity records, reads output through the existing `useBackgroundShellOutput` polling boundary, and renders a capped `ScrollableOverlay` below the activity header while the main activity fold remains closed. The existing `ToolPart` and activity expansion continue to own full output and controls.
+**Architecture:** Add focused live preview components under the chat components folder. They derive the latest running shell from the existing turn activity records, read output through the existing `useBackgroundShellOutput` polling boundary with the running metadata as a foreground fallback, and render a capped `ScrollableOverlay` below the activity header while the main activity fold remains closed. When no shell is active, the current reasoning stream occupies the same slot. The existing `ToolPart` and activity expansion continue to own full output and controls.
 
 **Tech Stack:** React, TypeScript, existing OpenCode shell projection, `ScrollableOverlay`, Zustand-backed activity state, Vitest/Testing Library.
 
@@ -16,6 +16,7 @@
 - Use semantic theme tokens and the shared scroll primitive.
 - Keep the existing activity header shimmer/breathing effect unchanged.
 - Do not expose output from a shell whose authoritative state is not running.
+- Do not leave a reasoning or command preview mounted after its authoritative stream settles.
 - Preserve full output access through existing activity/tool expansion.
 - Run focused chat tests, `bun run check:changed`, and the affected web build before completion.
 
@@ -27,8 +28,8 @@
 - Test: `packages/ui/src/components/chat/components/liveCommandPreview.test.tsx`
 
 **Interfaces:**
-- Consumes: `TurnActivityRecord[]`, effective directory, and the running shell ID reader from `@/lib/opencode/background-shell`.
-- Produces: `LiveCommandPreview` component props `{ activities: TurnActivityRecord[]; directory?: string; visible: boolean }` and a stable latest-running-shell selector used by the component.
+- Consumes: `TurnActivityRecord[]`, effective directory, and the running shell readers from `@/lib/opencode/background-shell`.
+- Produces: `LiveCommandPreview` component props `{ activities: TurnActivityRecord[]; directory?: string; visible: boolean }`, a stable latest-running-shell selector, and a running-output metadata fallback for foreground calls.
 
 - [ ] **Step 1: Write the failing selector tests**
 
@@ -71,9 +72,9 @@ Run: `bun test packages/ui/src/components/chat/components/liveCommandPreview.tes
 
 Use the existing polling hook, `ScrollableOverlay` with `useScrollShadow`, and a plain `<pre>` with `whitespace-pre-wrap`. Maintain bottom-follow state with a ref. A wheel gesture toward history pauses follow; reaching the bottom resumes it. Render only when `visible && !expanded && shell.status === running`.
 
-- [ ] **Step 4: Mount it in `LiveTurnActivity`**
+- [x] **Step 4: Mount it in `LiveTurnActivity`**
 
-Pass `turn.activityParts`, the effective directory and `!isExpanded`. Keep the existing header label and shimmer untouched. Place the preview immediately after the header and before the collapsed activity body.
+Pass `turn.activityParts`, the effective directory and `!isExpanded`. Keep the existing header label and shimmer untouched. Place the command preview immediately after the header and before the collapsed activity body. When no shell is running, mount `LiveReasoningPreview` in the same position using the current throttled reasoning text; both previews are bounded and disappear when their authoritative stream ends.
 
 - [ ] **Step 5: Run focused tests**
 
