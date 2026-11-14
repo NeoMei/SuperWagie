@@ -30,8 +30,8 @@ export async function smokeIntelEngine({ app, receipt, source, stagedEngine }) {
   const appPath = fs.realpathSync(path.resolve(app));
   const engine = path.join(appPath, 'Contents/Resources/opencode-cli');
   const manifest = JSON.parse(fs.readFileSync(path.join(engine, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '2.1.4');
-  assert.equal(manifest.sourceCommit, '68bc26b7da1990ce10ffecfbc1e09eb13aa5d824');
+  assert.equal(manifest.version, '2.3.0');
+  assert.equal(manifest.sourceCommit, 'a6b15d33daf6ab7d35569f6d711fdb630b9f04e7');
   assert.deepEqual(manifest.runtime, { kind: 'electron-node24', serverOnly: true });
   assert.equal(manifest.arch, 'x64');
   for (const file of manifest.files) {

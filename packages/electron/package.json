@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
-    "electron": "^44.9.3",
+    "electron": "43.8.4",
     "electron-builder": "^26.0.0",
     "node-abi": "^4.33.0"
   },
@@ -171,7 +171,7 @@
     "artifactName": "SuperWagie-${version}-${arch}.${ext}",
     "npmRebuild": false,
     "mac": {
-      "minimumSystemVersion": "13.0",
+      "minimumSystemVersion": "12.0",
       "category": "public.app-category.developer-tools",
       "icon": "resources/icons/icon.icns",
       "artifactName": "SuperWagie-${version}-mac-${arch}.${ext}",

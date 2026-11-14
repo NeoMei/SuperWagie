@@ -73,7 +73,7 @@ module.exports = async (context) => {
   setExecutableUuid(executablePath, context.packager.appInfo.id);
   // Replacing LC_UUID invalidates the existing signature. Re-sign the launcher
   // before any later builder signing, including unsigned ARM64 distributions.
-  execFileSync('codesign', ['--force', '--sign', '-', executablePath], { stdio: 'inherit' });
+  execFileSync('codesign', ['--force', '--deep', '--sign', '-', executablePath], { stdio: 'inherit' });
 
   const sourceAssetsPath = path.join(__dirname, '..', 'resources', 'icons', 'Assets.car');
 

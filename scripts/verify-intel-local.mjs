@@ -6,9 +6,12 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { verifyHyMemoryResources } from '../packages/electron/scripts/prepare-hy-memory.mjs';
 import { canReuseStagedKnowledge } from '../packages/electron/scripts/prepare-embedded-knowledge.mjs';
+import knowledgePin from '../packages/electron/scripts/embedded-knowledge-pin.cjs';
 import { assertIntelCompatibility } from './verify-intel-compat.mjs';
 
-const VERSION = '2.7.40-intel';
+const knowledgeSource = knowledgePin.knowledgeSourcePin();
+
+const VERSION = '2.7.95';
 const ELECTRON = '43.8.4';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const machOMagic = new Set([0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca]);
@@ -107,8 +110,8 @@ async function main() {
   const engineRoot = path.join(resources, 'opencode-cli');
   const engine = JSON.parse(fs.readFileSync(path.join(engineRoot, 'manifest.json'), 'utf8'));
   assert.equal(engine.platform, 'darwin'); assert.equal(engine.arch, 'x64');
-  assert.equal(engine.version, '2.1.4'); assert.equal(engine.binary, 'opencode');
-  assert.equal(engine.sourceCommit, '68bc26b7da1990ce10ffecfbc1e09eb13aa5d824');
+  assert.equal(engine.version, '2.3.0'); assert.equal(engine.binary, 'opencode');
+  assert.equal(engine.sourceCommit, 'a6b15d33daf6ab7d35569f6d711fdb630b9f04e7');
   assert.equal(engine.runtime.kind, 'electron-node24'); assert.equal(engine.runtime.serverOnly, true);
   for (const name of ['opencode', 'node']) {
     const file = path.join(engineRoot, name), text = fs.readFileSync(file, 'utf8');
@@ -141,7 +144,7 @@ async function main() {
     assert.equal(entry.sha256, hash(bytes), `Frozen memory source mismatch: ${file}`); assert.equal(entry.size, bytes.length);
   }
   const knowledge = JSON.parse(fs.readFileSync(path.join(resources, 'embedded-knowledge/manifest.json')));
-  assert(canReuseStagedKnowledge({ manifest: knowledge, directory: path.join(resources, 'embedded-knowledge'), binaryName: 'embedded-knowledge-server', repository: 'https://github.com/NeoMei/embedded-knowledge', ref: 'embedded-knowledge', pinnedCommit: 'f5adb9eac166e7d3da7dceed7aa50049d4c4db1f', tags: 'sqlite_fts5,anydoc', platform: 'darwin' }), 'Incomplete or stale knowledge backend');
+  assert(canReuseStagedKnowledge({ manifest: knowledge, directory: path.join(resources, 'embedded-knowledge'), binaryName: 'embedded-knowledge-server', repository: knowledgeSource.repository, ref: knowledgeSource.ref, pinnedCommit: knowledgeSource.commit, tags: 'sqlite_fts5,anydoc', platform: 'darwin' }), 'Incomplete or stale knowledge backend');
   const files = inventory(app), native = [];
   const inspect = (bytes, name) => {
     if (bytes.length >= 4 && machOMagic.has(bytes.readUInt32BE())) native.push({ path: name, ...assertIntelCompatibility(bytes, name) });

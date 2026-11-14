@@ -8,10 +8,10 @@ import { readPinnedOpenCodeCliVersion, parseOpenCodeCliVersion } from './opencod
 
 const electronRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const sourceLock = Object.freeze({
-  version: '2.1.4',
-  commit: '68bc26b7da1990ce10ffecfbc1e09eb13aa5d824',
-  url: 'https://api.github.com/repos/anomalyco/opencode/tarball/68bc26b7da1990ce10ffecfbc1e09eb13aa5d824',
-  sha256: 'ae69c87a4991b3ac90fd112fe439119dbaeb77bc76cbdfd63b6dac601bd6904b',
+  version: '2.3.0',
+  commit: 'a6b15d33daf6ab7d35569f6d711fdb630b9f04e7',
+  url: 'https://api.github.com/repos/anomalyco/opencode/tarball/a6b15d33daf6ab7d35569f6d711fdb630b9f04e7',
+  sha256: '327af8ce7f5538036e9b49aaefd1d644dc6d739c8c4a3c7b6c71d0bb8ece6a79',
 });
 const sha256 = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const run = (command, args, options = {}) => {
@@ -83,7 +83,7 @@ import { mainConfig, appArchiveAsset } from './vite.node.config'
 import { copyNodeAssets, hashNodeAssets } from './script/node-assets'
 import { collectFiles } from './script/files'
 import { resolveOpencodePty } from './script/opencode-pty'
-import { nodeTarget, photonWasmAsset, shellParserWasmAssets } from './src/node/target'
+import { nodeTarget, photonWasmAsset } from './src/node/target'
 import { AppArchive } from './src/app-archive'
 const target = nodeTarget('darwin', process.env.SUPERWAGIE_OPENCODE_ARCH)
 const require = createRequire(import.meta.url)
@@ -94,14 +94,13 @@ const persistentPty = await resolveOpencodePty(target)
 const assets = [
   { key: target.parcelWatcherAsset, source: resolve(target.parcelWatcherPackage) },
   { key: photonWasmAsset, source: resolve(photonWasmAsset) },
-  ...Object.values(shellParserWasmAssets).map((key) => ({ key, source: resolve(key) })),
   ...await Promise.all((await collectFiles(ptyRoot)).filter((file) => !file.endsWith('.map') && !file.endsWith('.pdb')).map(async (file) => ({ key: target.nodePtyPackage + '/' + file, source: path.join(ptyRoot, file) }))),
   ...(persistentPty ? [{ key: target.opencodePtyAsset, source: persistentPty.source }] : []),
 ]
 await fs.rm('dist-node', { recursive: true, force: true })
 await copyNodeAssets(assets)
 await fs.writeFile('dist-node/assets/' + appArchiveAsset, AppArchive.encode([]))
-const config = mainConfig({ version: '2.1.4', channel: 'latest', assetHash: await hashNodeAssets(assets), target })
+const config = mainConfig({ version: '2.3.0', channel: 'latest', assetHash: await hashNodeAssets(assets), target })
 config.build = { ...config.build, target: 'node24' }
 config.define.OPENCODE_CLI_NAME = JSON.stringify('opencode')
 // The upstream graph check requires TUI simulation renderers. The desktop API keeps its control server.

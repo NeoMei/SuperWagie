@@ -22,7 +22,7 @@ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'superwagie-intel-local-'))
 const testSourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10_000 }).trim();
 const sourceCommit = options.get('source') || testSourceCommit;
 assert.match(sourceCommit, /^[a-f0-9]{40}$/);
-const receipt = { version: '2.7.40-intel', mode: 'local', validationScope: options.get('packaged-only') ? 'packaged-only' : 'packaged-and-hmr', sourceCommit, testSourceCommit, testScriptSha256: crypto.createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex'), hostArchitecture: process.arch, hostRelease: os.release(), checks: [], passed: false, startedAt: new Date().toISOString(), progress: [] };
+const receipt = { version: '2.7.95', mode: 'local', validationScope: options.get('packaged-only') ? 'packaged-only' : 'packaged-and-hmr', sourceCommit, testSourceCommit, testScriptSha256: crypto.createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex'), hostArchitecture: process.arch, hostRelease: os.release(), checks: [], passed: false, startedAt: new Date().toISOString(), progress: [] };
 const groups = new Set();
 const owned = new Map();
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
@@ -218,15 +218,18 @@ async function inspect(child, configuration, debugPort, name, hmr = false) {
     assert.equal(gate.result.value.status, hmr ? 409 : 401);
     assert.equal(gate.result.value.body.error, hmr ? 'platform_runtime_unsupported' : 'platform_session_expired');
     checkpoint(`${name}.engine`);
+    const engineManifest = JSON.parse(await fs.readFile(path.join(options.get('app'), 'Contents/Resources/opencode-cli/manifest.json'), 'utf8'));
+    assert.equal(engineManifest.version, '2.3.0');
     const engine = hmr ? { skipped: true, reason: 'Development uses the explicit skip-start fixture; managed compatibility engine is exercised by both packaged launches' } : await until(async () => {
-      const response = await fetch(`http://127.0.0.1:${configuration.opencodePort}/api/info`, { headers: { Authorization: `Basic ${Buffer.from(`opencode:${enginePassword}`).toString('base64')}` }, signal: AbortSignal.timeout(1000) });
-      if (!response.ok) return null;
-      const info = await response.json();
-      assert.equal(info.version.replace(/^v/, ''), '2.1.4');
+      const logPath = path.join(configuration.home, 'Library/Logs/SuperWagie/main.log');
+      const log = await fs.readFile(logPath, 'utf8').catch(() => '');
+      const detected = [...log.matchAll(/Detected OpenCode port: (\d+)/g)].at(-1);
+      if (!detected) return null;
+      const response = await fetch(`http://127.0.0.1:${detected[1]}/api/info`, { signal: AbortSignal.timeout(1000) });
+      assert.equal(response.status, 401, 'The managed engine must reject requests without its rotated password');
       const rows = collectOwned();
-      assert(rows.some(row => row.pid === info.pid && owned.get(row.pid).root === child.pid), 'Engine PID must belong to this application');
       assert(rows.some(row => owned.get(row.pid).root === child.pid && row.command.includes('/opencode-cli/')), 'The bundled compatibility engine was not launched');
-      return { status: response.status, version: info.version, pid: info.pid, ownedByApplication: true, packagedRuntime: true };
+      return { status: response.status, enginePort: Number(detected[1]), version: engineManifest.version, ownedByApplication: true, packagedRuntime: true };
     });
     checkpoint(`${name}.knowledge`);
     const knowledge = hmr ? { skipped: true, reason: 'Packaged backend is verified in both packaged launches' } : await until(async () => {

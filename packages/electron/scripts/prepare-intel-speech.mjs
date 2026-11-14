@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { prepareMacSpeech } from './macos-speech-build.mjs';
 
 export const intelSpeechProfile = {
-  arch: 'x64', minimumMacOS: '12.0', appVersion: '2.7.40-intel',
+  arch: 'x64', minimumMacOS: '12.0', appVersion: '2.7.95',
   electronVersion: '43.8.4', electronDependency: '43.8.4', electronAbi: '148',
   originalAddonSha256: '73bd986df350a4dda71f081d898aa4bc6ef3f4e105c025b92a4e766360f07972',
   headersSha256: 'cccb253b87b50b5957d8bab8c80abaca744cae779a5aba8e4184fbcc087c9dbb',
