@@ -73,9 +73,10 @@ export const PlatformAccountCommerce: React.FC<{
   const runtimeKey = getRuntimeKey();
   React.useEffect(() => {
     if (!purchaseTarget) return;
+    if (commerceReadFailed) { usePlatformAccountTabStore.getState().clearPurchaseTarget(); return; }
     setBuyingTask(purchaseTarget === 'funding' ? hasActiveMembership ? 'addon' : 'membership' : purchaseTarget);
     usePlatformAccountTabStore.getState().clearPurchaseTarget();
-  }, [purchaseTarget, hasActiveMembership]);
+  }, [purchaseTarget, hasActiveMembership, commerceReadFailed]);
   const applyReadFailure = React.useCallback((error: I18nKey) => {
     setError(error); setCommerceReadFailed(true); setBuyingTask(null);
     if (!lastCommerceState.current) setState(null);
@@ -83,7 +84,6 @@ export const PlatformAccountCommerce: React.FC<{
   const refresh = React.useCallback(async () => {
     const version = ++generation.current;
     setBusy(true); setError(null); setPurchaseApplied(false);
-    if (!lastCommerceState.current) setCommerceReadFailed(false);
     try {
       const next = await readPlatformCommerce();
       if (version === generation.current && runtimeKey === getRuntimeKey()) {
