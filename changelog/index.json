@@ -1,5 +1,26 @@
 [
   {
+    "version": "2.7.99",
+    "date": "2026-11-14",
+    "title": "Reliable chat folds",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [
+        "**Chat:** Live command output and current thinking stay in one bounded priority panel while they run. When they finish, the preview closes cleanly and the activity record remains available to expand without duplicating the live content.",
+        "About: opening the About dialog checks for updates once automatically."
+      ],
+      "fixes": [],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.98",
     "date": "2026-11-14",
     "title": "Priority chat output",

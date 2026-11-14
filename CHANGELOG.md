@@ -2,6 +2,13 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.99] - 2026-11-14
+
+### Improvements
+
+- **Chat:** Live command output and current thinking stay in one bounded priority panel while they run. When they finish, the preview closes cleanly and the activity record remains available to expand without duplicating the live content.
+- About: opening the About dialog checks for updates once automatically.
+
 ## [2.7.98] - 2026-11-14
 
 ### Improvements
