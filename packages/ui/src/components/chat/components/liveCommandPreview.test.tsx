@@ -29,11 +29,18 @@ const nonShell = (): TurnActivityRecord => {
 describe('latestRunningShellPreview', () => {
     test('selects the latest running shell even when a later non-shell tool exists', () => {
         expect(latestRunningShellPreview([shell('old', 'running', 'sh_old'), shell('new', 'running', 'sh_new'), nonShell()]))
-            .toEqual({ shellID: 'sh_new' });
+            .toEqual({ key: 'new', shellID: 'sh_new' });
     });
 
     test('ignores completed shells and shells without an authoritative id', () => {
         expect(latestRunningShellPreview([shell('done', 'completed', 'sh_done'), shell('unknown', 'running')])).toBeUndefined();
+    });
+
+    test('keeps a running shell preview when OpenCode has only published output metadata', () => {
+        const part = shell('metadata', 'running');
+        if (part.part.type !== 'tool' || part.part.state.status !== 'running') throw new Error('Expected running shell');
+        part.part.state.metadata = { output: 'first line\nsecond line' };
+        expect(latestRunningShellPreview([part])).toEqual({ key: 'metadata', output: 'first line\nsecond line' });
     });
 
     test('returns no preview when the turn has no shell activity', () => {

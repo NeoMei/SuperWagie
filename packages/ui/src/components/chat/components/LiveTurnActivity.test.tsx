@@ -995,7 +995,7 @@ describe('live Activity with the real message body', () => {
     test('shows the running command in the folded Activity header', async () => {
         const shell: Part = {
             type: 'tool', tool: 'shell', id: 'shell', callID: 'shell', sessionID: 'session', messageID: 'progress',
-            state: { status: 'running', input: { command: 'npm test' }, time: { start: 1 } },
+            state: { status: 'running', input: { command: 'npm test' }, metadata: { output: 'running test suite' }, time: { start: 1 } },
         };
         const progress = assistant('progress', [text('progress-text', 'Checking'), shell], 'tool-calls');
         await act(async () => root.render(<Harness record={turn([progress])} initialExpanded={false} />));
@@ -1005,11 +1005,23 @@ describe('live Activity with the real message body', () => {
         expect(header?.textContent).not.toContain('Working');
         expect(container.querySelector('.live-activity-icon[data-running="true"]')).not.toBeNull();
         expect(container.querySelector('[data-work-glyph]')).toBeNull();
-        // The row itself waits behind the header; opening it moves the command
-        // out of the preview and into the detailed list.
+        // The command is visible in a bounded priority preview while it runs.
+        expect(container.querySelector('[data-live-command-preview="true"]')).not.toBeNull();
+        expect(container.querySelector('[data-live-command-preview="true"]')?.textContent).toContain('running test suite');
         await act(async () => header?.click());
         expect(header?.textContent).not.toContain('npm test');
         expect(container.textContent).toContain('npm test');
+    });
+
+    test('shows streaming reasoning in the bounded priority preview and folds it when settled', async () => {
+        const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'Checking the next step', time: { start: 1 } };
+        const progress = assistant('progress', [thought], 'tool-calls');
+        await act(async () => root.render(<Harness record={turn([progress])} working />));
+        expect(container.querySelector('[data-live-reasoning-preview="true"]')).not.toBeNull();
+        expect(container.querySelector('[data-live-reasoning-preview="true"]')?.textContent).toContain('Checking the next step');
+
+        await act(async () => root.render(<Harness record={turn([assistant('final', [text('final', 'Done')], 'stop')])} working={false} />));
+        expect(container.querySelector('[data-live-reasoning-preview="true"]')).toBeNull();
     });
 
     test('draws a page the agent showed above the answer, outside the folded Activity', async () => {

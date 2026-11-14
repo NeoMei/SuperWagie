@@ -107,10 +107,13 @@ or the live turn's revealed prose boundary.
     The open execution shows progress prose and compact thought/tool rows;
     reasoning text and tool output remain behind their own requested details.
     While the activity fold is closed, the latest authoritative running shell
-    may show a plain-text live output preview below the header. The preview is
-    capped and scrolls inside its own box, follows new output until the reader
-    scrolls upward, and disappears when that shell settles. Full output remains
-    owned by `ToolPart` and is available after opening the activity or tool row.
+    and the current reasoning stream take the same bounded priority slot below
+    the header. Shell output is read from the live shell cursor when a shell ID
+    is available, with OpenCode's running output metadata as the fallback for
+    foreground calls that have not published an ID yet. The preview follows new
+    output until the reader scrolls upward, and disappears when the shell or
+    thought settles. Full output remains owned by `ToolPart` and is available
+    after opening the activity or tool row.
     A missing shell ID, directory or running state produces no preview.
   - Background children and shells keep the process active only while the
     existing live indexes report work or a scoped permission/form waits. A
