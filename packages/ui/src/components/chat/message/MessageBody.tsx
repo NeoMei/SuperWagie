@@ -62,7 +62,7 @@ import { isShownInPlace } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
 import { LivePinnedMessageContext, RevealedTextPartContext, type LivePinnedMessagePresentation, type RevealedTextPartScope } from '../components/revealedTextContext';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../lib/turns/activityRows';
-import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from '../components/liveActivityContext';
+import { LiveActivityHoistedShellsContext, LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from '../components/liveActivityContext';
 import {
     buildRevealedTailPart,
     buildRevealedTextPart,
@@ -1534,6 +1534,7 @@ const AssistantMessageBody = React.memo(({
     const vscodeApi = useRuntimeAPIs().vscode;
     const liveFinalActivity = React.useContext(LiveFinalActivityContext);
     const liveActivityToolsHidden = React.useContext(LiveActivityToolsHiddenContext);
+    const liveActivityHoistedShells = React.useContext(LiveActivityHoistedShellsContext);
     const inlineActivityReasoning = React.useContext(LiveActivityInlineContentContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
     const hoistedInteractions = React.useContext(LiveTurnHoistedInteractionsContext);
@@ -2009,6 +2010,11 @@ const AssistantMessageBody = React.memo(({
                 const toolPart = part as ToolPartType;
                 const toolName = toolPart.tool?.toLowerCase() ?? '';
 
+                if (liveActivityHoistedShells?.has(toolPart.id)) {
+                    i++;
+                    continue;
+                }
+
                 // A session notice that landed during this step (see
                 // `attachSyntheticContext`) draws as its own info row.
                 const notice = readSessionNoticePart(toolPart);
@@ -2119,6 +2125,7 @@ const AssistantMessageBody = React.memo(({
         isMobile,
         liveFinalActivity,
         liveActivityToolsHidden,
+        liveActivityHoistedShells,
         inlineActivityReasoning,
         isLastAssistantInTurn,
         hasStopFinish,

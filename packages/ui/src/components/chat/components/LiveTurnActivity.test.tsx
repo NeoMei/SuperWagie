@@ -823,7 +823,7 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('Check the current model');
     });
 
-    test('replaces the folded thought with the current command and clears it after execution', async () => {
+    test('keeps command execution in a sibling fold instead of nesting thought inside it', async () => {
         const thought: Part = { type: 'reasoning', id: 'current', sessionID: 'session', messageID: 'step', text: 'Inspecting the model', time: { start: 1 } };
         const command: Part = { type: 'tool', tool: 'shell', id: 'command', callID: 'command', sessionID: 'session', messageID: 'step',
             state: { status: 'running', input: { command: 'bun run type-check', description: 'Check types' }, time: { start: 2 } } };
@@ -831,12 +831,18 @@ describe('live Activity with the real message body', () => {
         const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
         expect(header()?.textContent).toContain('Inspecting the model');
         await act(async () => root.render(<Harness record={turn([assistant('step', [thought, command])])} />));
-        expect(header()?.textContent).toContain('bun run type-check');
-        expect(header()?.textContent).not.toContain('Inspecting the model');
+        const commandFold = () => container.querySelector<HTMLElement>('[data-live-command-fold="command"]');
+        expect(commandFold()).not.toBeNull();
+        expect(commandFold()?.textContent).toContain('bun run type-check');
+        expect(commandFold()?.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('true');
+        expect(commandFold()?.closest('[data-live-activity-content]')).toBeNull();
         const finished: Part = { ...command, state: { status: 'completed', input: { command: 'bun run type-check' }, output: 'Passed', metadata: {}, time: { start: 2, end: 3 } } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [finished], 'tool-calls')])} />));
-        expect(header()?.textContent).not.toContain('bun run type-check');
-        expect(header()?.textContent).not.toContain('Inspecting the model');
+        expect(commandFold()).not.toBeNull();
+        expect(commandFold()?.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
+        await act(async () => commandFold()?.querySelector<HTMLElement>('[role="button"]')?.click());
+        expect(commandFold()?.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('true');
+        expect(commandFold()?.textContent).toContain('Passed');
     });
 
     test('a folded preview respects the reasoning opt-out and live turn lifecycle', async () => {
@@ -992,7 +998,7 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('Recorded thought');
     });
 
-    test('shows the running command in the folded Activity header', async () => {
+    test('shows the running command in its own sibling fold', async () => {
         const shell: Part = {
             type: 'tool', tool: 'shell', id: 'shell', callID: 'shell', sessionID: 'session', messageID: 'progress',
             state: { status: 'running', input: { command: 'npm test' }, metadata: { output: 'running test suite' }, time: { start: 1 } },
@@ -1000,18 +1006,15 @@ describe('live Activity with the real message body', () => {
         const progress = assistant('progress', [text('progress-text', 'Checking'), shell], 'tool-calls');
         await act(async () => root.render(<Harness record={turn([progress])} initialExpanded={false} />));
         const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        expect(header?.textContent).toContain('Shell Command');
-        expect(header?.textContent).toContain('npm test');
-        expect(header?.textContent).not.toContain('Working');
+        expect(header?.textContent).not.toContain('npm test');
         expect(container.querySelector('.live-activity-icon[data-running="true"]')).not.toBeNull();
         expect(container.querySelector('[data-work-glyph]')).toBeNull();
-        // The command is visible in a bounded priority preview while it runs.
-        expect(container.querySelector('[data-live-command-preview="true"]')).not.toBeNull();
-        expect(container.querySelector('[data-live-command-preview="true"]')?.textContent).toContain('running test suite');
+        const commandFold = container.querySelector<HTMLElement>('[data-live-command-fold="shell"]');
+        expect(commandFold).not.toBeNull();
+        expect(commandFold?.textContent).toContain('npm test');
+        expect(commandFold?.textContent).toContain('running test suite');
+        expect(commandFold?.closest('[data-live-activity-content]')).toBeNull();
         expect(container.textContent).not.toContain('Checking');
-        await act(async () => header?.click());
-        expect(header?.textContent).not.toContain('npm test');
-        expect(container.textContent).toContain('npm test');
     });
 
     test('shows streaming reasoning in the bounded priority preview and folds it when settled', async () => {
@@ -1373,13 +1376,15 @@ describe('live Activity with the real message body', () => {
             expect(header()?.getAttribute('data-shimmer')).toBeNull();
             await act(async () => jest.advanceTimersByTime(1));
             expect(header()?.getAttribute('data-shimmer')).toBe('ready');
-            expect(header()?.querySelector('.oc-live-header-shimmer')?.textContent).toContain('npm test');
+            expect(header()?.querySelector('.oc-live-header-shimmer')?.textContent).not.toContain('npm test');
+            expect(container.querySelector('[data-live-command-fold="shell"]')?.textContent).toContain('npm test');
 
             await act(async () => root.render(<Harness record={record('bun test')} initialExpanded={false} />));
             expect(header()?.getAttribute('data-shimmer')).toBeNull();
             expect(header()?.querySelector('.oc-live-header-shimmer')).toBeNull();
             await act(async () => jest.advanceTimersByTime(1000));
-            expect(header()?.querySelector('.oc-live-header-shimmer')?.textContent).toContain('bun test');
+            expect(header()?.querySelector('.oc-live-header-shimmer')?.textContent).not.toContain('bun test');
+            expect(container.querySelector('[data-live-command-fold="shell"]')?.textContent).toContain('bun test');
 
             await act(async () => root.render(<Harness record={record('bun test')} working={false} initialExpanded={false} />));
             expect(header()?.getAttribute('data-shimmer')).toBeNull();

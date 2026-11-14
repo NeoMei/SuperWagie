@@ -16,6 +16,9 @@ export const LiveFinalActivityContext = createContext<LiveFinalActivityContextVa
 /** All interaction call IDs, so every disclosure suppresses duplicate cards. */
 export const LiveTurnHoistedInteractionsContext = createContext<ReadonlySet<string> | null>(null);
 
+/** Shell calls rendered by the sibling command disclosure, never inside Activity. */
+export const LiveActivityHoistedShellsContext = createContext<ReadonlySet<string> | null>(null);
+
 /**
  * A folded execution keeps unrevealed tails, tool rows and reasoning behind
  * the outer Activity header and each pinned message's inner fold. Retired
