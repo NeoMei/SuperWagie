@@ -42,7 +42,7 @@ export const PlatformAccountCommerce: React.FC<{
   view: 'overview' | 'orders';
   hasActiveMembership: boolean;
   currentMembership?: Extract<PlatformAccountState, { status: 'signed-in' }>['membership'][number];
-  membershipSummary: (actions: { openMembership: () => void; openAddon: () => void; membershipOpen: boolean; addonOpen: boolean }) => React.ReactNode;
+  membershipSummary: (actions: { openMembership: () => void; openAddon: () => void; membershipOpen: boolean; addonOpen: boolean; disabled: boolean }) => React.ReactNode;
   onAccountRefresh: () => void;
 }> = ({ accountId, payer, view, hasActiveMembership, currentMembership, membershipSummary, onAccountRefresh }) => {
   const { t } = useI18n();
@@ -86,7 +86,7 @@ export const PlatformAccountCommerce: React.FC<{
         setCommand((previous) => previous && next.intents.some((intent) => intent.idempotencyKey === previous.idempotencyKey) ? null : previous);
       }
     } catch (cause) {
-      if (version === generation.current && runtimeKey === getRuntimeKey()) { setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.commerceFailed')); }
+      if (version === generation.current && runtimeKey === getRuntimeKey()) { setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.commerceFailed')); setBuyingTask(null); }
     } finally { if (version === generation.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   }, [accountId, runtimeKey]);
   React.useEffect(() => { const requestGeneration = generation; void refresh(); return () => { ++requestGeneration.current; }; }, [refresh]);
@@ -257,10 +257,11 @@ export const PlatformAccountCommerce: React.FC<{
     setOfferId(id ?? ''); setQuote(null); setError(null); setPurchaseApplied(false);
   };
   const summary = () => membershipSummary({
-    openMembership: () => setBuyingTask((task) => task === 'membership' ? null : 'membership'),
-    openAddon: () => setBuyingTask((task) => task === 'addon' ? null : 'addon'),
+    openMembership: () => { if (state) setBuyingTask((task) => task === 'membership' ? null : 'membership'); },
+    openAddon: () => { if (state) setBuyingTask((task) => task === 'addon' ? null : 'addon'); },
     membershipOpen: buyingTask === 'membership',
     addonOpen: buyingTask === 'addon',
+    disabled: !state || busy || Boolean(error),
   });
   const requestUpgrade = async () => {
     if (!currentMembership || !selectedOffer || busy || unresolved) return;

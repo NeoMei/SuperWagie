@@ -190,10 +190,15 @@ uses a redirect or HTTP success as evidence of funds arriving.
   while retaining unresolved write guards. Empty authorized results are
   represented by empty arrays.
 - The journal has one writer per data directory, atomic fsync-backed writes and
-  an 8 MiB limit. A second writer, corrupted state or stale lock fails closed.
-  Graceful shutdown waits for active commands and releases its own lock. After a
-  crash, an operator must stop all processes using the data directory, preserve
-  `state.json`, and remove only `unihub-commerce/writer.lock` before restarting.
+  an 8 MiB limit. A SQLite kernel guard and a complete PID/UUID owner record
+  fence concurrent writers; a crashed writer's dead-owner record is reclaimed
+  by exactly one restart. A live, malformed or inaccessible owner, corrupted
+  state and a second writer fail closed. Graceful shutdown waits for active
+  commands and releases its own guard and owner record. The legacy
+  `writer.lock` remains for compatibility with older writers: after a crash,
+  an operator should stop all processes using the data directory, preserve
+  `state.json`, and remove only `unihub-commerce/writer.lock` before restarting
+  with a build that predates automatic dead-owner recovery.
 
 ### Why recovery requires an explicit action
 

@@ -39,9 +39,18 @@ let currentMembership: Extract<PlatformAccountState, { status: 'signed-in' }>['m
 let upgradeQuote: PlatformUpgradeQuote | undefined;
 let loseUpgradeResponse = false;
 let upgradeRejection: 'failed' | 'http' | 'conflict' | null = null;
+let commerceReadFailures = 0;
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   const path = String(input instanceof Request ? input.url : input);
   if (init?.method && init.method !== 'GET') { writes++; mutations.push({ path, body: String(init.body) }); }
+  if (path.includes('/api/platform-account/commerce') && (!init?.method || init.method === 'GET') && !path.includes('/checkouts/')) {
+    if (commerceReadFailures > 0) {
+      commerceReadFailures--;
+      return Response.json({ error: 'platform_commerce_unavailable' }, { status: 503 });
+    }
+    return Response.json(commerce);
+  }
+  if (!init?.method && (path.includes('/usage/') || path.includes('/activity'))) return Response.json({ error: 'not_found' }, { status: 404 });
   if (path.endsWith('/checkouts')) {
     const body = JSON.parse(String(init?.body));
     const rejection = upgradeRejection; upgradeRejection = null;
@@ -70,7 +79,7 @@ let host: HTMLDivElement | undefined;
 const render = async (view: 'overview' | 'orders') => {
   if (!root) { host = document.createElement('div'); document.body.append(host); root = createRoot(host); }
   useI18nStore.getState().setLocale('en');
-  await act(async () => root?.render(<I18nProvider><PlatformAccountCommerce accountId="team-a" payer="Team A" view={view} hasActiveMembership={activeMembership} currentMembership={currentMembership} membershipSummary={({ openMembership, openAddon }) => <><p>Current membership</p><button type="button" onClick={openMembership}>Subscribe</button><button type="button" onClick={openAddon}>Buy extra credits</button></>} onAccountRefresh={() => { accountRefreshes++; }} /></I18nProvider>));
+  await act(async () => root?.render(<I18nProvider><PlatformAccountCommerce accountId="team-a" payer="Team A" view={view} hasActiveMembership={activeMembership} currentMembership={currentMembership} membershipSummary={({ openMembership, openAddon, disabled }) => <><p>Current membership</p><button type="button" disabled={disabled} onClick={openMembership}>Subscribe</button><button type="button" disabled={disabled} onClick={openAddon}>Buy extra credits</button></>} onAccountRefresh={() => { accountRefreshes++; }} /></I18nProvider>));
 };
 const button = (text: string) => {
   const found = [...(host?.querySelectorAll('button') ?? [])].find(item => item.textContent === text);
@@ -79,7 +88,7 @@ const button = (text: string) => {
 };
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined; host?.remove(); host = undefined;
-  writes = 0; accountRefreshes = 0; mutations.length = 0; Object.assign(commerce, structuredClone(initialCommerce)); activeMembership = true; currentMembership = undefined; upgradeQuote = undefined; loseUpgradeResponse = false; upgradeRejection = null; usePlatformAccountTabStore.getState().setTab('billing');
+  writes = 0; accountRefreshes = 0; mutations.length = 0; Object.assign(commerce, structuredClone(initialCommerce)); activeMembership = true; currentMembership = undefined; upgradeQuote = undefined; loseUpgradeResponse = false; upgradeRejection = null; commerceReadFailures = 0; usePlatformAccountTabStore.getState().setTab('billing');
 });
 afterAll(async () => {
   fetchFixture.mockRestore(); await browser.happyDOM.close();
@@ -105,6 +114,25 @@ test('overview opens a buying task deliberately and preserves its offer while vi
   await act(async () => button('Subscribe').click());
   expect(host?.querySelector('[role="radio"][aria-label="SuperWagie Plus"]')).not.toBeNull();
   expect(host?.querySelectorAll('[role="radio"]')).toHaveLength(1);
+  expect(writes).toBe(0);
+});
+
+test('an unread commerce state disables purchase entries and restores plans after an authoritative refresh', async () => {
+  commerceReadFailures = 1;
+  await render('overview');
+  expect(host?.textContent).toContain('Could not read wallets or orders. Refresh to check the authoritative status.');
+  expect(button('Subscribe').disabled).toBe(true);
+  expect(button('Buy extra credits').disabled).toBe(true);
+  await act(async () => button('Subscribe').click());
+  await act(async () => button('Buy extra credits').click());
+  expect(writes).toBe(0);
+  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  await act(async () => button('Refresh wallets and orders').click());
+  expect(host?.textContent).not.toContain('Could not read wallets or orders.');
+  expect(button('Subscribe').disabled).toBe(false);
+  expect(button('Buy extra credits').disabled).toBe(false);
+  await act(async () => button('Subscribe').click());
+  expect(host?.querySelector('[role="radio"][aria-label="SuperWagie Plus"]')).not.toBeNull();
   expect(writes).toBe(0);
 });
 

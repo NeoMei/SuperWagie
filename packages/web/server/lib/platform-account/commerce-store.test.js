@@ -42,6 +42,26 @@ describe('commerce recovery store', () => {
     await expect(openCommerceStore(f.directory)).rejects.toThrow('platform_commerce_store_busy');
     expect(await fs.readFile(lockPath, 'utf8')).toBe('stale-process:preserve');
   });
+  it('recovers an owner lock from an exited process without changing the journal', async () => {
+    const f = await fixture();
+    await f.store.mutate((intents) => { intents['entry-a'] = f.intent; });
+    const before = await fs.readFile(path.join(f.directory, 'unihub-commerce/state.json'), 'utf8');
+    await f.store.close();
+    const lockPath = path.join(f.directory, 'unihub-commerce/writer.lock');
+    await fs.writeFile(lockPath, `999999999:${crypto.randomUUID()}`);
+    const recovered = await openCommerceStore(f.directory); cleanups.push(() => recovered.close());
+    expect(recovered.read()['entry-a']).toEqual(f.intent);
+    expect(await fs.readFile(path.join(f.directory, 'unihub-commerce/state.json'), 'utf8')).toBe(before);
+    await expect(openCommerceStore(f.directory)).rejects.toThrow('platform_commerce_store_busy');
+  });
+  it('keeps a lock whose recorded owner is still alive', async () => {
+    const f = await fixture(); await f.store.close();
+    const lockPath = path.join(f.directory, 'unihub-commerce/writer.lock');
+    const owner = `${process.pid}:${crypto.randomUUID()}`;
+    await fs.writeFile(lockPath, owner);
+    await expect(openCommerceStore(f.directory)).rejects.toThrow('platform_commerce_store_busy');
+    expect(await fs.readFile(lockPath, 'utf8')).toBe(owner);
+  });
   it('rejects symlinked state without writing through the link', async () => {
     const f = await fixture(); await f.store.close();
     const target = path.join(f.directory, 'other.json'); await fs.writeFile(target, '{"private":"untouched"}');

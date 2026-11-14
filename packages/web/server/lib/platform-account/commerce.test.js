@@ -162,6 +162,21 @@ describe('UniHub commerce without sandbox funding', () => {
     expect(view.offers.find((item) => item.id === 'addon')).toMatchObject({ kind: 'addon', sandbox: false });
   });
 
+  it('reads wallets and orders after a previous writer left a dead-owner lock', async () => {
+    const f = await fixture();
+    await f.runtime.overview(identity);
+    await f.runtime.close();
+    const lockPath = path.join(f.directory, 'unihub-commerce/writer.lock');
+    await fs.writeFile(lockPath, `999999999:${crypto.randomUUID()}`);
+    const restarted = f.create();
+    const app = express();
+    registerPlatformCommerceRoutes(app, { runtime: restarted, resolveIdentity: () => identity, isRequestOriginAllowed: () => true });
+    const view = await request(app).get('/api/platform-account/commerce').expect(200);
+    expect(view.body.accountId).toBe(f.state.account);
+    expect(view.body.wallets).toEqual([{ productId: 'superwagie', asset: 'CNY/6', amount: '10000000' }]);
+    expect(view.body.orders).toEqual([]);
+  });
+
   it('quotes and accepts an upgrade with the original amount', async () => {
     const f = await fixture(); f.state.activeMembership = true; f.state.wallet = 10_000_000n;
     const quote = await f.runtime.quoteUpgrade(identity, { accountId: f.state.account, subscriptionId: 'sub-a', offerId: membership.id });
