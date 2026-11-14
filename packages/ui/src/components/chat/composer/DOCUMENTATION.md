@@ -268,9 +268,9 @@ composer's top edge, hides until the composer is back at rest.
 The transcript's end fade is a band in the chat background over the
 scroller's end (`.chat-scroll-fade--end` in `index.css`; a mask on the
 scroller made the GPU recomposite the whole transcript every frame). It reads
-`--chat-composer-inset` (plus the floating-panel clearance and, while the
-session works, the status row's height) through
-`--scroll-shadow-end-inset`, so a row that
+`--chat-composer-inset` plus the status row's measured height while a rendered
+`[data-status-row]` exists (through `--chat-status-row-clearance` and a
+`:has()` selector on the chat column), so a row that
 does reach the composer, as the newest lines of a live reply do while the
 follow glide is still catching up, dissolves above the box instead of being
 cut in half by its top edge. That inset applies only while a reply streams

@@ -61,15 +61,16 @@ test('every allowed infinite animation still exists', () => {
 
 test('the folded Activity header sweeps repeating bands from left to right', () => {
   const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
-  expect(css).toContain('color-mix(in srgb, currentColor 48%, white) 50%,');
-  expect(css).toContain('transparent 100%) -240px 0 / 240px 100% repeat-x;');
-  expect(css).toContain('@keyframes oc-live-header-shimmer {\n  from { background-position: -240px 0; }\n  to { background-position: 0 0; }');
+  expect(css).toContain('-webkit-mask-position: -240px 0;');
+  expect(css).toContain('mask-position: -240px 0;');
+  expect(css).toContain('-webkit-mask-position: 0 0;');
+  expect(css).toContain('mask-position: 0 0;');
 });
 
 test('each folded header highlight covers three full-width Chinese glyphs', () => {
   const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
-  const gradient = css.match(/color-mix\(in srgb, currentColor 19%, transparent\) (\d+)%,[\s\S]*?color-mix\(in srgb, currentColor 19%, transparent\) (\d+)%,/);
-  const tile = css.match(/-240px 0 \/ (\d+)px 100% repeat-x;/);
+  const gradient = css.match(/rgb\(255 255 255 \/ 0\.25\) (\d+)%,[\s\S]*?rgb\(255 255 255 \/ 0\.25\) (\d+)%,/);
+  const tile = css.match(/mask-size: (\d+)px 100%;/);
   expect(gradient).not.toBeNull();
   expect(tile).not.toBeNull();
   const broadWidthPx = Number(tile?.[1]) * (Number(gradient?.[2]) - Number(gradient?.[1])) / 100;
@@ -78,20 +79,19 @@ test('each folded header highlight covers three full-width Chinese glyphs', () =
   expect(css).not.toContain('39.9998%');
 });
 
-test('the isolated background-position fixture sweeps from left to right', () => {
+test('the isolated mask-position fixture sweeps from left to right', () => {
   const fixture = readFileSync(FIXTURE_ROOT, 'utf8');
   expect(fixture).toContain('@keyframes oc-background-position { from { background-position: 100% 0; } to { background-position: 0 0; } }');
   expect(fixture).toContain('background-repeat: no-repeat;');
   expect(fixture).toContain('background-position: 100% 0;');
   expect(fixture).toContain('background-size: 200% 100%;');
-  expect(fixture).toContain('color-mix(in srgb, currentColor 48%, white) 50%,');
-  expect(fixture).toContain('transparent 100%) -240px 0 / 240px 100% repeat-x;');
+  expect(fixture).toContain('from { -webkit-mask-position: -240px 0; mask-position: -240px 0; }');
+  expect(fixture).toContain('to { -webkit-mask-position: 0 0; mask-position: 0 0; }');
 });
 
 test('every supported CSS branch keeps the soft highlight and brand coin', () => {
   const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
-  expect(css).toContain('rgb(255 255 255 / 0.48) 50%,');
-  expect(css).toContain('color-mix(in srgb, currentColor 48%, white) 50%,');
+  expect(css).toContain('rgb(255 255 255 / 1) 50%,');
   expect(css).toContain('--oc-brand-signal: #fd4d06;');
   expect(css).toContain('var(--oc-brand-signal) 350deg,');
   expect(css).toContain('@supports (color: color-mix(in lab, red, red)) {');
@@ -103,6 +103,23 @@ test('the stop coin uses the chat surface and the brand signal', () => {
   expect(coin).toContain("backgroundColor: 'var(--surface-background)'");
   expect(coin).toContain("boxShadow: 'inset 0 0 0 1px var(--oc-brand-signal)'");
   expect(coin).toContain('bg-[var(--oc-brand-signal)]');
+});
+
+test('the shimmer keeps the glyph color at both ends and peaks at the centre', () => {
+  const css = readFileSync(join(SOURCE_ROOT, 'index.css'), 'utf8');
+  // The base label stays in place; only a white copy is masked, so a flat
+  // rectangle can never paint over the row's empty space.
+  expect(css).not.toContain('-webkit-background-clip: text;\n  background-clip: text;\n  animation: oc-live-header-shimmer');
+  expect(css).toContain('-webkit-mask-image: linear-gradient(90deg,');
+  expect(css).toContain('mask-image: linear-gradient(90deg,');
+  expect(css).toContain('rgb(255 255 255 / 0) 0%,');
+  expect(css).toContain('rgb(255 255 255 / 1) 50%,');
+  expect(css).toContain('rgb(255 255 255 / 0.82) 47%,');
+  expect(css).toContain('rgb(255 255 255 / 0.82) 53%,');
+  expect(css).toContain('rgb(255 255 255 / 0.55) 42%,');
+  expect(css).toContain('rgb(255 255 255 / 0.55) 58%,');
+  expect(css).toContain('rgb(255 255 255 / 0) 100%);');
+  expect(css).toContain('mask-size: 240px 100%;');
 });
 
 test('the provider mark breathes smoothly and stops for reduced motion', () => {

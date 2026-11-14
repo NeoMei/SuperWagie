@@ -1848,7 +1848,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             isDesktopExpandedInput={isDesktopExpandedInput}
             isMobile={isMobile}
             floatingComposer={floatingComposer}
-            statusRowClearance={sessionIsWorking ? composerOverlayHeight : 0}
+            statusRowClearance={composerOverlayHeight}
             directory={effectiveSessionDirectory}
             scrollRef={scrollRef}
             registerList={registerList}
@@ -1962,6 +1962,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                             distance from the input and the same left edge. */}
                         <div
                             ref={registerFloatingPanelClearanceReader}
+                            data-status-row-host={userOwnsScroll ? undefined : 'visible'}
                             className={cn(
                                 'pointer-events-none absolute bottom-full inset-x-0 mb-2 transition-opacity duration-100',
                                 userOwnsScroll && 'opacity-0',

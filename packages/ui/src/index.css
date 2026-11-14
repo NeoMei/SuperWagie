@@ -482,6 +482,15 @@ div[data-chat-input-footer="true"] {
   --scroll-shadow-end-size: var(--scroll-shadow-size);
 }
 
+/* The status row can appear while a reply has already stopped following. Its
+   rendered root triggers this selector in the same style pass, so the band
+   reaches the row without waiting for a React presence effect. The normal
+   48 px ramp remains above the row. */
+[data-composer-bound]:has([data-status-row-host="visible"] [data-status-row]) .chat-scroll-fade--end {
+  --scroll-shadow-end-inset: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px) + var(--chat-status-row-clearance, 0px));
+  --scroll-shadow-end-size: var(--scroll-shadow-size);
+}
+
 [data-scroll-shadow="true"][data-orientation="vertical"] {
   mask-mode: alpha;
   -webkit-mask-repeat: no-repeat;
@@ -2567,16 +2576,15 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 }
 
 /*
- * The folded Activity header sweeps soft luminance bands from left to right
- * through a duplicate of its own text. The bands repeat every 240 px, so a
- * long header shows several highlights at once while a short one shows one.
- * Every band fades in and out through the same luminance, and its bright span
- * covers at least three full-width Chinese characters. The duplicate carries
- * the original classes, so font size and weight stay as they are; the
- * highlight uses the title color. React mounts it only after the header has
- * held still for one second, and removes it when the visible identity changes
- * or the turn settles.
+ * The folded Activity header keeps its resting colors underneath. A duplicate
+ * painted white is masked by a repeating horizontal alpha envelope, so the
+ * light exists only on glyph pixels and fades back into the original color at
+ * both sides. The bands repeat every 240 px, so a long header shows several
+ * highlights at once while a short one shows one. React mounts the duplicate
+ * only after the header has held still for one second, and removes it when the
+ * visible identity changes or the turn settles.
  */
+@supports ((mask-image: linear-gradient(90deg, transparent, black)) or (-webkit-mask-image: linear-gradient(90deg, transparent, black))) {
 .oc-live-header-shimmer {
   position: absolute;
   inset: 0;
@@ -2589,46 +2597,49 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   overflow: hidden;
   padding-inline: inherit;
   pointer-events: none;
-  color: var(--tools-title);
-  /* Without color-mix(), a transparent stop written as a colour keyword stays
-     transparent, but the stopping points would show a flat band. This
-     fallback keeps the same soft envelope with fixed-opacity white bands. */
-  background: linear-gradient(90deg,
-    transparent 0%,
-    rgb(255 255 255 / 0.07) 13%,
-    rgb(255 255 255 / 0.19) 26%,
-    rgb(255 255 255 / 0.38) 40%,
-    rgb(255 255 255 / 0.48) 50%,
-    rgb(255 255 255 / 0.38) 60%,
-    rgb(255 255 255 / 0.19) 74%,
-    rgb(255 255 255 / 0.07) 87%,
-    transparent 100%) -240px 0 / 240px 100% repeat-x;
-  -webkit-background-clip: text;
-  background-clip: text;
+  color: rgb(255 255 255);
+  -webkit-mask-image: linear-gradient(90deg,
+    rgb(255 255 255 / 0) 0%,
+    rgb(255 255 255 / 0.03) 12%,
+    rgb(255 255 255 / 0.1) 24%,
+    rgb(255 255 255 / 0.25) 34%,
+    rgb(255 255 255 / 0.55) 42%,
+    rgb(255 255 255 / 0.82) 47%,
+    rgb(255 255 255 / 1) 50%,
+    rgb(255 255 255 / 0.82) 53%,
+    rgb(255 255 255 / 0.55) 58%,
+    rgb(255 255 255 / 0.25) 66%,
+    rgb(255 255 255 / 0.1) 76%,
+    rgb(255 255 255 / 0.03) 88%,
+    rgb(255 255 255 / 0) 100%);
+  mask-image: linear-gradient(90deg,
+    rgb(255 255 255 / 0) 0%,
+    rgb(255 255 255 / 0.03) 12%,
+    rgb(255 255 255 / 0.1) 24%,
+    rgb(255 255 255 / 0.25) 34%,
+    rgb(255 255 255 / 0.55) 42%,
+    rgb(255 255 255 / 0.82) 47%,
+    rgb(255 255 255 / 1) 50%,
+    rgb(255 255 255 / 0.82) 53%,
+    rgb(255 255 255 / 0.55) 58%,
+    rgb(255 255 255 / 0.25) 66%,
+    rgb(255 255 255 / 0.1) 76%,
+    rgb(255 255 255 / 0.03) 88%,
+    rgb(255 255 255 / 0) 100%);
+  -webkit-mask-mode: alpha;
+  mask-mode: alpha;
+  -webkit-mask-size: 240px 100%;
+  mask-size: 240px 100%;
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
   animation: oc-live-header-shimmer 2.8s linear infinite;
 }
-
-@supports (color: color-mix(in lab, red, red)) {
-  .oc-live-header-shimmer {
-  background: linear-gradient(90deg,
-    transparent 0%,
-    color-mix(in srgb, currentColor 7%, transparent) 13%,
-    color-mix(in srgb, currentColor 19%, transparent) 26%,
-    color-mix(in srgb, currentColor 38%, white) 40%,
-    color-mix(in srgb, currentColor 48%, white) 50%,
-    color-mix(in srgb, currentColor 38%, white) 60%,
-    color-mix(in srgb, currentColor 19%, transparent) 74%,
-    color-mix(in srgb, currentColor 7%, transparent) 87%,
-    transparent 100%) -240px 0 / 240px 100% repeat-x;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: oc-live-header-shimmer 2.8s linear infinite;
-  }
 }
 
 .oc-live-header-shimmer,
 .oc-live-header-shimmer * {
-  -webkit-text-fill-color: transparent;
+  color: rgb(255 255 255);
+  -webkit-text-fill-color: rgb(255 255 255);
 }
 
 .oc-live-header-shimmer svg,
@@ -2638,8 +2649,14 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 
 /* Travelling exactly one fixed period makes the repeating bands loop seamlessly. */
 @keyframes oc-live-header-shimmer {
-  from { background-position: -240px 0; }
-  to { background-position: 0 0; }
+  from {
+    -webkit-mask-position: -240px 0;
+    mask-position: -240px 0;
+  }
+  to {
+    -webkit-mask-position: 0 0;
+    mask-position: 0 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
