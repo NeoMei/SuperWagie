@@ -94,7 +94,9 @@ or the live turn's revealed prose boundary.
     choices by turn, so deltas, step changes, completion and virtualized remounts
     preserve them.
     A folded running turn keeps its latest visible assistant progress message
-    outside the log, including while a permission or form waits for the user.
+    outside the log when it is between execution steps or waiting for a
+    permission/form. While a shell or thought is actively streaming, the
+    bounded priority preview owns that live content so it is not drawn twice.
     Runtime-local revealed prose stays in the original `ChatMessage` root,
     including a rewritten foreground. The current authoritative answer stays
     outside the folds; unshown text tails, tool rows and reasoning go into a
@@ -114,7 +116,10 @@ or the live turn's revealed prose boundary.
     output until the reader scrolls upward, and disappears when the shell or
     thought settles. Full output remains owned by `ToolPart` and is available
     after opening the activity or tool row.
-    A missing shell ID, directory or running state produces no preview.
+    A missing shell ID or directory produces no polled shell preview; a
+    foreground output metadata snapshot can still render while OpenCode has
+    not published the shell ID. A settled shell or thought produces no live
+    preview, while its historical rows remain behind the expandable fold.
   - Background children and shells keep the process active only while the
     existing live indexes report work or a scoped permission/form waits. A
     parent's answer does not finish its background work. Terminal reports win;

@@ -198,12 +198,33 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     // disclosures explicitly; the live header carries the current state and
     // latest running tool.
     const isExpanded = expanded ?? false;
+    const liveTool = React.useMemo(
+        () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
+        [turn.activityParts],
+    );
+    const liveShell = React.useMemo(() => turn.activityParts.some((activity) => (
+        activity.part.type === 'tool'
+        && isShellTool(activity.part.tool)
+        && (activity.part.state.status === 'pending' || activity.part.state.status === 'running')
+    )), [turn.activityParts]);
+    const liveThought = React.useMemo(() => {
+        if (settled || liveTool) return undefined;
+        const parts = turn.assistantMessages.at(-1)?.parts ?? [];
+        for (let index = parts.length - 1; index >= 0; index -= 1) {
+            const part = parts[index];
+            if (part.type === 'reasoning' && part.time?.end === undefined) return part;
+        }
+        return undefined;
+    }, [liveTool, settled, turn.assistantMessages]);
     // One latest progress update remains readable while the execution log is
-    // folded. Messages whose prose was already shown keep their original root
-    // above it; opening the folds shows the unrevealed work without a second
-    // copy in the transcript.
+    // folded between live steps. A live shell or thought owns the priority
+    // preview instead; opening the fold shows the historical work without a
+    // second copy in the transcript.
     const progressMessage = React.useMemo(() => {
-        if (finalMessage || isExpanded || (!isWorking && !waitingForUser) || hasLaterAssistant) return null;
+        // The priority preview owns the live thought/command region. Keeping
+        // the same progress text outside it duplicates the current content
+        // directly below the folded header.
+        if (finalMessage || isExpanded || liveShell || liveThought || (!isWorking && !waitingForUser) || hasLaterAssistant) return null;
         for (let index = turn.assistantMessages.length - 1; index >= 0; index -= 1) {
             const message = turn.assistantMessages[index];
             if (message.info.role !== 'assistant') continue;
@@ -211,7 +232,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             if (parts.length > 0) return { ...message, parts };
         }
         return null;
-    }, [finalMessage, isExpanded, isWorking, waitingForUser, hasLaterAssistant, turn.assistantMessages]);
+    }, [finalMessage, isExpanded, isWorking, liveShell, liveThought, waitingForUser, hasLaterAssistant, turn.assistantMessages]);
     const foregroundMessage = finalMessage ?? progressMessage;
     const foregroundMessageId = foregroundMessage?.info.id;
     // Runtime-local revealed prose stays in the original ChatMessage root
@@ -246,19 +267,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     const pinnedMessageIds = React.useMemo(() => new Set(pinnedMessages.map((message) => message.info.id)), [pinnedMessages]);
     const foldedMessages = React.useMemo(() => activityMessages.filter((message) => !pinnedMessageIds.has(message.info.id)),
         [activityMessages, pinnedMessageIds]);
-    const liveTool = React.useMemo(
-        () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
-        [turn.activityParts],
-    );
-    const liveThought = React.useMemo(() => {
-        if (settled || liveTool) return undefined;
-        const parts = turn.assistantMessages.at(-1)?.parts ?? [];
-        for (let index = parts.length - 1; index >= 0; index -= 1) {
-            const part = parts[index];
-            if (part.type === 'reasoning' && part.time?.end === undefined) return part;
-        }
-        return undefined;
-    }, [liveTool, settled, turn.assistantMessages]);
     // The turn owns one effective state for all outer and pinned inner
     // disclosures. An absent choice follows execution; explicit reader choices
     // survive it.
