@@ -2,6 +2,12 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.98] - 2026-11-14
+
+### Improvements
+
+- **Chat:** Running commands and current thinking now share a bounded priority panel under the activity header. The panel follows live output while you read the latest lines and folds away as the command or thought ends; full details remain available on expansion.
+
 ## [2.7.97] - 2026-11-14
 
 ### Improvements
