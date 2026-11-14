@@ -1,3 +1,9 @@
+## [2.7.95] - 2026-11-14
+
+### Fixes
+
+- **Search:** Session content search keeps its result position across the three entry points, and Chinese headings anchor correctly in markdown previews.
+
 ## [2.7.94] - 2026-11-14
 
 ## [2.7.88] - 2026-11-12

@@ -1,5 +1,42 @@
 [
   {
+    "version": "2.7.95",
+    "date": "2026-11-14",
+    "title": "OpenChamber 2.7.1 upgrade on OpenCode 2.3.0",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [
+        "**Sessions:** Retry keeps the chosen model consistent with what the chat displays, and an unknown paid-model request is never replayed automatically. Forms keep their parent-child attribution, so parent A with child B delivers the form to B once, and a dropped connection never fakes success.",
+        "**Long tasks:** A long turn reads only the message window it shows and re-reads missing pieces on demand; four distinct message states replace the old blur of pending and failed rows.",
+        "**Files:** A single broken preview no longer takes the whole file panel down — chat, other files and drafts keep working, and Retry recovers the same file. Markdown previews gain an outline menu and passive SVG rendering; wide CSV tables size their columns to the viewport, and read-only undo leaves the file untouched.",
+        "**Work status:** Activity snapshots survive reconnects, late-arriving states no longer overwrite live events, and knowledge drafts stay bound to their project.",
+        "**Entry points:** MCP sign-in, tab close targets and skill discovery follow the OpenChamber 2.7.1 behavior definitions; tool enumeration stays compatible.",
+        "**Foreground stop:** Stopping one running shell command in the chat stops only that command; other commands and subagents keep running. A failed stop can no longer misreport a command as stopped.",
+        "**Pasted references:** Issue, pull-request and tracker links pasted into the composer resolve into reference chips with an escaped context preview, bounded lookups and no invented context on failure.",
+        "**Desktop todos:** The plan progress card shows real step counts from the associated plan (2 of 4, never 0% without steps), and manual read-state writes survive instance switches.",
+        "**Desktop data files:** SQLite and Parquet files open read-only in a bounded table view with column filtering; CSV gains light editing with quote-accurate selection references.",
+        "**Desktop Excel:** XLSX files open through the existing Omni viewer with an explicit \"select cells / save copy\" pilot that stages up to 100 scalar edits into a sibling copy, leaving the original byte-for-byte intact; chart-bearing packages are refused at the edit gate.",
+        "**Desktop shell stop:** The terminal row reads native completion and the ended-shell index, so a code-less exit after a stop request stays unknown until authoritative removal confirms it.",
+        "**Desktop worktrees:** Deleting a worktree keeps its sessions by migrating the whole tree with read-back verification; partial or unknown states keep the directory.",
+        "**Desktop Hy memory:** Incremental tidy suggestions with per-item withdrawal and an independent rule-export confirmation.",
+        "**Runtime kernel:** Bundled OpenCode CLI and client/schema move to 2.3.0; external minimum stays 2.2.4 and Intel compatibility lines stay separate. Private-runtime smoke covers credentials, session history retention and cold start on the packaged app.",
+        "**Runtime mobile:** The official mobile pane is a read-only, account-bound view of one selected project's artifacts and tasks; phone mutations never write host Markdown, and selector authority never crosses devices.",
+        "**Runtime notifications:** Waiting-page settlements withdraw their already-delivered notifications with the original directory identity, on macOS natively and elsewhere through the web API."
+      ],
+      "fixes": [],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "**Search:** Session content search keeps its result position across the three entry points, and Chinese headings anchor correctly in markdown previews."
+      ],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.94",
     "date": "2026-11-14",
     "title": "Credits-only model billing",
