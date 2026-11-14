@@ -14,9 +14,15 @@ type LiveCommandPreviewProps = {
 };
 
 export const LiveCommandPreview: React.FC<LiveCommandPreviewProps> = ({ activities, directory, visible }) => {
-    const { t } = useI18n();
     const shell = React.useMemo(() => latestRunningShellPreview(activities), [activities]);
-    const output = useBackgroundShellOutput(shell?.shellID ?? '', directory, visible && shell !== undefined);
+    if (!visible || !shell) return null;
+
+    return <LiveCommandPreviewBody key={shell.shellID} shellID={shell.shellID} directory={directory} />;
+};
+
+const LiveCommandPreviewBody: React.FC<{ shellID: string; directory?: string }> = ({ shellID, directory }) => {
+    const { t } = useI18n();
+    const output = useBackgroundShellOutput(shellID, directory, true);
     const scrollRef = React.useRef<HTMLElement>(null);
     const followEndRef = React.useRef(true);
     const lastScrollTopRef = React.useRef(0);
@@ -43,7 +49,7 @@ export const LiveCommandPreview: React.FC<LiveCommandPreviewProps> = ({ activiti
         lastScrollTopRef.current = element.scrollTop;
     }, []);
 
-    if (!shouldRenderLiveCommandPreview(visible, shell, output)) return null;
+    if (!shouldRenderLiveCommandPreview(true, { shellID }, output)) return null;
 
     return (
         <div className="chat-message-column mt-0.5" data-live-command-preview="true">
