@@ -11,7 +11,7 @@ import { getLiveFinalMessage, getShownInteractions } from '../lib/turns/liveActi
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { latestRunningTool } from '../lib/turns/liveActivityStatus';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
-import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from './liveActivityContext';
+import { LiveActivityHoistedShellsContext, LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from './liveActivityContext';
 import { ShownToolCard } from '../message/parts/ShownToolCard';
 import { TurnMessageWindow } from './TurnMessageWindow';
 import { TurnMessageWindowContext, initialMessageWindow, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
@@ -44,6 +44,7 @@ import {
 import { RevealedTextTurnContext, type LivePinnedMessagePresentation } from './revealedTextContext';
 import { PinnedMessage } from './withPinnedMessage';
 import { LiveCommandPreview } from './liveCommandPreview';
+import { latestShellPreview } from './liveCommandPreviewModel';
 import { LiveReasoningPreview } from './liveReasoningPreview';
 
 const SHIMMER_STABLE_DELAY_MS = 1000;
@@ -285,6 +286,11 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     // including after the turn ends without a final answer. Each call ID has
     // one card owner: a pinned message, the hoisted list or the final message.
     const interactions = React.useMemo(() => getShownInteractions(turn.assistantMessages), [turn.assistantMessages]);
+    const latestShell = React.useMemo(() => latestShellPreview(turn.activityParts), [turn.activityParts]);
+    const hoistedShells = React.useMemo(
+        () => latestShell ? new Set([latestShell.key]) : null,
+        [latestShell],
+    );
     // While the turn works, steps after the last interaction and the reply
     // being written stay below it in the order they happened. When the answer
     // arrives, later work folds below the retained prose and the answer.
@@ -342,7 +348,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                     {t(terminalStopped ? 'chat.toolPart.status.stopped' : 'chat.toolPart.status.failed')}
                 </span>
             ) : null}
-            {liveTool && !isExpanded ? (
+            {liveTool && !latestShell && !isExpanded ? (
                 <span className="flex min-w-0 flex-1 items-center gap-1 typography-meta" data-live-tool="true">
                     <span className="shrink-0 font-medium" style={{ color: 'var(--tools-title)' }}>{liveTool.label}</span>
                     {liveTool.description ? (
@@ -425,6 +431,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         pinnedForegroundMessageId, pinnedMessages, revealedRecords]);
     return (
         <LiveTurnHoistedInteractionsContext.Provider value={hoistedInteractions}>
+            <LiveActivityHoistedShellsContext.Provider value={hoistedShells}>
             <LiveActivityInlineContentContext.Provider value>
             <LiveActivityToolsHiddenContext.Provider value={!isExpanded}>
             <RevealedTextTurnContext.Provider value={turnScope}>
@@ -449,7 +456,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                         </Button>
                     </div>
                 </div>
-                <LiveCommandPreview activities={turn.activityParts} directory={directory} visible={!isExpanded} />
+                <LiveCommandPreview activities={turn.activityParts} directory={directory} />
                 {!liveTool ? <LiveReasoningPreview text={reasoningText} visible={!isExpanded && Boolean(liveThought)} /> : null}
                 <LiveActivityCollapse expanded={isExpanded} id={contentId} animate={expanded !== undefined}>
                     <div>
@@ -479,6 +486,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             </RevealedTextTurnContext.Provider>
             </LiveActivityToolsHiddenContext.Provider>
             </LiveActivityInlineContentContext.Provider>
+            </LiveActivityHoistedShellsContext.Provider>
         </LiveTurnHoistedInteractionsContext.Provider>
     );
 }

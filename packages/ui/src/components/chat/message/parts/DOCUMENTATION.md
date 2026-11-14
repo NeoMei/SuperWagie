@@ -108,18 +108,19 @@ or the live turn's revealed prose boundary.
     visibility use the effective state.
     The open execution shows progress prose and compact thought/tool rows;
     reasoning text and tool output remain behind their own requested details.
-    While the activity fold is closed, the latest authoritative running shell
-    and the current reasoning stream take the same bounded priority slot below
-    the header. Shell output is read from the live shell cursor when a shell ID
-    is available, with OpenCode's running output metadata as the fallback for
-    foreground calls that have not published an ID yet. The preview follows new
-    output until the reader scrolls upward, and disappears when the shell or
-    thought settles. Full output remains owned by `ToolPart` and is available
-    after opening the activity or tool row.
+    While the activity fold is closed, the current reasoning stream keeps its
+    bounded priority preview and the latest shell call gets a sibling command
+    disclosure at the same level. The command disclosure follows live output
+    until the reader scrolls upward, opens while the command runs, and
+    auto-folds when it settles; its output remains available by expanding that
+    command row. The shell part is hoisted out of the outer Activity fold so
+    reasoning is never nested inside command execution. A shell ID uses the
+    live shell cursor when available, with OpenCode's running output metadata
+    as the fallback for foreground calls that have not published an ID yet.
     A missing shell ID or directory produces no polled shell preview; a
     foreground output metadata snapshot can still render while OpenCode has
-    not published the shell ID. A settled shell or thought produces no live
-    preview, while its historical rows remain behind the expandable fold.
+    not published the shell ID. A settled thought produces no live preview;
+    the settled command disclosure remains as a collapsed historical row.
   - Background children and shells keep the process active only while the
     existing live indexes report work or a scoped permission/form waits. A
     parent's answer does not finish its background work. Terminal reports win;

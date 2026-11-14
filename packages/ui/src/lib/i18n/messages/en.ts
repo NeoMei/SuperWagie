@@ -3002,6 +3002,8 @@ export const dict = {
   'chat.reasoningTrace.expandAria': 'Expand reasoning trace',
   'chat.reasoningTrace.collapseAria': 'Collapse reasoning trace',
   'chat.reasoningTrace.thought': 'Thought',
+  'chat.commandTrace.expandAria': 'Expand command output',
+  'chat.commandTrace.collapseAria': 'Collapse command output',
   'chat.messageBody.subtask.title': 'Delegated task',
   'chat.messageBody.subtask.hidePrompt': 'Hide prompt',
   'chat.messageBody.subtask.showPrompt': 'Show prompt',
