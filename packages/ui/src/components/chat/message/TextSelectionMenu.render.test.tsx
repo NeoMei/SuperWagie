@@ -10,6 +10,8 @@ import { getSyncChildStores } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ChatColumnSessionContext } from '../chatColumnSession';
 import { dispatchFrameSelection } from './frameSelection';
+import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
+import { findChatQuoteRoots, resolveChatQuoteRanges } from '@/lib/chatQuoteAnchor';
 
 // React DOM probes for a DOM when first imported; give it one, then restore
 // the caller's globals.
@@ -36,12 +38,12 @@ const session = (updated: number, sessionDirectory = directory): Session => ({
 });
 const otherSession = (updated: number): Session => ({ ...session(updated), id: 'session-2' });
 
-const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'CustomEvent', 'DOMRect', 'MutationObserver', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'NodeFilter', 'Text', 'Element', 'HTMLElement', 'CustomEvent', 'DOMRect', 'MutationObserver', 'CSS', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const installDom = () => {
   const win = new Window({ url: 'http://localhost' });
   const previous = DOM_GLOBAL_NAMES.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
-  const values = { window: win, document: win.document, navigator: win.navigator, Node: win.Node, Element: win.Element,
-    HTMLElement: win.HTMLElement, CustomEvent: win.CustomEvent, DOMRect: win.DOMRect, MutationObserver: win.MutationObserver, localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
+  const values = { window: win, document: win.document, navigator: win.navigator, Node: win.Node, NodeFilter: win.NodeFilter, Text: win.Text, Element: win.Element,
+    HTMLElement: win.HTMLElement, CustomEvent: win.CustomEvent, DOMRect: win.DOMRect, MutationObserver: win.MutationObserver, CSS: win.CSS, localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
     requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), IS_REACT_ACT_ENVIRONMENT: true };
   for (const name of DOM_GLOBAL_NAMES) Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
   const container = document.createElement('div');
@@ -115,6 +117,80 @@ describe('TextSelectionMenu render subscriptions', () => {
     await stage([session(2, '/repo/worktree')]);
 
     expect(renders).toBeGreaterThan(settled);
+  });
+
+  test('a quote from the second grouped source keeps its original message after plain-thinking remount', async () => {
+    const scope = document.createElement('div');
+    scope.setAttribute('data-scrollbar', 'chat');
+    scope.innerHTML = '<div data-message-id="first"><div data-chat-quote-root><div data-chat-source-message-id="first" data-chat-quote-root><p>First thought.</p></div><div data-chat-source-message-id="second" data-chat-quote-root><p>Second thought has quoted words.</p></div></div></div>';
+    document.body.appendChild(scope);
+    containerRef.current = scope.querySelector('[data-chat-quote-root]');
+    const target = { directory, sessionKey: sessionId };
+    const draftsBefore = useInlineCommentDraftStore.getState().drafts;
+    const touchedBefore = useInlineCommentDraftStore.getState().touchedAt;
+    try {
+      await render();
+      await stage([session(1)]);
+      const source = scope.querySelector('[data-chat-source-message-id="second"] p')!;
+      const range = document.createRange();
+      range.selectNodeContents(source);
+      await act(async () => {
+        window.getSelection()?.addRange(range);
+        document.dispatchEvent(new window.Event('selectionchange'));
+      });
+      const comment = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === 'Comment');
+      expect(comment).toBeDefined();
+      await act(async () => { comment?.click(); });
+      const attach = document.querySelector<HTMLButtonElement>('button[aria-label="Attach"]');
+      expect(attach).not.toBeNull();
+      await act(async () => { attach?.click(); });
+      const draft = useInlineCommentDraftStore.getState().getDrafts(target).at(-1);
+      expect(draft?.fileLabel).toBe('second');
+      expect(draft?.anchor?.text).toBe('Second thought has quoted words.');
+
+      scope.innerHTML = '<div data-message-id="second"><div data-chat-quote-root><p>Second thought has quoted words.</p></div></div>';
+      expect(draft?.anchor && resolveChatQuoteRanges(findChatQuoteRoots(scope, 'second'), draft.anchor)?.[0]?.toString()).toBe('Second thought has quoted words.');
+    } finally {
+      containerRef.current = null;
+      useInlineCommentDraftStore.setState({ drafts: draftsBefore, touchedAt: touchedBefore });
+    }
+  });
+
+  test('a selection crossing grouped sources from different messages has no message menu', async () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div data-message-id="first"><div data-chat-source-message-id="first"><p>First thought.</p></div><div data-chat-source-message-id="second"><p>Second thought.</p></div></div>';
+    document.body.appendChild(host);
+    containerRef.current = host;
+    try {
+      await render();
+      const paragraphs = host.querySelectorAll('p');
+      const range = document.createRange();
+      range.setStart(paragraphs[0].firstChild!, 0);
+      range.setEnd(paragraphs[1].firstChild!, 7);
+      await act(async () => {
+        window.getSelection()?.addRange(range);
+        document.dispatchEvent(new window.Event('selectionchange'));
+      });
+      expect(document.body.textContent).not.toContain('Comment');
+    } finally { containerRef.current = null; }
+  });
+
+  test('a selection of the whole grouped row cannot assign foreign sources to its owner', async () => {
+    const host = document.createElement('div');
+    host.setAttribute('data-message-id', 'first');
+    host.innerHTML = '<div data-chat-source-message-id="first"><p>First thought.</p></div><div data-chat-source-message-id="second"><p>Second thought.</p></div>';
+    document.body.appendChild(host);
+    containerRef.current = host;
+    try {
+      await render();
+      const range = document.createRange();
+      range.selectNodeContents(host);
+      await act(async () => {
+        window.getSelection()?.addRange(range);
+        document.dispatchEvent(new window.Event('selectionchange'));
+      });
+      expect(document.body.textContent).not.toContain('Comment');
+    } finally { containerRef.current = null; }
   });
 
   test('a selection a page frame reports opens the menu, and clearing it closes the menu', async () => {

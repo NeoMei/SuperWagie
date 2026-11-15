@@ -1,25 +1,17 @@
 import { createContext } from 'react';
 
-import type { Part, ToolPart } from '@/lib/opencode/model';
+import type { Part } from '@/lib/opencode/model';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
+import { isActivityGroupContinuation, type ActivityGroups } from './activityGroups';
+import { isToolRowShown } from './toolRowVisibility';
+
+export { isToolRowShown } from './toolRowVisibility';
 
 // While a turn works with Activity collapsed, only its latest rows stay in
 // view and the earlier ones fold into one "+N more" row. A row is what
 // MessageBody draws for one part: a text, a reasoning block, a tool call.
 
 export const LIVE_ACTIVITY_VISIBLE_ROWS = 7;
-
-const isToolRunning = (status: string | undefined): boolean => (
-    status === 'pending' || status === 'running' || status === 'started'
-);
-
-/** Whether a tool call gets a row: while it runs, and once it ended with sane timing. */
-export const isToolRowShown = (toolPart: ToolPart): boolean => {
-    const { state } = toolPart;
-    if (isToolRunning(state.status)) return true;
-    if (state.status !== 'completed' && state.status !== 'error') return false;
-    return state.time.end >= state.time.start;
-};
 
 /** Whether a part MessageBody draws is a row (`parts` already filtered for reasoning). */
 export const isActivityRowPart = (part: Part): boolean => {
@@ -29,8 +21,10 @@ export const isActivityRowPart = (part: Part): boolean => {
 };
 
 /** The parts of a message that draw a row, in order. */
-export const activityRowParts = (parts: Part[], showReasoning: boolean): Part[] => (
-    filterVisibleParts(parts, { includeReasoning: showReasoning }).filter(isActivityRowPart)
+export const activityRowParts = (parts: Part[], showReasoning: boolean, groups?: ActivityGroups | null): Part[] => (
+    filterVisibleParts(parts, { includeReasoning: showReasoning }).filter((part) => (
+        isActivityRowPart(part) && !isActivityGroupContinuation(part, groups)
+    ))
 );
 
 interface ActivityTrim {

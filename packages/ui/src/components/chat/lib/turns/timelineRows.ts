@@ -1,6 +1,7 @@
 import { isHiddenUserMessage } from '../../message/hiddenUserMessage';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
 import { answerChunkCuts } from './answerChunks';
+import { getActivityGroups, isActivityContinuationOnlyMessage, isActivityGroupContinuation, type ActivityGroups } from './activityGroups';
 import { getLiveFinalMessage, getShownPages, hasLiveActivity } from './liveActivity';
 import type { TimelineEntry } from './timelineEntries';
 import type { ChatMessageEntry } from './types';
@@ -42,6 +43,8 @@ export type TimelineRow =
         kind: 'turn-message';
         key: string;
         messageId: string;
+        /** Original messages drawn entirely by a group in this row. */
+        messageAliases?: readonly string[];
         slice: MessageSlice | null;
         /** The turn's final answer under a fold (collapsed activity mode). */
         final: boolean;
@@ -64,6 +67,7 @@ export type TimelineRowsOptions = {
     collapsedActivity: boolean;
     expandedTurns: ReadonlyMap<string, boolean>;
     showReasoningTraces: boolean;
+    collapsibleThinkingBlocks?: boolean;
 };
 
 const isMessageCompleted = (message: ChatMessageEntry): boolean => (
@@ -78,12 +82,13 @@ const PARTS_PER_ROW = 24;
  * part it draws, and inside a long text once it is finished. Only parts the
  * message draws (`MessageBody`'s own filter) are cut at.
  */
-const messageCuts = (message: ChatMessageEntry, showReasoningTraces: boolean): TextCut[] => {
+const messageCuts = (message: ChatMessageEntry, showReasoningTraces: boolean, groups: ActivityGroups): TextCut[] => {
     const completed = isMessageCompleted(message);
     const cuts: TextCut[] = [];
     let partsInRow = 0;
     for (const part of filterVisibleParts(message.parts, { includeReasoning: showReasoningTraces })) {
         if (isEmptyTextPart(part)) continue;
+        if (isActivityGroupContinuation(part, groups)) continue;
         if (partsInRow === PARTS_PER_ROW) {
             cuts.push({ partId: part.id, offset: 0 });
             partsInRow = 0;
@@ -99,15 +104,47 @@ const messageCuts = (message: ChatMessageEntry, showReasoningTraces: boolean): T
 
 const sliceKey = (cut: TextCut) => `${cut.partId}:${cut.offset}`;
 
+const rowContainsPart = (row: Extract<TimelineRow, { kind: 'turn-message' }>, message: ChatMessageEntry, partId: string): boolean => {
+    const partIndex = message.parts.findIndex((part) => part.id === partId);
+    const from = row.slice?.from;
+    const to = row.slice?.to;
+    const start = from ? message.parts.findIndex((part) => part.id === from.partId) : 0;
+    const end = to ? message.parts.findIndex((part) => part.id === to.partId) : message.parts.length;
+    return partIndex >= start && (partIndex < end || (partIndex === end && (to?.offset ?? 0) > 0));
+};
+
+const attachGroupMessageAliases = (rows: TimelineRow[], groups: ActivityGroups): void => {
+    const rowsByMessage = new Map<string, Extract<TimelineRow, { kind: 'turn-message' }>[]>();
+    for (const row of rows) {
+        if (row.kind !== 'turn-message') continue;
+        const bucket = rowsByMessage.get(row.messageId);
+        if (bucket) bucket.push(row); else rowsByMessage.set(row.messageId, [row]);
+    }
+    for (const [partId, group] of groups) {
+        if (partId !== group.id) continue;
+        const first = group.members[0];
+        if (!first) continue;
+        const owner = rowsByMessage.get(first.message.info.id)?.find((row) => rowContainsPart(row, first.message, first.part.id));
+        if (!owner) continue;
+        const aliases = new Set(owner.messageAliases);
+        for (const { message } of group.members) {
+            if (!rowsByMessage.has(message.info.id) && isActivityContinuationOnlyMessage(message, groups)) aliases.add(message.info.id);
+        }
+        if (aliases.size > 0) owner.messageAliases = [...aliases];
+    }
+};
+
 const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[] => {
     const { turn } = entry;
+    const groups = getActivityGroups(turn.assistantMessages, options.collapsibleThinkingBlocks);
     const underFold = options.collapsedActivity && hasLiveActivity(turn, options.showReasoningTraces);
     const finalMessage = underFold ? getLiveFinalMessage(turn.assistantMessages) : undefined;
     const fields = { entry, underFold, finalMessageId: finalMessage?.info.id, gapBelow: false };
     const rows: TimelineRow[] = [{ kind: 'turn-head', key: entry.key, ...fields }];
     const addMessage = (message: ChatMessageEntry, final = false) => {
+        if (isActivityContinuationOnlyMessage(message, groups)) return;
         const messageId = message.info.id;
-        const cuts = messageCuts(message, options.showReasoningTraces);
+        const cuts = messageCuts(message, options.showReasoningTraces, groups);
         if (cuts.length === 0) {
             rows.push({ kind: 'turn-message', key: `step:${messageId}`, ...fields, messageId, slice: null, final });
             return;
@@ -148,6 +185,8 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
         turn.assistantMessages.forEach((message) => addMessage(message));
     }
 
+    attachGroupMessageAliases(rows, groups);
+
     // The gap under an answer belongs to the turn's last row, from the moment
     // it is sent (see the scroll documentation, "Row identity").
     const last = rows[rows.length - 1];
@@ -166,7 +205,9 @@ const isSameRow = (previous: TimelineRow, next: TimelineRow): boolean => {
     if (previous.kind === 'ungrouped' || next.kind === 'ungrouped') return true;
     if (previous.gapBelow !== next.gapBelow || previous.underFold !== next.underFold || previous.finalMessageId !== next.finalMessageId) return false;
     if (previous.kind === 'turn-message' && next.kind === 'turn-message') {
-        return previous.messageId === next.messageId && previous.final === next.final && isSameSlice(previous.slice, next.slice);
+        return previous.messageId === next.messageId && previous.final === next.final && isSameSlice(previous.slice, next.slice)
+            && previous.messageAliases?.length === next.messageAliases?.length
+            && (previous.messageAliases?.every((id, index) => id === next.messageAliases?.[index]) ?? true);
     }
     return true;
 };

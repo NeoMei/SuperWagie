@@ -19,6 +19,13 @@ pages have their own contracts in `parts/DOCUMENTATION.md`.
   removes the observer and listener on cleanup.
 - Quote anchors and comment writes stay owned by their caller. A layout change
   does not change quote identity, persistence or save semantics.
+- Grouped thinking and command details retain their original message through
+  `data-chat-source-message-id` on each source's `data-chat-quote-root`.
+  Selection ownership uses that source before the surrounding message row.
+  A selection across sources from different messages has no message menu.
+- Quote lookup includes sources drawn inside another message. Nested roots
+  contribute text once, and a message's text stream excludes foreign source
+  subtrees. Grouping changes preserve the existing quote anchor schema.
 
 | Runtime | Quote comment layout |
 | --- | --- |
@@ -37,3 +44,10 @@ an edge. Preview and editor widths differ, so placement uses the measured
 fractional width and updates when the card or viewport changes. A content-sized
 outer box prevents the available space on one side of the anchor from changing
 the measured width while the card is repositioned.
+
+### Why grouped details retain source ownership
+
+A shared disclosure can draw several messages inside the first message's row.
+Using that row as the source assigns later selections to the wrong message and
+breaks saved quotes when grouping changes. Explicit source roots preserve the
+original message and text stream without adding a persisted anchor format.

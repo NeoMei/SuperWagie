@@ -55,7 +55,7 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
   - If a tool should switch between static vs expandable, change it here.
 
 - `ReasoningPart.tsx`
-  - Thinking block UI (`ReasoningTimelineBlock`), summary + optional duration.
+  - Thinking disclosure UI (`ReasoningTimelineBlock`), shared by consecutive parts. Each source keeps its own streaming throttle and search identity inside the bounded body.
 
 - `AssistantTextPart.tsx` and `message/MessageBody.tsx`
   - Text follows upstream block commits while streaming. `MessageSliceContext` selects the visible range of a completed long message without changing the underlying record.
@@ -68,11 +68,10 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
   - Questions, accepted rendered pages, and proposed workflows remain accessible through the existing shown-interaction path. `LiveTurnHoistedPagesContext` prevents duplicate call cards.
   - `lib/turns/liveActivity.ts` owns final-answer boundaries; `timelineRows.ts` owns stable list-row projection.
 
-- `CommandExecution.tsx`
-  - Owns each shell call's disclosure inside `ToolPart`; thinking is rendered separately by `ReasoningPart`.
-  - The fixed localized header never contains the command, target, or output. The command and stdout stay inside a bounded scrolling body.
-  - Running commands open automatically, completed commands close automatically, and reader choices are respected. Settled output remains expandable, including after remount from the authoritative record.
-  - Busy state uses the existing header shimmer. Shell/background status and stop actions remain owned by `ToolPart` and authoritative runtime state.
+- `CommandActivityGroup.tsx` and `CommandExecution.tsx`
+  - Consecutive shell calls share one fixed header and one bounded scrolling body. Each call keeps its original input, stdout, error, attachments, copy, and stop control inside that body.
+  - The group opens while any member is active, closes when all members settle, and preserves reader choices as further calls append. Its header never contains command or output text; the existing shimmer belongs to the active header.
+  - `ToolPart` retains authoritative foreground/background lifecycle, cancellation, and content completion. Member controllers remain mounted while folded; output polling and content mounting stop with group expansion.
 
 - `ShownToolCard.tsx`
   - Draws questions, proposed workflow runs, and accepted `openchamber_render` pages in their call order. `getShownPages` uses the existing interaction classification; the hoisted call-ID set prevents duplicate in-place cards when the optional Activity fold is opened.
@@ -356,6 +355,22 @@ Cache eviction, request coalescing, timeout replay and grammar-lineage retention
 follow the pre-migration worker. The payload and its byte estimate change from
 HTML to tokens so React can own the code body; streaming-only prefixes stay in
 the bounded recent results.
+
+### Consecutive thinking and commands
+
+`lib/turns/activityGroups.ts` projects each turn's original ordered parts into adjacent runs before message slicing or Activity trimming. A run of thinking and a run of shell calls each have one disclosure, including runs across assistant messages. Text, empty text placeholders, other tools, notices, and shown questions/pages end a run. Hidden thinking still separates shell calls. With non-collapsible thinking selected, every thinking part retains its ordinary inline rendering.
+
+The first part owns the group's stable identity. Appending another part preserves the header and reader expansion. Each member retains its original message/part IDs, timing, Markdown, and authoritative output; no synthetic message or combined part is stored. A search hit in any thinking member opens the shared disclosure and highlights that source's own root. An omitted continuation-only message maps to its owner's list row, with a closed-header source anchor for navigation. Errors, footers, and other source content retain their original message row.
+
+Searching a later thinking member opens the shared block and scrolls its inner box to that source. The outer timeline anchors to the disclosure header. Content observers account for delayed Markdown; a wheel, touch, pointer, or keyboard gesture releases the source hold. Quotes retain the selected member's original message identity when bodies move between grouped and plain presentations.
+
+### Why groups keep original source parts
+
+Each member's live phase, output, stop control, search, and quote belong to its source message. Grouping changes header ownership without merging those records, so later-member updates remain visible and completed details remain addressable after a remount.
+
+The 24-part row budget and seven-row Activity preview both count a group once and never cut through it. The renderer-local weak cache is keyed by the immutable assistant-message array and the thinking-display preference; source replacement creates a new projection. It stores no runtime authority or persisted conversation data.
+
+Web, Electron, VS Code, hosted mobile, and Capacitor use this same presentation. Grouping adds no API, transport, or privilege difference between them.
 
 ### Optional history disclosure
 

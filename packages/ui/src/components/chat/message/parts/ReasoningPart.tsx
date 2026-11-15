@@ -1,6 +1,8 @@
 import React from 'react';
 import { animate, type AnimationPlaybackControls } from 'motion';
-import type { Part } from '@/lib/opencode/model';
+import type { ReasoningPart as ReasoningPartData } from '@/lib/opencode/model';
+import type { ReasoningActivityGroupMember } from '../../lib/turns/activityGroups';
+import { ActivityGroupStreamContext } from '../../components/activityGroupsContext';
 import { cn } from '@/lib/utils';
 import { isInvisibleText } from '@/lib/invisibleText';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -15,7 +17,7 @@ import type { MarkdownVariant } from '../../MarkdownRendererImpl';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { commitStreamedText } from '../../lib/streamTextCommit';
 import type { StreamPhase } from '../types';
-import { useReasoningReveal } from '@/components/chat/search/reasoningReveal';
+import { isReasoningRevealTarget, useReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { dispatchRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
@@ -25,8 +27,6 @@ const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!lead
 // acted on in the foreground (ToolPart).
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-normal', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
-
-type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
 const cleanReasoningText = (text: string): string => {
     if (typeof text !== 'string' || isInvisibleText(text)) {
@@ -96,6 +96,7 @@ const getReasoningSummary = (text: string): string => {
 
 type ReasoningTimelineBlockProps = {
     text: string;
+    content?: React.ReactNode;
     blockId: string;
     time?: { start?: number; end?: number };
     isStreaming?: boolean;
@@ -111,6 +112,7 @@ type ReasoningTimelineBlockProps = {
     revealRequest?: number;
     /** The message this reasoning belongs to; search finds and highlights the block by it. */
     reasoningMessageId?: string;
+    revealMessageId?: string;
     /**
      * Presentation for rows that borrow this block for something other than
      * reasoning (a compaction summary): its own icon, title, toggle labels,
@@ -134,6 +136,7 @@ type ExpansionState = {
 
 export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     text,
+    content,
     blockId,
     time,
     isStreaming = false,
@@ -142,6 +145,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     expandWhileStreaming = true,
     revealRequest = 0,
     reasoningMessageId,
+    revealMessageId,
     presentation,
 }) => {
     const { t } = useI18n();
@@ -213,7 +217,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
     React.useEffect(() => {
         if (!isStreaming) return;
-        followBoxEndRef.current = true;
+        followBoxEndRef.current = revealRequest === 0;
         const node = scrollBoxRef.current;
         if (!node || !globalThis.ResizeObserver) return;
         const content = node.firstElementChild;
@@ -231,7 +235,44 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         observer.observe(content);
         follow();
         return () => observer.disconnect();
-    }, [isStreaming, shouldRenderExpandedContent]);
+    }, [isStreaming, revealRequest, shouldRenderExpandedContent]);
+
+    // Search reveals the source inside the bounded box. Markdown can land
+    // after this commit, so keep its source in view until a reader takes over.
+    React.useLayoutEffect(() => {
+        const box = scrollBoxRef.current;
+        const content = box?.firstElementChild;
+        if (!revealRequest || !revealMessageId || !isExpanded || !box || !content) return;
+        let released = false;
+        const reveal = () => {
+            if (released) return;
+            const target = [...content.querySelectorAll<HTMLElement>('[data-reasoning-message-id]')]
+                .find((element) => element.dataset.reasoningMessageId === revealMessageId);
+            if (!target) return;
+            followBoxEndRef.current = false;
+            box.scrollTop += target.getBoundingClientRect().top - box.getBoundingClientRect().top;
+            lastBoxScrollTopRef.current = box.scrollTop;
+        };
+        const resize = new ResizeObserver(reveal);
+        const mutation = new MutationObserver(reveal);
+        const release = () => {
+            released = true;
+            resize.disconnect();
+            mutation.disconnect();
+            box.removeEventListener('wheel', release);
+            box.removeEventListener('touchstart', release);
+            box.removeEventListener('pointerdown', release);
+            box.removeEventListener('keydown', release);
+        };
+        resize.observe(content);
+        mutation.observe(content, { childList: true, subtree: true, characterData: true });
+        box.addEventListener('wheel', release, { passive: true });
+        box.addEventListener('touchstart', release, { passive: true });
+        box.addEventListener('pointerdown', release, { passive: true });
+        box.addEventListener('keydown', release);
+        reveal();
+        return release;
+    }, [isExpanded, revealMessageId, revealRequest, shouldRenderExpandedContent]);
 
     // The header shows no summary while the part streams.
     const summary = React.useMemo(() => (isStreaming ? '' : getReasoningSummary(text)), [isStreaming, text]);
@@ -386,7 +427,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
     const reasoningBody = (
         <>
-            <div data-message-text-export-source="true">
+            {content ?? <div data-message-text-export-source="true">
                 <MarkdownRenderer
                     content={text}
                     messageId={blockId}
@@ -394,7 +435,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     isStreaming={isStreaming}
                     variant={presentation?.markdownVariant ?? 'reasoning'}
                 />
-            </div>
+            </div>}
             {actions ? (
                 <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
                     <div className="flex items-center gap-1.5" data-message-action-group="true">
@@ -516,56 +557,65 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 };
 
 type ReasoningPartProps = {
-    part: Part;
+    part: ReasoningPartData;
     messageId: string;
     streamPhase?: StreamPhase;
+    members?: readonly ReasoningActivityGroupMember[];
 };
 
-const ReasoningPart = React.memo(({
-    part,
-    messageId,
-    streamPhase,
-}: ReasoningPartProps) => {
+type ReasoningMember = { part: ReasoningPartData; messageId: string; phase?: StreamPhase };
+
+const isMemberStreaming = ({ part, phase }: ReasoningMember): boolean => (
+    (phase === 'streaming' || phase === 'cooldown') && part.time?.end === undefined
+);
+
+/** Each source keeps its own throttle, Markdown identity, and search root. */
+const ReasoningMemberText = React.memo(({ member }: { member: ReasoningMember }) => {
+    const { part, messageId } = member;
+    const isStreaming = isMemberStreaming(member);
+    const text = React.useMemo(() => cleanReasoningText(part.text), [part.text]);
+    const throttled = useStreamingTextThrottle({ text, isStreaming, identityKey: `${messageId}:${part.id}` });
+    const content = isStreaming ? commitStreamedText(throttled) : throttled;
+    return <div data-reasoning-message-id={messageId} data-reasoning-part-id={part.id} data-chat-source-message-id={messageId} data-chat-quote-root="true" data-message-text-export-root="true">
+        <div data-message-text-export-source="true">
+            <MarkdownRenderer content={content} messageId={part.id} isAnimated={false} isStreaming={isStreaming} variant="reasoning" />
+        </div>
+    </div>;
+});
+
+const ReasoningPart = React.memo(({ part, messageId, streamPhase, members }: ReasoningPartProps) => {
     const expandWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
-    const revealRequest = useReasoningReveal(messageId);
-    const partWithText = part as PartWithText;
-    const rawText = partWithText.text || partWithText.content || '';
-    const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
-    const time = partWithText.time;
-    // Live activity derives from the live stream phase, never from the absence
-    // of persisted timing data: cached parts may lack `time.end` even though
-    // the message finished long ago (issue #2020). A part that has ended is
-    // never streaming, even while the rest of the message still streams.
-    const isLiveStreamPhase = streamPhase === 'streaming' || streamPhase === 'cooldown';
-    const isStreaming = isLiveStreamPhase && typeof time?.end !== 'number';
-    const throttledTextRaw = useStreamingTextThrottle({
-        text: textContent,
-        isStreaming,
-        identityKey: `${messageId}:${part.id ?? 'reasoning'}`,
-    });
-    // Same block-level reveal as assistant text: a shown reasoning paragraph
-    // never mutates in place.
-    const throttledText = isStreaming ? commitStreamedText(throttledTextRaw) : throttledTextRaw;
+    const live = React.useContext(ActivityGroupStreamContext);
+    const sources = React.useMemo<ReasoningMember[]>(() => members
+        ? members.map((member) => ({
+            part: member.part,
+            messageId: member.message.info.id,
+            phase: member.message.info.role === 'assistant' && (member.message.info.time.completed ?? 0) > 0
+                ? 'completed'
+                : live?.messageId === member.message.info.id ? live.phase ?? 'streaming'
+                    : member.message.info.id === messageId ? streamPhase : 'completed',
+        }))
+        : [{ part, messageId, phase: streamPhase }], [live, members, messageId, part, streamPhase]);
+    const revealRequest = useReasoningReveal(sources.map((source) => source.messageId));
+    const isStreaming = sources.some(isMemberStreaming);
+    const text = React.useMemo(() => sources.map((source) => cleanReasoningText(source.part.text)).filter(Boolean).join('\n\n'), [sources]);
+    const time = React.useMemo(() => {
+        const starts = sources.flatMap((source) => source.part.time ? [source.part.time.start] : []);
+        const ends = sources.flatMap((source) => source.part.time?.end === undefined ? [] : [source.part.time.end]);
+        return { start: starts.length ? Math.min(...starts) : undefined, end: ends.length === sources.length ? Math.max(...ends) : undefined };
+    }, [sources]);
 
-    // Show reasoning even if time.end isn't set yet (during streaming).
-    // While genuinely streaming, keep the block mounted even before the
-    // block-level reveal commits a first line, so the busy header appears
-    // immediately instead of waiting on committed text.
-    if (!isStreaming && isInvisibleText(throttledText)) {
-        return null;
-    }
-
-    return (
-        <ReasoningTimelineBlock
-            text={throttledText}
-            blockId={part.id || `${messageId}-reasoning`}
-            time={time}
-            isStreaming={isStreaming}
-            expandWhileStreaming={expandWhileStreaming}
-            revealRequest={revealRequest}
-            reasoningMessageId={messageId}
-        />
-    );
+    if (!isStreaming && isInvisibleText(text)) return null;
+    return <ReasoningTimelineBlock
+        text={text}
+        content={<div className="space-y-3">{sources.map((source) => <ReasoningMemberText key={source.part.id} member={source} />)}</div>}
+        blockId={part.id || `${messageId}-reasoning`}
+        time={time}
+        isStreaming={isStreaming}
+        expandWhileStreaming={expandWhileStreaming}
+        revealRequest={revealRequest}
+        revealMessageId={sources.find((source) => isReasoningRevealTarget(source.messageId))?.messageId}
+    />;
 });
 
 export default ReasoningPart;

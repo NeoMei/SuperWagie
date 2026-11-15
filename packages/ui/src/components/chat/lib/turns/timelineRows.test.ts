@@ -66,6 +66,28 @@ describe('answerChunkCuts', () => {
 });
 
 describe('buildTimelineRows', () => {
+    test('keeps an adjacent command run whole across the part budget and assistant messages', () => {
+        const shell = (id: string): ToolPart => ({ ...readPart, id, callID: id, tool: 'shell' });
+        const rows = buildTimelineRows([turnEntry([
+            assistant('step', Array.from({ length: 30 }, (_, index) => shell(`shell-${index}`)), 'tool-calls'),
+            assistant('continuation', [shell('shell-last')], 'tool-calls'),
+            assistant('answer', [textPart('final', 'Done')], 'stop'),
+        ])], summary, []);
+        expect(rows.map((row) => row.key)).toEqual(['turn:user', 'step:step', 'step:answer']);
+        expect(rows[1]?.kind === 'turn-message' && rows[1].messageAliases).toEqual(['continuation']);
+    });
+
+    test('keeps a continuation message that also owns an error or the final footer', () => {
+        const shell = (id: string): ToolPart => ({ ...readPart, id, callID: id, tool: 'shell' });
+        const failed = assistant('failed', [shell('second')], 'tool-calls');
+        if (failed.info.role === 'assistant') failed.info.error = { type: 'ProviderError', message: 'Failed' };
+        const rows = buildTimelineRows([turnEntry([
+            assistant('step', [shell('first')], 'tool-calls'), failed,
+            assistant('last', [shell('last')], 'stop'),
+        ])], summary, []);
+        expect(rows.map((row) => row.key)).toEqual(['turn:user', 'step:step', 'step:failed', 'step:last']);
+    });
+
     test('draws a turn as its prompt row and a row per step', () => {
         const rows = buildTimelineRows([turnEntry([
             assistant('step', [readPart, textPart('note', 'Reading')], 'tool-calls'),

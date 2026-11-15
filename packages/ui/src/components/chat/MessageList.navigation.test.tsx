@@ -30,6 +30,80 @@ plugin({
 const { default: MessageList } = await import('./MessageList');
 const { MarkdownContent } = await import('./MarkdownRendererImpl');
 
+test('an omitted activity continuation navigates to its owner row and keeps one source anchor', async () => {
+    const dom = new Window({ url: 'https://app.test' });
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    const requestAnimationFrame = (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; };
+    const cancelAnimationFrame = (id: number) => { frames.delete(id); };
+    Object.assign(dom, { requestAnimationFrame, cancelAnimationFrame });
+    Object.defineProperties(dom.HTMLElement.prototype, {
+        clientHeight: { configurable: true, get: () => 800 },
+        clientWidth: { configurable: true, get: () => 800 },
+    });
+    dom.HTMLElement.prototype.getBoundingClientRect = () => new dom.DOMRect(0, 0, 800, 320);
+    const values = {
+        window: dom, document: dom.document, navigator: dom.navigator, HTMLElement: dom.HTMLElement, Element: dom.Element,
+        Node: dom.Node, localStorage: dom.localStorage, sessionStorage: dom.sessionStorage,
+        getComputedStyle: dom.getComputedStyle.bind(dom), ResizeObserver: dom.ResizeObserver, MutationObserver: dom.MutationObserver,
+        requestAnimationFrame, cancelAnimationFrame,
+        IS_REACT_ACT_ENVIRONMENT: true,
+    };
+    const previous = Object.keys(values).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+    for (const [name, value] of Object.entries(values)) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () => new Promise(() => {});
+    const sdk = OpenCode.make({ baseUrl: 'https://timeline.test', fetch: () => new Promise<Response>(() => {}) });
+    const { activityRenderMode, collapsibleThinkingBlocks, showReasoningTraces } = useUIStore.getState();
+    useUIStore.setState({ activityRenderMode: 'summary', collapsibleThinkingBlocks: true, showReasoningTraces: true });
+    const assistant = (id: string, text: string, final = false): ChatMessageEntry => ({
+        info: { id, sessionID: 'group-navigation', role: 'assistant', agent: 'build', providerID: 'mock', modelID: 'mock', finish: final ? 'stop' : 'tool-calls', time: { created: 2, completed: 3 } },
+        parts: [{ id: `${id}-part`, sessionID: 'group-navigation', messageID: id, type: final ? 'text' : 'reasoning', text, time: { start: 2, end: 3 } }],
+    });
+    const messages: ChatMessageEntry[] = [
+        { info: { id: 'prompt', sessionID: 'group-navigation', role: 'user', time: { created: 1 } }, parts: [{ id: 'prompt-part', sessionID: 'group-navigation', messageID: 'prompt', type: 'text', text: 'Check this' }] },
+        assistant('owner', 'First thought'), assistant('continuation', 'Second thought'), assistant('answer', 'Done', true),
+    ];
+    const host = document.createElement('div'); document.body.append(host);
+    const root = createRoot(host);
+    const list = React.createRef<MessageListHandle>();
+    const unavailable = (): never => { throw new Error('Activity navigation must not call runtime APIs'); };
+    const runtime: RuntimeAPIs = {
+        runtime: { platform: 'web', isDesktop: false, isVSCode: false },
+        get terminal() { return unavailable(); }, get git() { return unavailable(); },
+        get files() { return unavailable(); }, get settings() { return unavailable(); },
+        get permissions() { return unavailable(); }, get notifications() { return unavailable(); },
+        get sourceControl() { return unavailable(); },
+    };
+    try {
+        await act(async () => root.render(<RuntimeAPIContext.Provider value={runtime}><ThemeSystemProvider><SyncProvider sdk={sdk} directory="/repo"><I18nProvider>
+            <ChatColumnSessionContext.Provider value={{ sessionId: 'group-navigation', directory: '/repo' }}>
+                <MessageList ref={list} sessionKey="group-navigation" messages={messages} isLoadingOlder={false} />
+            </ChatColumnSessionContext.Provider>
+        </I18nProvider></SyncProvider></ThemeSystemProvider></RuntimeAPIContext.Provider>));
+        for (let index = 0; index < 5; index += 1) await act(async () => {
+            await new Promise((resolve) => dom.setTimeout(resolve, 0));
+            const pending = [...frames.values()]; frames.clear();
+            pending.forEach((callback) => callback(0));
+        });
+        expect(list.current?.hasMessageRow('continuation')).toBe(true);
+        const alias = host.querySelector('[data-message-id="continuation"]');
+        const owner = host.querySelector('[data-message-id="owner"]');
+        expect(owner).not.toBeNull();
+        expect(host.querySelectorAll('[data-message-id="continuation"]')).toHaveLength(1);
+        expect(alias?.closest('[data-turn-row]')).toBe(owner?.closest('[data-turn-row]'));
+        await act(async () => { expect(list.current?.scrollToMessageId('continuation')).toBe(true); });
+    } finally {
+        await act(async () => root.unmount());
+        useUIStore.setState({ activityRenderMode, collapsibleThinkingBlocks, showReasoningTraces });
+        globalThis.fetch = originalFetch;
+        for (const [name, descriptor] of previous) {
+            if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);
+        }
+        await dom.happyDOM.close();
+    }
+});
+
 test('quote reveal opens real folded Activity, including a source prepended from history', async () => {
     const dom = new Window({ url: 'https://app.test' });
     const frames = new Map<number, FrameRequestCallback>();

@@ -8,6 +8,10 @@ import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart from './parts/ReasoningPart';
+import { CommandActivityGroup } from './parts/CommandActivityGroup';
+import { ActivityGroupsContext, ActivityGroupStreamContext } from '../components/activityGroupsContext';
+import { isActivityGroupContinuation } from '../lib/turns/activityGroups';
+import { isShellTool } from '@/lib/opencode/tools';
 import { MessageFilesDisplay } from '../FileAttachment';
 import type { ToolPart as ToolPartType } from '@/lib/opencode/model';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
@@ -1292,6 +1296,8 @@ const AssistantMessageBody = React.memo(({
     const vscodeApi = useRuntimeAPIs().vscode;
     const liveFinalActivity = React.useContext(LiveFinalActivityContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
+    const activityGroups = React.useContext(ActivityGroupsContext);
+    const activityGroupStream = React.useContext(ActivityGroupStreamContext);
     const hoistedPages = React.useContext(LiveTurnHoistedPagesContext);
     const slice = React.useContext(MessageSliceContext);
     const isSliceEnd = !slice?.to;
@@ -1676,6 +1682,11 @@ const AssistantMessageBody = React.memo(({
             }
             // The next row starts at this part, or inside the one just drawn.
             if (slice?.to && (slice.to.offset === 0 ? part.id === slice.to.partId : visibleParts[i - 1]?.id === slice.to.partId)) break;
+            if (activityGroups && isActivityGroupContinuation(part, activityGroups)) {
+                i += 1;
+                continue;
+            }
+            const activityGroup = activityGroups?.get(part.id);
             if (rowsToSkip > 0 && isActivityRowPart(part)) {
                 rowsToSkip -= 1;
                 i += 1;
@@ -1742,12 +1753,19 @@ const AssistantMessageBody = React.memo(({
                 // before the first reasoning text arrives.
                 const reasoningEnded = part.time?.end !== undefined
                     || (effectiveStreamPhase !== 'streaming' && effectiveStreamPhase !== 'cooldown');
-                if (showReasoningTraces && !(reasoningEnded && isInvisibleText(part.text))) {
+                const groupHasVisibleReasoning = activityGroup?.kind === 'reasoning' && activityGroup.members.some((member) => (
+                    !isInvisibleText(member.part.text)
+                    || (activityGroupStream?.messageId === member.message.info.id
+                        && (activityGroupStream.phase === 'streaming' || activityGroupStream.phase === 'cooldown' || activityGroupStream.phase === null)
+                        && member.part.time?.end === undefined
+                        && !(member.message.info.role === 'assistant' && (member.message.info.time.completed ?? 0) > 0))
+                ));
+                if (showReasoningTraces && (groupHasVisibleReasoning || !(reasoningEnded && isInvisibleText(part.text)))) {
                     if (!collapsibleThinkingBlocks) {
                         // Non-collapsible mode: render thinking blocks as plain text inline.
                         rendered.push(
                             <AssistantTextPart
-                                key={`reasoning-${messageId}-${i}`}
+                                key={`reasoning-${part.id}`}
                                 part={part}
                                 sessionId={sessionId}
                                 messageId={messageId}
@@ -1759,8 +1777,9 @@ const AssistantMessageBody = React.memo(({
                         // Per-part mode: each reasoning block at its natural position.
                         rendered.push(
                             <ReasoningPart
-                                key={`reasoning-${messageId}-${i}`}
+                                key={`reasoning-${part.id}`}
                                 part={part}
+                                members={activityGroup?.kind === 'reasoning' ? activityGroup.members : undefined}
                                 messageId={messageId}
                                 streamPhase={effectiveStreamPhase}
                             />
@@ -1800,6 +1819,25 @@ const AssistantMessageBody = React.memo(({
                     if (!hoistedPages?.has(toolPart.id)) {
                         rendered.push(<ShownToolCard key={`page-${toolPart.id}`} part={toolPart} />);
                     }
+                    i++;
+                    continue;
+                }
+
+                if (isShellTool(toolName)) {
+                    rendered.push(
+                        <FadeInOnReveal key={`tool-${toolPart.id}`}>
+                            <CommandActivityGroup
+                                id={toolPart.id}
+                                parts={activityGroup?.kind === 'command' ? activityGroup.members.map((member) => member.part) : [toolPart]}
+                                isExpanded={expandedTools.has(toolPart.id)}
+                                onToggle={onToggleTool}
+                                isMobile={isMobile}
+                                alwaysShowActions={alwaysShowMessageActions}
+                                onShowPopup={onShowPopup}
+                                animateTailText={false}
+                            />
+                        </FadeInOnReveal>
+                    );
                     i++;
                     continue;
                 }
@@ -1862,6 +1900,8 @@ const AssistantMessageBody = React.memo(({
         return answerRendered;
     }, [
         activityRowSkip,
+        activityGroups,
+        activityGroupStream,
         alwaysShowMessageActions,
         hoistedPages,
         collapsibleThinkingBlocks,

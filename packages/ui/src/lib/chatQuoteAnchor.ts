@@ -4,8 +4,8 @@
  * out of the virtualized list and back, or the page reloads.
  *
  * Offsets count characters of the root's text stream: the concatenated data of
- * every descendant Text node in document order (what `textContent` and
- * `Range.toString()` both produce). An offset alone is not trusted; the quote
+ * descendant Text nodes in document order, excluding grouped sources owned by
+ * another message. An offset alone is not trusted; the quote
  * is re-found by its text, disambiguated by the characters around it.
  */
 
@@ -46,6 +46,14 @@ const MAX_OCCURRENCES = 200;
  */
 const CHAT_QUOTE_ROOT_SELECTOR = '[data-chat-quote-root]';
 
+/** Grouped activity keeps the identity of the message whose text was selected. */
+export function getChatQuoteSourceMessageId(node: Node): string | null {
+    // SAFETY: nodeType 1 is ELEMENT_NODE.
+    const element = node.nodeType === 1 ? node as Element : node.parentElement;
+    const source = element?.closest('[data-chat-source-message-id], [data-message-id]');
+    return source?.getAttribute('data-chat-source-message-id') ?? source?.getAttribute('data-message-id') ?? null;
+}
+
 /**
  * The quote roots of a message that are mounted, in reading order. A long
  * answer is drawn in several transcript rows, each with its own root
@@ -53,9 +61,17 @@ const CHAT_QUOTE_ROOT_SELECTOR = '[data-chat-quote-root]';
  * message's stream, as one root's was before it was cut.
  */
 export function findChatQuoteRoots(scope: ParentNode, messageId: string): Element[] {
-    return [...scope.querySelectorAll(`[data-message-id="${CSS.escape(messageId)}"]`)]
-        .flatMap((message) => message.querySelector(CHAT_QUOTE_ROOT_SELECTOR) ?? [])
-        .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top);
+    const escapedId = CSS.escape(messageId);
+    const roots = [
+        ...[...scope.querySelectorAll(`[data-message-id="${escapedId}"]`)]
+            .flatMap((message) => message.querySelector(CHAT_QUOTE_ROOT_SELECTOR) ?? []),
+        ...scope.querySelectorAll(`${CHAT_QUOTE_ROOT_SELECTOR}[data-chat-source-message-id="${escapedId}"]`),
+    ];
+    const unique = [...new Set(roots)];
+    return unique.filter((root) => !unique.some((other) => other !== root && other.contains(root)))
+        .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top
+            // DOM order breaks ties before rows have a measured position.
+            || (left.compareDocumentPosition(right) & 4 ? -1 : 1));
 }
 
 // The anchor's context around `index`, as far as `stream` reaches: a row of
@@ -72,7 +88,9 @@ function streamOffset(root: Node, container: Node, offset: number): number {
     const probe = root.ownerDocument!.createRange();
     probe.setStart(root, 0);
     probe.setEnd(container, offset);
-    return probe.toString().length;
+    return collectTextNodes(root, []).reduce((length, node) => (
+        length + (probe.intersectsNode(node) ? node === container ? offset : node.data.length : 0)
+    ), 0);
 }
 
 /** The joined stream of `roots`, and where each root's part of it starts. */
@@ -81,7 +99,7 @@ function joinStreams(roots: readonly Element[]) {
     let stream = '';
     for (const root of roots) {
         bases.push(stream.length);
-        stream += root.textContent ?? '';
+        stream += collectTextNodes(root, []).map((node) => node.data).join('');
     }
     return { stream, bases };
 }
@@ -127,13 +145,17 @@ export function locateChatQuote(stream: string, anchor: ChatQuoteAnchor): number
     ));
 }
 
-function collectTextNodes(node: Node, into: Text[]): Text[] {
+function collectTextNodes(node: Node, into: Text[], messageId = getChatQuoteSourceMessageId(node)): Text[] {
     for (let child = node.firstChild; child; child = child.nextSibling) {
         if (child.nodeType === 3) {
             // SAFETY: nodeType 3 is TEXT_NODE.
             into.push(child as Text);
         } else {
-            collectTextNodes(child, into);
+            // A disclosure may draw a later message's source inside this body.
+            // SAFETY: nodeType 1 is ELEMENT_NODE.
+            const sourceId = child.nodeType === 1 ? (child as Element).getAttribute('data-chat-source-message-id') : null;
+            if (sourceId !== null && messageId !== null && sourceId !== messageId) continue;
+            collectTextNodes(child, into, messageId);
         }
     }
     return into;
