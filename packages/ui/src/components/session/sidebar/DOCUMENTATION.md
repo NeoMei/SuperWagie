@@ -509,6 +509,12 @@ The header's page buttons (Issues and PRs, Scheduled tasks, Archive, extension
 pages, Usage in the footer) are toggles: pressed while their page is open, and
 the next click closes it.
 
+The full Web/Electron header pins the available Workbench at the start of its
+fixed page group. Other extension pages fit after that group or enter the
+extension-page menu together. Workbench never enters that menu. Catalog
+availability still controls its presence; compact and mobile headers retain
+their existing entries.
+
 Sidebar queries beginning with `ses_` match only the full session ID,
 case-insensitively and ignoring surrounding whitespace. Partial IDs and typos
 return no matches, without falling back to titles, directories, group labels,
@@ -730,6 +736,12 @@ indicators. Indicators stay inside the existing row/header action-padding bounda
 hover, keyboard focus, and always-visible action buttons move them left without hiding them.
 
 ## Decisions
+
+### Why Workbench stays outside extension-page overflow
+
+Workbench is the return point for the main workspace. Keeping it with the
+ordinary extension pages hid that entry when the sidebar narrowed. Its fixed
+first button reserves space before the remaining extension pages are measured.
 
 ### Why the avatar opens a separate user center
 
