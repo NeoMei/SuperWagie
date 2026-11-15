@@ -61,9 +61,9 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn, getRevealLabelKey } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isOfficeFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
-import { MAX_OPEN_FILE_BYTES, MAX_OFFICE_PREVIEW_BYTES } from '@/lib/fileOpenLimits';
+import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 import { dataPreviewKind } from './files/previews/dataFilePreview';
-import { OfficePreviewSizeError, readBoundedResponseBytes } from './files/previews/officePreviewBytes';
+import { OfficePreviewSizeError, readBoundedResponseBytes, readOfficePreviewBytes } from './files/previews/officePreviewBytes';
 import { formatFileSize } from '@/lib/fileSize';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
 import { captureRuntimeInstance, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -3980,26 +3980,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     return new Uint8Array(await response.arrayBuffer());
   }, [resolveFileReadOptions, root, t]);
 
-  const readOfficeBytes = React.useCallback(async (path: string, callerSignal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
+  const readOfficeBytes = React.useCallback((path: string, signal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
     const readOptions = resolveFileReadOptions(path);
-    const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(60_000)]);
-    signal.throwIfAborted();
-    const response = await runtimeFetch('/api/fs/raw', {
+    return readOfficePreviewBytes({
+      path,
       signal,
-      cache: 'no-store',
-      query: {
-        path,
-        maxBytes: String(MAX_OFFICE_PREVIEW_BYTES),
-        allowOutsideWorkspace: readOptions.allowOutsideWorkspace ? 'true' : undefined,
-        directory: root || undefined,
-      },
+      allowOutsideWorkspace: readOptions.allowOutsideWorkspace,
+      directory: root || undefined,
+      readFailedMessage: t('filesView.error.readFileFailed'),
     });
-    if (!response.ok) {
-      void response.body?.cancel().catch(() => {});
-      if (response.status === 413) throw new OfficePreviewSizeError();
-      throw new Error(t('filesView.error.readFileFailed'));
-    }
-    return readBoundedResponseBytes(response, { maxBytes: MAX_OFFICE_PREVIEW_BYTES, signal });
   }, [resolveFileReadOptions, root, t]);
 
   const readDataBytes = React.useCallback(async (path: string, callerSignal: AbortSignal, maxBytes: number): Promise<Uint8Array<ArrayBuffer>> => {

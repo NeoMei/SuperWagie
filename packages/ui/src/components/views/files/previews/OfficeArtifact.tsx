@@ -6,13 +6,11 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { openDesktopPath } from '@/lib/desktop';
 import { getFileExtension } from '@/lib/toolHelpers';
-import { MAX_OFFICE_PREVIEW_BYTES } from '@/lib/fileOpenLimits';
 import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
 import type { OfficeKind, OfficeViewerMount } from './officeViewer';
 import type { ViewerHandle } from 'omni-viewer-core/viewers/types';
-import { OfficePreviewSizeError } from './officePreviewBytes';
 import { XlsxCopyPanel, type XlsxCopyAPI } from './XlsxCopyPanel';
 import type { TableQuote } from './tableSelection';
 
@@ -85,7 +83,6 @@ export const OfficeArtifact: React.FC<{
       try {
         const data = await readBytesRef.current(controller.signal);
         controller.signal.throwIfAborted();
-        if (data.byteLength > MAX_OFFICE_PREVIEW_BYTES) throw new OfficePreviewSizeError();
         const mounted = await mountViewer(kind, { fileName: name, data }, host, controller.signal);
         if (controller.signal.aborted) mounted.dispose();
         else { viewer = mounted; setState({ status: 'ready' }); }
@@ -134,7 +131,7 @@ export const OfficeArtifact: React.FC<{
         {error ? (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 p-6 text-center">
             <div className="typography-ui-header text-foreground">{t('filesView.artifact.office.failed')}</div>
-            <div className="max-w-md typography-ui text-muted-foreground">{error instanceof OfficePreviewSizeError ? t('filesView.artifact.office.tooLarge') : error.message}</div>
+            <div className="max-w-md typography-ui text-muted-foreground">{error.message}</div>
             <Button type="button" variant="outline" size="sm" onClick={retry}>{t('filesView.artifact.office.retry')}</Button>
             {download}
           </div>
