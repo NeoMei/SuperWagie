@@ -1,7 +1,13 @@
-import { isNavigationTool, type ToolName } from '@/lib/opencode/tools';
+import { OPENCODE_TOOLS, isNavigationTool, normalizeToolName, type ToolName } from '@/lib/opencode/tools';
+
+const STANDALONE_TOOL_NAMES = new Set<string>([OPENCODE_TOOLS.subagent]);
 
 export const isExpandableTool = (toolName: ToolName): boolean => {
     return !isStaticTool(toolName);
+};
+
+export const isStandaloneTool = (toolName: ToolName): boolean => {
+    return STANDALONE_TOOL_NAMES.has(normalizeToolName(toolName));
 };
 
 // Keep only tools with a direct in-app navigation destination compact. Every

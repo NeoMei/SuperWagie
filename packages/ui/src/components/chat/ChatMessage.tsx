@@ -1,5 +1,6 @@
 import { guestActionLabel } from '@/lib/guests/built-in-copy';
 import React from 'react';
+import { MessageSliceContext } from './message/messageSliceContext';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { findCatalogModel, type Message, type Part } from '@/lib/opencode/model';
 import { readPromptOrigin } from '@/lib/opencode/prompt-origin';
@@ -133,6 +134,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const canPinIntoContext = !isVSCodeRuntime();
     const { currentTheme } = useThemeSystem();
     const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
+    const slice = React.useContext(MessageSliceContext);
+    const sliceName = slice?.from ? `${slice.from.partId}:${slice.from.offset}` : undefined;
 
     const getAgentModelForSession = useSelectionStore((s) => s.getAgentModelForSession);
     const getSessionModelSelection = useSelectionStore((s) => s.getSessionModelSelection);
@@ -612,10 +615,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 className={cn(
                     'group w-full',
                     isUser ? (isMobile ? 'pt-2' : 'pt-4') : 'pt-0',
-                    isUser ? 'pb-0' : (isFollowedByAssistant || nextIsHiddenUserMessage) ? 'pb-0' : 'pb-2'
+                    isUser || hasTurnGrouping || isFollowedByAssistant || nextIsHiddenUserMessage ? 'pb-0' : 'pb-2'
                 )}
-                id={`message-${message.info.id}`}
+                id={sliceName ? undefined : `message-${message.info.id}`}
                 data-message-id={message.info.id}
+                data-message-slice={sliceName}
+                data-message-continues={slice?.to ? '' : undefined}
+                data-message-row={slice ? `${slice.index}/${slice.count}` : undefined}
                 ref={messageContainerRef}
             >
                 <div className="chat-message-column relative">

@@ -229,7 +229,7 @@ type ChatViewportProps = {
     messageListRef: React.RefObject<MessageListHandle | null>;
     registerList: (list: TimelineListHandle | null, sessionKey?: string) => void;
     onIsAtEndChange: (isAtEnd: boolean) => void;
-    onListMetricsChange: (metrics: { readonly footerSize: number }) => void;
+    onListMetricsChange: (metrics: { readonly headerSize: number; readonly footerSize: number }) => void;
     onTimelineDataChange: () => void;
     renderedMessages: SessionMessageRecord[];
     isLoadingOlder: boolean;
@@ -245,6 +245,7 @@ type ChatViewportProps = {
     scrollToBottom: () => void;
     /** A drag on the overlay scrollbar's thumb takes the scroll from auto-follow. */
     onScrollbarDrag: () => void;
+    captureOutgoingPosition: () => void;
     endPinningReleased: boolean;
     /** The user waited for this session (held or fetched); reveal it with a fade. */
     revealWaited: boolean;
@@ -290,6 +291,7 @@ const ChatViewport = React.memo(({
     retryOverlay,
     scrollToBottom,
     onScrollbarDrag,
+    captureOutgoingPosition,
     endPinningReleased,
     revealWaited,
     revealGate,
@@ -562,6 +564,7 @@ const ChatViewport = React.memo(({
                         key={getRuntimeKey()}
                         cacheKey={showingTranscript ? currentSessionId : null}
                         capacity={retainedTimelines()}
+                        onBeforeHide={captureOutgoingPosition}
                     >
                         <ChatColumnSessionContext.Provider value={session}>
                             <MessageList
@@ -1337,6 +1340,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         scrollRef,
         scrollNode,
         registerList,
+        captureOutgoingPosition,
         onIsAtEndChange,
         onListMetricsChange,
         onManualNavigation,
@@ -1359,6 +1363,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         checkLinkedMessage,
         onLinkedMessageMissing: handleLinkedMessageMissing,
         sessionIsWorking,
+        pinned,
         revealGate,
         onActiveTurnChange: handleActiveTurnChange,
     });
@@ -1864,6 +1869,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             retryOverlay={retryOverlay}
             scrollToBottom={resumeToLatestInstant}
             onScrollbarDrag={onManualNavigation}
+            captureOutgoingPosition={captureOutgoingPosition}
             endPinningReleased={userOwnsScroll}
             revealWaited={revealWaited}
             revealGate={revealGate}
@@ -1899,6 +1905,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 		<ChatQuoteHighlightLayer
 			store={chatQuoteHighlights}
 			scrollNode={scrollNode}
+			loadHistoryUntilMessage={(messageId) => timelineController.loadHistoryUntilMessage(messageId, { maxBatches: Number.POSITIVE_INFINITY })}
 			scrollToMessage={timelineController.scrollToMessage}
 		/>
 		<div

@@ -231,7 +231,7 @@ export const dict = {
   'commitComparison.loadError': 'Failed to load commits',
   'commitComparison.noCommits': 'No commits found',
   'commitComparison.emptyDiff': 'No changes in this commit',
-  'chat.liveActivity.title': 'Execution details',
+  'chat.liveActivity.title': 'Activity',
   'chat.liveActivity.running': 'Working',
   'chat.liveActivity.moreRows': '+{count} more',
   'chat.liveActivity.changedFile': 'Changed {count} file',
