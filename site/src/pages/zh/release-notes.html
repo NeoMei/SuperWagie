@@ -1,7 +1,16 @@
 <section class="section-tight">
   <div class="wrap prose">
     <h1>更新说明</h1>
-    <p class="lead">当前版本 2.7.108 · 2026年11月16日</p>
+    <p class="lead">当前版本 2.7.109 · 2026年11月16日</p>
+    <h2>2.7.109 · 大型 Office 文件可直接预览</h2>
+    <ul>
+      <li>移除 Office 预览的固定输入大小上限，Word、Excel 和 PowerPoint 文件不再被 30 MiB 或 50 MiB 的输入阈值拒绝。</li>
+      <li>已在新 Mac 成品的文件预览中完整读取 73.52 MiB、63 页的 PPTX，并生成全部 63 页预览。</li>
+      <li>保留格式与解压校验，以及取消、超时和重试处理。实际打开能力仍取决于设备内存与格式支持。</li>
+      <li>已知限制：验证文档第 30 页的 1 张 WDP/JPEG XR 图片无法在浏览器解码，其余 340 个图片实例成功解码。</li>
+    </ul>
+    <p>提供 Apple 芯片 Mac 与 Windows x64 安装包。可从<a href="/download/">下载页</a>获取当前版本安装包与校验文件。</p>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.109">查看 2.7.109 的完整发布信息</a></p>
     <h2>2.7.108 · 恢复消息流，统一命令折叠</h2>
     <ul>
       <li>恢复 OpenChamber 2.7.2 的聊天正文、独立思考、工具结果、页脚和状态展示。</li>

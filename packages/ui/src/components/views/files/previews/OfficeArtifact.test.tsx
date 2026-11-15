@@ -23,6 +23,19 @@ const mount: OfficeViewerMount = async (_kind, _input, host) => { host.textConte
 afterEach(async () => { await act(async () => root?.unmount()); container?.remove(); root = null; container = null; });
 
 describe('Office preview lifecycle', () => {
+  test('a large Office document reaches its viewer without an input-size veto', async () => {
+    const bytes = new Uint8Array(64 * 1024 * 1024);
+    bytes[0] = 0x50;
+    bytes[bytes.length - 1] = 0x4b;
+    const documentViewer: OfficeViewerMount = async (_kind, input, host) => {
+      host.textContent = `${input.fileName}: ${input.data.byteLength} bytes, ${input.data[0]}, ${input.data[input.data.length - 1]}`;
+      return { dispose() { host.replaceChildren(); } };
+    };
+    await render('/a/same.xlsx', async () => bytes, documentViewer, 1, bytes.byteLength);
+    expect(container?.textContent).toContain('same.xlsx: 67108864 bytes, 80, 75');
+    expect(container?.textContent).not.toContain('cannot be previewed');
+  });
+
   test('a stale display size does not veto a newer bounded read after the file shrinks', async () => {
     let reads = 0;
     await render('/a/same.xlsx', async () => { reads += 1; return new Uint8Array([1]); }, mount, 1, 31_457_281);

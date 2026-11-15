@@ -1,3 +1,5 @@
+import { runtimeFetch } from '@/lib/runtime-fetch';
+
 export class OfficePreviewSizeError extends Error {
   constructor() {
     super('Office preview exceeds its byte limit');
@@ -41,4 +43,28 @@ export const readBoundedResponseBytes = async (
     void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
+};
+
+/** Office reads retain runtime authorization and cancellation without a byte ceiling. */
+export const readOfficePreviewBytes = async ({
+  path, directory, allowOutsideWorkspace, signal: callerSignal, readFailedMessage,
+}: {
+  path: string;
+  directory?: string;
+  allowOutsideWorkspace?: boolean;
+  signal: AbortSignal;
+  readFailedMessage: string;
+}): Promise<Uint8Array<ArrayBuffer>> => {
+  const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(60_000)]);
+  signal.throwIfAborted();
+  const response = await runtimeFetch('/api/fs/raw', {
+    signal,
+    cache: 'no-store',
+    query: { path, directory, allowOutsideWorkspace: allowOutsideWorkspace ? 'true' : undefined },
+  });
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error(readFailedMessage);
+  }
+  return readBoundedResponseBytes(response, { maxBytes: Number.POSITIVE_INFINITY, signal });
 };

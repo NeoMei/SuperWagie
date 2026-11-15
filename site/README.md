@@ -6,12 +6,20 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.108 for macOS Apple silicon and Windows x64,
+The website targets release 2.7.109 for macOS Apple silicon and Windows x64,
 plus a separately published Intel x64 build for macOS 12. The Apple silicon
 build requires macOS 13 or later; the Intel build requires macOS 12 or later.
 Both Mac bundles use ad-hoc signing and have no Apple notarization; the
 Windows installer is unsigned. Precise installer sizes are added to the public
 site after the final artifacts are verified.
+
+Version 2.7.109 removes fixed input-byte ceilings from Word, Excel and
+PowerPoint previews. The packaged Mac application read a 73.52 MiB, 63-slide PPTX
+in full through its file preview and generated all 63 slide previews. One WDP/JPEG XR image on slide 30
+remains unsupported by the browser; the other 340 image instances decoded.
+The authorized raw-file path, cancellation, 60-second read deadline and existing
+ZIP, decompression and page budgets remain active. The full input still lives
+in memory, so device memory and format support remain practical limits.
 
 Version 2.7.108 restores the OpenChamber 2.7.2 chat flow and native structured
 UI messages. Reasoning stays independent; consecutive shell commands share a
@@ -176,7 +184,7 @@ background and indexed for project retrieval. The Experiences checkbox can pause
 or resume learning. Sessions from before enablement require explicit processing.
 Methodology candidates require confirmation.
 
-Installer links point to the v2.7.108 GitHub Release assets. The unified release
+Installer links point to the v2.7.109 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 

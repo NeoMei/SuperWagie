@@ -1,7 +1,16 @@
 <section class="section-tight">
   <div class="wrap prose">
     <h1>Release notes</h1>
-    <p class="lead">Current version 2.7.108 · 16 November 2026</p>
+    <p class="lead">Current version 2.7.109 · 16 November 2026</p>
+    <h2>2.7.109 · Preview large Office files</h2>
+    <ul>
+      <li>Remove the fixed input-size ceiling for Office previews. Word, Excel and PowerPoint files no longer face the previous 30 MiB or 50 MiB input rejection.</li>
+      <li>The packaged Mac application read a 73.52 MiB, 63-slide PPTX in full through its file preview and generated all 63 slide previews.</li>
+      <li>Keep format and decompression checks, cancellation, timeouts and retry handling. Available device memory and format support still apply.</li>
+      <li>Known limitation: one WDP/JPEG XR image on slide 30 of that file does not decode in the browser. The other 340 image instances decoded successfully.</li>
+    </ul>
+    <p>Apple silicon Mac and Windows x64 installers are available from the <a href="/en/download/">download page</a>, along with checksums.</p>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.109">View the full 2.7.109 release information</a></p>
     <h2>2.7.108 · Restore the chat flow and unify command folding</h2>
     <ul>
       <li>Restore OpenChamber 2.7.2 message text, independent reasoning, tool results, footers and status presentation.</li>

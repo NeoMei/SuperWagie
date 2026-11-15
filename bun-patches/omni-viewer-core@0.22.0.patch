@@ -1,0 +1,14 @@
+diff --git a/dist/viewers/word/index.js b/dist/viewers/word/index.js
+--- a/dist/viewers/word/index.js
++++ b/dist/viewers/word/index.js
+@@ -486,7 +486,9 @@
+         return Math.min(coreDefault, Math.max(0, Math.floor(value)));
+     };
+     return {
+-        maxInputBytes: clamp(limits?.maxInputBytes, WORD_VIEWER_DEFAULT_LIMITS.maxInputBytes),
++        maxInputBytes: limits?.maxInputBytes === Number.POSITIVE_INFINITY
++            ? Number.POSITIVE_INFINITY
++            : clamp(limits?.maxInputBytes, WORD_VIEWER_DEFAULT_LIMITS.maxInputBytes),
+         maxDecompressedBytes: clamp(limits?.maxDecompressedBytes, WORD_VIEWER_DEFAULT_LIMITS.maxDecompressedBytes),
+         maxPages: clamp(limits?.maxPages, WORD_VIEWER_DEFAULT_LIMITS.maxPages),
+         maxImageBytes: clamp(limits?.maxImageBytes, WORD_VIEWER_DEFAULT_LIMITS.maxImageBytes),
