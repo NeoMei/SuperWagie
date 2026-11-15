@@ -70,7 +70,7 @@ export const mountOfficeViewer: OfficeViewerMount = async (
     signal.throwIfAborted();
     const deps = await loadWordViewerDeps();
     signal.throwIfAborted();
-    const mounted = await mountWordViewer(input, container, ctx, deps, { signal });
+    const mounted = await mountWordViewer(input, container, ctx, deps, { signal, limits: { maxInputBytes: Number.POSITIVE_INFINITY } });
     // Theme the surrounding canvas while retaining document-authored page colors.
     const wrapper = container.shadowRoot?.querySelector<HTMLElement>('.docx-wrapper');
     if (wrapper) wrapper.style.background = 'var(--omni-bg)';
@@ -79,11 +79,11 @@ export const mountOfficeViewer: OfficeViewerMount = async (
   if (kind === 'excel') {
     const { mountSelfLoadingExcelViewer } = await import('omni-viewer-core/viewers/excel/self-loading');
     signal.throwIfAborted();
-    return mountSelfLoadingExcelViewer(input, container, ctx, { signal });
+    return mountSelfLoadingExcelViewer(input, container, ctx, { signal, limits: { maxInputBytes: Number.POSITIVE_INFINITY } });
   }
   const { mountPptViewer } = await import('omni-viewer-core/viewers/ppt');
   signal.throwIfAborted();
-  const mounted = await mountPptViewer(input, container, ctx, undefined, { signal });
+  const mounted = await mountPptViewer(input, container, ctx, undefined, { signal, limits: { maxInputBytes: Number.POSITIVE_INFINITY } });
   fitPptToWidth(container, mounted.controller);
   return mounted;
 };

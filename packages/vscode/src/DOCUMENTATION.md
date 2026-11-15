@@ -509,7 +509,7 @@ once the settings load, a language the person picked in any OpenChamber client
 replaces it. VS Code's display language stays in effect only while no client
 has saved one.
 
-## Bounded Office raw reads
+## Optional bounded raw reads
 
 The existing `/api/fs/raw` local proxy accepts optional `maxBytes` as a single
 positive decimal safe integer. Invalid values return 400 before filesystem
@@ -518,7 +518,9 @@ checks the opened file's metadata and counts actual bytes while reading, includi
 growth after stat. The proxy owns and closes the handle on success and failure.
 Callers omitting `maxBytes` retain the whole-file read and response contract.
 
-Office preview callers send 30 MiB and also enforce that bound in the webview.
+Shared Office preview reads omit a byte ceiling; callers such as data previews
+can still request a finite bound. VS Code does not mount the shared Files view,
+and its native file-opening behavior is unchanged.
 Webview cancellation retires its request, but the current native local proxy
 does not receive the request AbortSignal; an already-started bounded disk read
 can finish. Installed-extension acceptance is separate from temporary-file tests.

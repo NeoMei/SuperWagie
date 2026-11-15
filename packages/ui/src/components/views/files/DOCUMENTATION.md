@@ -228,13 +228,18 @@ without reading or parsing again. DOCX's surrounding wrapper uses the same canva
 document pages and PPT slide fills retain their authored colors. Omni is the sole
 Office renderer. Its Word self-loader requires the installed `docx-preview` peer.
 
-Office input has an independent 30 MiB bound. Display metadata can be stale after
-a file changes, so the scoped raw reader checks Content-Length and every received chunk before
-retention. The raw request carries an optional `maxBytes` for VS Code's native
-adapter, which bounds disk reads before base64 allocation. Canvas reads and raw
-callers omitting that option keep their existing behavior. This bounds compressed
-input bytes, not total parser heap or decompressed documents. Attachment extraction
-keeps its separate contract and 20 MiB limit.
+Office preview input has no application byte ceiling. `readOfficePreviewBytes`
+owns the authorized runtime raw request, its existing 60-second deadline and
+caller cancellation. It omits `maxBytes`, and the reader accepts the complete
+stream regardless of its declared or received size. Display metadata is not a
+read veto. `OfficeArtifact` passes all original bytes to the viewer. The Omni
+Word, Excel and PPT mounts explicitly set `limits.maxInputBytes` to positive
+infinity. The pinned `omni-viewer-core@0.22.0` Bun patch permits this explicit
+Word opt-out while retaining its default and finite-limit behavior. ZIP integrity,
+decompression, page and media budgets remain active. The viewers still need whole
+input bytes in memory; this is not streaming parsing or a constant-memory claim.
+Other data previews still supply their own byte bounds, and attachment extraction
+retains its separate 20 MiB contract.
 
 Each runtime/root/path preview owns an abort controller and a fresh mount host per
 revision or manual retry. Closing or replacing it aborts its read/mount, removes
@@ -242,7 +247,8 @@ its host and disposes any returned handle, including one that resolves after
 cleanup. Late reads and errors cannot publish into the replacement preview. A
 read failure keeps download/default-app actions and offers Retry. Network/relay
 and webview abort are supported; a VS Code native disk read already in progress
-remains bounded and can finish after the webview retires its request.
+can finish after the webview retires its request. VS Code does not mount this
+Files view; its native file-opening behavior and raw API contract stay unchanged.
 `FilesView.renderArtifactPreview` is the single switch both the docked and
 the fullscreen viewer use. SVG, Mermaid (`.mmd`) and delimited files are text
 with an artifact view: each has a per-path preview/source toggle, and opens
@@ -651,7 +657,7 @@ Markdown and Mermaid boundaries use the same document identity. File read
 failures retain their selected tab and offer a read retry.
 
 Office continues to use Omni's Word, Excel and PowerPoint viewers for
-DOC/DOCX, XLS/XLSX and PPT/PPTX. Its original-byte reader, 30 MiB bound,
+DOC/DOCX, XLS/XLSX and PPT/PPTX. Its original-byte reader without a byte ceiling,
 AbortSignal ownership, viewer disposal and live theme variables remain owned by
 `OfficeArtifact`, `officePreviewBytes` and `officeViewer`.
 
@@ -704,7 +710,7 @@ FilesView's authenticated, bounded raw-file read and the existing per-file lazy
 error boundary. File path, runtime scope and content revision key the preview;
 switching or closing aborts the read and late completions cannot publish.
 Notebook files join the non-editable preview path, including save and autosave
-guards. Office keeps Omni and its separate 30 MiB limit.
+guards. Office keeps Omni and accepts its original input without a byte ceiling.
 
 ZIP input is limited to 10 MiB and 2,000 central-directory entries. Directory
 metadata is validated before JSZip receives the input. No archive member is
@@ -772,8 +778,8 @@ file bytes while each worker receives its own copy.
 
 ## Selected XLSX cells and copies
 
-Omni remains the default Office renderer for all six formats and keeps its
-30 MiB raw-input limit. A workspace XLSX on a server-backed runtime offers a
+Omni remains the default Office renderer for all six formats without an input
+byte ceiling. A workspace XLSX on a server-backed runtime offers a
 separate selected-cell panel. Opening the panel preserves the Omni mount;
 closing it preserves applied draft edits. The panel reads the server's supported
 snapshot, selects one exact visible sheet/cell at a time, and stages only explicit
@@ -789,7 +795,8 @@ completions cannot publish feedback in another file. A dispatched server save
 may still finish after its view closes; an uncertain failure asks the user to
 check the destination before retrying.
 
-The server's supported-format and publication contract is in
+The copy editor retains its separate 30 MiB source budget; that budget does not
+prevent the original workbook from opening in Omni. The server's supported-format and publication contract is in
 `packages/web/server/lib/fs/DOCUMENTATION.md`. The panel does not implement
 formula evaluation: dependent formulas recalculate in Excel or WPS. Chart-bearing
 workbooks are refused before editing and remain available in the Omni viewer. VS Code does not expose this capability. English and Simplified Chinese
