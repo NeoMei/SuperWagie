@@ -21,4 +21,27 @@ describe('latestShellPreview', () => {
     test('keeps settled output available for the collapsed command row', () => {
         expect(latestShellPreview([shell('done', 'completed')])).toMatchObject({ key: 'done', output: 'done', running: false });
     });
+
+    test('recovers a completed command from metadata when the input snapshot is empty', () => {
+        const activity = shell('metadata', 'completed');
+        if (activity.part.type !== 'tool' || activity.part.state.status !== 'completed') throw new Error('Expected completed shell');
+        activity.part.state = {
+            ...activity.part.state,
+            input: {},
+            metadata: { command: 'bun test packages/ui' },
+        };
+        expect(latestShellPreview([activity])).toMatchObject({ command: 'bun test packages/ui', output: 'done' });
+    });
+
+    test('recognizes legacy bash parts and cmd input', () => {
+        const activity = shell('legacy', 'completed');
+        if (activity.part.type !== 'tool' || activity.part.state.status !== 'completed') throw new Error('Expected completed shell');
+        activity.part.tool = 'bash';
+        activity.part.state = {
+            ...activity.part.state,
+            input: { cmd: 'npm test -- legacy' },
+            metadata: {},
+        };
+        expect(latestShellPreview([activity])).toMatchObject({ command: 'npm test -- legacy' });
+    });
 });

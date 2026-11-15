@@ -2961,6 +2961,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.reasoningTrace.thought': '已思考',
   'chat.commandTrace.expandAria': '展开命令输出',
   'chat.commandTrace.collapseAria': '折叠命令输出',
+  'chat.commandTrace.title': '命令执行',
   'chat.messageBody.subtask.title': '委派任务',
   'chat.messageBody.subtask.hidePrompt': '隐藏提示',
   'chat.messageBody.subtask.showPrompt': '显示提示',

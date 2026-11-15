@@ -1014,6 +1014,17 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('npm test');
     });
 
+    test('does not fall back to the command count when a settled shell has metadata command text', async () => {
+        const shell: Part = {
+            type: 'tool', tool: 'shell', id: 'metadata-shell', callID: 'metadata-shell', sessionID: 'session', messageID: 'progress',
+            state: { status: 'completed', input: {}, output: 'Passed', metadata: { command: 'bun test packages/ui' }, time: { start: 1, end: 2 } },
+        };
+        await act(async () => root.render(<Harness record={turn([assistant('progress', [shell], 'tool-calls')])} initialExpanded={false} />));
+        expect(container.querySelector('[data-live-command-fold="metadata-shell"]')?.textContent).toContain('bun test packages/ui');
+        expect(container.textContent).not.toContain('运行了 1 条命令');
+        expect(container.textContent).not.toContain('Ran 1 command');
+    });
+
     test('draws a page the agent showed above the answer, outside the folded Activity', async () => {
         const pagePart = (id: string, messageID: string, ok: boolean): Part => ({
             type: 'tool', tool: 'openchamber_render', id, callID: id, sessionID: 'session', messageID,
