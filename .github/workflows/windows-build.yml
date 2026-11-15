@@ -36,6 +36,7 @@ jobs:
           sparse-checkout: |
             packages/electron/scripts/collect-windows-diagnostics.test.mjs
             packages/electron/scripts/collect-windows-diagnostics-evidence.test.ps1
+            packages/electron/scripts/smoke-packaged-runtime.mjs
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -364,6 +365,7 @@ jobs:
           node ./scripts/windows-update-feeds.mjs ./dist
 
       - name: Verify packaged resources against staged files
+        id: packaged_resources
         shell: bash
         env:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
@@ -450,6 +452,49 @@ jobs:
           console.log(`Verified ${verified.length} packaged resource files for ${arch}`);
           NODE
 
+      - name: Use the runtime probe from the workflow revision
+        shell: pwsh
+        env:
+          RUNTIME_PROBE_REVISION: ${{ github.workflow_sha }}
+          RUNTIME_APPLICATION_REF: ${{ inputs.ref }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $applicationCommit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the application commit' }
+          $applicationTree = (git rev-parse 'HEAD^{tree}').Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the application tree' }
+          $probe = 'packages/electron/scripts/smoke-packaged-runtime.mjs'
+          $probeSource = Join-Path '.release-tests' $probe
+          $probeHash = (Get-FileHash $probeSource -Algorithm SHA256).Hash.ToLowerInvariant()
+          $asar = 'packages/electron/dist/win-unpacked/resources/app.asar'
+          $asarHash = (Get-FileHash $asar -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item $probeSource $probe -Force
+          if ((Get-FileHash $probe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $probeHash) { throw 'Runtime probe copy differs' }
+          if ((Get-FileHash $asar -Algorithm SHA256).Hash.ToLowerInvariant() -ne $asarHash) { throw 'Packaged application changed during probe preparation' }
+          $allowedChanges = @(
+            'packages/electron/scripts/collect-windows-diagnostics.test.mjs',
+            'packages/electron/scripts/collect-windows-diagnostics-evidence.test.ps1',
+            $probe
+          )
+          $changedFiles = @(git diff --name-only)
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify probe-only source changes' }
+          foreach ($file in $changedFiles) {
+            if ($allowedChanges -notcontains $file) { throw "Unexpected application source change: $file" }
+          }
+          $sourceReceipt = [ordered]@{
+            schemaVersion = 1
+            applicationRef = $env:RUNTIME_APPLICATION_REF
+            applicationCommit = $applicationCommit
+            applicationTree = $applicationTree
+            workflowRevision = $env:RUNTIME_PROBE_REVISION
+            probeSha256 = $probeHash
+            packagedAsarSha256 = $asarHash
+            overlayAfterPackagingAndResourceVerification = $true
+            changedTrackedFiles = $changedFiles
+          }
+          $sourceReceipt | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM 'packages/electron/dist/windows-x64-probe-source.json'
+          "Application: $applicationCommit; tree: $applicationTree; runtime probe: $env:RUNTIME_PROBE_REVISION; SHA-256: $probeHash" | Add-Content $env:GITHUB_STEP_SUMMARY
+
       - name: Exercise the packaged runtime and multiline PowerShell
         timeout-minutes: 6
         shell: pwsh
@@ -465,10 +510,13 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-${{ matrix.arch }}-runtime
-          path: packages/electron/dist/windows-x64-runtime.json
+          path: |
+            packages/electron/dist/windows-x64-runtime.json
+            packages/electron/dist/windows-x64-probe-source.json
           if-no-files-found: warn
 
       - name: Upload installer artifact
+        if: ${{ always() && steps.packaged_resources.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-${{ matrix.arch }}

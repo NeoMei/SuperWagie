@@ -810,6 +810,14 @@ this check after resource verification and uploads its sanitized receipt even
 when the check fails. `--root` accepts only a new directory; no existing app
 profile or user history is reused.
 
+Windows CI builds the application from `inputs.ref` and overlays the runtime
+probe from the workflow revision only after packaging and resource verification.
+Its source receipt records the application commit and tree, workflow revision
+and probe digest separately. API checkpoints retain status, expected-value
+comparisons and bounded error categories without credentials or response bodies.
+Verified installer artifacts remain available when a probe fails; publishing
+still requires a passing native runtime receipt.
+
 Managed local Desktop owns one engine and resolves it in this order:
 
 0. `opencodeBinary` in the machine policy file, when an administrator pinned one. It has no fallback: an unusable pin stops startup (see `packages/web/server/lib/enterprise-mode.js`).
