@@ -23,6 +23,10 @@ These helpers adapt guest file requests and session artifact references for the 
 
 ## Decisions
 
+### Why restored plugin pages wait until first shown
+
+`ContextSurfacePanes` mounts a restored plugin tab only after its zone is open and the tab is active. CSS-hidden iframes still execute scripts, request grants and allocate Chromium resources. Once shown, the page stays mounted across tab switches and zone closure to preserve its state; closing its tab removes the frame. Shared-surface viewers retain their visibility-only lifetime. This matches upstream OpenChamber and applies to web and Electron. VS Code and mobile retain their unsupported guest catalog behavior.
+
 ### Why directory headers remain tuples until transport
 
 Constructing `Headers` with a Chinese project directory throws before runtime encoding can run. Passing tuples lets the existing runtime transport own encoding and authentication for both direct and relay requests.
