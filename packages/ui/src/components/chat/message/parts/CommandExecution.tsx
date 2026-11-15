@@ -31,22 +31,37 @@ type CommandExecutionBodyProps = {
     output: string;
     error?: string;
     children?: React.ReactNode;
+    inline?: boolean;
 };
 
-/** Command and stdout share one capped scroller; the authoritative part retains their text. */
-export const CommandExecutionBody: React.FC<CommandExecutionBodyProps> = ({ command, output, error, children }) => {
+/** A command group owns one scrolling area for all of its member output. */
+export const CommandExecutionScroller: React.FC<{
+    children: React.ReactNode;
+    group?: boolean;
+    expanded?: boolean;
+}> = ({ children, group = false, expanded = true }) => {
     const scrollRef = React.useRef<HTMLElement>(null);
+    const contentRef = React.useRef<HTMLDivElement>(null);
     const followEndRef = React.useRef(true);
     const lastTopRef = React.useRef(0);
     const touchYRef = React.useRef<number | null>(null);
-    React.useLayoutEffect(() => {
+    const followEnd = React.useCallback(() => {
         const node = scrollRef.current;
-        if (!node || !followEndRef.current) return;
+        if (!expanded || !node || !followEndRef.current) return;
         node.scrollTop = node.scrollHeight;
         lastTopRef.current = node.scrollTop;
-    }, [command, error, output]);
+    }, [expanded]);
+    React.useLayoutEffect(followEnd, [children, followEnd]);
+    React.useEffect(() => {
+        const content = contentRef.current;
+        if (!group || !expanded || !content) return;
+        const observer = new ResizeObserver(followEnd);
+        observer.observe(content);
+        return () => observer.disconnect();
+    }, [expanded, followEnd, group]);
     return <ScrollableOverlay ref={scrollRef} outerClassName="max-h-80" className="tool-output-surface p-0" dir="ltr"
-        useScrollShadow scrollShadowSize={24} userIntentOnly data-command-output="true" data-scrollable="true"
+        useScrollShadow scrollShadowSize={24} userIntentOnly data-command-output={group ? undefined : 'true'}
+        data-command-group-output={group && expanded ? 'true' : undefined} data-scrollable="true"
         onWheelCapture={(event) => { if (event.deltaY < 0) followEndRef.current = false; }}
         onTouchStart={(event) => { touchYRef.current = event.touches[0]?.clientY ?? null; }}
         onTouchMove={(event) => {
@@ -59,11 +74,17 @@ export const CommandExecutionBody: React.FC<CommandExecutionBodyProps> = ({ comm
             else if (node.scrollTop < lastTopRef.current - 1) followEndRef.current = false;
             lastTopRef.current = node.scrollTop;
         }}>
-        <div className="space-y-2">
+        <div ref={contentRef}>{children}</div>
+    </ScrollableOverlay>;
+};
+
+/** Command and stdout share one capped scroller; the authoritative part retains their text. */
+export const CommandExecutionBody: React.FC<CommandExecutionBodyProps> = ({ command, output, error, children, inline = false }) => {
+    const content = <div className="space-y-2" data-command-output={inline ? 'true' : undefined}>
             {command ? <pre className="tool-input-text typography-code whitespace-pre-wrap break-words text-muted-foreground m-0">{command}</pre> : null}
             {output ? <pre className="typography-code whitespace-pre-wrap break-words m-0">{output}</pre> : null}
             {error ? <pre className="typography-code whitespace-pre-wrap break-words text-[var(--status-error)] m-0">{error}</pre> : null}
             {children}
-        </div>
-    </ScrollableOverlay>;
+        </div>;
+    return inline ? content : <CommandExecutionScroller>{content}</CommandExecutionScroller>;
 };

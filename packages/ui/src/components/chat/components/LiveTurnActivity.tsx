@@ -18,6 +18,8 @@ import { useActivityRowGlide, useLiveRowsFloor } from './useActivityRowGlide';
 import { foldContentId, finalActivityContentId, useTurnFold } from './useTurnFold';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
 import type { ShownPart } from '../lib/turns/liveActivity';
+import { getActivityGroups, isActivityContinuationOnlyMessage } from '../lib/turns/activityGroups';
+import { ActivityGroupsContext } from './activityGroupsContext';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
 
@@ -41,12 +43,14 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     // Folded, a working turn shows only its latest rows (the header counts
     // the earlier ones) and a settled one shows none.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+    const groupReasoning = useUIStore((state) => state.collapsibleThinkingBlocks);
+    const groups = getActivityGroups(turn.assistantMessages, groupReasoning);
     const trim = React.useMemo(() => (expanded
         ? null
         : planActivityTrim(
-            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).length),
+            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces, groups).length),
             LIVE_ACTIVITY_VISIBLE_ROWS,
-        )), [activityMessages, expanded, showReasoningTraces]);
+        )), [activityMessages, expanded, groups, showReasoningTraces]);
     const shownMessages = React.useMemo(
         () => (trim && trim.hiddenMessages > 0 ? activityMessages.slice(trim.hiddenMessages) : activityMessages),
         [activityMessages, trim],
@@ -115,6 +119,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     const headerClass = 'w-full justify-start normal-case !ps-px !pe-2 text-[var(--tools-description)] hover:!bg-transparent active:!bg-transparent';
     const contentId = foldContentId(turn.turnId);
     return (
+        <ActivityGroupsContext.Provider value={groups}>
         <div className="relative z-0" data-live-turn-activity={turn.turnId}>
             <div className="chat-message-column @container">
                 <div className="mt-1">
@@ -133,7 +138,8 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                             <div ref={rowsRef}>
                                 <ActivityRowSkipContext.Provider value={rowSkip}>
                                     {messagesAbovePages.map((message) => (
-                                        <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
+                                        isActivityContinuationOnlyMessage(message, groups) ? null
+                                            : <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
                                     ))}
                                 </ActivityRowSkipContext.Provider>
                             </div>
@@ -142,7 +148,8 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                         {messagesBelowPages.length > 0 ? (
                             <ActivityRowSkipContext.Provider value={rowSkip}>
                                 {messagesBelowPages.map((message) => (
-                                    <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
+                                    isActivityContinuationOnlyMessage(message, groups) ? null
+                                        : <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
                                 ))}
                             </ActivityRowSkipContext.Provider>
                         ) : null}
@@ -150,6 +157,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                 </div>
             )}
         </div>
+        </ActivityGroupsContext.Provider>
     );
 }
 

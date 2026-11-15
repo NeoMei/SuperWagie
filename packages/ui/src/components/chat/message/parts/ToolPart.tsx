@@ -118,6 +118,7 @@ import { useToolContentCompletion } from './useToolContentCompletion';
 import { BusyDots } from '@/components/ui/busy-dots';
 import { CommandExecutionBody, CommandExecutionTitle } from './CommandExecution';
 import { useCommandDisclosure } from './useCommandDisclosure';
+import { CommandGroupContext, type CommandMemberStatus } from './commandGroupContext';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
 
@@ -150,7 +151,7 @@ const formatDuration = (start: number, end?: number, now: number = Date.now()) =
     return `${Math.max(0.1, seconds).toFixed(1)}s`;
 };
 
-const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> = ({ start, end, active }) => {
+export const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> = ({ start, end, active }) => {
     const now = useDurationTickerNow(active);
 
     return <>{formatDuration(start, end, now)}</>;
@@ -1089,6 +1090,7 @@ interface ToolExpandedContentProps {
     isExpanded: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
     presentation: GuestToolRule | null;
+    groupedCommand?: boolean;
 }
 
 const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
@@ -1098,6 +1100,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     isExpanded,
     onShowPopup,
     presentation,
+    groupedCommand,
 }) => {
     const { t } = useI18n();
     const runtime = React.useContext(RuntimeAPIContext);
@@ -1466,7 +1469,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     if (isShellTool(part.tool)) {
         const command = coerceToText(input?.command) || coerceToText(input?.cmd)
             || coerceToText(metadata?.command) || coerceToText(metadata?.cmd);
-        return <CommandExecutionBody command={command} output={capToolOutputText(outputString)}
+        return <CommandExecutionBody command={command} output={capToolOutputText(outputString)} inline={groupedCommand}
             error={state.status === 'error' ? coerceToText(state.error) : undefined}>
             {outputString ? <CopyToolOutputButton output={outputString} /> : null}
             {Array.isArray(attachments) && attachments.length > 0 && state.status === 'completed'
@@ -1597,10 +1600,9 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
 ToolExpandedContent.displayName = 'ToolExpandedContent';
 
-type ToolRowStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stopped' | 'unknown'
-    | 'waitingPermission' | 'waitingAnswer' | 'retrying' | 'stopping';
+type ToolRowStatus = CommandMemberStatus;
 
-const ToolRowStatusText: React.FC<{ status: ToolRowStatus }> = ({ status }) => {
+export const ToolRowStatusText: React.FC<{ status: ToolRowStatus }> = ({ status }) => {
     const { t } = useI18n();
     const waiting = status === 'waitingPermission' || status === 'waitingAnswer';
     const active = waiting || status === 'pending' || status === 'running' || status === 'retrying' || status === 'stopping';
@@ -1640,6 +1642,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     subagentSessionId: taskSessionId,
 }) => {
     const { t } = useI18n();
+    const commandGroup = React.useContext(CommandGroupContext);
     const rowRef = React.useRef<HTMLDivElement>(null);
     const onToggle = (toolId: string) => {
         if (!isExpanded) dispatchRowExpand(rowRef.current);
@@ -1957,12 +1960,58 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     const shouldRenderExpandedContent = useDeferredExpandedContent(isExpanded);
     const contentCompletion = useToolContentCompletion(
         part,
-        shouldRenderExpandedContent || (presentation !== null && guestToolHeaderReadsOutput(presentation)),
+        shouldRenderExpandedContent || (!commandGroup && presentation !== null && guestToolHeaderReadsOutput(presentation)),
     );
     // Shell and subagent rows carry their duration: live while they run, final once settled.
     const showsDuration = isShellTool(normalizedPartTool) || isTaskTool;
     const rowStatus = header?.status ?? (header?.durationUnknown ? 'unknown'
         : state.status === 'error' ? 'failed' : state.status);
+    const reportCommandState = commandGroup?.report;
+    React.useLayoutEffect(() => {
+        reportCommandState?.(part.id, {
+            status: rowStatus,
+            start: effectiveTimeStart,
+            end: header?.durationUnknown ? undefined : effectiveTimeEnd,
+        });
+    }, [effectiveTimeEnd, effectiveTimeStart, header?.durationUnknown, part.id, reportCommandState, rowStatus]);
+
+    const expandedContent = contentCompletion.status === 'whole' ? (
+        <ToolExpandedContent part={part} state={state} currentDirectory={currentDirectory}
+            isExpanded={isExpanded} onShowPopup={onShowPopup} presentation={presentation}
+            groupedCommand={commandGroup !== null && isCommand} />
+    ) : contentCompletion.status === 'loading' ? (
+        contentCompletion.showProgress ? <div className="typography-meta py-1 text-muted-foreground">
+            {t('chat.toolPart.content.loading')}
+        </div> : null
+    ) : (
+        <div className="typography-meta flex items-center gap-2 py-1 text-muted-foreground">
+            <span>{t('chat.toolPart.content.loadFailed')}</span>
+            <Button variant="ghost" size="xs" onClick={contentCompletion.retry}>
+                {t('chat.toolPart.content.retry')}
+            </Button>
+        </div>
+    );
+
+    if (commandGroup && isCommand) {
+        return <div data-command-member={part.id} data-chat-source-message-id={part.messageID} data-chat-quote-root="true">
+            {isExpanded ? <>
+                <div className="flex min-w-0 items-center gap-2 py-1">
+                    <ToolRowStatusText status={rowStatus} />
+                    {effectiveTimeStart !== undefined && !header?.durationUnknown ? <span className="typography-meta text-muted-foreground/80 tabular-nums">
+                        <LiveDuration start={effectiveTimeStart} end={effectiveTimeEnd} active={isActive} />
+                    </span> : null}
+                    {header?.stop ? <Button type="button" variant="ghost" size="xs"
+                        className="text-[var(--status-error)] hover:text-[var(--status-error)]"
+                        onClick={header.stop.onStop} aria-label={header.stop.ariaLabel} title={header.stop.ariaLabel}
+                        disabled={header.stop.disabled}>
+                        <Icon name="stop" className="size-3" />
+                        {t('chat.toolPart.background.stopLabel')}
+                    </Button> : null}
+                </div>
+                {shouldRenderExpandedContent ? expandedContent : null}
+            </> : null}
+        </div>;
+    }
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
@@ -2191,29 +2240,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                         className="relative ms-2 ps-3"
                     >
                         <BlockLine onToggle={() => onToggle(part.id)} topOffset={1} />
-                        {contentCompletion.status === 'whole' ? (
-                            <ToolExpandedContent
-                                part={part}
-                                state={state}
-                                currentDirectory={currentDirectory}
-                                isExpanded={isExpanded}
-                                onShowPopup={onShowPopup}
-                                presentation={presentation}
-                            />
-                        ) : contentCompletion.status === 'loading' ? (
-                            contentCompletion.showProgress ? (
-                                <div className="typography-meta py-1 text-muted-foreground">
-                                    {t('chat.toolPart.content.loading')}
-                                </div>
-                            ) : null
-                        ) : (
-                            <div className="typography-meta flex items-center gap-2 py-1 text-muted-foreground">
-                                <span>{t('chat.toolPart.content.loadFailed')}</span>
-                                <Button variant="ghost" size="xs" onClick={contentCompletion.retry}>
-                                    {t('chat.toolPart.content.retry')}
-                                </Button>
-                            </div>
-                        )}
+                        {expandedContent}
                     </div>
                 ) : null}
             </div>
@@ -2275,13 +2302,14 @@ type CommandDisclosure = ReturnType<typeof useCommandDisclosure>;
 
 const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string; disclosure: CommandDisclosure }> = ({ shellID, disclosure, ...props }) => {
     const { t } = useI18n();
+    const commandGroup = React.useContext(CommandGroupContext);
     const directory = useEffectiveDirectory();
     const running = useRunningShell(shellID);
     const ended = useBackgroundShellsStore(React.useCallback((state) => state.ended.get(shellID), [shellID]));
     const messages = useSessionMessages(props.part.sessionID, directory);
     const completion = React.useMemo(() => findShellCompletion(messages, shellID), [messages, shellID]);
     const isRunning = !completion && running !== undefined;
-    const expanded = disclosure.choice ?? isRunning;
+    const expanded = commandGroup?.expanded ?? (disclosure.choice ?? isRunning);
     const liveOutput = useBackgroundShellOutput(shellID, running?.directory, isRunning && expanded);
     const [stopping, setStopping] = React.useState(false);
     const stoppedFromForeground = useForegroundShellStopping(shellID);
@@ -2339,11 +2367,12 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
  */
 const ShellToolPartContent: React.FC<ToolPartProps & { disclosure: CommandDisclosure }> = ({ disclosure, ...props }) => {
     const { t } = useI18n();
+    const commandGroup = React.useContext(CommandGroupContext);
     const directory = useEffectiveDirectory();
     const shellID = readRunningShellID(props.part);
     const running = useRunningShell(shellID);
     const stopping = useForegroundShellStopping(shellID);
-    const expanded = disclosure.choice ?? (props.part.state.status === 'pending' || props.part.state.status === 'running');
+    const expanded = commandGroup?.expanded ?? (disclosure.choice ?? (props.part.state.status === 'pending' || props.part.state.status === 'running'));
     const liveOutput = useBackgroundShellOutput(shellID ?? '', running?.directory, shellID !== undefined && expanded);
     const part = React.useMemo((): ToolPartType => {
         const { state } = props.part;

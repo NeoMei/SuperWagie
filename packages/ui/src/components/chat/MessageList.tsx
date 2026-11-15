@@ -22,6 +22,8 @@ import { buildHistoryEntries, findFirstVisibleMessageId, type TimelineEntry } fr
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { buildTimelineRows, type TimelineRow } from './lib/turns/timelineRows';
+import { getActivityGroups } from './lib/turns/activityGroups';
+import { ActivityGroupsContext, ActivityGroupStreamContext } from './components/activityGroupsContext';
 import { getNormalizedMessageForDisplay } from './lib/messageDisplayNormalization';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
 import { useUIStore } from '@/stores/useUIStore';
@@ -446,6 +448,22 @@ const TurnRow = React.memo(({
     ...rendererInput
 }: TurnRowProps) => {
     const { turn } = entry;
+    const groupReasoning = useUIStore((state) => state.collapsibleThinkingBlocks);
+    const groups = getActivityGroups(turn.assistantMessages, groupReasoning);
+    let activeGroupMessageId = rendererInput.activeStreamingMessageId ?? null;
+    if (!activeGroupMessageId && entry.isLastTurn && rendererInput.sessionIsWorking) {
+        for (let index = turn.assistantMessages.length - 1; index >= 0; index -= 1) {
+            const message = turn.assistantMessages[index];
+            if (message.info.role === 'assistant' && !message.info.time.completed) {
+                activeGroupMessageId = message.info.id;
+                break;
+            }
+        }
+    }
+    const groupStream = React.useMemo(() => ({
+        messageId: activeGroupMessageId ?? null,
+        phase: activeGroupMessageId ? rendererInput.activeStreamingPhase ?? 'streaming' : null,
+    }), [activeGroupMessageId, rendererInput.activeStreamingPhase]);
     const renderMessage = useTurnMessageRenderer({
         ...rendererInput,
         turn,
@@ -489,11 +507,16 @@ const TurnRow = React.memo(({
     // Under a fold, a message does not draw the pages the turn hoists.
     const underFold = row.underFold;
     return (
+        <ActivityGroupsContext.Provider value={groups}>
+        <ActivityGroupStreamContext.Provider value={groupStream}>
         <div className={cn('relative w-full', row.gapBelow && 'pb-2')} data-turn-row={turn.turnId}>
+            {row.kind === 'turn-message' ? row.messageAliases?.map((id) => <span key={id} data-message-id={id} aria-hidden="true" className="block h-0 overflow-hidden" />) : null}
             {underFold ? (
                 <LiveTurnHoistedPagesContext.Provider value={foldContexts.hoistedPages}>{content}</LiveTurnHoistedPagesContext.Provider>
             ) : content}
         </div>
+        </ActivityGroupStreamContext.Provider>
+        </ActivityGroupsContext.Provider>
     );
 });
 
@@ -1121,10 +1144,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             collapsedActivity: !defaultActivityExpanded,
             expandedTurns: turnExpansion,
             showReasoningTraces,
+            collapsibleThinkingBlocks,
         }, previousRowsRef.current);
         previousRowsRef.current = next;
         return next;
-    }), [allEntries, defaultActivityExpanded, showReasoningTraces, turnExpansion]);
+    }), [allEntries, collapsibleThinkingBlocks, defaultActivityExpanded, showReasoningTraces, turnExpansion]);
 
     // The prompt rows the list keeps on top while their turn scrolls under them.
     const stickyRowIndices = React.useMemo(() => {
@@ -1233,6 +1257,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             } else if (row.kind === 'turn-message' && !row.slice?.from) {
                 messageIndexes.set(row.messageId, index);
             }
+            if (row.kind === 'turn-message') for (const id of row.messageAliases ?? []) messageIndexes.set(id, index);
         });
         for (const entry of allEntries) {
             if (entry.kind !== 'turn') continue;
@@ -1287,7 +1312,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // than the top of its message.
         if (isReasoningRevealTarget(messageId)) {
             const reasoning = container.querySelector<HTMLElement>(`[data-reasoning-message-id="${messageId}"]`);
-            if (reasoning) return reasoning;
+            if (reasoning) return reasoning.closest<HTMLElement>('[data-reasoning-block-id]') ?? reasoning;
         }
         // A long answer's later rows carry its id too; its start is the one without a slice.
         return container.querySelector(`[data-message-id="${messageId}"]:not([data-message-slice])`);

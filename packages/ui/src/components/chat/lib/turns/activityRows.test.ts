@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { Part, ToolPart } from '@/lib/opencode/model';
 
 import { activityRowParts, planActivityTrim } from './activityRows';
+import { getActivityGroups } from './activityGroups';
+import type { ChatMessageEntry } from './types';
 
 const tool = (id: string, state: ToolPart['state']): ToolPart => ({
     id, callID: id, type: 'tool', tool: 'read', messageID: 'm', sessionID: 's', state,
@@ -10,6 +12,16 @@ const text = (id: string, value: string): Part => ({ id, type: 'text', text: val
 const reasoning = (id: string): Part => ({ id, type: 'reasoning', text: 'thinking', messageID: 'm', sessionID: 's', time: { start: 1 } });
 
 describe('activityRowParts', () => {
+    test('counts an adjacent command group once before choosing the seven visible rows', () => {
+        const shell = (id: string): ToolPart => ({ ...tool(id, { status: 'running', input: {}, time: { start: 1 } }), tool: 'shell' });
+        const first: ChatMessageEntry = { info: { id: 'first', sessionID: 's', role: 'user', time: { created: 1 } }, parts: [shell('one'), shell('two')] };
+        const next: ChatMessageEntry = { info: { id: 'next', sessionID: 's', role: 'user', time: { created: 2 } }, parts: [shell('three'), text('done', 'Done')] };
+        const messages = [first, next];
+        const groups = getActivityGroups(messages);
+        expect(messages.map((message) => activityRowParts(message.parts, true, groups).map((part) => part.id))).toEqual([['one'], ['done']]);
+        expect(planActivityTrim(messages.map((message) => activityRowParts(message.parts, true, groups).length), 7)).toEqual({ hiddenMessages: 0, skipRows: 0, hiddenRows: 0 });
+    });
+
     test('counts drawn parts: text, reasoning when shown, tools running or ended', () => {
         const parts: Part[] = [
             reasoning('r'),

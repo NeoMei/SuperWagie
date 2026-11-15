@@ -51,6 +51,16 @@ test('reasoning shown and each tool add a line', () => {
     expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(108);
 });
 
+test('adjacent reasoning and command groups each estimate one header', () => {
+    const rows = rowsOf([
+        assistant('step', [reasoning('r1', 'First thought'), reasoning('r2', 'Second thought'), tool('s1', 'shell'), tool('s2', 'shell')]),
+        assistant('answer', [text('done', 'Done.')]),
+    ]);
+    expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(72);
+    const plain = estimateTimelineRowSize(messageRow(rows, 'step'), { ...metrics, collapsibleThinkingBlocks: false });
+    expect(plain).toBe(112);
+});
+
 test('a patch across many files grows with the rows of files it lists', () => {
     const files = (count: number) => ({ files: Array.from({ length: count }, (_, index) => ({ filePath: `/f${index}.ts` })) });
     const rows = rowsOf([

@@ -29,7 +29,7 @@ import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } fro
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 import { frameRectInApp, onFrameSelection } from './frameSelection';
-import { captureChatQuoteAnchor, findChatQuoteRoots, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { captureChatQuoteAnchor, findChatQuoteRoots, getChatQuoteSourceMessageId, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
   DESKTOP_MENU_FALLBACK_WIDTH_PX,
@@ -78,16 +78,16 @@ const normalizeDistilledInsight = (insight: string): string => (
   insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
 );
 
-const messageIdOf = (node: Node): string | null => (
-  (node instanceof Element ? node : node.parentElement)?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null
-);
-
 /** A long answer's first selected row owns a selection across its later rows. */
 const ownsSelection = (container: HTMLElement, range: Range): boolean => {
+  const messageId = getChatQuoteSourceMessageId(range.startContainer);
+  if (messageId !== getChatQuoteSourceMessageId(range.endContainer)) return false;
+  const commonAncestor = range.commonAncestorContainer;
+  if (commonAncestor instanceof Element && [...commonAncestor.querySelectorAll('[data-chat-source-message-id]')]
+    .some((source) => getChatQuoteSourceMessageId(source) !== messageId && range.intersectsNode(source))) return false;
   if (container.contains(range.commonAncestorContainer)) return true;
   if (!container.contains(range.startContainer)) return false;
-  const messageId = messageIdOf(container);
-  return messageId !== null && messageId === messageIdOf(range.endContainer);
+  return messageId !== null;
 };
 
 const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud, frameSelections = false }) => {
@@ -439,15 +439,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     const rect = range.getBoundingClientRect();
 
     // Store the selection but don't show menu yet if dragging
-    const anchorElement = range.startContainer instanceof Element
-      ? range.startContainer
-      : range.startContainer.parentElement;
     const replaced = pendingSelectionRef.current;
     pendingSelectionRef.current = {
       plainText: text,
       markdownText: rangeToMarkdown(range, text),
       rect,
-      messageId: anchorElement?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null,
+      messageId: getChatQuoteSourceMessageId(range.startContainer),
       range: range.cloneRange(),
     };
     // The app's selection takes over from one a page frame had.
@@ -622,7 +619,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     // A long answer's rows are one text: the anchor counts in all of its rows.
     const scope = container.closest('[data-scrollbar="chat"]');
     const roots = scope && pending.messageId ? findChatQuoteRoots(scope, pending.messageId) : [];
-    return captureChatQuoteAnchor(roots.includes(container) ? roots : [container], pending.range);
+    return captureChatQuoteAnchor(roots.length > 0 ? roots : [container], pending.range);
   }, [containerRef]);
 
   const openComment = React.useCallback((initialText: string) => {

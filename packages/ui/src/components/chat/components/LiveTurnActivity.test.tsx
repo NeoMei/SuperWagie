@@ -27,6 +27,8 @@ import type { WorkflowRun } from '@/lib/workflows/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { ChatColumnSessionContext } from '../chatColumnSession';
+import { ActivityGroupsContext } from './activityGroupsContext';
+import { getActivityGroups } from '../lib/turns/activityGroups';
 
 plugin({
     name: 'live-activity-provider-logos',
@@ -108,12 +110,14 @@ function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }) {
+    const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const rows = buildTimelineRows([{ kind: 'turn', key: 'turn', turn: record, isLastTurn: true, hasLaterAssistant: retired }], {
-        collapsedActivity: true, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
+        collapsedActivity: true, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true, collapsibleThinkingBlocks,
     }, []);
     const finalMessageId = rows.find((row) => row.kind === 'turn-fold')?.finalMessageId;
     const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId);
-    return <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
+    return <ActivityGroupsContext.Provider value={getActivityGroups(record.assistantMessages, collapsibleThinkingBlocks)}>
+    <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
         {rows.map((row) => {
             if (row.kind === 'turn-fold') {
                 return <TurnFold key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded}
@@ -127,7 +131,8 @@ function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
                 {row.final ? <LiveFinalActivityContext.Provider value={finalContext}>{renderMessage(message)}</LiveFinalActivityContext.Provider> : renderMessage(message)}
             </MessageSliceContext.Provider>;
         })}
-    </LiveTurnHoistedPagesContext.Provider>;
+    </LiveTurnHoistedPagesContext.Provider>
+    </ActivityGroupsContext.Provider>;
 }
 
 function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn }: {
@@ -379,6 +384,19 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('The final answer');
         await act(async () => root.render(<Harness record={turn([progress, { ...final, parts: [...final.parts] }])} />));
         expect(header?.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    test('counts a command run once when folding the rows before the seven-row preview', async () => {
+        const calls: Part[] = [
+            ...Array.from({ length: 7 }, (_, index): Part => ({ ...readPart, id: `read-${index}`, callID: `read-${index}` })),
+            ...Array.from({ length: 30 }, (_, index): Part => ({
+                type: 'tool', tool: 'shell', id: `shell-${index}`, callID: `shell-${index}`, sessionID: 'session', messageID: 'progress',
+                state: { status: 'completed', input: { command: `echo ${index}` }, output: `Result ${index}`, metadata: {}, time: { start: 1, end: 2 } },
+            })),
+        ];
+        await act(async () => root.render(<Harness record={turn([assistant('progress', calls, 'tool-calls')])} />));
+        const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        expect(header?.textContent).toContain('+1 more');
     });
 
     test('draws a page the agent showed above the answer, outside the folded Activity', async () => {

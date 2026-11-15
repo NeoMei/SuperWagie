@@ -4,6 +4,7 @@ import { Window } from 'happy-dom';
 import {
     captureChatQuoteAnchor,
     chatQuoteAnchorSchema,
+    findChatQuoteRoots,
     legacyChatQuoteAnchor,
     locateChatQuote,
     resolveChatQuoteAnchor,
@@ -11,11 +12,13 @@ import {
 } from './chatQuoteAnchor';
 
 const previousDocument = globalThis.document;
+const previousCSS = globalThis.CSS;
 beforeEach(() => {
-    Object.assign(globalThis, { document: new Window().document });
+    const window = new Window();
+    Object.assign(globalThis, { document: window.document, CSS: window.CSS });
 });
 afterEach(() => {
-    Object.assign(globalThis, { document: previousDocument });
+    Object.assign(globalThis, { document: previousDocument, CSS: previousCSS });
 });
 
 const renderRoot = (html: string): Element => {
@@ -88,6 +91,31 @@ describe('chat quote anchor schema', () => {
     test('a malformed page is rejected rather than read as a message anchor', () => {
         expect(chatQuoteAnchorSchema.safeParse({ ...base, page: {} }).success).toBe(false);
         expect(chatQuoteAnchorSchema.safeParse({ ...base, page: 'prt_1' }).success).toBe(false);
+    });
+});
+
+describe('quotes from grouped activity sources', () => {
+    test('a moved source belongs to its original message and resolves after grouping is disabled', () => {
+        const scope = renderRoot('<div data-message-id="first"><div data-chat-quote-root><p>First thought.</p><div data-chat-source-message-id="second" data-chat-quote-root><p>Second thought has the quoted words here.</p></div></div></div><div data-message-id="second"><div data-chat-quote-root><p>Final answer.</p></div></div>');
+        const source = scope.querySelector('[data-chat-source-message-id="second"]')!;
+        const roots = findChatQuoteRoots(scope, 'second');
+        const anchor = captureChatQuoteAnchor(roots, selectText(source, 'the quoted words'));
+        expect(anchor?.text).toBe('the quoted words');
+        expect(roots).toHaveLength(2);
+
+        // The source is back in its own message after a remount with plain thinking.
+        const plain = renderRoot('<div data-message-id="second"><div data-chat-quote-root><p>Second thought has the quoted words here.</p><p>Final answer.</p></div></div>');
+        expect(resolveChatQuoteRanges(findChatQuoteRoots(plain, 'second'), anchor!)?.[0]?.toString()).toBe('the quoted words');
+    });
+
+    test('an owning message excludes moved foreign text without duplicating its own nested source', () => {
+        const scope = renderRoot('<div data-message-id="first"><div data-chat-quote-root><p>Before.</p><div data-chat-source-message-id="first" data-chat-quote-root><p>First thought.</p></div><div data-chat-source-message-id="second" data-chat-quote-root><p>Foreign thought.</p></div></div></div>');
+        const source = scope.querySelector('[data-chat-source-message-id="first"]')!;
+        const roots = findChatQuoteRoots(scope, 'first');
+        const anchor = captureChatQuoteAnchor(roots, selectText(source, 'First thought.'));
+        expect(roots).toHaveLength(1);
+        expect(anchor).toEqual({ text: 'First thought.', prefix: 'Before.', suffix: '', start: 7 });
+        expect(resolveChatQuoteRanges(roots, anchor!)?.[0]?.toString()).toBe('First thought.');
     });
 });
 

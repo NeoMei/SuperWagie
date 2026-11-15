@@ -165,3 +165,7 @@ The mobile keyboard side (`keyboardFollowGlide.ts`) is documented with the compo
 ## SuperWagie recap visibility
 
 `viewportAtEnd` remains available to the recap hint above the composer. It stays true during the follow's own movement and is false whenever the scroll-to-bottom pill is offered. A manual gesture or other navigation is measured normally. This display state never re-arms follow or overrides an upstream follow stop.
+
+## Consecutive activity rows
+
+`activityGroups.ts` assigns adjacent thinking or shell parts to their first member before timeline rows are cut. Continuation-only messages contribute no empty virtual row; their message IDs resolve to the owning row and retain zero-height source anchors. Groups count as one row in Activity trimming and row estimates. A later source update invalidates the immutable turn projection so a group owned by an earlier message still receives streaming content and completion.
