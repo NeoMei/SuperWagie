@@ -456,6 +456,7 @@ export function projectMessage(info: SessionMessageInfo, sessionID: string): Pro
           reason: info.reason,
           summary: info.status === "failed" ? "" : info.summary,
           error: info.status === "failed" ? info.error : undefined,
+          model: info.status === "completed" ? info.model : undefined,
           cost: info.status === "running" ? undefined : info.cost,
           tokens: info.status === "running" ? undefined : info.tokens,
           metadata,

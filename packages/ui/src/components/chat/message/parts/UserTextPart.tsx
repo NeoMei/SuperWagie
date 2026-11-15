@@ -32,14 +32,16 @@ import { prepareUserMarkdownContent, SKILL_TOKEN_PATTERN } from './userTextPartC
 import { extractTerminalContexts } from '@/lib/messages/terminalContext';
 import { readContextPart } from '@/lib/messages/contextParts';
 import UserContextPart from './UserContextPart';
+import { ReferenceLinkChipsContext, withReferenceLinkChips, type ReferenceLinkChips } from './referenceLinkChips';
 import { SessionMentionChipsContext, withSessionMentionChips, type SessionMentionChips } from './sessionMentionChips';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { withLineDirectionMarks } from './plainTextLineDirection';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
 type UserTextPartProps = {
     part: Part;
-    messageId: string;
     isMobile: boolean;
     agentMention?: AgentMentionInfo;
     /**
@@ -52,6 +54,7 @@ type UserTextPartProps = {
     onExpandMessage: () => void;
     partIndex: number;
     onTruncationChange: (partIndex: number, truncated: boolean) => void;
+    onCollapsedLinesChange: (partIndex: number, lines: number) => void;
     /** Names of the files attached to this message; `[name]` in the text renders as a file chip. */
     attachmentFilenames: readonly string[];
     /** The message's file parts; a citation of one the app can show opens it on click. */
@@ -60,9 +63,12 @@ type UserTextPartProps = {
     onShowPopup?: (content: ToolPopupContent) => void;
     /** Sessions and messages the message mentioned; their links in the text draw as chips. */
     sessionMentionChips?: SessionMentionChips;
+    /** Linked repository and tracker items named by URLs in this message. */
+    referenceLinkChips?: ReferenceLinkChips;
 };
 
 const NO_SESSION_MENTIONS: SessionMentionChips = new Map();
+const NO_REFERENCE_LINKS: ReferenceLinkChips = new Map();
 
 const EMPTY_ATTACHMENT_LINKS: AttachmentCitationLink[] = [];
 const EMPTY_ATTACHMENT_FILES: readonly FilePart[] = [];
@@ -74,16 +80,17 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
 
 const UserTextPart: React.FC<UserTextPartProps> = ({
     part,
-    messageId,
     agentMention,
     messageExpanded,
     onExpandMessage,
     partIndex,
     onTruncationChange,
+    onCollapsedLinesChange,
     attachmentFilenames,
     attachmentFiles = EMPTY_ATTACHMENT_FILES,
     onShowPopup,
     sessionMentionChips = NO_SESSION_MENTIONS,
+    referenceLinkChips = NO_REFERENCE_LINKS,
 }) => {
     // Structured context (inline comments, terminal selections, annotations,
     // PR context) renders as a dedicated block instead of raw prompt text.
@@ -96,6 +103,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     const textContent = terminalContextState.visibleText;
 
     const [isTruncated, setIsTruncated] = React.useState(false);
+    const [collapsedLines, setCollapsedLines] = React.useState(1);
     const userMessageRenderingMode = useUIStore((state) => state.userMessageRenderingMode);
     const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
     const skills = useSkillsStore((state) => state.skills);
@@ -149,6 +157,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
 
         const checkTruncation = () => {
             setIsTruncated(el.scrollHeight > el.clientHeight);
+            setCollapsedLines(el.clientHeight > Number.parseFloat(getComputedStyle(el).lineHeight) * 1.5 ? 2 : 1);
         };
 
         checkTruncation();
@@ -198,6 +207,12 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     }, [isTruncated, onTruncationChange, partIndex]);
 
     React.useEffect(() => () => onTruncationChange(partIndex, false), [onTruncationChange, partIndex]);
+
+    const textLines = contextPayload ? 0 : collapsedLines;
+    React.useLayoutEffect(() => {
+        onCollapsedLinesChange(partIndex, textLines);
+        return () => onCollapsedLinesChange(partIndex, 0);
+    }, [onCollapsedLinesChange, partIndex, textLines]);
 
     const handleExpand = React.useCallback(() => {
         setIsTruncated(true);
@@ -332,19 +347,23 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
         });
     }, [agentMention, openSkill, skillByName, textContent]);
 
-    // Attachment citations and mentioned sessions become chips in the plain-text path too.
-    const plainTextContent = React.useMemo(() => glueChipPunctuation(
-        attachmentFilenames.length === 0 && sessionMentionChips.size === 0 ? plainTextNodes : plainTextNodes.flatMap((node, nodeIndex) => (
+    // Attachment citations, mentioned sessions and linked items become chips in plain text too.
+    const plainTextContent = React.useMemo(() => withLineDirectionMarks(glueChipPunctuation(
+        attachmentFilenames.length === 0 && sessionMentionChips.size === 0 && referenceLinkChips.size === 0 ? plainTextNodes : plainTextNodes.flatMap((node, nodeIndex) => (
             React.isValidElement<unknown>(node)
                 ? node
                 : withSessionMentionChips(node, sessionMentionChips, `session-${nodeIndex}`).flatMap((run, runIndex) => (
                     React.isValidElement<unknown>(run)
                         ? run
-                        : withAttachmentChips(run, attachmentFilenames, `attachment-${nodeIndex}-${runIndex}`, isOpenableAttachment)
+                        : withReferenceLinkChips(run, referenceLinkChips, `reference-${nodeIndex}-${runIndex}`).flatMap((piece, pieceIndex) => (
+                            React.isValidElement<unknown>(piece)
+                                ? piece
+                                : withAttachmentChips(piece, attachmentFilenames, `attachment-${nodeIndex}-${runIndex}-${pieceIndex}`, isOpenableAttachment)
+                        ))
                 ))
         )),
         'chip-glue',
-    ), [attachmentFilenames, isOpenableAttachment, plainTextNodes, sessionMentionChips]);
+    ), 'line-dir'), [attachmentFilenames, isOpenableAttachment, plainTextNodes, referenceLinkChips, sessionMentionChips]);
 
     if (contextPayload) {
         return (
@@ -362,7 +381,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     }
 
     return (
-        <div className="relative" key={part.id || `${messageId}-user-text`}>
+        <div className="relative">
             <div
                 className={cn(
                     "break-words font-sans typography-markdown-body",
@@ -370,40 +389,23 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                     isCollapsed && "line-clamp-2",
                     collapsibleUserMessages && isTruncated && !messageExpanded && "cursor-pointer"
                 )}
+                data-user-message-collapsed={isCollapsed && normalizedRenderingMode === 'markdown' ? '' : undefined}
                 ref={textRef}
                 onClick={handleClick}
                 onKeyDown={handleKeyDown}
             >
                 {normalizedRenderingMode === 'markdown' ? (
                     <SessionMentionChipsContext.Provider value={sessionMentionChips}>
+                        <ReferenceLinkChipsContext.Provider value={referenceLinkChips}>
                         <SimpleMarkdownRenderer
+                            singleTilde={false}
                             content={processedMarkdownContent}
-                            className={cn(
-                                "[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0",
-                                isCollapsed && [
-                                    "[&_.markdown-content>*]:my-0",
-                                    "[&_[data-oc-streamdown]>*]:![margin-block:0]",
-                                    "[&_[data-oc-markdown-block]>*]:![margin-block:0]",
-                                    "[&_[data-streamdown='code-block']]:!my-0",
-                                    "[&_[data-streamdown='code-block']]:!inline",
-                                    "[&_[data-streamdown='code-block']]:!border-0",
-                                    "[&_[data-streamdown='code-block']]:!bg-transparent",
-                                    "[&_[data-streamdown='code-block-header']]:!hidden",
-                                    "[&_[data-streamdown='code-block-actions']]:!hidden",
-                                    "[&_[data-streamdown='code-block-body']]:!inline",
-                                    "[&_[data-streamdown='code-block-body']]:!p-0",
-                                    "[&_[data-streamdown='code-block-body']_pre]:!inline",
-                                    "[&_[data-streamdown='code-block-body']_pre]:!p-0",
-                                    "[&_[data-streamdown='code-block-body']_code]:!inline",
-                                    "[&_[data-streamdown='code-block-body']_code]:!ps-0",
-                                    "[&_[data-streamdown='code-block-body']_code]:![background-image:none]",
-                                    "[&_[data-streamdown='code-block-body']_code>span]:!block",
-                                    "[&_[data-streamdown='code-block-body']_code>span]:before:!hidden",
-                                 ]
-                            )}
+                            className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
                             disableLinkSafety
                             enableFileReferences={false}
+                            literalText
                         />
+                        </ReferenceLinkChipsContext.Provider>
                     </SessionMentionChipsContext.Provider>
                 ) : (
                     plainTextContent
@@ -416,7 +418,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                             <summary className="cursor-pointer text-muted-foreground">
                                 {t('chat.message.terminalContext', { terminal: context.terminalLabel, start: context.startLine, end: context.endLine })}
                             </summary>
-                            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[var(--surface-foreground)]">{context.text}</pre>
+                            <ScrollableOverlay as="pre" outerClassName="mt-2 max-h-48" className="whitespace-pre-wrap font-mono text-[var(--surface-foreground)]" disableHorizontal>{context.text}</ScrollableOverlay>
                         </details>
                     ))}
                 </div>

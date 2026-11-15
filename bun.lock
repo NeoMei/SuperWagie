@@ -89,7 +89,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "2.7.107",
+      "version": "2.7.108",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -127,7 +127,7 @@
     },
     "packages/sdk": {
       "name": "@openchamber/sdk",
-      "version": "2.7.107",
+      "version": "2.7.108",
       "bin": {
         "openchamber-guest-bundle": "./scripts/bundle-guest.ts",
       },
@@ -207,7 +207,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "2.7.107",
+      "version": "2.7.108",
       "dependencies": {
         "@aparajita/capacitor-secure-storage": "^8.0.0",
         "@base-ui/react": "^1.4.0",
@@ -245,6 +245,7 @@
         "@openchamber/sdk": "workspace:*",
         "@opencode/client": "2.3.0",
         "@opencode/schema": "2.3.0",
+        "@openuidev/lang-core": "1.0.2",
         "@pierre/diffs": "1.6.1",
         "@pierre/highlights": "0.2.0",
         "@replit/codemirror-vim": "^6.4.0",
@@ -320,7 +321,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "2.7.107",
+      "version": "2.7.108",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode/client": "2.3.0",
@@ -344,7 +345,7 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "2.7.107",
+      "version": "2.7.108",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
@@ -1144,6 +1145,8 @@
     "@opencode/protocol": ["@opencode/protocol@2.3.0", "", { "dependencies": { "@opencode/schema": "2.3.0", "effect": "4.1.0" } }, "sha512-V37zTGXVa1j9aXUvUY01YN1EtfMMSWoT5pSCc6M0UsGdTUZX6QL/vMgGVGzPvbt7+Z8Vo40/0DFRPyqT4sdvnw=="],
 
     "@opencode/schema": ["@opencode/schema@2.3.0", "", { "dependencies": { "@standard-schema/spec": "1.1.0", "effect": "4.1.0" } }, "sha512-9CPS4+BXWUs3ELIWo68AA2q4XEPMkRYwpGYdqd/wNz3jRTOB8swef+2/z+igkCel+UtlX+dAlGTmSnid/JcoKw=="],
+
+    "@openuidev/lang-core": ["@openuidev/lang-core@1.0.2", "", { "dependencies": { "ci-info": "^4.4.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": ">=1.0.0", "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-mxrWXgSmGx9N8ZHFiRgvqCmCH8j3x0PTHJVRvtRPlucxDAihthgMR4W6RXJN5KnCl/5fk1SzcT9JHrvGTKcBFw=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.155.0", "", {}, "sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q=="],
 

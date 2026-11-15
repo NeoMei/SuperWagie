@@ -110,13 +110,12 @@ function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }) {
-    const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const rows = buildTimelineRows([{ kind: 'turn', key: 'turn', turn: record, isLastTurn: true, hasLaterAssistant: retired }], {
-        collapsedActivity: true, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true, collapsibleThinkingBlocks,
+        collapsedActivity: true, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
     }, []);
     const finalMessageId = rows.find((row) => row.kind === 'turn-fold')?.finalMessageId;
     const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId);
-    return <ActivityGroupsContext.Provider value={getActivityGroups(record.assistantMessages, collapsibleThinkingBlocks)}>
+    return <ActivityGroupsContext.Provider value={getActivityGroups(record.assistantMessages)}>
     <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
         {rows.map((row) => {
             if (row.kind === 'turn-fold') {
@@ -596,9 +595,9 @@ describe('live Activity with the real message body', () => {
             { file: 'src/c.ts', additions: 1, deletions: 0, inTurnDiff: false },
         ]} />));
         expect(container.querySelector('button[aria-label="Open src/a.ts"]')?.textContent).toBe('a.ts');
-        expect(container.querySelector('button[aria-label="Open src/b.ts"]')?.textContent).toBe('b.ts+1/-2');
+        expect(container.querySelector('button[aria-label="Open src/b.ts"]')?.textContent).toBe('b.ts+1 −2');
         expect(container.querySelector('button[aria-label="Open src/c.ts"]')).toBeNull();
-        expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1/-0');
+        expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1 −0');
     });
 
     test('keeps historical files informational and withholds the list before stop', async () => {

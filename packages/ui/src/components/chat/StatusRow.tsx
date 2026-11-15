@@ -2,9 +2,7 @@ import React from "react";
 import { useChatSessionSelection } from './chatColumnSession';
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { BackgroundWorkButton } from "./components/BackgroundWorkButton";
-import { ChatActivityToneDot } from "./components/ChatActivityTone";
 import type { AgentStatus } from "@/lib/agentStatus";
-import type { ActivityTone } from "./lib/turns/activityTone";
 
 // The floating assistant-status chip that hovers above the composer while the
 // agent works ("Claude is working…"). ONLY that. The composer's
@@ -26,9 +24,6 @@ interface StatusRowProps {
   providerId?: string | null;
   /** Set while the turn waits on work OpenCode can move to the background. */
   onBackground?: () => void;
-  /** One status signal owned by the chat column, rendered only in this host. */
-  tone?: ActivityTone;
-  showTone?: boolean;
 }
 
 export const StatusRow: React.FC<StatusRowProps> = ({
@@ -42,8 +37,6 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   modelName,
   providerId,
   onBackground,
-  tone = 'neutral',
-  showTone = false,
 }) => {
   const currentSessionId = useChatSessionSelection().sessionId;
 
@@ -56,7 +49,6 @@ export const StatusRow: React.FC<StatusRowProps> = ({
 
   return (
     <div
-      data-status-row=""
       // The row renders inside the composer-anchored overlay, which owns the
       // distance to the input and the horizontal column (the same ones the
       // scroll-to-bottom pill uses).
@@ -78,7 +70,6 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             its own scrollbar. Clipping both axes cut descenders off at the
             label's 16px line box, so only the width is clipped. */}
         <div className="flex items-center min-w-0 gap-2 overflow-x-clip">
-          {showTone ? <ChatActivityToneDot tone={tone} providerId={providerId} /> : null}
           {shouldRenderPlaceholder ? (
             <WorkingPlaceholder
               key={currentSessionId ?? "no-session"}
@@ -90,7 +81,6 @@ export const StatusRow: React.FC<StatusRowProps> = ({
               agentName={agentName}
               modelName={modelName}
               providerId={providerId}
-              showProviderLogo={!showTone}
             />
           ) : null}
         </div>

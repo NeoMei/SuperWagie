@@ -20,6 +20,10 @@ export interface MarkdownPresentation {
   /** A preview button next to loopback links; only chat messages show it. */
   loopbackPreview: boolean;
   purpose?: 'copy' | 'image';
+  /** Only assistant/subagent replies on screen draw openui-lang fences. */
+  uiBlocks: boolean;
+  /** The finished assistant reply a block can answer; absent elsewhere. */
+  settledReply: { sessionId: string; messageId: string } | null;
   disableLinkSafety?: boolean;
   theme: Theme;
   mermaidControls: MermaidControls;

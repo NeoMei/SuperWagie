@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Part, ReasoningPart, TextPart, ToolPart } from '@/lib/opencode/model';
-import { getActivityGroups } from './activityGroups';
+import { getActivityGroups, isActivityContinuationOnlyMessage } from './activityGroups';
 import type { ChatMessageEntry } from './types';
 
 const reasoning = (id: string): ReasoningPart => ({ id, messageID: 'm', sessionID: 's', type: 'reasoning', text: id, time: { start: 1 } });
@@ -15,14 +15,14 @@ const message = (id: string, parts: Part[]): ChatMessageEntry => ({
 });
 
 describe('getActivityGroups', () => {
-    test('retains original source messages and parts while grouping across message boundaries', () => {
-        const first = message('first', [reasoning('r1')]);
-        const next = message('next', [reasoning('r2'), tool('s1'), tool('s2')]);
+    test('groups only consecutive commands across source messages', () => {
+        const first = message('first', [tool('s1')]);
+        const next = message('next', [tool('s2'), reasoning('r1'), reasoning('r2'), tool('s3'), tool('s4')]);
         const groups = getActivityGroups([first, next]);
-        expect([...groups.keys()]).toEqual(['r1', 'r2', 's1', 's2']);
-        expect(groups.get('r1')).toBe(groups.get('r2'));
-        const group = groups.get('r1');
-        expect(group?.kind).toBe('reasoning');
+        expect([...groups.keys()]).toEqual(['s1', 's2', 's3', 's4']);
+        expect(groups.get('s1')).toBe(groups.get('s2'));
+        const group = groups.get('s1');
+        expect(group?.kind).toBe('command');
         expect(group?.members.map((member) => member.message.info.id)).toEqual(['first', 'next']);
         expect(group?.members[0]?.message).toBe(first);
         expect(group?.members[0]?.part).toBe(first.parts[0]);
@@ -49,13 +49,17 @@ describe('getActivityGroups', () => {
 
     test('plain reasoning keeps individual parts while still separating command groups', () => {
         const messages = [message('m', [tool('s1'), reasoning('r1'), reasoning('r2'), tool('s2'), tool('s3')])];
-        const groups = getActivityGroups(messages, false);
+        const groups = getActivityGroups(messages);
         expect(groups.has('r1')).toBe(false);
         expect(groups.has('r2')).toBe(false);
         expect(groups.has('s1')).toBe(false);
         expect(groups.get('s2')?.members.map((member) => member.part.id)).toEqual(['s2', 's3']);
-        expect(getActivityGroups(messages, false)).toBe(groups);
-        expect(getActivityGroups(messages).get('r1')?.members).toHaveLength(2);
+        expect(getActivityGroups(messages)).toBe(groups);
+    });
+
+    test('adjacent reasoning keeps upstream part and message boundaries', () => {
+        const messages = [message('first', [reasoning('r1')]), message('next', [reasoning('r2'), reasoning('r3')])];
+        expect(getActivityGroups(messages).size).toBe(0);
     });
 
     test('an invalid settled shell row separates runs and cannot hide a later valid call', () => {
@@ -80,4 +84,15 @@ describe('getActivityGroups', () => {
         expect(next.get('s1')?.members[1]?.message).toBe(updated);
         expect(initial.get('s1')?.members).toHaveLength(2);
     });
+});
+
+
+test('sealed invisible text leaves visually consecutive commands in one disclosure', () => {
+    const first = message('first', [tool('s1'), { ...text('blank', '\u200b'), time: { start: 1, end: 2 } }]);
+    const second = message('second', [text('empty', ''), tool('s2')]);
+    if (second.info.role !== 'assistant') throw new Error('Expected assistant fixture');
+    second.info.time.completed = 3;
+    const groups = getActivityGroups([first, second]);
+    expect(groups.get('s1')?.members.map((member) => member.part.id)).toEqual(['s1', 's2']);
+    expect(isActivityContinuationOnlyMessage(second, groups)).toBe(true);
 });

@@ -1,26 +1,61 @@
 import React from 'react';
 
-import type { ToolPart as ToolPartData } from '@/lib/opencode/model';
-import { isQuestionTool, proposedWorkflowRunId } from '@/lib/opencode/tools';
-import { useUIStore } from '@/stores/useUIStore';
+import type { ToolPart } from '@/lib/opencode/model';
+import { isSettledAsk, type ShownPart } from '../../lib/turns/liveActivity';
+import AssistantTextPart from './AssistantTextPart';
+import { PageAskStatus } from './PageAskStatus';
+import { proposedWorkflowRunId, renderedPage } from '@/lib/opencode/tools';
 import { WorkflowRunCard } from '@/components/chat/workflows/WorkflowRunCard';
+import type { ToolPopupContent } from '../types';
 import { ShownPage } from './HtmlRenderFrame';
-import ToolPart from './ToolPart';
+import { useUIStore } from '@/stores/useUIStore';
+import ToolPartRow from './ToolPart';
 
-/**
- * What a call the chat shows in place (`isShownInPlace`) draws instead of its
- * row: a question, the run a `workflow.run` call proposed, or the page it showed.
- */
-export function ShownToolCard({ part }: { part: ToolPartData }) {
+/** Draw supported cards in place, keeping other call results as ordinary rows. */
+export function ShownToolCard({ part, onShowPopup }: { part: ToolPart; onShowPopup?: (content: ToolPopupContent) => void }) {
   const runId = React.useMemo(() => proposedWorkflowRunId(part.tool, part.state), [part.tool, part.state]);
-  if (isQuestionTool(part.tool)) return <QuestionToolCard key={part.id} part={part} />;
+  const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
   if (runId) return <WorkflowRunCard sessionId={part.sessionID} runId={runId} />;
-  return <ShownPage part={part} />;
+  if (page) return <ShownPage part={part} />;
+  return <OrdinaryToolCard part={part} onShowPopup={onShowPopup} />;
 }
 
-/** The transcript keeps the question and answer; FormDock owns the live reply. */
-function QuestionToolCard({ part }: { part: ToolPartData }) {
-  const [expanded, setExpanded] = React.useState(true);
+/** Unsupported card capabilities retain the complete call's normal disclosure. */
+function OrdinaryToolCard({ part, onShowPopup }: { part: ToolPart; onShowPopup?: (content: ToolPopupContent) => void }) {
   const isMobile = useUIStore((state) => state.isMobile);
-  return <ToolPart part={part} isExpanded={expanded} onToggle={() => setExpanded((value) => !value)} isMobile={isMobile} />;
+  const [expanded, setExpanded] = React.useState(false);
+  return <ToolPartRow part={part} isExpanded={expanded} onToggle={() => setExpanded((current) => !current)}
+    isMobile={isMobile} onShowPopup={onShowPopup} />;
+}
+
+/** A settled form a collapsed Activity keeps in view: one line, no form. */
+function SettledAskLine({ part }: { part: ToolPart }) {
+  const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
+  if (!page) return null;
+  return (
+    <div className="my-2">
+      <PageAskStatus ask={page.ask} answeredSummary={page.ask.kind === 'answered' ? page.ask.summary : undefined} />
+    </div>
+  );
+}
+
+/**
+ * A part a collapsed Activity keeps in view (`getShownPages`): a call drawn in
+ * place, the line of a settled form, or the text with a UI block the agent
+ * wrote before a later step.
+ */
+export function ShownPartCard({ part, onShowPopup }: { part: ShownPart; onShowPopup?: (content: ToolPopupContent) => void }) {
+  if (part.type === 'tool') {
+    if (isSettledAsk(part)) return <SettledAskLine part={part} />;
+    return <ShownToolCard part={part} onShowPopup={onShowPopup} />;
+  }
+  return (
+    <AssistantTextPart
+      part={part}
+      sessionId={part.sessionID}
+      messageId={part.messageID}
+      streamPhase={part.time?.end === undefined ? 'streaming' : 'completed'}
+      onShowPopup={onShowPopup}
+    />
+  );
 }

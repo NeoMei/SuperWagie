@@ -145,11 +145,34 @@ const setClampedGeometry = (el: HTMLElement, clampedHeight: number, contentHeigh
 };
 
 describe('UserTextPart expand affordance (issue #3742)', () => {
+    test('a server echo replacing the optimistic part ID preserves the user text DOM', async () => {
+        const dom = installDomStub();
+        const root = createRoot(dom.container);
+        const first = makeTextPart('Keep this prompt selected while it is acknowledged.');
+        const render = (part: TextPartFixture) => <SyncProvider sdk={sdk} directory=""><I18nProvider>
+            <UserTextPart part={part} isMobile={false} messageExpanded onExpandMessage={() => undefined}
+                partIndex={0} attachmentFilenames={[]} onTruncationChange={() => undefined}
+                onCollapsedLinesChange={() => undefined} />
+        </I18nProvider></SyncProvider>;
+        try {
+            await act(async () => root.render(render(first)));
+            const original = dom.container.firstElementChild;
+            expect(original).not.toBeNull();
+            await act(async () => root.render(render({ ...first, id: 'server-acknowledged-part' })));
+            expect(dom.container.firstElementChild).toBe(original);
+            expect(original?.textContent).toContain(first.text);
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
+
     test('collapsed truncated message reports truncation and a click on the text expands the message', async () => {
         const dom = installDomStub();
         let expandCalls = 0;
         const onExpandMessage = () => { expandCalls += 1; };
         const truncation: boolean[] = [];
+        const collapsedLines: number[] = [];
         const part = makeTextPart(`${'Long user report. '.repeat(40)}`);
         const root = createRoot(dom.container);
 
@@ -160,12 +183,12 @@ describe('UserTextPart expand affordance (issue #3742)', () => {
                         <I18nProvider>
                             <UserTextPart
                                 part={part}
-                                messageId="msg_3742"
                                 isMobile={false}
                                 messageExpanded={false}
                                 onExpandMessage={onExpandMessage}
                                 partIndex={0}
                                 attachmentFilenames={[]}
+                                onCollapsedLinesChange={(_index, lines) => { collapsedLines.push(lines); }}
                                 onTruncationChange={(_index, truncated) => { truncation.push(truncated); }}
                             />
                         </I18nProvider>
@@ -178,12 +201,14 @@ describe('UserTextPart expand affordance (issue #3742)', () => {
             // component's clamped text div.
             const textDiv = dom.container.querySelector('div.relative > div') as HTMLElement;
             if (!textDiv) throw new Error('Expected the clamped user text div');
+            textDiv.style.lineHeight = '20px';
             setClampedGeometry(textDiv, 40, 200);
             await act(async () => {
                 dom.observers.forEach((observer) => observer.notify());
             });
 
             expect(truncation.at(-1)).toBe(true);
+            expect(collapsedLines.at(-1)).toBe(2);
 
             await act(async () => {
                 textDiv.click();
@@ -210,12 +235,12 @@ describe('UserTextPart expand affordance (issue #3742)', () => {
                         <I18nProvider>
                             <UserTextPart
                                 part={part}
-                                messageId="msg_3742"
                                 isMobile={false}
                                 messageExpanded={false}
                                 onExpandMessage={() => undefined}
                                 partIndex={0}
                                 attachmentFilenames={[]}
+                                onCollapsedLinesChange={() => undefined}
                                 onTruncationChange={(_index, truncated) => { truncation.push(truncated); }}
                             />
                         </I18nProvider>
@@ -256,12 +281,12 @@ describe('UserTextPart expand affordance (issue #3742)', () => {
                         <I18nProvider>
                             <UserTextPart
                                 part={part}
-                                messageId="msg_3742"
                                 isMobile={false}
                                 messageExpanded={false}
                                 onExpandMessage={onExpandMessage}
                                 partIndex={0}
                                 attachmentFilenames={[]}
+                                onCollapsedLinesChange={() => undefined}
                                 onTruncationChange={() => undefined}
                             />
                         </I18nProvider>

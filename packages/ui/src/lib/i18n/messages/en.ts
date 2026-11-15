@@ -1,3 +1,4 @@
+import { chatStreamI18n } from './chat-stream.i18n';
 import { productHelpI18n } from './product-help.i18n';
 import { platformAccountI18n } from './platform-account.i18n';
 import { platformUsageActivityI18n } from './platform-usage-activity.i18n';
@@ -45,7 +46,7 @@ import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
-export const dict = {
+const baseDict = {
   'mobile.official.desktopSelectionOnly': 'Select material in the desktop app running on this host.',
   'mobile.official.manage': 'Phone selections',
   'mobile.official.revokeFailed': 'Could not revoke this selection.',
@@ -4174,5 +4175,7 @@ export const dict = {
   'references.pasted.remove': 'Remove link',
   'references.pasted.close': 'Close',
 } as const;
+
+export const dict = { ...baseDict, ...chatStreamI18n.en } as const;
 
 export type I18nKey = keyof typeof dict;

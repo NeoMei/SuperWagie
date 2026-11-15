@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ReasoningTimelineBlock } from './parts/ReasoningPart';
 import ToolPart from './parts/ToolPart';
-import { getLastOutputLine } from './parts/toolOutput';
+import { CommandActivityGroup } from './parts/CommandActivityGroup';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
 import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
@@ -49,6 +49,15 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
     const running = message.status === 'running';
     const failed = message.status === 'failed';
     const summary = message.summary.trim();
+    const model = message.status === 'completed' && message.model
+        ? `${message.model.providerID}/${message.model.id}`
+        : undefined;
+    const title = (
+        <>
+            {running ? t('chat.compaction.running') : failed ? t('chat.compaction.failed') : t('chat.compaction.completed')}
+            {model ? <bdi className="font-normal break-all" style={{ color: 'var(--tools-description)' }} title={model}> · {model}</bdi> : null}
+        </>
+    );
 
     // A compaction reads like a thinking row: one collapsible tool-style line
     // whose body is the summary as Markdown. The summary streams in while the
@@ -66,11 +75,7 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                 presentation={{
                     icon: failed ? 'error-warning' : 'scissors',
                     iconClassName: failed ? 'text-[var(--status-error)]' : undefined,
-                    title: running
-                        ? t('chat.compaction.running')
-                        : failed
-                            ? t('chat.compaction.failed')
-                            : t('chat.compaction.completed'),
+                    title,
                     expandLabel: t('chat.compaction.showSummary'),
                     collapseLabel: t('chat.compaction.hideSummary'),
                     markdownVariant: 'assistant',
@@ -78,13 +83,13 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                 }}
             />
             {!running && !summary ? (
-                <div className="flex items-center gap-1.5 py-1.5 ps-px typography-meta" style={{ color: 'var(--tools-title)' }}>
+                <div className="flex items-center gap-1.5 py-1.5 ps-px typography-meta" style={{ color: 'var(--tools-description)' }}>
                     <Icon
                         name={failed ? 'error-warning' : 'scissors'}
                         className={cn('h-3.5 w-3.5 shrink-0', failed && 'text-[var(--status-error)]')}
                         style={failed ? undefined : { color: 'var(--tools-icon)' }}
                     />
-                    <span className="font-medium">{failed ? t('chat.compaction.failed') : t('chat.compaction.completed')}</span>
+                    <span>{title}</span>
                 </div>
             ) : null}
             {message.error ? (
@@ -94,7 +99,7 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
     );
 };
 
-type ShellRow = { part: ToolPartType; failureReason?: string };
+type ShellRow = { part: ToolPartType };
 
 /**
  * A `!command` run is shown as the shell tool the agent would have called, so
@@ -124,15 +129,8 @@ const toShellRow = (message: Extract<Message, { role: 'shell' }>): ShellRow => {
     if (failed) {
         const detail = message.signal ?? message.exit;
         const reason = detail !== undefined ? `${message.status} (${detail})` : message.status;
-        // A command that ran to its end prints why it failed as its last line;
-        // for one killed or timed out, how it ended is the reason. A truncated
-        // output keeps only its start, so its last line is not the end.
-        const lastLineIsReason = message.status === 'exited'
-            && message.signal === undefined
-            && message.output?.truncated !== true;
         return {
             part: { ...base, state: { status: 'error', input, error: reason, output, time: { start, end } } },
-            failureReason: (lastLineIsReason ? getLastOutputLine(output) : undefined) ?? reason,
         };
     }
     return { part: { ...base, state: { status: 'completed', input, output, time: { start, end } } } };
@@ -143,12 +141,12 @@ const toShellRow = (message: Extract<Message, { role: 'shell' }>): ShellRow => {
 const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }>; isFirstRow: boolean }> = ({ message, isFirstRow }) => {
     const isMobile = useUIStore((state) => state.isMobile);
     const [expanded, setExpanded] = React.useState(false);
-    const { part, failureReason } = React.useMemo(() => toShellRow(message), [message]);
+    const { part } = React.useMemo(() => toShellRow(message), [message]);
     const toggle = React.useCallback(() => setExpanded((value) => !value), []);
 
     return (
         <NoticeRow spacingClassName={cn('pb-2', isFirstRow && (isMobile ? 'pt-2' : 'pt-4'))}>
-            <ToolPart part={part} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} failureReason={failureReason} />
+            <CommandActivityGroup id={part.id} parts={[part]} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} />
         </NoticeRow>
     );
 };

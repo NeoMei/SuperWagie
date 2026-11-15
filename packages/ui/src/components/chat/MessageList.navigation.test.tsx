@@ -30,7 +30,7 @@ plugin({
 const { default: MessageList } = await import('./MessageList');
 const { MarkdownContent } = await import('./MarkdownRendererImpl');
 
-test('an omitted activity continuation navigates to its owner row and keeps one source anchor', async () => {
+test('an omitted command continuation navigates to its owner row and keeps one source anchor', async () => {
     const dom = new Window({ url: 'https://app.test' });
     const frames = new Map<number, FrameRequestCallback>();
     let nextFrame = 0;
@@ -58,11 +58,14 @@ test('an omitted activity continuation navigates to its owner row and keeps one 
     useUIStore.setState({ activityRenderMode: 'summary', collapsibleThinkingBlocks: true, showReasoningTraces: true });
     const assistant = (id: string, text: string, final = false): ChatMessageEntry => ({
         info: { id, sessionID: 'group-navigation', role: 'assistant', agent: 'build', providerID: 'mock', modelID: 'mock', finish: final ? 'stop' : 'tool-calls', time: { created: 2, completed: 3 } },
-        parts: [{ id: `${id}-part`, sessionID: 'group-navigation', messageID: id, type: final ? 'text' : 'reasoning', text, time: { start: 2, end: 3 } }],
+        parts: final
+            ? [{ id: `${id}-part`, sessionID: 'group-navigation', messageID: id, type: 'text', text, time: { start: 2, end: 3 } }]
+            : [{ id: `${id}-part`, sessionID: 'group-navigation', messageID: id, type: 'tool', tool: 'shell', callID: `${id}-call`,
+                state: { status: 'completed', input: { command: `echo ${id}` }, output: text, metadata: {}, time: { start: 2, end: 3 } } }],
     });
     const messages: ChatMessageEntry[] = [
         { info: { id: 'prompt', sessionID: 'group-navigation', role: 'user', time: { created: 1 } }, parts: [{ id: 'prompt-part', sessionID: 'group-navigation', messageID: 'prompt', type: 'text', text: 'Check this' }] },
-        assistant('owner', 'First thought'), assistant('continuation', 'Second thought'), assistant('answer', 'Done', true),
+        assistant('owner', 'First result'), assistant('continuation', 'Second result'), assistant('answer', 'Done', true),
     ];
     const host = document.createElement('div'); document.body.append(host);
     const root = createRoot(host);
@@ -89,9 +92,9 @@ test('an omitted activity continuation navigates to its owner row and keeps one 
         expect(list.current?.hasMessageRow('continuation')).toBe(true);
         const alias = host.querySelector('[data-message-id="continuation"]');
         const owner = host.querySelector('[data-message-id="owner"]');
-        expect(owner).not.toBeNull();
-        expect(host.querySelectorAll('[data-message-id="continuation"]')).toHaveLength(1);
-        expect(alias?.closest('[data-turn-row]')).toBe(owner?.closest('[data-turn-row]'));
+        expect(owner !== null).toBe(true);
+        expect(host.querySelectorAll('[data-message-id="continuation"]').length).toBe(1);
+        expect(alias?.closest('[data-turn-row]') === owner?.closest('[data-turn-row]')).toBe(true);
         await act(async () => { expect(list.current?.scrollToMessageId('continuation')).toBe(true); });
     } finally {
         await act(async () => root.unmount());
@@ -216,16 +219,16 @@ test('quote reveal opens real folded Activity, including a source prepended from
     const expectHighlight = async (prefix: string) => {
         for (let index = 0; index < 30 && !highlights.has('oc-chat-quote'); index += 1) await flush();
         const source = host.querySelector(`[data-message-id="${prefix}-source"]`);
-        expect(source).not.toBeNull();
+        expect(source !== null).toBe(true);
         // An opened fold draws its steps as rows of their own, outside any closed fold.
-        expect(source?.closest('[data-live-activity-content][aria-hidden="true"]')).toBeNull();
+        expect(source?.closest('[data-live-activity-content][aria-hidden="true"]') === null).toBe(true);
         expect(source?.textContent).toContain(`${prefix} quoted text`);
         expect([...highlights.get('oc-chat-quote') ?? []].map((range) => range.toString())).toEqual([`${prefix} quoted text`]);
     };
     try {
         await render();
         for (let index = 0; index < 5; index += 1) await flush();
-        expect(host.querySelector('[data-message-id="recent-source"]')).toBeNull();
+        expect(host.querySelector('[data-message-id="recent-source"]') === null).toBe(true);
         await reveal('recent');
         await expectHighlight('recent');
         highlights.clear();
@@ -234,7 +237,7 @@ test('quote reveal opens real folded Activity, including a source prepended from
         messages = [...older, ...recent];
         await render();
         for (let index = 0; index < 5; index += 1) await flush();
-        expect(host.querySelector('[data-message-id="older-source"]')).toBeNull();
+        expect(host.querySelector('[data-message-id="older-source"]') === null).toBe(true);
         await act(async () => finishLoad?.(true));
         await expectHighlight('older');
     } finally {
@@ -342,15 +345,15 @@ test('retains real lists and Markdown while reconnecting only the selected scrol
 
         await render('B');
         const secondScroller = selectedScrollRef.current;
-        expect(secondScroller).not.toBeNull();
-        expect(secondScroller).not.toBe(firstScroller);
+        expect(secondScroller !== null).toBe(true);
+        expect(secondScroller !== firstScroller).toBe(true);
         await act(async () => lateDetach?.());
-        expect(selectedScrollRef.current).toBe(secondScroller);
+        expect(selectedScrollRef.current === secondScroller).toBe(true);
 
         await render('A', '**updated**');
-        expect(selectedScrollRef.current).toBe(firstScroller);
-        expect(host.querySelector('[data-session="A"]')).toBe(a);
-        expect(a?.querySelector('[data-markdown-content]')).toBe(markdown);
+        expect(selectedScrollRef.current === firstScroller).toBe(true);
+        expect(host.querySelector('[data-session="A"]') === a).toBe(true);
+        expect(a?.querySelector('[data-markdown-content]') === markdown).toBe(true);
         expect(markdown.textContent).toContain('updated');
         expect(input.value).toBe('kept');
 
@@ -358,11 +361,11 @@ test('retains real lists and Markdown while reconnecting only the selected scrol
             await render(name);
         }
         expect(host.querySelectorAll('[data-scrollbar="chat"]').length).toBe(4);
-        expect(host.querySelector('[data-session="B"]')).toBeNull();
+        expect(host.querySelector('[data-session="B"]') === null).toBe(true);
         expect(a?.isConnected).toBe(true);
 
         await render('A', '**refreshed**');
-        expect(host.querySelector('[data-session="A"]')).toBe(a);
+        expect(host.querySelector('[data-session="A"]') === a).toBe(true);
         expect(markdown.textContent).toContain('refreshed');
     } finally {
         await act(async () => root.unmount());

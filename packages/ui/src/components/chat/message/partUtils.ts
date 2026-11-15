@@ -1,5 +1,17 @@
 import { isInvisibleText } from '@/lib/invisibleText';
+import { readContextPart } from '@/lib/messages/contextParts';
 import type { Part } from '@/lib/opencode/model';
+
+const COLLAPSED_LINES = 2;
+
+/** Text gets its lines first; context rows share the prompt's remaining budget. */
+export const contextPartsPastCollapse = (parts: Part[], textLines: number): ReadonlySet<Part> => {
+    const rows = parts.filter((part) => {
+        const context = readContextPart(part);
+        return context !== null && context.kind !== 'session' && context.kind !== 'session-message';
+    });
+    return new Set(rows.slice(Math.max(0, COLLAPSED_LINES - textLines)));
+};
 
 const isValidPart = (part: unknown): part is Part => {
     return Boolean(part && typeof part === 'object' && typeof (part as { type?: unknown }).type === 'string');

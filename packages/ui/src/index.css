@@ -954,6 +954,16 @@ html:not(.dark) .chat-scroll {
   padding-right: 6px;
 }
 
+/* Transcript scrollers reserve the upstream gutter before output grows, so
+   opening a reasoning or command block never shifts its text sideways. */
+.chat-message-column .overlay-scrollbar-wrapper {
+  padding-right: 6px;
+}
+
+.chat-message-column .overlay-scrollbar-wrapper.overlay-scrollbar-wrapper--no-gutter {
+  padding-right: 0;
+}
+
 .overlay-scrollbar {
   position: absolute;
   inset: 0;
@@ -1388,7 +1398,7 @@ diffs-container {
   display: flex;
   align-items: center;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   overflow: hidden;
 }
 
@@ -1485,10 +1495,21 @@ diffs-container {
 /* Text font. The line height is snapped to whole pixels: a fractional
    value lets glyph baselines land on half pixels and text lines blur or
    render unevenly as they scroll. */
+/* Direction marks are generated content, so copied user text stays literal. */
+[data-oc-line-dir="rtl"]::before { content: "\200F"; }
+[data-oc-line-dir="ltr"]::before { content: "\200E"; }
+
 .markdown-content {
   font-family: var(--font-sans);
   font-size: var(--text-markdown);
   line-height: round(1.625em, 1px);
+}
+
+/* Prose sits one small step under the full text colour, so headings, which
+   take it in full, read darker (lighter in dark themes) than the paragraphs
+   they introduce. Muted grey stays for captions and paths. */
+.markdown-content :is(p, li, td):not(blockquote *) {
+  color: color-mix(in oklab, var(--foreground) 88%, var(--muted-foreground));
 }
 
 .markdown-content p,
@@ -1549,6 +1570,46 @@ diffs-container {
 .markdown-content hr,
 .markdown-content table {
   margin: var(--markdown-paragraph-spacing) 0;
+}
+
+/* A collapsed user message keeps its two lines: code blocks run inline with
+   the text and blocks lose their margins. A data attribute, not utility classes:
+   classes spelling out "code-block" fell under the phone's [class*="code"] font
+   rule (mobile.css) and shrank the whole message to code size. */
+@layer utilities {
+  [data-user-message-collapsed] > .markdown-content .markdown-content > * {
+    margin-block: 0;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-oc-streamdown] > *,
+  [data-user-message-collapsed] > .markdown-content [data-oc-markdown-block] > * {
+    margin-block: 0 !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block'] {
+    display: inline !important;
+    margin-block: 0 !important;
+    border-width: 0 !important;
+    background-color: transparent !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-header'],
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-actions'] {
+    display: none !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'],
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] pre {
+    display: inline !important;
+    padding: 0 !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] code {
+    display: inline !important;
+    padding-inline-start: 0 !important;
+    background-image: none !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] code > span {
+    display: block !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] code > span::before {
+    display: none !important;
+  }
 }
 
 /* The native root and arrival wrappers add no rhythm of their own. Static
@@ -1638,9 +1699,9 @@ diffs-container {
   margin-bottom: 0;
 }
 
-/* Tool markdown should render at code size to match tool card typography. */
+/* Prose in an expanded chat block (tool markdown, reasoning) shares the meta size. */
 .markdown-content.markdown-tool {
-  font-size: var(--text-code) !important;
+  font-size: var(--text-meta) !important;
 }
 
 .form-markdown > .markdown-content.markdown-tool {
@@ -1649,7 +1710,7 @@ diffs-container {
 
 /* Reasoning markdown renders at meta size, dimmed. */
 .markdown-content.markdown-reasoning {
-  font-size: var(--text-markdown);
+  font-size: var(--text-meta);
   color: var(--surface-muted-foreground);
   --markdown-link: inherit;
   --markdown-link-hover: var(--surface-foreground);

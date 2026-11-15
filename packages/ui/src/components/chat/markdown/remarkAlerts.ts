@@ -2,10 +2,10 @@ import type { Properties } from 'hast';
 import type { Blockquote, Root, RootContent } from 'mdast';
 
 export const MARKDOWN_ALERT_KINDS = ['note', 'tip', 'important', 'warning', 'caution'] as const;
-type MarkdownAlertKind = typeof MARKDOWN_ALERT_KINDS[number];
+export type MarkdownAlertKind = typeof MARKDOWN_ALERT_KINDS[number];
 
 /** The kind a marker or a rendered quote's `data-oc-alert` names; null for anything else. */
-const markdownAlertKind = (value: Properties[string]): MarkdownAlertKind | null =>
+export const markdownAlertKind = (value: Properties[string]): MarkdownAlertKind | null =>
   MARKDOWN_ALERT_KINDS.find((kind) => kind === value) ?? null;
 
 // GitHub's marker stands alone on the quote's first line: `> [!NOTE]`.

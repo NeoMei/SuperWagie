@@ -9,6 +9,7 @@ pages have their own contracts in `parts/DOCUMENTATION.md`.
 
 ## Invariants
 
+- A repository or tracker URL in user text becomes an inline chip only when it names a linked context item already carried by that message. The display normalizer keeps that association without changing stored parts; only matched items leave the attachment row. Links in code retain their attachment, and chip clicks use the existing tracker routing and permission boundaries.
 - Quote previews and editors keep their complete card and controls within the
   viewport with a 12 px horizontal margin. Empty comments, unbroken text,
   repeated editing and a viewport resize follow the same rule.
@@ -19,7 +20,7 @@ pages have their own contracts in `parts/DOCUMENTATION.md`.
   removes the observer and listener on cleanup.
 - Quote anchors and comment writes stay owned by their caller. A layout change
   does not change quote identity, persistence or save semantics.
-- Grouped thinking and command details retain their original message through
+- Grouped command details retain their original message through
   `data-chat-source-message-id` on each source's `data-chat-quote-root`.
   Selection ownership uses that source before the surrounding message row.
   A selection across sources from different messages has no message menu.

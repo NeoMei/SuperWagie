@@ -18,7 +18,6 @@ import type { StreamPhase } from '../types';
 import { onRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import type { ChatMessageEntry } from '../../lib/turns/types';
-import { ActivityGroupStreamContext } from '../../components/activityGroupsContext';
 import { useUIStore } from '@/stores/useUIStore';
 
 // Bun does not implement Vite's asset-query imports. Preserve the real asset
@@ -539,99 +538,61 @@ describe('ReasoningTimelineBlock live follow', () => {
 });
 
 
-const groupedReasoningMember = (id: string, text: string, ended = true) => {
+const reasoningSource = (id: string, text: string, ended = true) => {
   const part: ReasoningPartFixture = { type: 'reasoning', id: `part-${id}`, messageID: id, sessionID: 'session', text, time: ended ? { start: 1, end: 2 } : { start: 3 } };
   const message: ChatMessageEntry = { info: { id, role: 'assistant', sessionID: 'session', time: ended ? { created: 1, completed: 2 } : { created: 3 }, agent: 'build', providerID: 'provider', modelID: 'model', cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }, parts: [part] };
   return { message, part };
 };
 
-describe('consecutive reasoning disclosure', () => {
-  test('search scrolls the inner box to its source and yields when the reader scrolls', async () => {
+describe('upstream reasoning boundaries', () => {
+  test('adjacent source messages keep separate blocks and scoped search reveal', async () => {
     const dom = installDomStub();
     const root = createRoot(dom.container);
-    const first = groupedReasoningMember('above-hit', 'First reasoning '.repeat(200));
-    const second = groupedReasoningMember('below-hit', 'Unique later reasoning');
+    const first = reasoningSource('first-source', 'First reasoning');
+    const second = reasoningSource('second-source', 'Second reasoning');
     try {
-      await act(async () => { root.render(<TestProviders><ReasoningPart part={first.part} messageId={first.message.info.id} members={[first, second]} /></TestProviders>); });
+      await act(async () => root.render(<TestProviders>
+        <ReasoningPart part={first.part} messageId={first.message.info.id} />
+        <ReasoningPart part={second.part} messageId={second.message.info.id} />
+      </TestProviders>));
+      const blocks = dom.container.querySelectorAll('[data-reasoning-block-id]');
+      expect(blocks.length).toBe(2);
+      expect(blocks[0].querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
+      expect(blocks[1].querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
       await act(async () => requestReasoningReveal(second.message.info.id));
-      const box = dom.container.querySelector<HTMLElement>('[data-scrollable="true"]');
-      const target = dom.container.querySelector<HTMLElement>('[data-reasoning-message-id="below-hit"]');
-      if (!box || !target) throw new Error('Reasoning source did not open');
-      const rect = (top: number, height: number): DOMRect => ({ x: 0, y: top, width: 500, height, top, bottom: top + height, left: 0, right: 500, toJSON: () => ({}) });
-      box.getBoundingClientRect = () => rect(0, 320);
-      target.getBoundingClientRect = () => rect(900 - box.scrollTop, 100);
-      Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => 1200 });
-      Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 320 });
-      await act(async () => dom.observers.forEach((observer) => observer.notify()));
-      expect(box.scrollTop).toBe(900);
-      box.dispatchEvent(new window.WheelEvent('wheel', { deltaY: -30 }));
-      box.scrollTop = 600;
-      await act(async () => dom.observers.forEach((observer) => observer.notify()));
-      expect(box.scrollTop).toBe(600);
-    } finally {
-      await act(async () => { requestReasoningReveal(null); root.unmount(); });
-      dom.restore();
-    }
-  });
-
-  test('reader expansion survives a singleton growing into a consecutive run', async () => {
-    const dom = installDomStub();
-    const root = createRoot(dom.container);
-    const first = groupedReasoningMember('first-stable', 'First stable reasoning');
-    const second = groupedReasoningMember('second-stable', 'Second appended reasoning');
-    try {
-      await act(async () => { root.render(<TestProviders><ReasoningPart part={first.part} messageId={first.message.info.id} /></TestProviders>); });
-      const header = dom.container.querySelector<HTMLElement>('[role="button"]');
-      await act(async () => header?.click());
-      expect(header?.getAttribute('aria-expanded')).toBe('true');
-      await act(async () => { root.render(<TestProviders><ReasoningPart part={first.part} messageId={first.message.info.id} members={[first, second]} /></TestProviders>); });
-      expect(dom.container.querySelector('[role="button"]')).toBe(header);
-      expect(header?.getAttribute('aria-expanded')).toBe('true');
-      expect(dom.container.querySelector('[data-reasoning-message-id="second-stable"]')).not.toBeNull();
+      expect(blocks[0].querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
+      expect(blocks[1].querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('true');
     } finally {
       await act(async () => root.unmount());
+      requestReasoningReveal(null);
       dom.restore();
     }
   });
 
-  test('search in a later source message opens the shared disclosure and keeps both source anchors', async () => {
+  test('each source follows only its own live phase and completion', async () => {
     const dom = installDomStub();
     const root = createRoot(dom.container);
-    const first = groupedReasoningMember('first-thought', 'First reasoning section');
-    const second = groupedReasoningMember('second-thought', 'Second reasoning section');
-    try {
-      await act(async () => { root.render(<TestProviders><ReasoningPart part={first.part} messageId={first.message.info.id} members={[first, second]} /></TestProviders>); });
-      expect(dom.container.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
-      await act(async () => requestReasoningReveal(second.message.info.id));
-      expect(dom.container.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('true');
-      expect(dom.container.querySelectorAll('[role="button"]')).toHaveLength(1);
-      expect(dom.container.querySelector('[data-reasoning-message-id="first-thought"]')).not.toBeNull();
-      expect(dom.container.querySelector('[data-reasoning-message-id="second-thought"]')).not.toBeNull();
-      expect(dom.container.querySelectorAll('[data-scrollable="true"]')).toHaveLength(1);
-    } finally {
-      await act(async () => { requestReasoningReveal(null); root.unmount(); });
-      dom.restore();
-    }
-  });
-
-  test('a later member can stream while the first source message is already completed', async () => {
-    const dom = installDomStub();
-    const root = createRoot(dom.container);
-    const original = useUIStore.getState().expandReasoningWhileStreaming;
-    const first = groupedReasoningMember('settled-thought', 'Completed thought');
-    const second = groupedReasoningMember('live-thought', 'Later thought '.repeat(200), false);
+    const first = reasoningSource('settled-source', 'Completed thought');
+    const second = reasoningSource('live-source', 'Current thought', false);
+    const previousExpansion = useUIStore.getState().expandReasoningWhileStreaming;
     useUIStore.setState({ expandReasoningWhileStreaming: true });
     try {
-      await act(async () => { root.render(<TestProviders><ActivityGroupStreamContext.Provider value={{ messageId: 'live-thought', phase: 'streaming' }}><ReasoningPart part={first.part} messageId={first.message.info.id} streamPhase="completed" members={[first, second]} /></ActivityGroupStreamContext.Provider></TestProviders>); });
-      expect(dom.container.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('true');
-      expect(dom.container.querySelectorAll('[role="button"]')).toHaveLength(1);
-      expect(dom.container.querySelector('[data-reasoning-message-id="live-thought"]')).not.toBeNull();
-      const completed = groupedReasoningMember('live-thought', 'Later thought completed');
-      await act(async () => { root.render(<TestProviders><ActivityGroupStreamContext.Provider value={{ messageId: null, phase: null }}><ReasoningPart part={first.part} messageId={first.message.info.id} members={[first, completed]} /></ActivityGroupStreamContext.Provider></TestProviders>); });
-      expect(dom.container.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => root.render(<TestProviders>
+        <ReasoningPart part={first.part} messageId={first.message.info.id} streamPhase="completed" />
+        <ReasoningPart part={second.part} messageId={second.message.info.id} streamPhase="streaming" />
+      </TestProviders>));
+      const blocks = dom.container.querySelectorAll('[data-reasoning-block-id]');
+      expect(blocks[0].querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
+      expect(blocks[1].querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('true');
+      const completed = reasoningSource('live-source', 'Current thought completed');
+      await act(async () => root.render(<TestProviders>
+        <ReasoningPart part={first.part} messageId={first.message.info.id} streamPhase="completed" />
+        <ReasoningPart part={completed.part} messageId={completed.message.info.id} streamPhase="completed" />
+      </TestProviders>));
+      expect(blocks[1].querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
     } finally {
       await act(async () => root.unmount());
-      useUIStore.setState({ expandReasoningWhileStreaming: original });
+      useUIStore.setState({ expandReasoningWhileStreaming: previousExpansion });
       dom.restore();
     }
   });

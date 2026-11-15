@@ -30,8 +30,8 @@ const subscribe = (listener: () => void) => {
 };
 
 /** A number that changes each time this message's reasoning is asked to open; 0 when it is not. */
-export const useReasoningReveal = (messageIds: readonly string[]): number => React.useSyncExternalStore(
+export const useReasoningReveal = (messageId: string): number => React.useSyncExternalStore(
     subscribe,
-    () => (target && messageIds.includes(target.messageId) ? target.serial : 0),
+    () => (target?.messageId === messageId ? target.serial : 0),
     () => 0,
 );

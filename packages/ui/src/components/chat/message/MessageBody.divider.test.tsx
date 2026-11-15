@@ -91,7 +91,7 @@ describe('managed gateway size refusal', () => {
       expect(html).toContain('System instructions and tool definitions also count toward the request size.');
       expect(html).toContain('Contact your administrator to check the gateway limit.');
       expect(html).toContain('This request will not be retried automatically.');
-      expect(html).not.toContain('Top up model balance');
+      expect(html).not.toContain('Get credits');
       expect(html).toContain('Show response details');
       expect(html).not.toContain('<pre');
       expect(runtimeRequests).toBe(0);
@@ -107,7 +107,7 @@ describe('managed gateway size refusal', () => {
 
   test('keeps the funding action for the confirmed funding refusal', () => {
     const html = renderAnswer([], context, true, { responseBody: '{"error":{"code":"platform_model_funding_required"}}' });
-    expect(html).toContain('Top up model balance');
+    expect(html).toContain('Get credits');
     expect(html).not.toContain('The model gateway rejected this request during its body read or size check');
   });
 });

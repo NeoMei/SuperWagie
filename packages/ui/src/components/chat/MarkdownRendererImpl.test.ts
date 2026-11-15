@@ -4,10 +4,13 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { getDefaultTheme } from '@/lib/theme/themes';
+import { OpenCode } from '@opencode/client';
+import { useUIStore } from '@/stores/useUIStore';
 
 const browser = new Window({ url: 'http://localhost/', settings: { navigation: {
   disableMainFrameNavigation: true, disableChildPageNavigation: true, disableFallbackToSetURL: true,
 } } });
+browser.document.write('<!doctype html><html><head></head><body></body></html>');
 Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,
@@ -17,10 +20,7 @@ Object.assign(globalThis, { window: browser, document: browser.document, navigat
   XMLSerializer: browser.XMLSerializer, IntersectionObserver: browser.IntersectionObserver, ResizeObserver: browser.ResizeObserver });
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 Object.defineProperty(globalThis, 'customElements', { configurable: true, value: browser.customElements });
-const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: (_directory: string, _path: string) => undefined, openContextFileAtLine: (_directory: string, _path: string, _line: number, _column: number) => undefined };
-mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state }) }));
 mock.module('@/lib/router/openSessionFromRoute', () => ({ openSessionLink: async () => undefined }));
-mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project' }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ runtime: { isVSCode: false }, editor: undefined }) }));
 const openedLinks: string[] = [];
 mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => (href: string) => { openedLinks.push(href); } }));
@@ -32,13 +32,53 @@ let Renderer: typeof import('./MarkdownRendererImpl');
 let I18nProvider: typeof import('@/lib/i18n')['I18nProvider'];
 let root: Root;
 const host = document.createElement('div');
+let restoreFixture = () => {};
 beforeAll(async () => {
+  const respond = async (input: RequestInfo | URL) => {
+    const path = new URL(input instanceof Request ? input.url : String(input), 'http://markdown.test').pathname;
+    if (path.endsWith('/event') || path.endsWith('/events')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    if (path === '/api/fs/home') return Response.json({ home: '/synthetic', chatsRoot: '/synthetic/chats' });
+    if (path === '/api/location') return Response.json({ directory: '/project', project: { id: 'synthetic', directory: '/project', canonical: '/project' } });
+    if (path === '/api/project' || path === '/api/config' || path === '/api/config/mcp') return Response.json([]);
+    if (path === '/api/session/active') return Response.json({ data: {} });
+    if (path === '/api/session-warming') return Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] });
+    return Response.json({ data: [] });
+  };
+  const fetch = spyOn(globalThis, 'fetch').mockImplementation(respond);
+  const { SyncProvider, useDirectoryStore: useSyncDirectoryStore } = await import('@/sync/sync-context');
+  const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+  const { useSessionUIStore } = await import('@/sync/session-ui-store');
+  const previousDirectory = useDirectoryStore.getState();
+  const previousUI = useUIStore.getState();
+  const previousSession = useSessionUIStore.getState();
+  useDirectoryStore.setState({ currentDirectory: '/project' });
+  useUIStore.setState({ codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg' });
+  useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: useSessionUIStore.getInitialState().newSessionDraft });
+  const sdk = OpenCode.make({ baseUrl: 'http://markdown.test', fetch: respond });
+  function ReadyDirectory({ children }: { children: React.ReactNode }) {
+    const store = useSyncDirectoryStore('/project', { bootstrap: false });
+    const seeded = React.useRef(false);
+    if (!seeded.current) {
+      seeded.current = true;
+      store.setState({ status: 'complete', sessionStatusReady: true });
+    }
+    return children;
+  }
   Renderer = await import('./MarkdownRendererImpl');
-  I18nProvider = (await import('@/lib/i18n')).I18nProvider;
+  const RealI18nProvider = (await import('@/lib/i18n')).I18nProvider;
+  I18nProvider = ({ children }) => React.createElement(RealI18nProvider, { children:
+    React.createElement(SyncProvider, { sdk, directory: '/project', children: React.createElement(ReadyDirectory, { children }) }),
+  });
+  restoreFixture = () => {
+    fetch.mockRestore();
+    useDirectoryStore.setState(previousDirectory);
+    useUIStore.setState(previousUI);
+    useSessionUIStore.setState(previousSession);
+  };
   document.body.append(host);
   root = createRoot(host);
 });
-afterAll(async () => { await act(() => root?.unmount()); browser.happyDOM.abort(); });
+afterAll(async () => { await act(() => root?.unmount()); restoreFixture(); browser.happyDOM.abort(); });
 const render = async (content: string, isStreaming = false, allowRawHtml = false) => {
   await act(async () => {
     root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.SimpleMarkdownRenderer, { content, allowRawHtml, enableFileReferences: false })));
@@ -110,7 +150,7 @@ test('invisible-block filtering preserves BOM-prefixed text and filters reparsed
 });
 
 test('file navigation respects disabling, stream settlement and selection-ending clicks', async () => {
-  const open = spyOn(state, 'openContextFile');
+  const open = spyOn(useUIStore.getState(), 'openContextFile').mockImplementation(() => {});
   const content = '[file](/outside/report.ts) and `/outside/inline.ts`\n\n```text\n/outside/code.ts\n```';
   const draw = (enabled: boolean, settled: boolean) => act(() => root.render(React.createElement(I18nProvider, null,
     React.createElement(Renderer.MarkdownContent, { content, directory: '/project', enableFileReferences: enabled, settled }))));
@@ -146,7 +186,7 @@ test('file navigation respects disabling, stream settlement and selection-ending
 });
 
 test('file navigation decodes a Markdown link to a local path containing spaces', async () => {
-  const open = spyOn(state, 'openContextFile');
+  const open = spyOn(useUIStore.getState(), 'openContextFile').mockImplementation(() => {});
   const target = '/outside/新 PPT 2026-10-28/芯风向-精简汇报/deck revisions/deck.pptx';
   try {
     await act(() => root.render(React.createElement(I18nProvider, null,
@@ -169,7 +209,7 @@ test('file navigation decodes a Markdown link to a local path containing spaces'
 });
 
 test('file navigation decodes an encoded file URL containing spaces and fragments', async () => {
-  const open = spyOn(state, 'openContextFile');
+  const open = spyOn(useUIStore.getState(), 'openContextFile').mockImplementation(() => {});
   const target = '/outside/新 PPT 2026-10-28/report #1.pptx';
   const href = pathToFileURL(target).href;
   try {
@@ -332,7 +372,7 @@ test('Mermaid preserves the view across themes and restores controls and ASCII c
   expect(svg?.getAttribute('viewBox')).toBe('1 2 30 40');
 
   const write = spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
-  state.mermaidRenderingMode = 'ascii';
+  await act(() => useUIStore.setState({ mermaidRenderingMode: 'ascii' }));
   try {
     await act(() => root.render(null));
     await render(content);
@@ -345,7 +385,7 @@ test('Mermaid preserves the view across themes and restores controls and ASCII c
     expect(host.querySelector('[data-streamdown="mermaid-block"]')?.getAttribute('data-mermaid-render')).toBe('ascii');
   } finally {
     write.mockRestore();
-    state.mermaidRenderingMode = 'svg';
+    await act(() => useUIStore.setState({ mermaidRenderingMode: 'svg' }));
     currentTheme = getDefaultTheme(false);
   }
 });
@@ -411,10 +451,10 @@ test('native copy uses the selected Markdown and current plain-text setting', as
   copy();
   expect(copied.get('text/plain')).toBe('**chosen**');
   expect(copied.get('text/html')).toContain('<strong>chosen</strong>');
-  state.copyMessagesAsPlainText = true;
+  await act(() => useUIStore.setState({ copyMessagesAsPlainText: true }));
   copy();
   expect(copied.get('text/plain')).toBe('chosen');
-  state.copyMessagesAsPlainText = false;
+  await act(() => useUIStore.setState({ copyMessagesAsPlainText: false }));
   selection?.removeAllRanges();
 });
 
@@ -427,7 +467,7 @@ test('ordinary code copy and desktop menu use raw selected source under both pro
   const write = spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   try {
     for (const plain of [false, true]) {
-      state.copyMessagesAsPlainText = plain;
+      await act(() => useUIStore.setState({ copyMessagesAsPlainText: plain }));
       const copied = new Map<string, string>();
       const event = new Event('copy', { bubbles: true, cancelable: true });
       Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, text: string) => copied.set(type, text) } });
@@ -439,7 +479,7 @@ test('ordinary code copy and desktop menu use raw selected source under both pro
       expect(menu.defaultPrevented).toBe(true);
       expect(write.mock.calls.at(-1)).toEqual(['alpha\nbeta\n']);
     }
-  } finally { write.mockRestore(); state.copyMessagesAsPlainText = false; document.getSelection()?.removeAllRanges(); }
+  } finally { write.mockRestore(); await act(() => useUIStore.setState({ copyMessagesAsPlainText: false })); document.getSelection()?.removeAllRanges(); }
 });
 
 test('mixed rich copy clips code at both ends and preserves full middle source', async () => {
@@ -479,13 +519,13 @@ test('desktop prose menu follows the copy setting and prevents the menu fallback
   const write = spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   try {
     for (const plain of [false, true]) {
-      state.copyMessagesAsPlainText = plain;
+      await act(() => useUIStore.setState({ copyMessagesAsPlainText: plain }));
       const menu = new Event('openchamber:copy', { cancelable: true });
       window.dispatchEvent(menu);
       expect(menu.defaultPrevented).toBe(true);
       expect(write.mock.calls.at(-1)).toEqual([plain ? 'menu' : '**menu**']);
     }
-  } finally { write.mockRestore(); state.copyMessagesAsPlainText = false; document.getSelection()?.removeAllRanges(); }
+  } finally { write.mockRestore(); await act(() => useUIStore.setState({ copyMessagesAsPlainText: false })); document.getSelection()?.removeAllRanges(); }
 });
 
 test('wrap settings update the actual Markdown root without replacing content', async () => {
@@ -494,18 +534,18 @@ test('wrap settings update the actual Markdown root without replacing content', 
   const markdown = host.querySelector('[data-markdown-content]');
   expect(markdown?.hasAttribute('dir')).toBe(false);
   expect(markdown?.getAttribute('data-code-wrap')).toBe('false');
-  state.codeBlockLineWrap = true;
-  state.tableCellWrap = false;
+  await act(() => useUIStore.setState({ codeBlockLineWrap: true }));
+  await act(() => useUIStore.setState({ tableCellWrap: false }));
   await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, { content: 'same source', enableFileReferences: false }))));
   expect(host.querySelector('[data-markdown-content]')?.getAttribute('data-code-wrap')).toBe('true');
   expect(host.querySelector('[data-markdown-content]')?.getAttribute('data-table-wrap')).toBe('false');
   // The wrappers differ in this fixture; subsequent same-source changes retain identity.
   const stable = host.querySelector('p');
-  state.codeBlockLineWrap = false;
+  await act(() => useUIStore.setState({ codeBlockLineWrap: false }));
   await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, { content: 'same source', enableFileReferences: false }))));
   expect(host.querySelector('p') === stable).toBe(true);
   expect(paragraph?.textContent).toBe('same source');
-  state.tableCellWrap = true;
+  await act(() => useUIStore.setState({ tableCellWrap: true }));
 });
 
 test('same-source theme repaint keeps nodes and publishes syntax variables on the consumer root', async () => {
@@ -594,7 +634,7 @@ test('native rich selection normalization keeps safe original media and ordinary
   const range = document.createRange(); range.selectNode(paragraph);
   document.getSelection()?.removeAllRanges(); document.getSelection()?.addRange(range);
   for (const plain of [false, true]) {
-    state.copyMessagesAsPlainText = plain;
+    await act(() => useUIStore.setState({ copyMessagesAsPlainText: plain }));
     const copied = new Map<string, string>();
     const event = new Event('copy', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, text: string) => copied.set(type, text) } });
@@ -604,7 +644,7 @@ test('native rich selection normalization keeps safe original media and ordinary
     expect(copied.get('text/html')).toContain('tracking=keep');
     expect(copied.get('text/plain')).not.toContain('NATIVE_SECRET');
   }
-  state.copyMessagesAsPlainText = false;
+  await act(() => useUIStore.setState({ copyMessagesAsPlainText: false }));
   document.getSelection()?.removeAllRanges();
 });
 

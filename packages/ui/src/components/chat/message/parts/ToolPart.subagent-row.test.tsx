@@ -1,4 +1,4 @@
-import { act } from 'react';
+import React, { act } from 'react';
 import { expect, spyOn, test } from 'bun:test';
 import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
@@ -12,12 +12,13 @@ import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-sys
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { subagentCancellationNote } from '@/lib/opencode/subagent-run';
 import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
 import { applyDirectoryEvent } from '@/sync/event-reducer';
 import { applyGlobalSessionStatusEvents, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
-import { readHostBlockingRequestsSnapshot, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
+import { readHostBlockingRequestsSnapshot, resetGlobalBlockingRequests, useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import type { SyncEvent } from '@/lib/opencode/events';
 
 // Bun does not implement Vite's worker asset-query imports.
@@ -32,6 +33,7 @@ plugin({
 });
 
 const { default: ToolPart } = await import('./ToolPart');
+const { CommandActivityGroup } = await import('./CommandActivityGroup');
 
 const unexpectedThemeChange = (): never => { throw new Error('Rendering must not change the theme'); };
 const theme = getDefaultTheme(false);
@@ -115,9 +117,18 @@ const withHarness = async (
     fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
   });
 
+  const previousPreference = useUIStore.getState().expandReasoningWhileStreaming;
+  useUIStore.setState({ expandReasoningWhileStreaming: false });
   const previousDirectory = useDirectoryStore.getState().currentDirectory;
   let manager: ReturnType<typeof useChildStoreManager> | undefined;
   const CaptureManager = () => { manager = useChildStoreManager(); return null; };
+  const CallRow = () => {
+    const [expanded, setExpanded] = React.useState(isExpanded);
+    const toggle = () => setExpanded((current) => !current);
+    return toolPart.tool === 'shell'
+      ? <CommandActivityGroup id={toolPart.id} parts={[toolPart]} isExpanded={expanded} onToggle={toggle} isMobile={false} />
+      : <ToolPart part={toolPart} isExpanded={expanded} isMobile={false} onToggle={toggle} />;
+  };
   try {
     replaceGlobalSessionStatusById(new Map());
     resetGlobalBlockingRequests();
@@ -129,7 +140,7 @@ const withHarness = async (
           <CaptureManager />
           <I18nProvider>
             <ThemeSystemContext.Provider value={themeContext}>
-              <ToolPart part={toolPart} isExpanded={isExpanded} isMobile={false} onToggle={() => {}} />
+              <CallRow />
             </ThemeSystemContext.Provider>
           </I18nProvider>
         </SyncProvider>,
@@ -140,6 +151,7 @@ const withHarness = async (
     await run(manager.ensureChild('/workspace', { bootstrap: false }), container);
   } finally {
     await act(async () => { root.unmount(); });
+    useUIStore.setState({ expandReasoningWhileStreaming: previousPreference });
     useDirectoryStore.setState({ currentDirectory: previousDirectory });
     replaceGlobalSessionStatusById(new Map());
     resetGlobalBlockingRequests();
@@ -167,13 +179,22 @@ const childActivity = (sessionID: string) => ({
 });
 
 const openButton = (container: HTMLElement) => container.querySelector('button[aria-label="Open Explore subtask"]');
+const stopButton = (container: HTMLElement) => container.querySelector<HTMLButtonElement>('button[aria-label="Stop subagent"]');
+const title = (container: HTMLElement) => container.querySelector<HTMLElement>('[role="button"] span[title]');
+const busy = (container: HTMLElement) => title(container)?.classList.contains('opacity-70') ?? false;
+const failed = (container: HTMLElement) => title(container)?.style.color === 'var(--status-error)';
+const expand = async (container: HTMLElement) => {
+  await act(async () => container.querySelector<HTMLElement>('[role="button"]')?.click());
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 80)); });
+};
+
 
 test('a finished subagent is one row with its duration and an open action, never its child activity', async () => {
   await withHarness(parent, false, async (store, container) => {
     await act(async () => store.setState(childActivity('child')));
     expect(container.textContent).toContain('Update files');
     expect(container.textContent).toContain('62.0s');
-    expect(openButton(container)).not.toBeNull();
+    expect(openButton(container) !== null).toBe(true);
     expect(container.textContent).not.toContain('child-work.ts');
     expect(container.textContent).not.toContain('Found two files');
   });
@@ -185,9 +206,9 @@ test('a running subagent without the progress join resolves its child session fr
     state: { status: 'running', input: { description: 'Look around', agent: 'explore', sessionID: '  ' }, time: { start: 100 } },
   };
   await withHarness(running, false, async (store, container) => {
-    expect(openButton(container)).toBeNull();
+    expect(openButton(container) === null).toBe(true);
     await act(async () => store.setState({ session: [childSession('child', 120)], ...childActivity('child') }));
-    expect(openButton(container)).not.toBeNull();
+    expect(openButton(container) !== null).toBe(true);
     expect(container.textContent).not.toContain('child-work.ts');
   });
 });
@@ -203,11 +224,11 @@ test('a resumed subagent opens its explicit child even when that child predates 
   };
   await withHarness(running, false, async (store, container) => {
     await act(async () => store.setState({ session: [childSession('child', 50)] }));
-    expect(openButton(container)).not.toBeNull();
+    expect(openButton(container) !== null).toBe(true);
   });
 });
 
-test('a running subagent offers a stop that tells the agent before interrupting the child', async () => {
+test('a running subagent delegates its scoped native stop once and retains its open action', async () => {
   const running: ToolPartData = {
     ...parent,
     state: { status: 'running', input: { description: 'Look around', agent: 'explore' }, metadata: { sessionID: 'child' }, time: { start: 100 } },
@@ -219,8 +240,8 @@ test('a running subagent offers a stop that tells the agent before interrupting 
       if (!(button instanceof HTMLElement)) throw new Error('Stop action is missing');
       await act(async () => { button.click(); });
       expect(stop.mock.calls).toEqual([[{ sessionID: 'parent', directory: '/workspace', childSessionID: 'child', description: 'Look around' }]]);
-      expect(container.querySelector<HTMLButtonElement>('button[aria-label="Stop subagent"]')?.disabled).toBe(true);
-      expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('stopping');
+      expect(stopButton(container) === null).toBe(true);
+      expect(openButton(container) !== null).toBe(true);
     });
   } finally {
     stop.mockRestore();
@@ -241,8 +262,9 @@ test('a subagent the user stopped reads as stopped, not failed, and offers no st
     await act(async () => store.setState({
       message: { parent: [{ id: 'note', sessionID: 'parent', role: 'synthetic', time: { created: 150 }, text: note.text, description: note.description, metadata: note.metadata }] },
     }));
-    expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('stopped');
-    expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+    expect(container.textContent).toContain('stopped');
+    expect(failed(container)).toBe(false);
+    expect(stopButton(container) === null).toBe(true);
   });
 });
 
@@ -265,11 +287,11 @@ test('a background subagent drops the background label once its report arrives',
     }));
     expect(container.textContent).toContain('Look around');
     expect(container.textContent).not.toContain('in background');
-    expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+    expect(stopButton(container) === null).toBe(true);
   });
 });
 
-test('a running child shows live permission, question and retry states in its transcript row', async () => {
+test('live child permission, form and retry events preserve the native running row and open action', async () => {
   const running: ToolPartData = {
     ...parent,
     state: { status: 'running', input: { description: 'Review files', agent: 'explore' }, metadata: { sessionID: 'child' }, time: { start: 100 } },
@@ -283,25 +305,27 @@ test('a running child shows live permission, question and retry states in its tr
       });
       applyGlobalSessionStatusEvents('/workspace', [event]);
     });
-    const status = () => container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status');
-    expect(status()).toBe('running');
+    expect(stopButton(container) !== null).toBe(true);
     await publish({ type: 'permission.asked', properties: { id: 'permission', sessionID: 'child', action: 'edit', resources: [] } });
-    expect(status()).toBe('waitingPermission');
-    expect(container.textContent).toContain('Waiting for approval');
+    expect(stopButton(container) !== null).toBe(true);
+    expect(store.getState().permission.child?.[0]?.id).toBe('permission');
     await publish({ type: 'form.created', properties: { form: { id: 'form', sessionID: 'child', title: 'Choose a source', fields: [{ key: 'answer', type: 'string' }] } } });
     await publish({ type: 'permission.replied', properties: { sessionID: 'child', requestID: 'permission' } });
-    expect(status()).toBe('waitingAnswer');
-    expect(container.textContent).toContain('Waiting for an answer');
+    expect(stopButton(container) !== null).toBe(true);
+    expect(store.getState().form.child?.[0]?.id).toBe('form');
+    expect(container.textContent).not.toContain('Choose a source');
     await publish({ type: 'form.settled', properties: { sessionID: 'child', formID: 'form' } });
     await publish({ type: 'session.status', properties: { sessionID: 'child', status: { type: 'retry', attempt: 2, message: 'Temporarily unavailable', next: Date.now() + 1000 } } });
-    expect(status()).toBe('retrying');
+    expect(stopButton(container) !== null).toBe(true);
+    expect(store.getState().session_status.child?.type).toBe('retry');
     await publish({ type: 'session.status', properties: { sessionID: 'child', status: { type: 'busy' } } });
-    expect(status()).toBe('running');
-    expect(openButton(container)).not.toBeNull();
+    expect(stopButton(container) !== null).toBe(true);
+    expect(store.getState().session_status.child?.type).toBe('busy');
+    expect(openButton(container) !== null).toBe(true);
   });
 });
 
-test('a subagent awaiting launch shows only its own parent-tool permission and resumes after reply', async () => {
+test('launch permissions retain their exact source without fabricating a child or a stop action', async () => {
   const waiting: ToolPartData = {
     ...parent,
     id: 'tool:call-awaiting-launch',
@@ -317,53 +341,67 @@ test('a subagent awaiting launch shows only its own parent-tool permission and r
         return next;
       });
     });
-    const status = () => container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status');
-    expect(openButton(container)).toBeNull();
-    expect(status()).toBe('running');
+    expect(openButton(container) === null).toBe(true);
+    expect(busy(container)).toBe(true);
+    expect(stopButton(container) === null).toBe(true);
     await publish({ type: 'permission.asked', properties: {
       id: 'another-tool', sessionID: parent.sessionID, action: 'subagent', resources: ['general'],
       source: { type: 'tool', messageID: waiting.messageID, id: 'another-call' },
     } });
-    expect(status()).toBe('running');
+    expect(busy(container)).toBe(true);
+    expect(stopButton(container) === null).toBe(true);
     await publish({ type: 'permission.asked', properties: {
       id: 'another-message', sessionID: parent.sessionID, action: 'subagent', resources: ['general'],
       source: { type: 'tool', messageID: 'another-message', id: waiting.callID },
     } });
-    expect(status()).toBe('running');
+    expect(busy(container)).toBe(true);
+    expect(stopButton(container) === null).toBe(true);
     await publish({ type: 'permission.asked', properties: {
       id: 'launch-permission', sessionID: parent.sessionID, action: 'subagent', resources: ['general'],
       source: { type: 'tool', messageID: waiting.messageID, id: waiting.callID },
     } });
-    expect(status()).toBe('waitingPermission');
-    expect(openButton(container)).toBeNull();
+    expect(busy(container)).toBe(true);
+    expect(stopButton(container) === null).toBe(true);
+    expect(openButton(container) === null).toBe(true);
+    expect(store.getState().permission.parent?.find((request) => request.id === 'launch-permission')?.source).toEqual({ type: 'tool', messageID: waiting.messageID, id: waiting.callID });
     await publish({ type: 'permission.replied', properties: { sessionID: parent.sessionID, requestID: 'launch-permission' } });
-    expect(status()).toBe('running');
-    expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+    expect(busy(container)).toBe(true);
+    expect(stopButton(container) === null).toBe(true);
+    expect(store.getState().permission.parent?.some((request) => request.id === 'launch-permission')).toBe(false);
+    expect(stopButton(container) === null).toBe(true);
   });
 });
 
-test('a background child stays running after its call settles, and its report supplies completion', async () => {
+test('a background child follows live busy and idle status until its terminal report supplies the result', async () => {
   const backgrounded: ToolPartData = {
     ...parent,
     state: { status: 'completed', input: { description: 'Review files', agent: 'explore' }, output: 'The subagent is working in the background.', metadata: { status: 'running', sessionID: 'child' }, time: { start: 100, end: 110 } },
   };
   await withHarness(backgrounded, false, async (store, container) => {
-    const status = () => container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status');
-    expect(status()).toBe('unknown');
+    expect(stopButton(container) === null).toBe(true);
+    expect(container.textContent).not.toContain('0.1s');
     await act(async () => applyGlobalSessionStatusEvents('/workspace', [{ type: 'session.status', properties: { sessionID: 'child', status: { type: 'busy' } } }]));
-    expect(status()).toBe('running');
+    expect(stopButton(container) !== null).toBe(true);
+    expect(container.textContent).toContain('in background');
+    await act(async () => applyGlobalSessionStatusEvents('/workspace', [{ type: 'session.status', properties: { sessionID: 'child', status: { type: 'idle' } } }]));
+    expect(stopButton(container) === null).toBe(true);
+    expect(container.textContent).not.toContain('in background');
+    expect(container.textContent).not.toContain('0.1s');
     await act(async () => store.setState({ message: { parent: [{
       id: 'report', sessionID: 'parent', role: 'synthetic', time: { created: 900 },
       text: '<subagent sessionID="child" state="completed" description="Review files">\nReviewed.\n</subagent>',
       description: 'Review files', metadata: { source: 'subagent', childID: 'child', agent: 'explore', state: 'completed' },
     }] } }));
-    expect(status()).toBe('completed');
-    expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+    expect(container.textContent).toContain('0.8s');
+    expect(failed(container)).toBe(false);
+    await expand(container);
+    expect(container.textContent).toContain('Reviewed.');
+    expect(stopButton(container) === null).toBe(true);
   });
 });
 
 for (const state of ['pending', 'completed', 'error'] as const) {
-  test(`a subagent has an explicit ${state} status without opening its output`, async () => {
+  test(`a ${state} subagent retains upstream activity and error styling with its output folded`, async () => {
     const input = { description: 'Review files', agent: 'explore' };
     const part: ToolPartData = { ...parent, state: state === 'pending'
       ? { status: 'pending', input, raw: '' }
@@ -371,7 +409,9 @@ for (const state of ['pending', 'completed', 'error'] as const) {
         ? { status: 'error', input, error: 'Review failed', time: { start: 100, end: 200 } }
         : { status: 'completed', input, output: 'Reviewed.', time: { start: 100, end: 200 } } };
     await withHarness(part, false, async (_store, container) => {
-      expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe(state === 'error' ? 'failed' : state);
+      expect(busy(container)).toBe(state === 'pending');
+      expect(failed(container)).toBe(state === 'error');
+      expect(container.textContent).toContain('Review files');
       expect(container.textContent).not.toContain(state === 'error' ? 'Review failed' : 'Reviewed.');
     });
   });
@@ -389,8 +429,11 @@ for (const state of ['error', 'cancelled'] as const) {
         text: 'The child ended.', description: 'Review files',
         metadata: { source: 'subagent', childID: 'child', agent: 'explore', state },
       }] } }));
-      expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe(state === 'error' ? 'failed' : 'stopped');
-      expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+      expect(failed(container)).toBe(state === 'error');
+      if (state === 'cancelled') expect(container.textContent).toContain('stopped');
+      await expand(container);
+      expect(container.textContent).toContain('The child ended.');
+      expect(stopButton(container) === null).toBe(true);
     });
   });
 }
@@ -398,7 +441,10 @@ for (const state of ['error', 'cancelled'] as const) {
 test('a completed child keeps its completion when another run in that session is waiting', async () => {
   await withHarness(parent, false, async (store, container) => {
     await act(async () => store.setState({ permission: { child: [{ id: 'later-permission', sessionID: 'child', action: 'edit', resources: [] }] } }));
-    expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('completed');
+    expect(failed(container)).toBe(false);
+    expect(busy(container)).toBe(false);
+    expect(container.textContent).toContain('62.0s');
+    expect(stopButton(container) === null).toBe(true);
   });
 });
 
@@ -415,8 +461,9 @@ test('a child in an unopened worktree shows its host-seeded permission without b
       pending: { child: { permissions: [{ id: 'seeded-permission', sessionID: 'child', action: 'edit', resources: [] }], forms: [], pages: [] } },
       serverTime: 0,
     }), () => '/worktrees/child') });
-    expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('waitingPermission');
-    expect(openButton(container)).not.toBeNull();
+    expect(useGlobalBlockingRequestsStore.getState().bySession.get('child')?.permissions[0]?.id).toBe('seeded-permission');
+    expect(stopButton(container) !== null).toBe(true);
+    expect(openButton(container) !== null).toBe(true);
   });
 });
 
@@ -432,12 +479,14 @@ test('a live child directory outranks a stale directory and request from the hos
       pending: { child: { permissions: [{ id: 'old-permission', sessionID: 'child', action: 'edit', resources: [] }], forms: [], pages: [] } },
       serverTime: 0,
     }), () => '/worktrees/old') });
-    expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe('running');
+    expect(store.getState().session.some((session) => session.id === 'child')).toBe(true);
+    expect(stopButton(container) !== null).toBe(true);
+    expect(container.textContent).not.toContain('Waiting for approval');
   });
 });
 
 for (const state of ['pending', 'running', 'completed', 'error'] as const) {
-  test(`a shell task exposes ${state} in its collapsed row`, async () => {
+  test(`a ${state} shell keeps command and outcome within the shared disclosure`, async () => {
     const input = { command: 'node --version', description: 'Check runtime version' };
     const part: ToolPartData = { ...parent, tool: 'shell', state: state === 'pending'
       ? { status: 'pending', input, raw: '' }
@@ -447,9 +496,14 @@ for (const state of ['pending', 'running', 'completed', 'error'] as const) {
           ? { status: 'error', input, error: 'Runtime unavailable', time: { start: 100, end: 200 } }
           : { status: 'completed', input, output: 'v24.18.0', time: { start: 100, end: 200 } } };
     await withHarness(part, false, async (_store, container) => {
-      expect(container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status')).toBe(state === 'error' ? 'failed' : state);
+      expect(container.querySelector('[data-command-header]') !== null).toBe(true);
+      expect(container.querySelector('[data-command-header]')?.textContent).not.toContain('node --version');
       expect(container.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
-      expect(container.textContent).not.toContain('v24.18.0');
+      expect(container.querySelector('[data-command-output]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') ?? 'true').toBe('true');
+      await expand(container);
+      expect(container.querySelector('[data-command-output]')?.textContent).toContain('node --version');
+      if (state === 'completed') expect(container.querySelector('[data-command-output]')?.textContent).toContain('v24.18.0');
+      if (state === 'error') expect(container.querySelector('[data-command-output]')?.textContent).toContain('Runtime unavailable');
     });
   });
 }
@@ -459,21 +513,25 @@ test('a live foreground shell offers an explicit single-command stop with its si
   const running: ToolPartData = { ...parent, tool: 'shell', state: {
     status: 'running', input: { command: 'sleep 300' }, metadata: { shellID: 'sh_selected' }, time: { start: 100 },
   } };
+  const receipts: string[] = [];
   const background = spyOn(opencodeClient, 'backgroundSessionWork').mockImplementation(async () => {
+    receipts.push('background');
     applyBackgroundShellEvents('/workspace', [{ type: 'message.tool.transition', properties: {
       sessionID: 'parent', messageID: 'parent-message', partID: 'parent-call',
       transition: { kind: 'success', output: '', metadata: { status: 'running', shellID: 'sh_selected' }, executed: true, end: 200 },
     } }]);
   });
-  const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
+  const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockImplementation(async () => { receipts.push('stop'); });
   try {
     await withHarness(running, false, async (_store, container) => {
       await act(async () => applyBackgroundShellEvents('/workspace', [{ type: 'shell.started', properties: { shell: {
         id: 'sh_selected', sessionID: 'parent', command: 'sleep 300', file: '/tmp/selected', startedAt: 100,
       } } }]));
-      const button = container.querySelector<HTMLButtonElement>('button[aria-label^="Stop this command."]');
-      expect(button?.title).toContain('subagents continue in the background');
+      await expand(container);
+      const button = container.querySelector<HTMLButtonElement>('button[aria-label="Stop command"]');
+      expect(button !== null).toBe(true);
       await act(async () => { button?.click(); button?.click(); });
+      expect(receipts).toEqual(['background', 'stop']);
       expect(background).toHaveBeenCalledTimes(1);
       expect(stop).toHaveBeenCalledTimes(1);
       expect(stop.mock.calls[0]?.[0].shells).toEqual([{ shellID: 'sh_selected', shellDirectory: '/workspace', command: 'sleep 300' }]);

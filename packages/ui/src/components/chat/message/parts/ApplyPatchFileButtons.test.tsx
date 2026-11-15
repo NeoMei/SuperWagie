@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import React from 'react';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Window } from 'happy-dom';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import type { EditorAPI } from '@/lib/api/types';
@@ -90,50 +92,61 @@ describe('ApplyPatchFileButtons', () => {
         expect(markup).toContain('aria-label="Open file diff: legacy.ts"');
     });
 
-    test('opens each clicked file with its own authoritative path, patch, and line', () => {
+    test('opens each native clicked file with its authoritative path, patch and line without bubbling', async () => {
+        const dom = new Window({ url: 'http://patch-file.test' });
+        const globals = { window: dom, document: dom.document, navigator: dom.navigator,
+            HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node, Text: dom.Text,
+            getComputedStyle: dom.getComputedStyle.bind(dom), IS_REACT_ACT_ENVIRONMENT: true };
+        const previous = new Map(Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+        for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+        const container = document.createElement('div');
+        document.body.append(container);
+        const root = createRoot(container);
         const openDiffCalls: Parameters<EditorAPI['openDiff']>[] = [];
         const editor: EditorAPI = {
             openDiff: async (...args) => { openDiffCalls.push(args); },
             openFile: async () => undefined,
         };
-        let propagationStops = 0;
-        const stopPropagation = () => { propagationStops += 1; };
-        // SAFETY: the fixture has multiple files, so the component returns its fragment with file children.
-        const tree = ApplyPatchFileButtons({
-            currentDirectory: '/workspace/project',
-            metadata: { files },
-            openDiffLabel: 'Open file diff',
-            onFileClick: (file, event) => {
-                event.stopPropagation();
-                const targetPath = (getApplyPatchFilePath(file) ?? '').replace('/workspace/project/', '');
-                openApplyPatchFileInEditor({
-                    currentDirectory: '/workspace/project',
-                    diffLabel: `${targetPath} (changes)`,
-                    editor,
-                    file,
-                    isVSCode: true,
-                });
-            },
-        }) as React.ReactElement<{ children: React.ReactNode }>;
-        // The deleted file renders as a plain span with no click handler.
-        // SAFETY: every fragment child is a button or span; the optional handler selects buttons only.
-        const buttons = (React.Children.toArray(tree.props.children) as React.ReactElement<{
-            onClick?: (event: { stopPropagation: () => void }) => void;
-        }>[]).filter((child) => child.props.onClick !== undefined);
-
-        buttons[0]?.props.onClick?.({ stopPropagation });
-        buttons[1]?.props.onClick?.({ stopPropagation });
-
-        expect(propagationStops).toBe(2);
-        expect(openDiffCalls).toEqual([
-            ['', '/workspace/project/src/first.ts', 'src/first.ts (changes)', {
-                line: 4,
-                patch: files[0]?.patch,
-            }],
-            ['', '/workspace/project/src/second.ts', 'src/second.ts (changes)', {
-                line: 12,
-                patch: files[1]?.patch,
-            }],
-        ]);
+        let handledClicks = 0;
+        let parentClicks = 0;
+        try {
+            await act(async () => root.render(
+                <div onClick={() => { parentClicks += 1; }}>
+                    <ApplyPatchFileButtons
+                        currentDirectory="/workspace/project"
+                        metadata={{ files }}
+                        openDiffLabel="Open file diff"
+                        onFileClick={(file, event) => {
+                            event.stopPropagation();
+                            handledClicks += 1;
+                            const targetPath = (getApplyPatchFilePath(file) ?? '').replace('/workspace/project/', '');
+                            openApplyPatchFileInEditor({
+                                currentDirectory: '/workspace/project',
+                                diffLabel: `${targetPath} (changes)`, editor, file, isVSCode: true,
+                            });
+                        }}
+                    />
+                </div>,
+            ));
+            const buttons = container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Open file diff:"]');
+            expect(buttons.length).toBe(2);
+            await act(async () => {
+                buttons[0]?.click();
+                buttons[1]?.click();
+            });
+            expect(handledClicks).toBe(2);
+            expect(parentClicks).toBe(0);
+            expect(openDiffCalls).toEqual([
+                ['', '/workspace/project/src/first.ts', 'src/first.ts (changes)', { line: 4, patch: files[0]?.patch }],
+                ['', '/workspace/project/src/second.ts', 'src/second.ts (changes)', { line: 12, patch: files[1]?.patch }],
+            ]);
+        } finally {
+            await act(async () => root.unmount());
+            await dom.happyDOM.abort();
+            for (const [key, descriptor] of previous) {
+                if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+                else Reflect.deleteProperty(globalThis, key);
+            }
+        }
     });
 });

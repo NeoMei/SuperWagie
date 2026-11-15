@@ -6,8 +6,12 @@ import {
   applyRecoverableQuestionEvents,
   classifyQuestionToolError,
   deriveRecoveredQuestions,
+  formReleaseKey,
+  formToolLink,
+  formTurnHold,
   noteLocalFormCancelled,
   noteLocalFormReplied,
+  noteFormToolReleased,
   moveRecoveredQuestions,
   noteQuestionFormSnapshot,
   questionToolLink,
@@ -78,6 +82,51 @@ const viewWith = (
 })
 
 const formCreated = (form: FormRequest): SyncEvent => ({ type: "form.created", properties: { form } })
+
+describe("form turn holding", () => {
+  test("only pending and running linked calls hold the turn", () => {
+    const form = questionForm("frm_hold")
+    expect(formTurnHold(form, {})).toBe("unknown")
+    expect(formTurnHold(form, { msg_ask: [runningTool()] })).toBe("holds")
+    expect(formTurnHold(form, { msg_ask: [completedTool()] })).toBe("released")
+    expect(formTurnHold(form, { msg_ask: [turnDeathPart()] })).toBe("released")
+    expect(formTurnHold({ ...form, metadata: {} }, {})).toBe("holds")
+  })
+
+  test("deferred plugin forms use their tool link without entering question recovery", () => {
+    const form = { ...questionForm("frm_plugin"), metadata: { kind: "plugin", tool: { messageID: "msg_ask", id: "tool_ask" } } }
+    expect(questionToolLink(form)).toBeNull()
+    expect(formToolLink(form)).toEqual({ messageID: "msg_ask", toolID: "tool_ask" })
+    expect(formTurnHold(form, { msg_ask: [completedTool()] })).toBe("released")
+  })
+
+  test("released history stays released until that exact form settles", () => {
+    const form = questionForm("frm_history")
+    const tool = formToolLink(form)
+    if (!tool) throw new Error("Expected a linked form")
+    const key = formReleaseKey(form, tool)
+    noteFormToolReleased(key, new Set([key]))
+    expect(formTurnHold(form, {}, useRecoverableQuestionsStore.getState().releasedForms)).toBe("released")
+    const replacement = { ...form, metadata: { kind: "question", tool: { messageID: "msg_new", id: "tool_new" } } }
+    expect(formTurnHold(replacement, {}, useRecoverableQuestionsStore.getState().releasedForms)).toBe("unknown")
+    applyRecoverableQuestionEvents("/repo", [{ type: "form.settled", properties: { sessionID: form.sessionID, formID: form.id, disposition: "cancelled" } }])
+    expect(formTurnHold(form, {}, useRecoverableQuestionsStore.getState().releasedForms)).toBe("unknown")
+  })
+
+  test("a deleted session drops only its released form evidence", () => {
+    const first = questionForm("frm_first")
+    const other = questionForm("frm_other", "ses_other")
+    const tool = { messageID: "msg_ask", toolID: "tool_ask" }
+    const firstKey = formReleaseKey(first, tool)
+    const otherKey = formReleaseKey(other, tool)
+    const open = new Set([firstKey, otherKey])
+    noteFormToolReleased(firstKey, open)
+    noteFormToolReleased(otherKey, open)
+    applyRecoverableQuestionEvents("/repo", [{ type: "session.deleted", properties: { sessionID: first.sessionID } }])
+    expect(formTurnHold(first, {}, useRecoverableQuestionsStore.getState().releasedForms)).toBe("unknown")
+    expect(formTurnHold(other, {}, useRecoverableQuestionsStore.getState().releasedForms)).toBe("released")
+  })
+})
 const formSettled = (formID: string, disposition?: "replied" | "cancelled"): SyncEvent => ({
   type: "form.settled",
   properties: { sessionID: "ses_ask", formID, disposition },

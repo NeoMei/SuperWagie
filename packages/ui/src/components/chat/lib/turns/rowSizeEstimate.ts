@@ -102,7 +102,7 @@ const sliceText = (part: Part & { type: 'text' }, row: Extract<TimelineRow, { ki
 
 // The parts one row of a message draws, in the order `messageCuts` cuts them.
 const rowParts = (message: ChatMessageEntry, row: Extract<TimelineRow, { kind: 'turn-message' }>, metrics: RowSizeMetrics): Part[] => {
-    const groups = getActivityGroups(row.entry.turn.assistantMessages, metrics.collapsibleThinkingBlocks);
+    const groups = getActivityGroups(row.entry.turn.assistantMessages);
     const parts = filterVisibleParts(message.parts, { includeReasoning: metrics.showReasoningTraces }).filter((part) => !isEmptyTextPart(part) && !isActivityGroupContinuation(part, groups));
     const start = row.slice?.from ? parts.findIndex((part) => part.id === row.slice?.from?.partId) : 0;
     const endCut = row.slice?.to;
@@ -140,7 +140,6 @@ const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetric
         && message.parts.find((part) => part.type === 'text' && !isEmptyTextPart(part))?.id === firstText.id
         && !(row.slice?.from?.partId === firstText.id && row.slice.from.offset > 0);
     let height = answerStartsHere ? hoistedHeight(hoisted) : 0;
-    const groups = getActivityGroups(row.entry.turn.assistantMessages, metrics.collapsibleThinkingBlocks);
     let hasText = false;
     for (const part of parts) {
         if (part.type === 'text') {
@@ -148,13 +147,6 @@ const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetric
             hasText = true;
             height += markdownHeight(sliceText(part, row), metrics.columnWidth);
         } else if (part.type === 'reasoning') {
-            const group = groups.get(part.id);
-            if (group?.kind === 'reasoning') {
-                if (!group.members.some((member) => member.part.text.trim())) continue;
-                height += metrics.collapsibleThinkingBlocks ? metrics.lineHeight
-                    : group.members.reduce((sum, member) => sum + markdownHeight(member.part.text, metrics.columnWidth), 0);
-                continue;
-            }
             // Reasoning the model kept to itself draws nothing.
             if (!part.text.trim()) continue;
             height += metrics.collapsibleThinkingBlocks ? metrics.lineHeight : markdownHeight(part.text, metrics.columnWidth);

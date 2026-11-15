@@ -537,7 +537,7 @@ const countsLinkedReference = (predicate: string): boolean =>
     || linkedReferenceValues().some((name) => predicate.includes(name));
 
 /** The condition the builder strips linked references with, read from the builder call itself. */
-const builderStripGuard = gateExpression(/references: (\w+) \? \[\] : linkedReferences/, 'the builder strip on linked references');
+const builderStripGuard = gateExpression(/references: (\w+) \? \[\] : (?:linkedReferences|referencesToSend)/, 'the builder strip on linked references');
 
 describe('the composer send gate counts what the submission builder counts', () => {
     // ChatInput cannot be mounted in bun test: its import graph pulls the composer editor,

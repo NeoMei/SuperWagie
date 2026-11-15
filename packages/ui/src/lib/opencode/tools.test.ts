@@ -177,7 +177,7 @@ describe("tool row description", () => {
       ],
     })).toEqual({
       kind: "tools",
-      calls: [{ name: "linear.list_issues", count: 3 }, { name: "linear.get_workspace", count: 1 }],
+      calls: [{ name: "linear.list_issues", count: 3, actions: [], completed: false }, { name: "linear.get_workspace", count: 1, actions: [], completed: true }],
       overflow: 0,
     })
   })
@@ -187,10 +187,10 @@ describe("tool row description", () => {
     expect(toolDescription("execute", {}, { toolCalls })).toEqual({
       kind: "tools",
       calls: [
-        { name: "a", count: 1 },
-        { name: "b", count: 1 },
-        { name: "c", count: 1 },
-        { name: "d", count: 1 },
+        { name: "a", count: 1, actions: [], completed: true },
+        { name: "b", count: 1, actions: [], completed: true },
+        { name: "c", count: 1, actions: [], completed: true },
+        { name: "d", count: 1, actions: [], completed: true },
       ],
       overflow: 2,
     })
@@ -214,16 +214,18 @@ describe("tool row description", () => {
 })
 
 describe("execute call details", () => {
-  test("reads the newest call's status and arguments", () => {
+  test("reads the newest call's raw arguments while the ordered call list retains statuses", () => {
     expect(lastExecuteToolCall({
       toolCalls: [
         { tool: "read", status: "running", input: { path: "a.ts" } },
         { tool: "shell", status: "completed", input: { command: "bun test" } },
       ],
-    })).toEqual({ tool: "shell", status: "completed", input: { command: "bun test" } })
+    })).toEqual({ tool: "shell", input: { command: "bun test" } })
     expect(lastExecuteToolCall({ toolCalls: [{ tool: "read", input: { path: "a.ts" } }] }))
       .toEqual({ tool: "read", input: { path: "a.ts" } })
     expect(lastExecuteToolCall({})).toBe(undefined)
+    expect(executeToolCalls({ toolCalls: [{ tool: "shell", status: "error", input: { command: "bun test" } }] }))
+      .toEqual([{ tool: "shell", status: "error", input: '{"command":"bun test"}' }])
   })
 
   test("recognizes blocking child progress and ignores invalid job markers", () => {
