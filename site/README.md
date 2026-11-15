@@ -6,10 +6,10 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.108 for macOS Apple silicon and
-Windows x64. Optional architectures are not part of the unified release. The
-Apple silicon build requires macOS 13 or later. Its complete app bundle uses
-ad-hoc signing and has no Apple notarization; the
+The website targets release 2.7.108 for macOS Apple silicon and Windows x64,
+plus a separately published Intel x64 build for macOS 12. The Apple silicon
+build requires macOS 13 or later; the Intel build requires macOS 12 or later.
+Both Mac bundles use ad-hoc signing and have no Apple notarization; the
 Windows installer is unsigned. Precise installer sizes are added to the public
 site after the final artifacts are verified.
 

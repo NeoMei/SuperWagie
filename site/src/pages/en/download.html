@@ -12,12 +12,12 @@
     <p class="meta">Current regular release</p>
     <p class="ver">2.7.108</p>
     <p class="meta">16 November 2026</p>
-    <p class="meta">Apple silicon Mac · Windows x64</p>
+    <p class="meta">Apple silicon Mac · Intel Mac · Windows x64</p>
     <p class="meta">Restore the OpenChamber chat flow with independent reasoning. Consecutive commands share a bounded disclosure with a breathing header, no folded command echo and results that remain available after completion. Native structured UI messages, quote navigation and scrolling are restored. <a href="/en/release-notes/">Read the release notes</a>.</p>
     <p class="meta">UniHub's verified-email password recovery from 2.7.90 stays in place. Enter the account email and a single-use link arrives by mail. Sign-in recovery from 2.7.88 also stays in place: a rejected device credential is renewed once, an unreachable account service leaves the sign-in form usable and an open workspace stays open. Alipay opens its checkout page in the browser.</p>
     <p class="meta">Turning on the library also turns on experience learning. After that, any user-visible root session in any project with a new conversation enters extraction automatically, even when the session is closed. A first launch after upgrading from an install with the library already on applies the same setting. Turning the library off and back on resumes learning after a manual pause.</p>
     <p class="meta">Failures show a specific reason and clear when recovery finishes. Older failed tasks with a complete extraction result are reused for indexing. Conversations from before the switch was enabled remain available through an explicit history import. <a href="/en/docs/troubleshooting/#memory">Read about memory issues</a>.</p>
-    <p class="meta">The Mac build requires macOS 13 or later on an Apple silicon Mac. The installers remain unnotarised; macOS may block the first launch.</p>
+    <p class="meta">The Apple silicon Mac build requires macOS 13 or later. The Intel build supports macOS 12 and later and ships separately. Neither installer is notarised by Apple; macOS may block the first launch.</p>
     <a class="btn primary" href="#mac">Choose a macOS build</a>
   </div>
 </section>
@@ -35,6 +35,15 @@
         <a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.108/SuperWagie-2.7.108-mac-arm64.zip">Download ZIP</a>
         <p class="meta">DMG 566.5 MB · ZIP 555.1 MB</p>
         <p class="meta">Ad-hoc signed and not notarised by Apple. macOS may block the first launch.</p>
+      </div>
+      <div class="version-card" data-ui>
+        <h3>Intel Mac</h3>
+        <p class="ver">2.7.108</p>
+        <p class="meta">x64 · macOS 12+ · 16 November 2026</p>
+        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.108-intel/SuperWagie-2.7.108-mac-x64.dmg">Download Intel DMG</a>
+        <a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.108-intel/SuperWagie-2.7.108-mac-x64.zip">Download ZIP</a>
+        <p class="meta">Ad-hoc signed and not notarised by Apple. macOS may block the first launch.</p>
+        <p class="meta">Separate Intel compatibility build; automatic updates are off.</p>
       </div>
     </div>
   </div>
@@ -121,7 +130,7 @@
   <div class="wrap prose">
     <h2>Requirements and updates</h2>
     <ul>
-      <li>The unified release provides Apple silicon Mac and Windows x64 installers.</li>
+      <li>The regular release provides Apple silicon Mac and Windows x64 installers. Intel Macs and macOS 12 use a separate Intel compatibility build.</li>
       <li>A network connection for model calls; tasks, the library index and keys stay local.</li>
       <li>The library starts a bundled indexing service on loopback. Nothing else to install.</li>
     </ul>

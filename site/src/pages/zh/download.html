@@ -12,12 +12,12 @@
     <p class="meta">当前常规版本</p>
     <p class="ver">2.7.108</p>
     <p class="meta">2026年11月16日</p>
-    <p class="meta">Apple 芯片 Mac · Windows x64</p>
+    <p class="meta">Apple 芯片 Mac · Intel 芯片 Mac · Windows x64</p>
     <p class="meta">恢复 OpenChamber 的聊天信息流，思考独立展示。连续命令共用限高折叠区，折叠头保留呼吸效果；收起后不重复显示命令内容，完成后的结果可重新展开查看。补齐原生结构化 UI 消息、引用跳转与滚动行为。<a href="/release-notes/">查看更新说明</a>。</p>
     <p class="meta">找回密码保留 2.7.90 的 UniHub 验证邮箱恢复表单，输入账户邮箱后会收到一次性恢复链接。2.7.88 的登录恢复仍在：设备凭证失效时自动重签一次，账户服务不可达时登录表单仍可用，已进入的工作区不会被退回登录页。支付宝结账页在浏览器打开。</p>
     <p class="meta">开启资料库时会一起打开经验学习；升级前已开启资料库的安装，首次启动会补齐这一设置。此后，任何项目中发生新对话的用户可见顶层会话都会自动进入提炼，即使当前没有打开该会话。关闭资料库再重新打开，会恢复手动暂停的学习。</p>
     <p class="meta">开关之前的历史仍可手动导入。捕获和索引失败会显示具体原因，恢复后清除；已有完整提炼结果的旧任务会直接继续索引，临时失败的任务保留重试入口。长中文内容按 UTF-8 字符边界分段，每次嵌入请求只提交一条短文本。查看<a href="/docs/troubleshooting/#memory">记忆问题说明</a>。</p>
-    <p class="meta">Mac 版适用于运行 macOS 13 及以上版本的 M 系列 Mac。安装包仍未做 Apple 公证，首次打开可能被 macOS 拦截。</p>
+    <p class="meta">Apple 芯片 Mac 版适用于 macOS 13 及以上。Intel 版支持 macOS 12 及以上，单独发布。安装包均未做 Apple 公证，首次打开可能被 macOS 拦截。</p>
     <a class="btn primary" href="#mac">选择 macOS 版本</a>
   </div>
 </section>
@@ -35,6 +35,15 @@
         <a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.108/SuperWagie-2.7.108-mac-arm64.zip">下载 ZIP</a>
         <p class="meta">DMG 566.5 MB · ZIP 555.1 MB</p>
         <p class="meta">临时签名，未做 Apple 公证。首次打开可能被 macOS 拦截。</p>
+      </div>
+      <div class="version-card" data-ui>
+        <h3>Intel 芯片 Mac</h3>
+        <p class="ver">2.7.108</p>
+        <p class="meta">x64 · macOS 12+ · 2026年11月16日</p>
+        <a class="btn primary" href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.108-intel/SuperWagie-2.7.108-mac-x64.dmg">下载 Intel 版 DMG</a>
+        <a href="https://github.com/NeoMei/SuperWagie/releases/download/v2.7.108-intel/SuperWagie-2.7.108-mac-x64.zip">下载 ZIP</a>
+        <p class="meta">临时签名，未做 Apple 公证。首次打开可能被 macOS 拦截。</p>
+        <p class="meta">Intel 兼容版单独发布，不参与自动更新。</p>
       </div>
     </div>
   </div>
@@ -121,7 +130,7 @@
   <div class="wrap prose">
     <h2>系统要求与更新</h2>
     <ul>
-      <li>统一发布提供 Apple 芯片 Mac 和 Windows x64 安装包。</li>
+      <li>常规版本提供 Apple 芯片 Mac 和 Windows x64 安装包；Intel 芯片 Mac 与 macOS 12 使用单独的 Intel 兼容版。</li>
       <li>调用模型时需要网络；任务、资料库索引和 Key 都在本机。</li>
       <li>资料库会启动一个内置的索引服务，只监听本机回环地址，不需要额外安装。</li>
     </ul>
