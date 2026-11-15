@@ -8,24 +8,20 @@ import { BlockLine } from '../message/parts/BlockLine';
 import { useBackgroundShellOutput } from '../message/parts/useBackgroundShellOutput';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
 import type { TurnActivityRecord } from '../lib/turns/types';
-import { latestShellPreview, shouldRenderLiveCommandPreview } from './liveCommandPreviewModel';
+import { latestShellPreview } from './liveCommandPreviewModel';
 
-const LIVE_COMMAND_PREVIEW_MAX_HEIGHT = 'max-h-40';
+const MAX_COMMAND_OUTPUT_HEIGHT = 'max-h-40';
 
-type LiveCommandPreviewProps = {
+type Props = {
     activities: readonly TurnActivityRecord[];
     directory?: string;
+    visible: boolean;
 };
 
-/**
- * A shell call owns its own disclosure, at the same level as a thinking
- * block. The outer Activity fold keeps the turn summary and older work; it
- * must not become the command's parent disclosure.
- */
-export const LiveCommandPreview: React.FC<LiveCommandPreviewProps> = ({ activities, directory }) => {
+/** A command disclosure added below the upstream Activity header when folded. */
+export const LiveCommandPreview: React.FC<Props> = ({ activities, directory, visible }) => {
     const shell = React.useMemo(() => latestShellPreview(activities), [activities]);
-    if (!shell) return null;
-
+    if (!visible || !shell) return null;
     return <LiveCommandPreviewBody key={shell.key} shell={shell} directory={directory} />;
 };
 
@@ -34,24 +30,17 @@ const LiveCommandPreviewBody: React.FC<{
     directory?: string;
 }> = ({ shell, directory }) => {
     const { t } = useI18n();
-    const [expansion, setExpansion] = React.useState<{ expanded: boolean; source: 'auto' | 'user' }>(() => ({
-        expanded: shell.running,
-        source: 'auto',
-    }));
-    const polledOutput = useBackgroundShellOutput(shell.shellID ?? '', directory, shell.running && shell.shellID !== undefined);
-    const output = polledOutput || shell.output || '';
-    const scrollRef = React.useRef<HTMLElement>(null);
+    const [expanded, setExpanded] = React.useState(shell.running);
     const rowRef = React.useRef<HTMLDivElement>(null);
+    const scrollRef = React.useRef<HTMLElement>(null);
     const followEndRef = React.useRef(true);
     const lastScrollTopRef = React.useRef(0);
-    const isExpanded = expansion.expanded;
+    const outputFromShell = useBackgroundShellOutput(shell.shellID ?? '', directory, shell.running && shell.shellID !== undefined);
+    const output = outputFromShell || shell.output || '';
     const command = shell.command || shell.description || t('chat.liveActivity.ranCommand', { count: 1 });
 
     React.useEffect(() => {
-        setExpansion((previous) => {
-            if (previous.source === 'user') return previous;
-            return { expanded: shell.running, source: 'auto' };
-        });
+        setExpanded((previous) => shell.running ? previous : false);
     }, [shell.running]);
 
     React.useLayoutEffect(() => {
@@ -59,28 +48,21 @@ const LiveCommandPreviewBody: React.FC<{
         if (!element || !followEndRef.current) return;
         element.scrollTop = element.scrollHeight;
         lastScrollTopRef.current = element.scrollTop;
-    }, [output, isExpanded]);
-
-    const handleWheel = React.useCallback((event: React.WheelEvent<HTMLElement>) => {
-        if (event.deltaY < 0) followEndRef.current = false;
-    }, []);
-
-    const handleScroll = React.useCallback((event: React.UIEvent<HTMLElement>) => {
-        const element = event.currentTarget;
-        const distanceToEnd = element.scrollHeight - element.clientHeight - element.scrollTop;
-        if (distanceToEnd <= 2) {
-            followEndRef.current = true;
-        } else if (element.scrollTop < lastScrollTopRef.current - 1) {
-            followEndRef.current = false;
-        }
-        lastScrollTopRef.current = element.scrollTop;
-    }, []);
-
-    if (!shouldRenderLiveCommandPreview(true, shell, output)) return null;
+    }, [expanded, output]);
 
     const handleToggle = () => {
-        if (!isExpanded) dispatchRowExpand(rowRef.current);
-        setExpansion({ expanded: !isExpanded, source: 'user' });
+        if (!expanded) dispatchRowExpand(rowRef.current);
+        setExpanded((previous) => !previous);
+    };
+    const handleWheel = (event: React.WheelEvent<HTMLElement>) => {
+        if (event.deltaY < 0) followEndRef.current = false;
+    };
+    const handleScroll = (event: React.UIEvent<HTMLElement>) => {
+        const element = event.currentTarget;
+        const distanceToEnd = element.scrollHeight - element.clientHeight - element.scrollTop;
+        if (distanceToEnd <= 2) followEndRef.current = true;
+        else if (element.scrollTop < lastScrollTopRef.current - 1) followEndRef.current = false;
+        lastScrollTopRef.current = element.scrollTop;
     };
 
     return (
@@ -88,9 +70,9 @@ const LiveCommandPreviewBody: React.FC<{
             <div
                 role="button"
                 tabIndex={0}
-                aria-expanded={isExpanded}
+                aria-expanded={expanded}
                 aria-controls={`command-output-${shell.key}`}
-                aria-label={isExpanded ? t('chat.commandTrace.collapseAria') : t('chat.commandTrace.expandAria')}
+                aria-label={expanded ? t('chat.commandTrace.collapseAria') : t('chat.commandTrace.expandAria')}
                 className="group/tool flex cursor-pointer items-center gap-1.5 rounded-xl py-1.5 pe-2 ps-px"
                 onClick={handleToggle}
                 onKeyDown={(event) => {
@@ -100,35 +82,23 @@ const LiveCommandPreviewBody: React.FC<{
                 }}
             >
                 <span className="relative h-3.5 w-3.5 shrink-0" style={{ color: 'var(--tools-icon)' }}>
-                    <span className="absolute inset-0 flex items-center justify-center transition-opacity group-hover/tool:opacity-0">
-                        <Icon name="terminal" className="h-3.5 w-3.5" />
-                    </span>
+                    <span className="absolute inset-0 flex items-center justify-center transition-opacity group-hover/tool:opacity-0"><Icon name="terminal" className="h-3.5 w-3.5" /></span>
                     <span className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover/tool:opacity-100">
-                        {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
+                        {expanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
                     </span>
                 </span>
                 <span className="min-w-0 flex-1 truncate typography-meta font-medium" style={{ color: 'var(--tools-title)' }} title={command}>
-                    {command}
-                    {shell.running ? <BusyDots /> : null}
+                    {command}{shell.running ? <BusyDots /> : null}
                 </span>
             </div>
-            <LiveActivityCollapse expanded={isExpanded} id={`command-output-${shell.key}`}>
+            <LiveActivityCollapse expanded={expanded} id={`command-output-${shell.key}`}>
                 <div className="relative ms-2 ps-3 pb-1 pt-0.5">
                     <BlockLine onToggle={handleToggle} />
                     {output ? (
-                        <ScrollableOverlay
-                            ref={scrollRef}
-                            as="pre"
-                            outerClassName={LIVE_COMMAND_PREVIEW_MAX_HEIGHT}
+                        <ScrollableOverlay ref={scrollRef} as="pre" outerClassName={MAX_COMMAND_OUTPUT_HEIGHT}
                             className="tool-output-surface w-full min-w-0 rounded-xl p-2 typography-micro whitespace-pre-wrap break-words"
-                            useScrollShadow
-                            scrollShadowSize={20}
-                            userIntentOnly
-                            data-scrollable="true"
-                            aria-label={t('chat.liveActivity.title')}
-                            onWheel={handleWheel}
-                            onScroll={handleScroll}
-                        >
+                            useScrollShadow scrollShadowSize={20} userIntentOnly data-scrollable="true"
+                            aria-label={t('chat.liveActivity.title')} onWheel={handleWheel} onScroll={handleScroll}>
                             {output}
                         </ScrollableOverlay>
                     ) : null}
