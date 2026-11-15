@@ -1,32 +1,25 @@
-import { describe, expect, test } from 'bun:test';
-import { Window } from 'happy-dom';
+import { describe, expect, spyOn, test } from 'bun:test';
+import type { AssistantMessage, FormRequest, JsonValue, Metadata, Part, StructuredError, SyntheticMessage, ToolInput, ToolPart, ToolState, UserMessage } from '@/lib/opencode/model';
 import React, { act } from 'react';
+import { Window } from 'happy-dom';
 import { createRoot } from 'react-dom/client';
-import type { AssistantMessage, Message, Metadata, Part, StructuredError, SyntheticMessage, ToolInput, ToolState, UserMessage } from '@/lib/opencode/model';
-import type { AssistantStatusSnapshot } from './useAssistantStatus';
-import { createParsedStatus, getActiveAssistantContext, hasBackgroundableWork, limitResetsAt } from './useAssistantStatus';
-import { agentStatusSignature, agentStatusVariants, formatAgentStatusPhrase, type AgentStatus } from '@/lib/agentStatus';
-import { formatMessage, type I18nKey, type I18nParams } from '@/lib/i18n/store';
-import { dict as enDict } from '@/lib/i18n/messages/en';
+import { OpenCode } from '@opencode/client';
+import type { StoreApi } from 'zustand';
+import { SyncProvider, useDirectoryStore } from '@/sync/sync-context';
+import type { DirectoryStore } from '@/sync/child-store';
+import { ChatColumnSessionContext } from '@/components/chat/chatColumnSession';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { useAssistantStatus, type AssistantStatusSnapshot } from './useAssistantStatus';
+import { agentStatusSignature } from '@/lib/agentStatus';
 
-declare global {
-    var __openchamber_sync_context__: React.Context<unknown> | undefined;
-    var __openchamber_sync_runtime_context__: React.Context<unknown> | undefined;
-}
+import { createParsedStatus, getActiveAssistantContext, hasBackgroundableWork, limitResetsAt } from './useAssistantStatus';
+import { formatAgentStatusPhrase, type AgentStatus } from '@/lib/agentStatus';
+import { formatMessage } from '@/lib/i18n';
+import { dict as enDict } from '@/lib/i18n/messages/en';
 
 // Statuses are keys; the tests read them through the English dictionary.
 const english = (status: AgentStatus): string => formatAgentStatusPhrase((key, params) => formatMessage(enDict, key, params), 'en', status);
-const dictionary = (key: I18nKey, params?: I18nParams): string => formatMessage(enDict, key, params);
-const englishPhrases = (key: I18nKey, params?: I18nParams): readonly string[] =>
-    agentStatusVariants(key).map((variant) => dictionary(variant, params));
-const expectsDictionaryPhrase = (actual: string, key: I18nKey, params?: I18nParams): void => {
-    expect(englishPhrases(key, params)).toContain(actual);
-};
-const REPLACEMENT_MARKER = String.fromCharCode(36) + '& lab';
-interface StatusProbeState {
-    current: AssistantStatusSnapshot | null;
-}
-const observedStatus: StatusProbeState = { current: null };
 
 const userMessage = (id: string): UserMessage => ({
     id,
@@ -220,198 +213,35 @@ describe('createParsedStatus', () => {
         state: toolState(status),
     });
 
-    const runningTool = (name: string, input: ToolInput): Part => {
-        const part = tool('1', name);
-        if (part.type !== 'tool') throw new Error('expected a tool');
-        part.state = { status: 'running', input, time: { start: 1 } };
-        return part;
-    };
-
     const statusOf = (parts: Part[]) => createParsedStatus(parts, 'ses_1:msg_1');
 
     test('names a tool by the kind of work it does', () => {
-        expect(englishPhrases('chat.agentStatus.read')).toContain(english(statusOf([tool('1', 'read')]).status));
-        expect(englishPhrases('chat.agentStatus.edit')).toContain(english(statusOf([tool('1', 'patch')]).status));
-        expect(englishPhrases('chat.agentStatus.command')).toContain(english(statusOf([tool('1', 'shell')]).status));
-        expect(englishPhrases('chat.agentStatus.lookup')).toContain(english(statusOf([tool('1', 'webfetch')]).status));
-        expect(englishPhrases('chat.agentStatus.delegate')).toContain(english(statusOf([tool('1', 'subagent')]).status));
-        expect(englishPhrases('chat.agentStatus.skill')).toContain(english(statusOf([tool('1', 'skill')]).status));
+        expect(english(statusOf([tool('1', 'read')]).status)).toBe('reading a file');
+        expect(english(statusOf([tool('1', 'patch')]).status)).toBe('editing a file');
+        expect(english(statusOf([tool('1', 'shell')]).status)).toBe('running a command');
+        expect(english(statusOf([tool('1', 'webfetch')]).status)).toBe('looking things up');
+        expect(english(statusOf([tool('1', 'subagent')]).status)).toBe('handing off a task');
+        expect(english(statusOf([tool('1', 'skill')]).status)).toBe('picking up a skill');
     });
 
     test('counts parallel calls of the same kind', () => {
-        expect(englishPhrases('chat.agentStatus.read.count', { count: 3 })).toContain(english(statusOf([tool('1', 'read'), tool('2', 'read'), tool('3', 'file-diff')]).status));
-        expect(englishPhrases('chat.agentStatus.edit.count', { count: 2 })).toContain(english(statusOf([tool('1', 'write'), tool('2', 'patch')]).status));
-        expect(englishPhrases('chat.agentStatus.command.count', { count: 2 })).toContain(english(statusOf([tool('1', 'shell'), tool('2', 'execute')]).status));
-        expect(englishPhrases('chat.agentStatus.delegate.count', { count: 2 })).toContain(english(statusOf([tool('1', 'subagent'), tool('2', 'subagent')]).status));
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'read'), tool('3', 'file-diff')]).status)).toBe('reading 3 files');
+        expect(english(statusOf([tool('1', 'write'), tool('2', 'patch')]).status)).toBe('editing 2 files');
+        expect(english(statusOf([tool('1', 'shell'), tool('2', 'execute')]).status)).toBe('running 2 commands');
+        expect(english(statusOf([tool('1', 'subagent'), tool('2', 'subagent')]).status)).toBe('handing off 2 tasks');
     });
 
     test('does not count searches, since one call spans many files', () => {
-        expect(englishPhrases('chat.agentStatus.search')).toContain(english(statusOf([tool('1', 'grep'), tool('2', 'glob')]).status));
+        expect(english(statusOf([tool('1', 'grep'), tool('2', 'glob')]).status)).toBe('searching files');
     });
 
     test('counts only unfinished calls', () => {
-        expect(englishPhrases('chat.agentStatus.read')).toContain(english(statusOf([tool('1', 'read'), tool('2', 'read', 'completed')]).status));
-    });
-
-    test('keeps command and file details in their tool rows while the status chip names the work', () => {
-        const shell = tool('1', 'shell');
-        if (shell.type !== 'tool') throw new Error('expected a tool');
-        shell.state = { status: 'running', input: { command: 'npm test' }, time: { start: 1 } };
-        expect(englishPhrases('chat.agentStatus.command.withTarget', { target: 'npm test' })).toContain(english(statusOf([shell]).status));
-
-        const edit = tool('1', 'edit');
-        if (edit.type !== 'tool') throw new Error('expected a tool');
-        edit.state = { status: 'running', input: { path: 'src/a.ts' }, time: { start: 1 } };
-        expect(englishPhrases('chat.agentStatus.edit.withTarget', { target: 'a.ts' })).toContain(english(statusOf([edit]).status));
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'read', 'completed')]).status)).toBe('reading a file');
     });
 
     test('shows the newest kind when different tools run together', () => {
-        expect(englishPhrases('chat.agentStatus.command')).toContain(english(statusOf([tool('1', 'read'), tool('2', 'shell')]).status));
-        expect(englishPhrases('chat.agentStatus.read')).toContain(english(statusOf([tool('1', 'shell'), tool('2', 'read')]).status));
-    });
-
-    test('extracts a short target from the current work', () => {
-        const cases: ReadonlyArray<readonly [string, ToolInput, string]> = [
-            ['read', { path: '/repo/src/a.ts' }, 'a.ts'],
-            ['read', { filePath: 'C:\\repo\\a.ts' }, 'a.ts'],
-            ['shell', { command: 'npm   test' }, 'npm test'],
-            ['webfetch', { url: 'https://docs.example.com:8443/path?q=1' }, 'docs.example.com'],
-            ['grep', { pattern: 'status label' }, 'status label'],
-            ['grep', { query: 'status label' }, 'status label'],
-            ['websearch', { query: 'status label' }, 'status label'],
-            ['websearch', { search: 'status label' }, 'status label'],
-            ['skill', { name: 'superwriter' }, 'superwriter'],
-        ];
-        for (const [name, input, target] of cases) {
-            const status = statusOf([runningTool(name, input)]).status;
-            expect(status.key.endsWith('.withTarget')).toBe(true);
-            expect(status.target).toBe(target);
-        }
-    });
-
-    test('flattens a command with extra lines into one readable target', () => {
-        expect(statusOf([runningTool('shell', { command: 'npm test\n --watch --verbose' })]).status).toEqual({
-            key: 'chat.agentStatus.command.withTarget',
-            target: 'npm test --watch --verbose',
-        });
-    });
-
-    test('keeps sensitive fields and secret-bearing targets out of status copy', () => {
-        const sensitive: ReadonlyArray<readonly [string, ToolInput]> = [
-            ['write', { content: 'SECRET DATA' }],
-            ['read', { text: 'SECRET DATA' }],
-            ['execute', { code: 'SECRET DATA' }],
-            ['subagent', { token: 'SECRET DATA' }],
-            ['question', { password: 'SECRET DATA' }],
-            ['question', { question: 'ping user@example.com' }],
-            ['grep', { query: 'https://example.com/?token=x' }],
-        ];
-        for (const [name, input] of sensitive) {
-            const status = statusOf([runningTool(name, input)]).status;
-            expect(status.target).toBeUndefined();
-            expect(status.key.endsWith('.withTarget')).toBe(false);
-        }
-    });
-
-    test('caps a target at 60 visible characters', () => {
-        const longName = 'a'.repeat(100) + '.ts';
-        const target = statusOf([runningTool('read', { path: `/repo/${longName}` })]).status.target;
-        expect(target).toHaveLength(60);
-        expect(target?.endsWith('…')).toBe(true);
-        expect(target?.slice(0, 59)).toBe('a'.repeat(59));
-
-        const emojiName = '🙂'.repeat(100) + '.ts';
-        const emojiTarget = statusOf([runningTool('read', { path: '/repo/' + emojiName })]).status.target;
-        expect(Array.from(emojiTarget ?? '')).toHaveLength(60);
-        expect(emojiTarget?.endsWith('…')).toBe(true);
-    });
-
-    test('waits for running input and reads nested Code Mode targets', () => {
-        expect(statusOf([{
-            type: 'tool',
-            tool: 'read',
-            id: '1',
-            sessionID: 'ses_1',
-            messageID: 'msg_1',
-            callID: 'call_1',
-            state: { status: 'pending', input: { path: '/repo/src/a.ts' }, raw: '' },
-        } satisfies Part]).status.target).toBeUndefined();
-
-        const nested: Part = {
-            id: '1',
-            sessionID: 'ses_1',
-            messageID: 'msg_1',
-            type: 'tool',
-            callID: 'call_1',
-            tool: 'execute',
-            state: {
-                status: 'running',
-                input: {},
-                time: { start: 1 },
-                metadata: {
-                    toolCalls: [{ tool: 'read', status: 'running', input: { path: '/repo/src/a.ts' } }],
-                },
-            },
-        };
-        expect(statusOf([nested]).status).toEqual({ key: 'chat.agentStatus.read.withTarget', target: 'a.ts' });
-    });
-
-    test('a completed nested Code Mode call stays out of the running status', () => {
-        const nested: Part = {
-            id: '1',
-            sessionID: 'ses_1',
-            messageID: 'msg_1',
-            type: 'tool',
-            callID: 'call_1',
-            tool: 'execute',
-            state: {
-                status: 'running',
-                input: {},
-                time: { start: 1 },
-                metadata: {
-                    toolCalls: [{ tool: 'read', status: 'completed', input: { path: '/repo/src/a.ts' } }],
-                },
-            },
-        };
-        expect(statusOf([nested]).status).toEqual({ key: 'chat.agentStatus.command' });
-    });
-
-    test('a nested Code Mode call without status keeps the existing running status', () => {
-        const nested: Part = {
-            id: '1',
-            sessionID: 'ses_1',
-            messageID: 'msg_1',
-            type: 'tool',
-            callID: 'call_1',
-            tool: 'execute',
-            state: {
-                status: 'running',
-                input: {},
-                time: { start: 1 },
-                metadata: {
-                    toolCalls: [{ tool: 'read', input: { path: '/repo/src/a.ts' } }],
-                },
-            },
-        };
-        expect(statusOf([nested]).status).toEqual({ key: 'chat.agentStatus.read.withTarget', target: 'a.ts' });
-    });
-
-    describe('encoded status and signatures', () => {
-        test('a changed target changes the status signature', () => {
-            const first = statusOf([runningTool('shell', { command: 'npm test' })]).status;
-            const second = statusOf([runningTool('shell', { command: 'bun test' })]).status;
-            expect(agentStatusSignature(first)).toBe(agentStatusSignature({ ...first }));
-            expect(agentStatusSignature(first)).not.toBe(agentStatusSignature(second));
-            expect(first).not.toEqual(second);
-        });
-
-        test('a replacement marker reaches the translated phrase exactly once', () => {
-            const status = statusOf([runningTool('shell', { command: REPLACEMENT_MARKER })]).status;
-            expect(status).toEqual({ key: 'chat.agentStatus.command.withTarget', target: REPLACEMENT_MARKER });
-            const phrase = english(status);
-            expect(phrase).toContain(REPLACEMENT_MARKER);
-            expect(phrase.split(REPLACEMENT_MARKER)).toHaveLength(2);
-        });
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'shell')]).status)).toBe('running a command');
+        expect(english(statusOf([tool('1', 'shell'), tool('2', 'read')]).status)).toBe('reading a file');
     });
 
     describe('OpenChamber tools', () => {
@@ -437,33 +267,29 @@ describe('createParsedStatus', () => {
         });
 
         test('say what the action does instead of the tool name', () => {
-            const cases: ReadonlyArray<readonly [string, ToolInput, I18nKey]> = [
-                ['openchamber_web', { action: 'browser.snapshot', parameters: {} }, 'chat.agentStatus.browser.read'],
-                ['openchamber_memory', { action: 'memory.save', parameters: { title: 'x' } }, 'chat.agentStatus.memory.save'],
-                ['openchamber', { action: 'session.create' }, 'chat.agentStatus.sessions.create'],
-                ['openchamber_notify', { title: 'Done' }, 'chat.agentStatus.notify'],
-            ];
-            for (const [name, input, key] of cases) {
-                expectsDictionaryPhrase(english(statusOf([call(name, input)]).status), key);
-            }
+            expect(english(statusOf([call('openchamber_web', { action: 'browser.snapshot', parameters: {} })]).status)).toBe('reading a page');
+            expect(english(statusOf([call('openchamber_memory', { action: 'memory.save', parameters: { title: 'x' } })]).status)).toBe('saving to memory');
+            expect(english(statusOf([call('openchamber', { action: 'session.create' })]).status)).toBe('starting a session');
+            expect(english(statusOf([call('openchamber_notify', { title: 'Done' })]).status)).toBe('sending a notification');
+            expect(english(statusOf([call('openchamber_usage', { action: 'usage.read', parameters: {} })]).status)).toBe('checking usage limits');
         });
 
         test('fall back to the tool phrase for an action without its own', () => {
-            expectsDictionaryPhrase(english(statusOf([call('openchamber_web', { action: 'browser.click' })]).status), 'chat.agentStatus.browser.use');
-            expectsDictionaryPhrase(english(statusOf([call('openchamber_knowledge', {})]).status), 'chat.agentStatus.knowledge.check');
+            expect(english(statusOf([call('openchamber_web', { action: 'browser.click' })]).status)).toBe('using the browser');
+            expect(english(statusOf([call('openchamber_knowledge', {})]).status)).toBe('checking project knowledge');
         });
 
         test('a page that waits for the answer says so once it shows', () => {
             const input = { action: 'render.page', parameters: { html: '<p>a</p>', awaitAnswer: true } };
-            expectsDictionaryPhrase(english(statusOf([call('openchamber_render', input, 'pending')]).status), 'chat.agentStatus.render');
-            expectsDictionaryPhrase(english(statusOf([call('openchamber_render', input)]).status), 'chat.agentStatus.waitingAnswer');
+            expect(english(statusOf([call('openchamber_render', input, 'pending')]).status)).toBe('drawing a page');
+            expect(english(statusOf([call('openchamber_render', input)]).status)).toBe('waiting for your answer');
         });
 
         test('read the same from inside a Code Mode script', () => {
-            expectsDictionaryPhrase(english(statusOf([script([
+            expect(english(statusOf([script([
                 { tool: 'openchamber_web', status: 'completed', input: { action: 'browser.open' } },
                 { tool: 'openchamber_memory', status: 'running', input: { action: 'memory.read' } },
-            ])]).status), 'chat.agentStatus.memory.check');
+            ])]).status)).toBe('checking memory');
         });
     });
 
@@ -481,32 +307,39 @@ describe('createParsedStatus', () => {
         const statusWith = (parts: Part[]) => english(createParsedStatus(parts, 'ses_1:msg_1', servers).status);
 
         test('the opencode namespace says what OpenCode does to itself', () => {
-            const cases: ReadonlyArray<readonly [Part[], I18nKey]> = [
-                [[script('opencode_session_rename')], 'chat.agentStatus.sessions.rename'],
-                [[script('opencode_worktree_list')], 'chat.agentStatus.worktree.list'],
-                [[script('opencode_read_mcp_resource')], 'chat.agentStatus.mcp.readResource'],
-                [[tool('1', 'opencode.models')], 'chat.agentStatus.sessions.models'],
-            ];
-            for (const [parts, key] of cases) expectsDictionaryPhrase(statusWith(parts), key);
+            expect(statusWith([script('opencode_session_rename')])).toBe('renaming the session');
+            expect(statusWith([script('opencode_worktree_list')])).toBe('checking worktrees');
+            expect(statusWith([script('opencode_read_mcp_resource')])).toBe('reading an MCP resource');
+            expect(statusWith([tool('1', 'opencode.models')])).toBe('looking up models');
         });
 
         test('an MCP tool names its integration, the longest server name first', () => {
-            expect(englishPhrases('chat.agentStatus.usingTool', { name: 'linear' })).toContain(statusWith([script('linear_list_issues')]));
-            expect(englishPhrases('chat.agentStatus.usingTool', { name: 'linear' })).toContain(statusWith([tool('1', 'linear_get_document')]));
-            expect(englishPhrases('chat.agentStatus.usingTool', { name: 'claude in chrome' })).toContain(statusWith([script('claude_in_chrome_navigate')]));
-            expect(englishPhrases('chat.agentStatus.usingTool', { name: 'my.server' })).toContain(statusWith([script('my_server_query')]));
+            expect(statusWith([script('linear_list_issues')])).toBe('using linear');
+            expect(statusWith([tool('1', 'linear_get_document')])).toBe('using linear');
+            expect(statusWith([script('claude_in_chrome_navigate')])).toBe('using claude in chrome');
+            expect(statusWith([script('my_server_query')])).toBe('using my.server');
         });
 
         test('a tool no server claims reads as words', () => {
-            expect(englishPhrases('chat.agentStatus.usingTool', { name: 'linear list issues' })).toContain(english(statusOf([script('linear_list_issues')]).status));
-            expect(englishPhrases('chat.agentStatus.usingTool', { name: 'jev route' })).toContain(english(statusOf([tool('1', 'jev-route')]).status));
+            expect(english(statusOf([script('linear_list_issues')]).status)).toBe('using linear list issues');
+            expect(english(statusOf([tool('1', 'jev-route')]).status)).toBe('using jev route');
+        });
+
+        test('a secret run waits on the user only while its card waits, then runs its command', () => {
+            const run: Part = {
+                id: '1', sessionID: 'ses_1', messageID: 'msg_1', type: 'tool', callID: 'call_1', tool: 'openchamber_secret',
+                state: { status: 'running', input: { action: 'secret.run', parameters: { program: 'sh' } }, time: { start: 1 } },
+            };
+            const statusWhile = (waiting: string[]) => english(createParsedStatus([run], 'ses_1:msg_1', [], new Set(waiting)).status);
+            expect(statusWhile(['call_1'])).toBe(english({ key: 'chat.agentStatus.waitingAnswer' }));
+            expect(statusWhile([])).toBe('running a command with secrets');
         });
     });
 });
 
 describe('limitResetsAt', () => {
     const error = (body: string): StructuredError => ({ type: 'provider.rate-limit', message: 'limit', status: 429, response: { body } });
-    const rateLimit = (body: unknown) => error(JSON.stringify(body));
+    const rateLimit = (body: JsonValue) => error(JSON.stringify(body));
 
     test('reads resets_at under error, as the Claude Code plugin sends it', () => {
         const claude = rateLimit({ error: { type: 'rate_limit_error', resets_at: '2026-10-19T12:20:00.000Z', retry_after: 16775 } });
@@ -526,178 +359,122 @@ describe('limitResetsAt', () => {
     });
 });
 
-test('reasoning activity carries its identity through repeated status reads', () => {
-    const part: Part = { type: 'reasoning', id: 'reasoning-3', messageID: 'msg', sessionID: 'ses', text: '', time: { start: 1 } };
-    expect(createParsedStatus([part], 'turn').status).toEqual({ key: 'chat.agentStatus.thinking', seed: 'reasoning-3' });
-    expect(createParsedStatus([part], 'turn').status).toEqual({ key: 'chat.agentStatus.thinking', seed: 'reasoning-3' });
+test('reasoning identity remains stable while tool-input changes do not enter status copy', () => {
+    const reasoning: Part = { type: 'reasoning', id: 'reasoning-3', messageID: 'msg', sessionID: 'ses', text: '', time: { start: 1 } };
+    expect(createParsedStatus([reasoning], 'turn').status).toEqual({ key: 'chat.agentStatus.thinking', seed: 'reasoning-3' });
+    expect(createParsedStatus([reasoning], 'turn').status).toEqual({ key: 'chat.agentStatus.thinking', seed: 'reasoning-3' });
+    const command = (text: string): ToolPart => ({
+        type: 'tool', id: 'tool', messageID: 'msg', sessionID: 'ses', callID: 'call', tool: 'shell',
+        state: { status: 'running', input: { command: text }, time: { start: 1 } },
+    });
+    const first = createParsedStatus([command('npm test')], 'turn').status;
+    const second = createParsedStatus([command('bun test --token=private')], 'turn').status;
+    expect(first).toEqual({ key: 'chat.agentStatus.command' });
+    expect(second).toEqual(first);
+    expect(agentStatusSignature(first)).toBe(agentStatusSignature(second));
+    expect(english(second)).not.toContain('private');
 });
 
-describe('useAssistantStatus encoded state', () => {
-    const DIRECTORY = '/repo';
-    const SESSION_ID = 'ses_encoded';
-    const ASSISTANT_ID = 'assistant_encoded';
+test('unknown-tool names preserve replacement markers exactly once', () => {
+    const name = String.fromCharCode(36) + '& lab';
+    const phrase = english({ key: 'chat.agentStatus.usingTool', name });
+    expect(phrase).toContain(name);
+    expect(phrase.split(name)).toHaveLength(2);
+});
 
-    type Permission = {
-        id: string;
-        sessionID: string;
-        action: string;
-        resources: string[];
+test('live status follows permissions, linked form lifetime and authoritative idle through real sync', async () => {
+    const directory = '/assistant-status/project';
+    const sessionID = 'status-session';
+    const messageID = 'status-assistant';
+    const dom = new Window({ url: 'http://assistant-status.test' });
+    class EventSocket extends EventTarget {
+        static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
+        readyState = 0; send() {} close() { this.readyState = 3; }
+    }
+    const values = { WebSocket: EventSocket, window: dom, document: dom.document, navigator: dom.navigator,
+        HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node, Text: dom.Text, Event: dom.Event,
+        CustomEvent: dom.CustomEvent, MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
+        localStorage: dom.localStorage, requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+        cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true };
+    const originals = new Map<string, PropertyDescriptor | undefined>();
+    for (const [key, value] of Object.entries(values)) {
+        originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+        Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+    }
+    const respond = async (input: RequestInfo | URL) => {
+        const path = new URL(input instanceof Request ? input.url : String(input), 'http://assistant-status.test').pathname;
+        if (path.endsWith('/event') || path.endsWith('/events')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+        if (path === '/api/fs/home') return Response.json({ home: '/synthetic', chatsRoot: '/synthetic/chats' });
+        if (path === '/api/location') return Response.json({ directory, project: { id: 'synthetic', directory, canonical: directory } });
+        if (path === '/api/project' || path === '/api/config' || path === '/api/config/mcp') return Response.json([]);
+        if (path === '/api/session/active') return Response.json({ data: {} });
+        if (path === '/api/session-warming') return Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] });
+        return Response.json({ data: [] });
     };
-
-    const toolPart = (command: string): Part => ({
-        id: 'tool_encoded',
-        sessionID: SESSION_ID,
-        messageID: ASSISTANT_ID,
-        type: 'tool',
-        callID: 'call_encoded',
-        tool: 'shell',
-        state: { status: 'running', input: { command }, time: { start: 1 } },
+    const sdk = OpenCode.make({ baseUrl: 'http://assistant-status.test', fetch: respond });
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(respond);
+    const previousUI = useSessionUIStore.getState();
+    const previousMcp = useMcpConfigStore.getState();
+    useSessionUIStore.setState({ sessionAbortFlags: new Map() });
+    const command = (text: string): ToolPart => ({
+        type: 'tool', id: 'command', messageID, sessionID, callID: 'command', tool: 'shell',
+        state: { status: 'running', input: { command: text }, time: { start: 1 } },
     });
-
-    test('a changed target survives the directory sync round trip and permission wins immediately', async () => {
-        const [{ ChildStoreManager }, { INITIAL_STATE }] = await Promise.all([
-            import('@/sync/child-store'),
-            import('@/sync/types'),
-        ]);
-        type State = typeof INITIAL_STATE;
-        const { ChatColumnSessionContext } = await import('@/components/chat/chatColumnSession');
-        await import('@/sync/sync-context');
-        const { useMcpConfigStore } = await import('@/stores/useMcpConfigStore');
-        const { useSessionUIStore } = await import('@/sync/session-ui-store');
-
-        const messages: Message[] = [{
-            id: ASSISTANT_ID,
-            role: 'assistant',
-            sessionID: SESSION_ID,
-            time: { created: 1 },
-            agent: 'build',
-            providerID: 'openai',
-            modelID: 'gpt-5',
-        }];
-        const permissions: Permission[] = [];
-        const childStores = new ChildStoreManager();
-        const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
-        const state = {
-            ...INITIAL_STATE,
-            status: 'complete',
-            session_status: { [SESSION_ID]: { type: 'busy' } },
-            message: { [SESSION_ID]: messages },
-            part: { [ASSISTANT_ID]: [toolPart('npm test')] },
-            permission: { [SESSION_ID]: permissions },
-        } satisfies State;
-        store.setState(state);
-
-        const mcpOriginal = useMcpConfigStore.getState();
-        const uiOriginal = useSessionUIStore.getState();
-        useMcpConfigStore.setState({
-            serversByDirectory: { [DIRECTORY]: [] },
-            loadMcpConfigs: () => Promise.resolve(true),
-        });
-        useSessionUIStore.setState({ sessionAbortFlags: new Map() });
-
-        const SyncContext = globalThis.__openchamber_sync_context__;
-        const SyncRuntimeContext = globalThis.__openchamber_sync_runtime_context__;
-        if (!SyncContext || !SyncRuntimeContext) throw new Error('sync contexts were not published');
-
-        const runtime = {
-            childStores,
-            messageLoader: { subscribe: () => () => undefined, getSnapshot: () => ({}) },
-            sdk: {},
-            runtimeKey: 'test',
-            currentDirectory: { get: () => DIRECTORY, subscribe: () => () => undefined },
-        };
-        const system = { ...runtime, directory: DIRECTORY };
-
-        const happyWindow = new Window({ url: 'http://localhost' });
-        const globals = {
-            window: happyWindow,
-            document: happyWindow.document,
-            navigator: happyWindow.navigator,
-            localStorage: happyWindow.localStorage,
-            Node: happyWindow.Node,
-            Text: happyWindow.Text,
-            Element: happyWindow.Element,
-            HTMLElement: happyWindow.HTMLElement,
-            SVGElement: happyWindow.SVGElement,
-            MutationObserver: happyWindow.MutationObserver,
-            ResizeObserver: happyWindow.ResizeObserver,
-            IS_REACT_ACT_ENVIRONMENT: true,
-        };
-        const previous = Object.keys(globals).map(
-            (name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const,
-        );
-        for (const [name, value] of Object.entries(globals)) {
-            Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-        }
-        const container = document.createElement('div');
-        document.body.appendChild(container);
-        const root = createRoot(container);
-
-        try {
-            const { useAssistantStatus } = await import('./useAssistantStatus');
-            const Probe = () => {
-                observedStatus.current = useAssistantStatus();
-                return null;
-            };
-            const render = () => React.createElement(
-                SyncContext.Provider,
-                { value: system },
-                React.createElement(
-                    SyncRuntimeContext.Provider,
-                    { value: runtime },
-                    React.createElement(
-                        ChatColumnSessionContext.Provider,
-                        { value: { sessionId: SESSION_ID, directory: DIRECTORY } },
-                        React.createElement(Probe),
-                    ),
-                ),
-            );
-            await act(async () => root.render(render()));
-            expect(observedStatus.current?.working.status).toEqual({ key: 'chat.agentStatus.command.withTarget', target: 'npm test' });
-
-            await act(async () => {
-                store.setState({ part: { [ASSISTANT_ID]: [toolPart('bun test')] } });
-                root.render(render());
-            });
-            expect(observedStatus.current?.working.status).toEqual({ key: 'chat.agentStatus.command.withTarget', target: 'bun test' });
-            expect(observedStatus.current?.working.canAbort).toBe(true);
-
-            permissions.push({ id: 'permission_encoded', sessionID: SESSION_ID, action: 'run', resources: [] });
-            await act(async () => {
-                store.setState({ permission: { [SESSION_ID]: [...permissions] } });
-                root.render(render());
-            });
-            expect(observedStatus.current?.working.status).toEqual({ key: 'chat.agentStatus.waitingPermission' });
-            expect(observedStatus.current?.working.isWaitingForPermission).toBe(true);
-            expect(observedStatus.current?.working.canAbort).toBe(false);
-            expect(observedStatus.current?.working.retryInfo).toBeNull();
-
-            permissions.length = 0;
-            await act(async () => {
-                store.setState({ permission: { [SESSION_ID]: [] } });
-                root.render(render());
-            });
-            expect(observedStatus.current?.working.status).toEqual({ key: 'chat.agentStatus.command.withTarget', target: 'bun test' });
-            expect(observedStatus.current?.working.isWaitingForPermission).toBe(false);
-            expect(observedStatus.current?.working.canAbort).toBe(true);
-
-            await act(async () => {
-                store.setState({ part: { [ASSISTANT_ID]: [toolPart(REPLACEMENT_MARKER)] } });
-                root.render(render());
-            });
-            expect(observedStatus.current?.working.status).toEqual({ key: 'chat.agentStatus.command.withTarget', target: REPLACEMENT_MARKER });
-            const phrase = english(observedStatus.current?.working.status ?? { key: 'chat.agentStatus.working' });
-            expect(phrase).toContain(REPLACEMENT_MARKER);
-            expect(phrase.split(REPLACEMENT_MARKER)).toHaveLength(2);
-        } finally {
-            await act(async () => root.unmount());
-            for (const [name, descriptor] of previous) {
-                if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-                else Reflect.deleteProperty(globalThis, name);
-            }
-            happyWindow.happyDOM.abort();
-            useMcpConfigStore.setState(mcpOriginal, true);
-            useSessionUIStore.setState(uiOriginal, true);
-        }
+    const formTool = (status: 'running' | 'completed'): ToolPart => ({
+        type: 'tool', id: 'form-tool', messageID, sessionID, callID: 'form-tool', tool: 'question',
+        state: status === 'running' ? { status, input: {}, time: { start: 1 } } : { status, input: {}, output: '', time: { start: 1, end: 2 } },
     });
+    const form: FormRequest = { id: 'form', sessionID, title: 'Deferred', fields: [{ key: 'answer', type: 'string' }], metadata: { kind: 'question', tool: { messageID, id: 'form-tool' } } };
+    type ObservedStatus = { current: AssistantStatusSnapshot | null; store: StoreApi<DirectoryStore> | null };
+    const observed: ObservedStatus = { current: null, store: null };
+    function Probe() {
+        const store = useDirectoryStore(directory, { bootstrap: false });
+        const seeded = React.useRef(false);
+        if (!seeded.current) {
+            seeded.current = true;
+            store.setState({ status: 'complete', sessionStatusReady: true, session_status: { [sessionID]: { type: 'busy' } },
+                message: { [sessionID]: [{ ...assistantMessage(messageID, 'provider', 'model'), sessionID }] },
+                part: { [messageID]: [command('npm test')] }, permission: {}, form: {} });
+        }
+        observed.store = store;
+        observed.current = useAssistantStatus();
+        return null;
+    }
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+        await act(async () => root.render(React.createElement(SyncProvider, { sdk, directory: '', children:
+            React.createElement(ChatColumnSessionContext.Provider, { value: { sessionId: sessionID, directory } }, React.createElement(Probe)),
+        })));
+        const store = observed.store;
+        if (!store) throw new Error('Expected the real directory store');
+        expect(observed.current?.working.status).toEqual({ key: 'chat.agentStatus.command' });
+        await act(async () => store.setState({ part: { [messageID]: [command('bun test --token=private')] } }));
+        expect(observed.current?.working.status).toEqual({ key: 'chat.agentStatus.command' });
+        expect(observed.current?.working.canAbort).toBe(true);
+        await act(async () => store.setState({ permission: { [sessionID]: [{ id: 'permission', sessionID, action: 'run', resources: [] }] } }));
+        expect(observed.current?.working.status).toEqual({ key: 'chat.agentStatus.waitingPermission' });
+        expect(observed.current?.working.isWaitingForPermission).toBe(true);
+        expect(observed.current?.working.canAbort).toBe(false);
+        await act(async () => store.setState({ permission: {}, form: { [sessionID]: [form] }, part: { [messageID]: [command('bun test'), formTool('completed')] } }));
+        expect(observed.current?.working.status).toEqual({ key: 'chat.agentStatus.command' });
+        expect(observed.current?.working.isWorking).toBe(true);
+        await act(async () => store.setState({ part: { [messageID]: [command('bun test'), formTool('running')] } }));
+        expect(observed.current?.working.status).toBeNull();
+        expect(observed.current?.working.canAbort).toBe(false);
+        await act(async () => store.setState({ form: {}, session_status: { [sessionID]: { type: 'idle' } } }));
+        expect(observed.current?.working.isWorking).toBe(false);
+        expect(observed.current?.working.status).toBeNull();
+    } finally {
+        await act(async () => root.unmount());
+        fetch.mockRestore();
+        useSessionUIStore.setState(previousUI);
+        useMcpConfigStore.setState(previousMcp);
+        await dom.happyDOM.close();
+        for (const [key, descriptor] of originals) {
+            if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+            else Reflect.deleteProperty(globalThis, key);
+        }
+    }
 });

@@ -115,15 +115,18 @@ test('a Code Mode call shows its script, the tools it called, and the truncation
       );
     });
 
-    // The row is named "Script", not "execute", and carries the braces icon.
-    expect(container.textContent).toContain('Script');
+    // A script whose calls share a provider uses that provider's name and icon.
+    expect(container.textContent).toContain('Linear');
     expect(container.textContent).not.toContain('execute');
-    expect(container.querySelector('use[href="#oc-braces"]')).not.toBeNull();
+    expect(container.querySelector('use[href="#oc-linear"]') !== null).toBe(true);
 
     // The description names the called tools, deduplicated and counted.
-    expect(container.textContent).toContain('linear.list_issues \u00d72, linear.get_workspace');
+    expect(container.textContent).toContain('list_issues \u00d72, get_workspace');
 
-    // The body lists every call with its input, and reports the truncated output.
+    // The body retains the original script and every call, including the failed call and its input.
+    expect(container.querySelector('pre')?.textContent).toBe('const issues = await linear.list_issues({ teamId: "OPE" });\nreturn issues;');
+    expect(container.textContent).toContain('linear.list_issues');
+    expect(container.textContent).toContain('linear.get_workspace');
     expect(container.textContent).toContain('Tool calls');
     expect(container.textContent).toContain('{"teamId":"OPE"}');
     expect(container.textContent).toContain('Output was truncated');

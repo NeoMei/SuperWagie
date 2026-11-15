@@ -67,7 +67,6 @@ export type TimelineRowsOptions = {
     collapsedActivity: boolean;
     expandedTurns: ReadonlyMap<string, boolean>;
     showReasoningTraces: boolean;
-    collapsibleThinkingBlocks?: boolean;
 };
 
 const isMessageCompleted = (message: ChatMessageEntry): boolean => (
@@ -136,7 +135,7 @@ const attachGroupMessageAliases = (rows: TimelineRow[], groups: ActivityGroups):
 
 const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[] => {
     const { turn } = entry;
-    const groups = getActivityGroups(turn.assistantMessages, options.collapsibleThinkingBlocks);
+    const groups = getActivityGroups(turn.assistantMessages);
     const underFold = options.collapsedActivity && hasLiveActivity(turn, options.showReasoningTraces);
     const finalMessage = underFold ? getLiveFinalMessage(turn.assistantMessages) : undefined;
     const fields = { entry, underFold, finalMessageId: finalMessage?.info.id, gapBelow: false };

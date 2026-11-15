@@ -221,6 +221,15 @@ describe("projectUserParts", () => {
 })
 
 describe("projectMessage (other roles)", () => {
+  test("completed compaction keeps the model that actually generated its summary", () => {
+    const result = projectMessage({
+      id: "summary", type: "compaction", time: { created: 1 }, status: "completed",
+      reason: "auto", summary: "Kept context", model: { providerID: "summary-provider", id: "summary-model" },
+      cost: 0, tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+    }, "ses_1")
+    expect(result.message).toMatchObject({ role: "compaction", model: { providerID: "summary-provider", id: "summary-model" } })
+  })
+
   test("every non-conversation message projects with its role and no parts", () => {
     const items: SessionMessageInfo[] = [
       { id: "1", type: "synthetic", time: { created: 1 }, text: "ctx" },

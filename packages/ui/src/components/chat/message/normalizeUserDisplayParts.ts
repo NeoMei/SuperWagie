@@ -9,7 +9,7 @@
  */
 
 import type { FilePart, Part, TextPart } from '@/lib/opencode/model';
-import { readContextPart } from '@/lib/messages/contextParts';
+import { readContextPart, type ContextPartPayload } from '@/lib/messages/contextParts';
 import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
 import type { SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { repositoryIssueLinkMime, trackerItemLinkMime } from '@/lib/messages/attachmentPreview';
@@ -48,6 +48,14 @@ const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
     return redundant;
 };
 
+/** A linked item a message's text can draw as an inline chip where its link stands. */
+export type InlineLinkedItem = Extract<ContextPartPayload, { kind: 'repository-issue' | 'repository-discussion' | 'change-request' | 'tracker-item' }>;
+
+const linkedItems = new WeakMap<Part, InlineLinkedItem>();
+
+/** The linked item behind a display part; attachments retain their existing file contract. */
+export const linkedItemOfDisplayPart = (part: Part): InlineLinkedItem | null => linkedItems.get(part) ?? null;
+
 /**
  * The display-only file part a linked issue or pull request renders as. It
  * keeps the identity of the context part it replaces, and never goes back to
@@ -56,7 +64,14 @@ const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
 const linkAttachmentPart = (part: TextPart, descriptorOf: SourceControlDescriptorOf): FilePart | null => {
     const payload = readContextPart(part);
     if (!payload) return null;
+    const display = displayPartOf(part, payload, descriptorOf);
+    if (display && (payload.kind === 'repository-issue' || payload.kind === 'repository-discussion' || payload.kind === 'change-request' || payload.kind === 'tracker-item')) {
+        linkedItems.set(display, payload);
+    }
+    return display;
+};
 
+const displayPartOf = (part: TextPart, payload: ContextPartPayload, descriptorOf: SourceControlDescriptorOf): FilePart | null => {
     const identity = { id: part.id, sessionID: part.sessionID, messageID: part.messageID };
 
     switch (payload.kind) {

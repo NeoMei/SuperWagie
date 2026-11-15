@@ -258,6 +258,7 @@ type ContentProps = React.ComponentProps<typeof BaseTooltip.Popup> & {
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   showArrow?: boolean;
+  anchor?: React.ComponentProps<typeof BaseTooltip.Positioner>["anchor"];
 };
 
 function TooltipContent({
@@ -268,12 +269,13 @@ function TooltipContent({
   children,
   style,
   showArrow = false,
+  anchor,
   ...props
 }: ContentProps) {
   return (
     <TooltipPartBoundary>
       <BaseTooltip.Portal>
-        <BaseTooltip.Positioner sideOffset={sideOffset} side={side} align={align} className="z-50">
+        <BaseTooltip.Positioner anchor={anchor} sideOffset={sideOffset} side={side} align={align} className="z-50">
           <BaseTooltip.Popup
             data-slot="tooltip-content"
             className={cn(

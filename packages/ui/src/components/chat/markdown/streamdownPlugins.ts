@@ -1,7 +1,7 @@
 import { cjk } from '@streamdown/cjk';
 import { createMathPlugin } from '@streamdown/math';
-import { defaultRehypePlugins, defaultRemarkPlugins, type MathPlugin, type StreamdownProps } from 'streamdown';
-import type { Processor } from 'unified';
+import { defaultRehypePlugins, defaultRemarkPlugins, type CjkPlugin, type MathPlugin, type StreamdownProps } from 'streamdown';
+import type { Pluggable, Plugin, Processor } from 'unified';
 import type { Root, RootContent } from 'mdast';
 import rehypeSanitize from 'rehype-sanitize';
 import { remarkAlerts, MARKDOWN_ALERT_KINDS } from './remarkAlerts';
@@ -11,7 +11,26 @@ import { rehypeMarkdownPolicy, rehypeRestoreMarkdownLinks } from './rehypeMarkdo
 import { isInvisibleText } from '@/lib/invisibleText';
 import { findSessionLinks } from '@/lib/sessionLinks';
 
-export const markdownCjk = cjk;
+// Micromark merges GFM and CJK registrations, so both must disable single tildes.
+const strictTildes = { singleTilde: false } as const;
+type GfmRegistration = [Plugin, { singleTilde: boolean }];
+// SAFETY: pinned Streamdown 2.7.1 exports GFM as [remarkGfm, { singleTilde }]; its public
+// declaration widens the entry to Pluggable. Preserve only the plugin function.
+const gfmEntry = defaultRemarkPlugins.gfm as GfmRegistration;
+const defaultRemarkPluginList: Pluggable[] = [
+  [gfmEntry[0], strictTildes],
+  ...Object.values(defaultRemarkPlugins).filter((plugin) => plugin !== defaultRemarkPlugins.gfm),
+];
+
+// SAFETY: pinned @streamdown/cjk 1.0.4 appends the bare strikethrough plugin last.
+const cjkStrikethrough = cjk.remarkPluginsAfter.at(-1) as Plugin;
+export const markdownCjk: CjkPlugin = {
+  ...cjk,
+  remarkPluginsAfter: [...cjk.remarkPluginsAfter.slice(0, -1), [cjkStrikethrough, strictTildes]],
+};
+export function getMarkdownCjk(singleTilde = false): CjkPlugin {
+  return singleTilde ? cjk : markdownCjk;
+}
 const officialMath = createMathPlugin({ singleDollarTextMath: false });
 // Streamdown appends math's remark plugin after the configured remark plugins.
 // Keeping the compatibility transformer here makes it run after remark-math.
@@ -75,6 +94,12 @@ function remarkSessionLinks() {
   };
 }
 
+/** Preserve typed HTML and entities at parse time, including inside code and math. */
+export function remarkLiteralText(this: Processor) {
+  const data = this.data();
+  (data.micromarkExtensions ??= []).push({ disable: { null: ['htmlFlow', 'htmlText', 'characterReference'] } });
+}
+
 // Static mode parses the whole document without the streaming BlockComponent.
 // Match the original top-level source policy without stripping inline joiners.
 function remarkVisibleBlocks() {
@@ -89,9 +114,9 @@ function remarkVisibleBlocks() {
   };
 }
 
-function createOptions(allowRawHtml: boolean, isVSCode: boolean): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
+function createOptions(allowRawHtml: boolean, isVSCode: boolean, singleTilde: boolean): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
   return {
-    remarkPlugins: [...Object.values(defaultRemarkPlugins), remarkDisclosures, remarkAlerts, remarkVisibleBlocks, remarkSessionLinks],
+    remarkPlugins: [...(singleTilde ? Object.values(defaultRemarkPlugins) : defaultRemarkPluginList), remarkDisclosures, remarkAlerts, remarkVisibleBlocks, remarkSessionLinks],
     rehypePlugins: [
       ...(allowRawHtml ? [defaultRehypePlugins.raw] : []),
       [rehypeMarkdownPolicy, { isVSCode }],
@@ -101,7 +126,10 @@ function createOptions(allowRawHtml: boolean, isVSCode: boolean): Pick<Streamdow
     ],
   };
 }
-const policies = [createOptions(false, false), createOptions(false, true), createOptions(true, false), createOptions(true, true)];
-export function getMarkdownProcessingOptions(allowRawHtml: boolean, isVSCode: boolean): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
-  return policies[(allowRawHtml ? 2 : 0) + (isVSCode ? 1 : 0)];
+const policies = [false, true].flatMap(singleTilde => [
+  createOptions(false, false, singleTilde), createOptions(false, true, singleTilde),
+  createOptions(true, false, singleTilde), createOptions(true, true, singleTilde),
+]);
+export function getMarkdownProcessingOptions(allowRawHtml: boolean, isVSCode: boolean, singleTilde = false): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
+  return policies[(singleTilde ? 4 : 0) + (allowRawHtml ? 2 : 0) + (isVSCode ? 1 : 0)];
 }

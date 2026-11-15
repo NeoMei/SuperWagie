@@ -1,3 +1,4 @@
+import { ChatTranscriptDirectoryContext } from './chatColumnSession';
 import React from 'react';
 import { LegendList, type LegendListRef } from '@legendapp/list/react';
 
@@ -23,7 +24,7 @@ import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { buildTimelineRows, type TimelineRow } from './lib/turns/timelineRows';
 import { getActivityGroups } from './lib/turns/activityGroups';
-import { ActivityGroupsContext, ActivityGroupStreamContext } from './components/activityGroupsContext';
+import { ActivityGroupsContext } from './components/activityGroupsContext';
 import { getNormalizedMessageForDisplay } from './lib/messageDisplayNormalization';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
 import { useUIStore } from '@/stores/useUIStore';
@@ -448,22 +449,7 @@ const TurnRow = React.memo(({
     ...rendererInput
 }: TurnRowProps) => {
     const { turn } = entry;
-    const groupReasoning = useUIStore((state) => state.collapsibleThinkingBlocks);
-    const groups = getActivityGroups(turn.assistantMessages, groupReasoning);
-    let activeGroupMessageId = rendererInput.activeStreamingMessageId ?? null;
-    if (!activeGroupMessageId && entry.isLastTurn && rendererInput.sessionIsWorking) {
-        for (let index = turn.assistantMessages.length - 1; index >= 0; index -= 1) {
-            const message = turn.assistantMessages[index];
-            if (message.info.role === 'assistant' && !message.info.time.completed) {
-                activeGroupMessageId = message.info.id;
-                break;
-            }
-        }
-    }
-    const groupStream = React.useMemo(() => ({
-        messageId: activeGroupMessageId ?? null,
-        phase: activeGroupMessageId ? rendererInput.activeStreamingPhase ?? 'streaming' : null,
-    }), [activeGroupMessageId, rendererInput.activeStreamingPhase]);
+    const groups = getActivityGroups(turn.assistantMessages);
     const renderMessage = useTurnMessageRenderer({
         ...rendererInput,
         turn,
@@ -508,14 +494,12 @@ const TurnRow = React.memo(({
     const underFold = row.underFold;
     return (
         <ActivityGroupsContext.Provider value={groups}>
-        <ActivityGroupStreamContext.Provider value={groupStream}>
         <div className={cn('relative w-full', row.gapBelow && 'pb-2')} data-turn-row={turn.turnId}>
             {row.kind === 'turn-message' ? row.messageAliases?.map((id) => <span key={id} data-message-id={id} aria-hidden="true" className="block h-0 overflow-hidden" />) : null}
             {underFold ? (
                 <LiveTurnHoistedPagesContext.Provider value={foldContexts.hoistedPages}>{content}</LiveTurnHoistedPagesContext.Provider>
             ) : content}
         </div>
-        </ActivityGroupStreamContext.Provider>
         </ActivityGroupsContext.Provider>
     );
 });
@@ -1144,11 +1128,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             collapsedActivity: !defaultActivityExpanded,
             expandedTurns: turnExpansion,
             showReasoningTraces,
-            collapsibleThinkingBlocks,
         }, previousRowsRef.current);
         previousRowsRef.current = next;
         return next;
-    }), [allEntries, collapsibleThinkingBlocks, defaultActivityExpanded, showReasoningTraces, turnExpansion]);
+    }), [allEntries, defaultActivityExpanded, showReasoningTraces, turnExpansion]);
 
     // The prompt rows the list keeps on top while their turn scrolls under them.
     const stickyRowIndices = React.useMemo(() => {
@@ -1597,6 +1580,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // fade on every remount reads as blinking. Rows are never "new" from the
         // list's point of view, so fade-in is disabled for them — content
         // arriving inside the streaming tail keeps its own animations.
+        <ChatTranscriptDirectoryContext.Provider value={directory ?? null}>
         <FadeInDisabledProvider disabled>
             <LiveTailSource entry={trailingStreamingEntry} directory={directory}
                 showTurnChangedFiles={showTurnChangedFiles} store={liveTail} />
@@ -1618,6 +1602,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     collapsibleThinkingBlocks={collapsibleThinkingBlocks}
                 />
         </FadeInDisabledProvider>
+        </ChatTranscriptDirectoryContext.Provider>
     );
 });
 

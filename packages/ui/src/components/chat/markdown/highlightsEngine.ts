@@ -35,6 +35,15 @@ export const resolveHighlights = async (lang: string): Promise<HighlightsTarget 
   return highlightsNow(lang);
 };
 
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+// CSI colours/cursor movement, OSC titles/hyperlinks and two-character escapes.
+const ANSI_ESCAPES = new RegExp(
+  `${ESC}(?:\\[[0-?]*[ -/]*[@-~]|\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)?|[@-Z\\\\^_])`,
+  'g',
+);
+export const stripAnsi = (code: string): string => code.replace(ANSI_ESCAPES, '');
+
 type StyledToken = { content: string; color?: string; fontStyle?: number };
 
 // Shiki FontStyle bitmask, which Highlights tokens share.

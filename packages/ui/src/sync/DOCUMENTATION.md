@@ -1545,6 +1545,13 @@ their tool calls qualify. A fetched completed tool overrides an earlier local
 interruption. A moved session moves its captured question's directory. Recovery
 never changes permission state or grants execution authority.
 
+Open forms and turn holding are separate. A linked pending or running tool
+holds the turn; a completed or failed tool leaves its form open and answerable
+without replacing Stop or Queue. An unloaded link stays unknown until its
+owning session read succeeds. That read shares work only inside its runtime
+instance, manager and owning store; failure or retirement publishes no release
+evidence. A new prompt cancels only holding forms in its session subtree.
+
 Blocking-request recovery overlays live mutations recorded during its read.
 A settled form cannot reappear from an older nonempty snapshot. Runtime and
 owning-store guards retire results before global question capture or store
@@ -1570,6 +1577,13 @@ shutdown question outcomes in the recovery owner before store publication.
 History trimming and cache eviction cannot erase that terminal authority.
 Retired runtime or store reads publish no veto, and runtime reset clears this
 bounded memory before same-ID questions on another host are observed.
+
+### Why form lifetime does not determine turn activity
+
+Deferred forms can outlive the call that created them. Treating every open form
+as blocking hid a running turn and cancelled answerable background questions
+on the next prompt. Tool status supplies the holding verdict, while the form
+keeps its independent reply and settlement lifecycle.
 
 ### Catalog batch ownership
 

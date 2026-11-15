@@ -122,6 +122,10 @@ export function onPageWaiting(container: HTMLElement, listener: (block: HTMLElem
 // start into view: the reader was at the end of the tab they left.
 const TAB_STEP_EVENT = 'openchamber:tab-step';
 
+export function dispatchTabStep(tabs: HTMLElement | null): void {
+    tabs?.dispatchEvent(new CustomEvent(TAB_STEP_EVENT, { bubbles: true }));
+}
+
 /** Listens for Tabs stepping to their next tab inside `container`. */
 export function onTabStep(container: HTMLElement, listener: (tabs: HTMLElement) => void): () => void {
     const handle = (event: Event) => {

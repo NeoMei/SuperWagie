@@ -27,10 +27,13 @@ type RecoverableQuestionsState = {
   outcomes: ReadonlyMap<string, ClosedOutcome>
   dispositions: ReadonlyMap<string, { sessionID: string; outcome: QuestionAskOutcome }>
   submissions: ReadonlyMap<string, Promise<void>>
+  // A read proved these open forms belong to an ended call. Settlement or
+  // removal of the form retires the evidence.
+  releasedForms: ReadonlySet<string>
 }
 
 const EMPTY_STATE: RecoverableQuestionsState = {
-  seen: new Map(), outcomes: new Map(), dispositions: new Map(), submissions: new Map(),
+  seen: new Map(), outcomes: new Map(), dispositions: new Map(), submissions: new Map(), releasedForms: new Set(),
 }
 const MAX_SEEN_QUESTIONS = 100
 export const useRecoverableQuestionsStore = create<RecoverableQuestionsState>(() => EMPTY_STATE)
@@ -42,11 +45,52 @@ const toolKey = (tool: QuestionToolLink): string => `${tool.messageID}\u0000${to
 
 const questionToolSchema = z.object({ messageID: z.string().min(1), id: z.string().min(1) })
 
-export function questionToolLink(form: FormRequest): QuestionToolLink | null {
-  const metadata = form.metadata
-  if (form.sessionID === "global" || metadata?.kind !== "question") return null
-  const parsed = questionToolSchema.safeParse(metadata.tool)
+/** A session form can be linked by the question tool or by a deferred plugin. */
+export function formToolLink(form: FormRequest): QuestionToolLink | null {
+  if (form.sessionID === "global") return null
+  const parsed = questionToolSchema.safeParse(form.metadata?.tool)
   return parsed.success ? { messageID: parsed.data.messageID, toolID: parsed.data.id } : null
+}
+
+export function questionToolLink(form: FormRequest): QuestionToolLink | null {
+  return form.metadata?.kind === "question" ? formToolLink(form) : null
+}
+
+export type FormTurnHold = "holds" | "released" | "unknown"
+
+/** Unloaded linked calls stay unknown until a successful read establishes their state. */
+export function formTurnHold(
+  form: FormRequest,
+  parts: Readonly<Record<string, readonly Part[] | undefined>>,
+  releasedForms: ReadonlySet<string> = EMPTY_STATE.releasedForms,
+): FormTurnHold {
+  const tool = formToolLink(form)
+  if (!tool) return "holds"
+  if (releasedForms.has(formReleaseKey(form, tool))) return "released"
+  const part = parts[tool.messageID]?.find((candidate) => candidate.id === tool.toolID)
+  if (!part) return "unknown"
+  if (part.type !== "tool") return "holds"
+  return part.state.status === "completed" || part.state.status === "error" ? "released" : "holds"
+}
+
+// The same form ID can be reused after settlement; its tool link is part of its identity.
+export const formReleaseKey = (form: FormRequest, tool: QuestionToolLink): string =>
+  `${form.sessionID}\u0000${form.id}\u0000${toolKey(tool)}`
+
+export function noteFormToolReleased(key: string, openKeys: ReadonlySet<string>): void {
+  useRecoverableQuestionsStore.setState((state) => {
+    const releasedForms = new Set([...state.releasedForms].filter((entry) => openKeys.has(entry))).add(key)
+    if (releasedForms.size === state.releasedForms.size && state.releasedForms.has(key)) return state
+    return { releasedForms }
+  })
+}
+
+function forgetReleasedForm(sessionID: string, formID: string): void {
+  const prefix = `${sessionID}\u0000${formID}\u0000`
+  useRecoverableQuestionsStore.setState((state) => {
+    if (![...state.releasedForms].some((key) => key.startsWith(prefix))) return state
+    return { releasedForms: new Set([...state.releasedForms].filter((key) => !key.startsWith(prefix))) }
+  })
 }
 
 // Unknown wording fails closed. Shutdown keeps OpenCode's turn resumable.
@@ -206,7 +250,9 @@ function dropSession(sessionID: string): void {
     }
     const dispositions = new Map(state.dispositions)
     for (const [key, entry] of dispositions) if (entry.sessionID === sessionID) dispositions.delete(key)
-    return { seen, outcomes, dispositions }
+    const prefix = `${sessionID}\u0000`
+    const releasedForms = new Set([...state.releasedForms].filter((key) => !key.startsWith(prefix)))
+    return { seen, outcomes, dispositions, releasedForms }
   })
 }
 
@@ -217,6 +263,7 @@ export function applyRecoverableQuestionEvents(directory: string, events: readon
         noteQuestionFormSeen(event.properties.form, directory)
         break
       case "form.settled":
+        forgetReleasedForm(event.properties.sessionID, event.properties.formID)
         // Turn death cancels its form too; only a reply is conclusive here.
         if (event.properties.disposition === "replied") noteLocalFormReplied(event.properties.formID)
         break

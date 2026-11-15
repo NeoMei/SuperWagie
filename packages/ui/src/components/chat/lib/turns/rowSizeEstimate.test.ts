@@ -51,12 +51,12 @@ test('reasoning shown and each tool add a line', () => {
     expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(108);
 });
 
-test('adjacent reasoning and command groups each estimate one header', () => {
+test('each upstream reasoning part and one command group estimate their own header', () => {
     const rows = rowsOf([
         assistant('step', [reasoning('r1', 'First thought'), reasoning('r2', 'Second thought'), tool('s1', 'shell'), tool('s2', 'shell')]),
         assistant('answer', [text('done', 'Done.')]),
     ]);
-    expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(72);
+    expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(108);
     const plain = estimateTimelineRowSize(messageRow(rows, 'step'), { ...metrics, collapsibleThinkingBlocks: false });
     expect(plain).toBe(112);
 });

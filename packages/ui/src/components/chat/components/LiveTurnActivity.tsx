@@ -13,7 +13,7 @@ import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { getShownPages } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
-import { ShownToolCard } from '../message/parts/ShownToolCard';
+import { ShownPartCard } from '../message/parts/ShownToolCard';
 import { useActivityRowGlide, useLiveRowsFloor } from './useActivityRowGlide';
 import { foldContentId, finalActivityContentId, useTurnFold } from './useTurnFold';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
@@ -43,8 +43,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     // Folded, a working turn shows only its latest rows (the header counts
     // the earlier ones) and a settled one shows none.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    const groupReasoning = useUIStore((state) => state.collapsibleThinkingBlocks);
-    const groups = getActivityGroups(turn.assistantMessages, groupReasoning);
+    const groups = getActivityGroups(turn.assistantMessages);
     const trim = React.useMemo(() => (expanded
         ? null
         : planActivityTrim(
@@ -171,7 +170,7 @@ function TurnPages({ pages }: { pages: ReturnType<typeof getShownPages> }) {
 }
 
 function TurnPage({ part }: { part: ShownPart }) {
-    return <ShownToolCard part={part} />;
+    return <ShownPartCard part={part} />;
 }
 
 /** The pages row of an opened fold. */

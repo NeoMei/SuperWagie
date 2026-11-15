@@ -1628,6 +1628,12 @@ class OpencodeService {
     await call("session.revert.clear", () => this.clientFor(directory).session.revert.clear({ sessionID: sessionId }))
   }
 
+
+  /** Commits a staged revert: OpenCode deletes the boundary message and everything after it. */
+  async commitRevert(sessionId: string, directory?: string | null): Promise<void> {
+    await call("session.revert.commit", () => this.clientFor(directory).session.revert.commit({ sessionID: sessionId }))
+  }
+
   /** Compacts the transcript; the result arrives as a compaction message through events. */
   async compactSession(sessionId: string, directory?: string | null): Promise<void> {
     await call("session.compact", () => this.clientFor(directory).session.compact({ sessionID: sessionId }))
@@ -1889,6 +1895,36 @@ class OpencodeService {
     }
     const page = await call("shell.output", () => client.shell.output({ id: shellID, cursor: start, limit: tailBytes }).then((r) => r.data))
     return { output: page.output, cursor: page.cursor, skipped: cursor === undefined && start > 0 }
+  }
+
+  /**
+   * Hands the agent input the user gave outside the composer, such as the
+   * choices in a UI block of its last reply, and starts its next turn. The
+   * input is a synthetic message: the chat shows no user bubble for it, and
+   * `metadata` lets the chat find it again.
+   */
+  async resumeWithSyntheticInput(params: {
+    runtimeKey: string
+    /** Client-minted, so a retry after a lost response is refused as a repeat instead of landing twice. */
+    id: string
+    sessionId: string
+    directory?: string | null
+    text: string
+    metadata: Metadata
+  }): Promise<void> {
+    const isCurrentRuntime = captureRuntimeInstance()
+    this.assertRuntimeUnchanged(params.runtimeKey)
+    const client = this.clientFor(params.directory)
+    await call("session.synthetic", () =>
+      client.session.synthetic({
+        sessionID: params.sessionId,
+        id: params.id,
+        text: params.text,
+        metadata: params.metadata,
+        resume: true,
+      }),
+    )
+    if (!isCurrentRuntime()) throw new Error("The runtime changed before the input result could be confirmed.")
   }
 
   /**

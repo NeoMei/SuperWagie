@@ -41,3 +41,15 @@ pending pages through `useMessageSearch`.
 `EditorState.readOnly` in the same compartment. The state facet prevents
 history commands and other editing commands from changing a read-only view.
 Re-enabling editing retains the document's existing undo and redo history.
+
+## Provider marks
+
+`ProviderLogo` preserves the selected custom icon and the provider hook's native
+asset priority. Metadata callers can tint a logo with the current text colour
+and supply a fallback. A hidden CORS image observes mask load failure, so an
+unavailable logo follows the same fallback path as an ordinary image.
+
+- Structured reply dates and times use `date-time.tsx` with the same persisted
+  calendar preferences as scheduled tasks. Provider marks can opt into the
+  upstream muted text-color mask for transcript facts; the default provider
+  picker and SuperWagie account logo resolution remain owned by their hooks.

@@ -18,10 +18,10 @@ const encodeHrefPart = (value: string): string =>
  * below by a pixel; the chip still paints at its full height.
  */
 export const INLINE_REFERENCE_CHIP_CLASS =
-    'mx-px -my-[0.2em] inline-flex h-[1.3em] max-w-full items-center gap-1 overflow-hidden whitespace-nowrap rounded-md border border-border/70 bg-background/50 px-1.5 align-middle text-[0.875em] leading-none text-foreground';
+    'mx-px -my-[0.2em] inline-flex h-[1.3em] max-w-full items-center gap-1 whitespace-nowrap rounded-md border border-edge bg-background/50 px-1.5 align-middle text-[0.875em] leading-none text-foreground';
 
 /** The label inside a reference chip: one line, cut with an ellipsis where the field is narrower than the name. */
-export const REFERENCE_CHIP_LABEL_CLASS = 'min-w-0 truncate';
+export const REFERENCE_CHIP_LABEL_CLASS = 'min-w-0 truncate leading-normal';
 
 /**
  * Punctuation the user typed right after a chip (`, . : ; ! ? …`, closing

@@ -19,6 +19,10 @@ the normalized language sent by `I18nProvider`.
   same normalization. A retired saved language cannot reactivate its dictionary.
 - Switching language preserves mounted UI state and writes the normalized value
   to local storage. Settings persistence accepts the same active languages.
+- Plain user-text direction follows the words in each line independently of
+  the interface language. Inline code, URLs and reference chips do not decide
+  the direction of mixed prose. Direction markers use generated content,
+  preserving copied source text.
 - Recorded model connection failures carry semantic summary keys. Transcript
   and session notices resolve them at render time, including existing history;
   original error details remain available without translation.
@@ -45,5 +49,6 @@ languages. Compatibility normalization preserves startup from retired saved tags
 
 Live status selectors carry dictionary keys and count/name/reasoning values.
 Translation happens inside reactive render hooks, so language changes update
-held status without restarting execution or resetting the display hold. English
-and Simplified Chinese use separate complete singular and counted messages.
+held status without restarting execution or resetting the display hold. The transcript uses the upstream ICU plural messages, formatted in the active
+locale with counts and names passed as values rather than substituted into
+fragments. English and Simplified Chinese share the same semantic status data.

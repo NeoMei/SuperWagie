@@ -12,6 +12,7 @@ import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-sys
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { applyBackgroundShellEvents, backgroundShellRevision, replaceDirectoryShells, resetBackgroundShells } from '@/sync/background-shells';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
@@ -95,6 +96,8 @@ const withHarness = async (
     fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
   });
 
+  const previousPreference = useUIStore.getState().expandReasoningWhileStreaming;
+  useUIStore.setState({ expandReasoningWhileStreaming: true });
   const previousDirectory = useDirectoryStore.getState().currentDirectory;
   let manager: ReturnType<typeof useChildStoreManager> | undefined;
   const CaptureManager = () => { manager = useChildStoreManager(); return null; };
@@ -132,6 +135,7 @@ const withHarness = async (
     });
   } finally {
     await act(async () => { root.unmount(); });
+    useUIStore.setState({ expandReasoningWhileStreaming: previousPreference });
     useDirectoryStore.setState({ currentDirectory: previousDirectory });
     replaceGlobalSessionStatusById(new Map());
     resetGlobalBlockingRequests();
@@ -179,10 +183,10 @@ test('a grouped background command follows authoritative completion while collap
       expect(status(container)).toBe('running');
       expect(header()?.getAttribute('aria-expanded')).toBe('true');
       expect(container.querySelectorAll('[data-command-header]').length).toBe(1);
-      expect(container.querySelector('button[aria-label="Stop command"]')).not.toBeNull();
+      expect(container.querySelector('button[aria-label="Stop command"]') !== null).toBe(true);
       await act(async () => { header()?.click(); });
       expect(header()?.getAttribute('aria-expanded')).toBe('false');
-      expect(container.querySelector('button[aria-label="Stop command"]')).toBeNull();
+      expect(container.querySelector('[data-command-scroll]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden')).toBe('true');
       const reads = read.mock.calls.length;
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1100)); });
       expect(read.mock.calls.length).toBe(reads);
@@ -194,9 +198,9 @@ test('a grouped background command follows authoritative completion while collap
       expect(header()?.getAttribute('aria-expanded')).toBe('false');
       await act(async () => { header()?.click(); });
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 130)); });
-      expect(container.querySelector('[data-command-group-output]')?.textContent).toContain('command output');
-      expect(container.querySelector('[data-command-group-output]')?.textContent).toContain('stable output');
-      expect(container.querySelector('[data-command-group-output]')?.textContent).toContain('exited (2)');
+      expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('command output');
+      expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('stable output');
+      expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('exited (2)');
       await remount();
       expect(status(container)).toBe('failed');
       expect(header()?.getAttribute('aria-expanded')).toBe('false');
@@ -211,7 +215,7 @@ test('a grouped command does not infer stop from disappearance or a rejected sto
     await withHarness(backgrounded, false, async (store, container) => {
       await act(async () => { start(); });
       const button = container.querySelector<HTMLButtonElement>('button[aria-label="Stop command"]');
-      expect(button).not.toBeNull();
+      expect(button !== null).toBe(true);
       await act(async () => { button?.click(); });
       expect(stop.mock.calls).toHaveLength(1);
       expect(status(container)).toBe('running');

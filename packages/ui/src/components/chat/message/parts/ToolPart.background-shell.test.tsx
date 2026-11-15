@@ -12,6 +12,7 @@ import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-sys
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { applyBackgroundShellEvents, backgroundShellRevision, replaceDirectoryShells, resetBackgroundShells } from '@/sync/background-shells';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
@@ -31,7 +32,7 @@ plugin({
   },
 });
 
-const { default: ToolPart } = await import('@/components/chat/message/parts/ToolPart');
+const { CommandActivityGroup } = await import('./CommandActivityGroup');
 
 const unexpectedThemeChange = (): never => { throw new Error('Rendering must not change the theme'); };
 const theme = getDefaultTheme(false);
@@ -95,6 +96,8 @@ const withHarness = async (
     fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
   });
 
+  const previousPreference = useUIStore.getState().expandReasoningWhileStreaming;
+  useUIStore.setState({ expandReasoningWhileStreaming: true });
   const previousDirectory = useDirectoryStore.getState().currentDirectory;
   let manager: ReturnType<typeof useChildStoreManager> | undefined;
   const CaptureManager = () => { manager = useChildStoreManager(); return null; };
@@ -110,7 +113,7 @@ const withHarness = async (
           <CaptureManager />
           <I18nProvider>
             <ThemeSystemContext.Provider value={themeContext}>
-              <ToolPart key={renderKey} part={currentPart} isExpanded={isExpanded} isMobile={false} onToggle={() => {}} />
+              <CommandActivityGroup key={renderKey} id={currentPart.id} parts={[currentPart]} isExpanded={isExpanded} isMobile={false} onToggle={() => {}} />
             </ThemeSystemContext.Provider>
           </I18nProvider>
         </SyncProvider>,
@@ -132,6 +135,7 @@ const withHarness = async (
     });
   } finally {
     await act(async () => { root.unmount(); });
+    useUIStore.setState({ expandReasoningWhileStreaming: previousPreference });
     useDirectoryStore.setState({ currentDirectory: previousDirectory });
     replaceGlobalSessionStatusById(new Map());
     resetGlobalBlockingRequests();
@@ -190,7 +194,7 @@ for (const state of reportedEnds) test(`a requested stop preserves a later ${sta
       expect(status(container)).toBe(state.want);
       await remount();
       expect(status(container)).toBe(state.want);
-      expect(container.querySelector('button[aria-label="Stop command"]')).toBeNull();
+      expect(container.querySelector('button[aria-label="Stop command"]') === null).toBe(true);
     });
   } finally { resetBackgroundShells(); }
 });
@@ -267,7 +271,7 @@ for (const nativeStatus of ['timeout', 'killed'] as const) {
         };
         await act(async () => { start(); });
         const button = container.querySelector<HTMLButtonElement>('button[aria-label="Stop command"]');
-        expect(button).not.toBeNull();
+        expect(button !== null).toBe(true);
         await act(async () => { button?.click(); });
         expect(status(container)).toBe('running');
         await act(async () => { end({ kind: 'exited', status: nativeStatus }); });
@@ -301,8 +305,8 @@ test('a foreground stop stays pending across the background row remount and remo
   try {
     await withHarness(foreground, false, async (store, container, remount) => {
       await act(async () => { start(); });
-      const button = container.querySelector<HTMLButtonElement>('button[aria-label^="Stop this command"]');
-      expect(button).not.toBeNull();
+      const button = container.querySelector<HTMLButtonElement>('button[aria-label="Stop command"]');
+      expect(button !== null).toBe(true);
       await act(async () => { button?.click(); button?.click(); await backgroundMoved; });
       await remount(backgrounded);
       expect(status(container)).toBe('stopping');
@@ -356,7 +360,7 @@ test('a reader collapse survives a running foreground command moving to the back
       });
       expect(header()?.getAttribute('aria-expanded')).toBe('false');
       await act(async () => { header()?.click(); });
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 140)); });
       expect(container.querySelector('[data-command-output]')?.textContent).toContain('command output');
     });
   } finally { resetBackgroundShells(); }
@@ -365,7 +369,7 @@ test('a reader collapse survives a running foreground command moving to the back
 test('a stopped command folds with its last observed output retained, then prefers the terminal report', async () => {
   resetBackgroundShells();
   const read = spyOn(opencodeClient, 'readShellOutput').mockResolvedValue({ output: 'before stop\n', cursor: 12, skipped: false });
-  const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+  const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 140)); });
   try {
     await withHarness(backgrounded, false, async (store, container, remount) => {
       await act(async () => { start(); });
@@ -374,7 +378,8 @@ test('a stopped command folds with its last observed output retained, then prefe
       await act(async () => { end({ kind: 'removed' }); });
       expect(status(container)).toBe('stopped');
       expect(container.querySelector('[data-command-header]')?.getAttribute('aria-expanded')).toBe('false');
-      expect(container.querySelector('[data-command-output]')).toBeNull();
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 240)); });
+      expect(container.querySelector('[data-command-output]') === null).toBe(true);
       await act(async () => { container.querySelector<HTMLElement>('[data-command-header]')?.click(); });
       await flush();
       expect(container.querySelector('[data-command-output]')?.textContent).toContain('before stop');
@@ -405,13 +410,13 @@ test('the ordinary background stop confirms removal and keeps the stopped result
       };
       await act(async () => { start(); });
       const button = container.querySelector<HTMLButtonElement>('button[aria-label="Stop command"]');
-      expect(button).not.toBeNull();
+      expect(button !== null).toBe(true);
       await act(async () => { button?.click(); });
       expect(status(container)).toBe('stopped');
       expect(stop.mock.calls[0]?.[0].shells).toEqual([shell]);
       await remount();
       expect(status(container)).toBe('stopped');
-      expect(container.querySelector('button[aria-label="Stop command"]')).toBeNull();
+      expect(container.querySelector('button[aria-label="Stop command"]') === null).toBe(true);
     });
   } finally { stop.mockRestore(); resetBackgroundShells(); }
 });

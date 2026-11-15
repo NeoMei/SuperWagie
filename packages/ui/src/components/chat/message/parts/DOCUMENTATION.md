@@ -4,6 +4,13 @@ This folder contains renderers for chat message parts (text, tools, reasoning, p
 
 Use this doc when changing message parts, tool disclosures, or timeline rendering.
 
+## UI program page capability boundary
+
+- `ShownPage` selects `UiPageFrame` for a recorded `ui` program and keeps the existing sandboxed HTML frame for an HTML page. Native UI programs use the app-owned block catalog; extension component contracts are not enabled by this renderer.
+- A waiting native page answers through the existing `/api/openchamber/render/answer` contract, with only the session, call, summary and answer data. Settled pages restore recorded choices when their answer matches the native block contract and keep controls disabled.
+- A program that cannot be parsed or drawn retains its errors and source. This runtime does not send unsupported `notDrawn` or decline requests, or add later-answer protocols to its backend.
+- Unsupported generated-image and secret-card capabilities retain the ordinary tool row and its full result. They are not hoisted into a card that this runtime cannot serve.
+
 ## High-level flow
 
 - `MessageList` projects turns into prompt, Activity, message-slice, and interaction rows.
@@ -55,7 +62,7 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
   - If a tool should switch between static vs expandable, change it here.
 
 - `ReasoningPart.tsx`
-  - Thinking disclosure UI (`ReasoningTimelineBlock`), shared by consecutive parts. Each source keeps its own streaming throttle and search identity inside the bounded body.
+  - Thinking disclosure UI (`ReasoningTimelineBlock`) follows upstream per-part and per-message boundaries, streaming throttle, search identity and expansion preference. Command groups reuse its disclosure and bounded scroll behavior without merging thinking.
 
 - `AssistantTextPart.tsx` and `message/MessageBody.tsx`
   - Text follows upstream block commits while streaming. `MessageSliceContext` selects the visible range of a completed long message without changing the underlying record.
@@ -65,7 +72,7 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
   - Exports the upstream `TurnFold`. Expanded Activity is the default and renders the normal timeline without an outer disclosure.
   - The optional Collapsed preference shows the latest seven actual rows while running and folds completed work. It does not copy reasoning, command strings, or output into the header.
   - `useTurnFold` retains reader expansion within the session. `LiveActivityCollapse` mounts visible content immediately, with no height animation or scroll-to-bottom.
-  - Questions, accepted rendered pages, and proposed workflows remain accessible through the existing shown-interaction path. `LiveTurnHoistedPagesContext` prevents duplicate call cards.
+  - Accepted rendered pages, proposed workflows and intermediate assistant text with UI blocks remain accessible through the upstream shown-interaction path. Ordinary questions keep the upstream tool-row presentation. `LiveTurnHoistedPagesContext` prevents duplicate call cards.
   - `lib/turns/liveActivity.ts` owns final-answer boundaries; `timelineRows.ts` owns stable list-row projection.
 
 - `CommandActivityGroup.tsx` and `CommandExecution.tsx`
@@ -74,7 +81,7 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
   - `ToolPart` retains authoritative foreground/background lifecycle, cancellation, and content completion. Member controllers remain mounted while folded; output polling and content mounting stop with group expansion.
 
 - `ShownToolCard.tsx`
-  - Draws questions, proposed workflow runs, and accepted `openchamber_render` pages in their call order. `getShownPages` uses the existing interaction classification; the hoisted call-ID set prevents duplicate in-place cards when the optional Activity fold is opened.
+  - Draws proposed workflow runs, accepted `openchamber_render` pages and intermediate text with UI blocks in source order. A settled form remains as a status line only after earlier shown content; the hoisted call-ID set prevents duplicate in-place cards when the optional Activity fold is opened.
   - A question uses the existing `ToolPart` body, open by default in both activity modes. It shows the question and choices while pending or running, the recorded answer after completion, and the original question alongside a dismissal or failure reason. These remain available on revisit. Readers can explicitly close its details. Live choices, drafts, submit and dismiss stay in the authoritative `FormDock`; transcript history never manufactures a pending form or submits an answer.
   - The workflow card (`components/chat/workflows/WorkflowRunCard.tsx`) reads the run from the server's store, not from the call: the plan with its phases, the run's state, and Run and Don't run while it waits for approval, Stop while it runs, Resume after a failure or stop. The card is current after a reload and on every device; a run the server no longer has says so.
   - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
@@ -117,6 +124,19 @@ annotation pass. Each list item owns its logical gutter, allowing adjacent
 Arabic and English items. Inline code and code widgets remain LTR isolates.
 Direction changes must preserve source and copy text. Disclosures use native
 `details` and `summary` with a React-owned chevron that follows the open state.
+
+Plain user-text lines prepend generated marks for the direction of most of
+their words. Reference chips remain isolates and do not contribute words;
+the marks stay out of selection and clipboard text.
+
+### User prompt collapse
+
+Text and context cards share the prompt's two-line collapsed budget. Text
+reports its visible line count; context cards occupy the remaining lines.
+One expansion control reveals the complete prompt. Expanding a normal row
+releases end following before growth, while a stuck turn header keeps its
+existing follow intent. Part-ID acknowledgement preserves the mounted text
+node so the expand control does not disappear and reappear.
 
 ### Turn footer copy and image
 
@@ -356,21 +376,32 @@ follow the pre-migration worker. The payload and its byte estimate change from
 HTML to tokens so React can own the code body; streaming-only prefixes stay in
 the bounded recent results.
 
-### Consecutive thinking and commands
+### Consecutive commands
 
-`lib/turns/activityGroups.ts` projects each turn's original ordered parts into adjacent runs before message slicing or Activity trimming. A run of thinking and a run of shell calls each have one disclosure, including runs across assistant messages. Text, empty text placeholders, other tools, notices, and shown questions/pages end a run. Hidden thinking still separates shell calls. With non-collapsible thinking selected, every thinking part retains its ordinary inline rendering.
+`lib/turns/activityGroups.ts` groups only adjacent shell calls before message
+slicing and Activity trimming. Thinking, text including empty placeholders,
+other tools, notices and shown interactions end a command run. Thinking retains
+upstream part/message boundaries in both folded and plain presentations.
 
-The first part owns the group's stable identity. Appending another part preserves the header and reader expansion. Each member retains its original message/part IDs, timing, Markdown, and authoritative output; no synthetic message or combined part is stored. A search hit in any thinking member opens the shared disclosure and highlights that source's own root. An omitted continuation-only message maps to its owner's list row, with a closed-header source anchor for navigation. Errors, footers, and other source content retain their original message row.
+The first command owns the stable disclosure identity. Source message/part IDs,
+input, output, errors and native stop authority remain on each member. The
+24-part row budget and seven-row Activity preview count a command group once.
+A continuation-only command message maps to its owner's row while retaining its
+source quote identity. Errors, footers and other source content keep their rows.
 
-Searching a later thinking member opens the shared block and scrolls its inner box to that source. The outer timeline anchors to the disclosure header. Content observers account for delayed Markdown; a wheel, touch, pointer, or keyboard gesture releases the source hold. Quotes retain the selected member's original message identity when bodies move between grouped and plain presentations.
+`ReasoningTimelineBlock` owns the shared keyboard, disclosure animation,
+`max-h-80` scroll box and reader-controlled follow. Command-only content slots
+retain native controllers after the visual body closes; output mounting and
+polling respect its visibility. Both thinking and commands follow the existing
+streaming-expansion preference. Completion folds automatic expansion while an
+explicit reader choice remains open, as upstream thinking does. Only command
+headers retain the requested breathing highlight, without echoing command or
+output text in the collapsed row.
 
-### Why groups keep original source parts
-
-Each member's live phase, output, stop control, search, and quote belong to its source message. Grouping changes header ownership without merging those records, so later-member updates remain visible and completed details remain addressable after a remount.
-
-The 24-part row budget and seven-row Activity preview both count a group once and never cut through it. The renderer-local weak cache is keyed by the immutable assistant-message array and the thinking-display preference; source replacement creates a new projection. It stores no runtime authority or persisted conversation data.
-
-Web, Electron, VS Code, hosted mobile, and Capacitor use this same presentation. Grouping adds no API, transport, or privilege difference between them.
+The projection cache is keyed by the immutable source-message array. It stores
+no runtime authority or persisted conversation data. The same presentation
+applies to web, Electron, VS Code and both mobile shells without new transport
+or privilege differences.
 
 ### Optional history disclosure
 
@@ -642,77 +673,10 @@ its concrete target; parallel calls of one kind show their count. Permission and
 retry states take precedence over thinking copy. Ordinary changes retain the
 existing 1200 ms display hold; permission transitions display at once.
 
-`ChatContainer.tsx` owns the chat's one status mark.
-`deriveChatActivityTone` derives the turn's state from live session status,
-messages, permissions and forms. `useChatActivityTone` keeps the transient
-state. `ChatContainer` selects the floating status row, the scroll pill, or a
-zero-height layer as the dot's one visible host. Work uses
-`--status-warning`, a wait mixes warning and error tokens, a terminal error
-uses `--status-error`, and a live completion uses `--status-success` for 3 s.
-Every other state uses `--surface-muted-foreground`. The floating working row
-fills the mark with the active provider's logo; no other host repeats that
-logo beside the label. Account-backed SuperWagie providers use the product's
-cow mark, so the work line starts with the same provider identity the model
-was selected under. A provider without a logo keeps the small dot. Working and
-waiting breathe one continuous opacity transition; completed and error states
-stand still. The mark is decorative and hidden from assistive technology because
-the surrounding status text names the state. Work text, chip and pill surfaces
-stay neutral. The folded Activity header has no status dot or tone attribute.
-Its existing failed label keeps its status text token. Forced-colors mode
-draws the mark and its outline in CanvasText. The breath stops while the page
-is hidden, a desktop window is minimized or tray-hidden, or reduced motion is
-requested. `ClockPausedContext` pauses the green expiry while the window is
-hidden or the surface is inert. The zero-height layer sits outside the status overlay's ResizeObserver,
-so a completion or error marker does not change the transcript's end inset.
-
-The same shared UI behavior applies on web, Electron desktop, VS Code, hosted
-mobile and Capacitor mobile. Each runtime renders the same dot in the same
-hosts from its own renderer state.
-
-### Why the status row names the work
-
-WorkBuddy resolves a loading line from the current phase and the active tool
-name. SuperWagie follows that order and adds the tool's short target, so a
-reader sees what the agent is reading, running, editing or searching. Benma
-lines remain for thinking, composing and states with no concrete tool target.
-
-### Why the execution tone lives at the chat prompt
-
-The status text already sits next to the prompt, where the reader watches an
-active turn. A dot in the folded Activity header repeats the signal for every
-turn in the transcript, so reopened history can show a row of colors.
-`ChatContainer.tsx` selects one visible host among the status row, the scroll
-pill and the zero-height layer. One dot follows the current turn, and the chip
-measurements stay unchanged.
-
-### Why the green tone expires
-
-A completion marker stays for 3 s and then returns to neutral. A cold session
-stays neutral and a terminal error stays red until the next turn starts, so
-reopened history does not fill the transcript with green dots and a failure
-remains visible. The marker is runtime state keyed by session and turn; resumed
-work, a user stop, or a new turn clears the previous completion timer.
-
-### Why the working row's provider mark breathes
-
-The floating working row already shows a provider mark beside the label, so
-rendering both a separate state dot and that mark produced two identities for
-one model. One mark now carries the provider identity and the state: its
-status color fills the logo, and only work or a wait animate. The motion is
-one composited `opacity` transition over 2.2 s. A one-second stepped blink read
-as separate states rather than breathing. Motion that can last for minutes
-stops outside work, when obscured, and under reduced motion. The resource-backed
-provider id is mapped by its stable `superwagie-account-` prefix; matching a
-model family would label the account connection with the upstream vendor
-instead of SuperWagie.
-
-### Why thinking lines use reasoning identity
-
-Every kind of work carries two phrasings of its own, and thinking carries six
-Benma lines. The status signature (key, count, tool name, target, reasoning seed)
-picks one by hash, so the same work keeps its line across renders and the
-status-row/pill handoff, and every line stays reachable. No additional clock,
-polling or model request selects copy.
+The working status row and scroll pill use the upstream provider mark and
+semantic activity copy. They add no separate execution-tone, completion or
+error-color marker. Runtime activity comes from authoritative session status
+and turn-holding forms; reopened incomplete history cannot establish live work.
 
 ### Why only the folded header shimmers
 
@@ -765,3 +729,11 @@ The operation survives the foreground-to-background row replacement, joins repea
 ### Why stop requests need terminal shell evidence
 
 The cancellation note reaches the transcript before shell.remove, which can fail or time out. Treating the note as a completed stop hides a later natural result and invents a stop reason after a stream gap. The background row uses native completion and the runtime-local ended index; the request alone grants no terminal status.
+
+- Thinking and tool prose use the upstream meta font size. Chat scrollers reserve
+  their overlay gutter before content overflows, so their width stays stable.
+  Product theme definitions and native account/file capabilities are independent
+  of transcript rendering and remain unchanged.
+- User-entered `!` shell messages use the same singleton command disclosure as
+  assistant shell calls. Collapsed headers contain no echoed command or failure
+  preview; expanding retains the full available stdout and terminal outcome.

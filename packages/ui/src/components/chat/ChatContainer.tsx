@@ -96,6 +96,7 @@ import {
     useSyncDirectory,
     useSessionRenderable,
     useSessionStatus,
+    useSessionStatusSnapshotReady,
     useScopedBlockingPermissions,
     useScopedBlockingForms,
     useParentSession,
@@ -121,9 +122,6 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
-import { deriveChatActivityTone, selectChatActivityToneHost } from './lib/turns/activityTone';
-import { useChatActivityTone } from './hooks/useChatActivityTone';
-import { ChatActivityToneHost } from './components/ChatActivityToneHost';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -1010,6 +1008,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
     // Session status from sync system
     const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '', effectiveSessionDirectory) ?? IDLE_SESSION_STATUS;
+    const statusSnapshotReady = useSessionStatusSnapshotReady(effectiveSessionDirectory, currentSessionId ?? '');
 
     // Scoped blocking requests — only subscribe to permissions/forms for
     // the current session + descendant subagent sessions, not all sessions in
@@ -1047,21 +1046,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             return true;
         }
 
+        if (sessionStatusForCurrent === IDLE_SESSION_STATUS && statusSnapshotReady) {
+            return false;
+        }
+
         // The last record can be a synthetic/skill/shell/switch message; the
         // turn is still running only per the last conversation message.
         return isIncompleteAssistantTurn(getLastConversationRecord(sessionMessages)?.info);
-    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionForms.length, sessionStatusForCurrent.type]);
-
-    const chatActivity = React.useMemo(() => deriveChatActivityTone({
-        sessionId: currentSessionId ?? null,
-        sessionKey: currentSessionKey,
-        messages: sessionMessages,
-        status: sessionStatusForCurrent,
-        hasPermissions: sessionPermissions.length > 0,
-        hasForms: sessionForms.length > 0,
-    }), [currentSessionId, currentSessionKey, sessionMessages, sessionStatusForCurrent,
-        sessionPermissions.length, sessionForms.length]);
-    const chatActivityTone = useChatActivityTone(chatActivity.key, chatActivity.state, chatActivity.lastMessageId);
+    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionForms.length, sessionStatusForCurrent, statusSnapshotReady]);
 
     const latestCompletedReply = React.useMemo(
         () => findLatestCompletedReply(sessionMessages),
@@ -1433,19 +1425,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         releaseAutoFollow: onManualNavigation,
         isPinned,
         showScrollButton,
-    });
-
-    // One dot follows the handoff between the working chip and the scroll
-    // pill. After the chip unmounts, an invisible pill has no host, so the
-    // terminal tone gets its own zero-height layer beside the measured row.
-    // A permission wait keeps the status chip mounted even though the session
-    // is no longer working; a form wait hides it. Keep the dot in the chip in
-    // the first case, and in the zero-height layer in the second.
-    const statusRowVisible = sessionIsWorking || sessionPermissions.length > 0;
-    const toneHost = selectChatActivityToneHost({
-        statusRowVisible,
-        showScrollToBottom: timelineController.showScrollToBottom,
-        userOwnsScroll,
     });
 
     // A transcript someone works in keeps every turn it receives, and every
@@ -1954,14 +1933,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                        one rider with the box instead of leaving them to jump
                        when the slot resizes (see mobileComposerMorph). */
                     <div className="oc-composer-riders absolute bottom-full inset-x-0" data-composer-riders="true">
-                        {toneHost === 'standalone' && chatActivityTone !== 'neutral' ? (
-                            <ChatActivityToneHost tone={chatActivityTone} />
-                        ) : null}
                         <ScrollToBottomButton
                             visible={timelineController.showScrollToBottom}
                             working={sessionIsWorking}
-                            tone={chatActivityTone}
-                            showTone={toneHost === 'pill'}
                             onClick={navigation.resumeToLatest}
                         />
                         {/* Same anchor and column as the pill, so the status
@@ -1987,7 +1961,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                         userOwnsScroll ? 'pointer-events-none' : 'pointer-events-auto',
                                     )}
                                 >
-                                    <StatusRowContainer tone={chatActivityTone} showTone={toneHost === 'row'} />
+                                    <StatusRowContainer />
                                 </div>
                             </div>
                         </div>

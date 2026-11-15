@@ -6,9 +6,13 @@ import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { dict as en } from '@/lib/i18n/messages/en';
+import { dict as zh } from '@/lib/i18n/messages/zh-CN';
 import { formatAgentStatus, type AgentStatus } from '@/lib/agentStatus';
 import { formatMessage, type I18nKey, type I18nParams } from '@/lib/i18n/store';
 import { WorkingPlaceholder } from './WorkingPlaceholder';
+import { thinkingLine } from '@/lib/easter-eggs/lines';
+import { copy as englishCopy } from '@/lib/easter-eggs/copy/en';
+import { copy as chineseCopy } from '@/lib/easter-eggs/copy/zh-CN';
 
 const unexpectedThemeChange = (): never => { throw new Error('Rendering must not change the theme'); };
 const theme = getDefaultTheme(false);
@@ -41,6 +45,8 @@ const englishLabel = (status: AgentStatus): string => formatAgentStatus(
   (key, params) => formatMessage(en, key, params),
   'en',
   status,
+  undefined,
+  status.key === 'chat.agentStatus.thinking' && status.seed ? thinkingLine(englishCopy, status.seed) ?? undefined : undefined,
 );
 
 const retryLabel = (template: I18nKey, params: I18nParams): string => formatMessage(en, template, params);
@@ -107,10 +113,30 @@ const withPlaceholder = async (run: (render: (props: RenderProps) => Promise<voi
 };
 
 describe('WorkingPlaceholder', () => {
+  test('a selected thinking line stays stable and follows the reader locale', async () => {
+    await withPlaceholder(async (render, container) => {
+      const status: AgentStatus = { key: 'chat.agentStatus.thinking', seed: 'reasoning-3' };
+      await render({ status });
+      const first = container.textContent;
+      expect(first).toBe('Brewing an idea');
+      await render({ status: { ...status } });
+      expect(container.textContent).toBe(first);
+      await act(async () => {
+        useI18nStore.getState().setLocale('zh-CN');
+        for (let wait = 0; useI18nStore.getState().loadingLocale && wait < 100; wait += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+      });
+      const localized = formatAgentStatus((key, params) => formatMessage(zh, key, params), 'zh-CN', status, undefined, thinkingLine(chineseCopy, 'reasoning-3') ?? undefined);
+      expect(container.textContent).toBe(localized);
+      expect(container.textContent).not.toBe(first);
+    });
+  });
+
   test('holds a status phrase for 1200 ms and keeps the gray row still', async () => {
     await withPlaceholder(async (render, container) => {
-      const reading: AgentStatus = { key: 'chat.agentStatus.read.withTarget', target: 'a.ts' };
-      const command: AgentStatus = { key: 'chat.agentStatus.command.withTarget', target: 'npm test' };
+      const reading: AgentStatus = { key: 'chat.agentStatus.read' };
+      const command: AgentStatus = { key: 'chat.agentStatus.command' };
       const firstLabel = englishLabel(command);
       const secondLabel = englishLabel(reading);
 
@@ -131,14 +157,16 @@ describe('WorkingPlaceholder', () => {
     });
   });
 
-  test('permission and retry replace thinking immediately and locale changes preserve retry', async () => {
+  test('permission respects the held label while retry replaces it immediately and follows locale changes', async () => {
     await withPlaceholder(async (render, container) => {
       const thinking: AgentStatus = { key: 'chat.agentStatus.thinking', seed: 'reasoning-0' };
       const permission: AgentStatus = { key: 'chat.agentStatus.waitingPermission' };
       await render({ status: thinking });
       expect(container.textContent).toBe(englishLabel(thinking));
 
-      await render({ status: thinking, permission: true });
+      await render({ status: permission, permission: true });
+      expect(container.textContent).toBe(englishLabel(thinking));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1210)); });
       expect(container.textContent).toBe(englishLabel(permission));
       expect(container.querySelector('[role="status"]')?.getAttribute('aria-live')).toBe('assertive');
       expect(container.querySelector('[data-waiting="true"]')).not.toBeNull();
