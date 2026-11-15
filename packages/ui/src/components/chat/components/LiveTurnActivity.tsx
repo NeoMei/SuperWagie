@@ -312,7 +312,9 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         : null;
     const details = summary ? [
         summary.explored ? t('chat.liveActivity.explored') : null,
-        summary.commands > 0 ? t(summary.commands === 1 ? 'chat.liveActivity.ranCommand' : 'chat.liveActivity.ranCommands', { count: summary.commands }) : null,
+        summary.commands > 0 && (!latestShell || isExpanded)
+            ? t(summary.commands === 1 ? 'chat.liveActivity.ranCommand' : 'chat.liveActivity.ranCommands', { count: summary.commands })
+            : null,
         summary.researched ? t('chat.liveActivity.researched') : null,
         summary.subagents > 0 ? t(summary.subagents === 1 ? 'chat.liveActivity.usedSubagent' : 'chat.liveActivity.usedSubagents', { count: summary.subagents }) : null,
     ].filter(Boolean).join(' · ') : '';

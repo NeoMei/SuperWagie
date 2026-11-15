@@ -109,8 +109,10 @@ or the live turn's revealed prose boundary.
     When Activity is collapsed, the latest shell call gets a sibling command
     disclosure below the upstream header. It follows live output in a bounded
     scroll area, folds when the call settles, and keeps the settled output
-    expandable. Opening the outer Activity fold hides this sibling so the
-    upstream tool row remains the single detailed owner.
+    expandable. Its label reads the normalized tool description and accepts
+    legacy `command`/`cmd`/metadata fields; it never uses the aggregate command
+    count as the row title. Opening the outer Activity fold hides this sibling
+    so the upstream tool row remains the single detailed owner.
   - Background children and shells keep the process active only while the
     existing live indexes report work or a scoped permission/form waits. A
     parent's answer does not finish its background work. Terminal reports win;

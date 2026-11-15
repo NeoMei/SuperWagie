@@ -37,7 +37,7 @@ const LiveCommandPreviewBody: React.FC<{
     const lastScrollTopRef = React.useRef(0);
     const outputFromShell = useBackgroundShellOutput(shell.shellID ?? '', directory, shell.running && shell.shellID !== undefined);
     const output = outputFromShell || shell.output || '';
-    const command = shell.command || shell.description || t('chat.liveActivity.ranCommand', { count: 1 });
+    const command = shell.command || shell.description || t('chat.commandTrace.title');
 
     React.useEffect(() => {
         setExpanded((previous) => shell.running ? previous : false);
