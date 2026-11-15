@@ -11,7 +11,7 @@ import { getLiveFinalMessage, getShownInteractions } from '../lib/turns/liveActi
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { latestRunningTool } from '../lib/turns/liveActivityStatus';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
-import { LiveActivityHoistedReasoningContext, LiveActivityHoistedShellsContext, LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from './liveActivityContext';
+import { LiveActivityHoistedShellsContext, LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from './liveActivityContext';
 import { ShownToolCard } from '../message/parts/ShownToolCard';
 import { TurnMessageWindow } from './TurnMessageWindow';
 import { TurnMessageWindowContext, initialMessageWindow, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
@@ -43,8 +43,8 @@ import { RevealedTextTurnContext, type LivePinnedMessagePresentation } from './r
 import { PinnedMessage } from './withPinnedMessage';
 import { LiveCommandPreview } from './liveCommandPreview';
 import { latestShellPreview } from './liveCommandPreviewModel';
-import { LiveReasoningFold } from './liveReasoningFold';
-import { reasoningPreviews } from './liveReasoningFoldModel';
+import { getCompactReasoningSummary } from '../lib/reasoningSummary';
+import { useStreamingTextThrottle } from '../hooks/useStreamingTextThrottle';
 
 const SHIMMER_STABLE_DELAY_MS = 1000;
 const subscribeRuntimeKey = (notify: () => void): (() => void) => subscribeRuntimeEndpointChanged(() => notify());
@@ -247,13 +247,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     const foldedMessages = React.useMemo(() => activityMessages.filter((message) => !pinnedMessageIds.has(message.info.id)),
         [activityMessages, pinnedMessageIds]);
     const latestShell = React.useMemo(() => latestShellPreview(turn.activityParts), [turn.activityParts]);
-    const reasoningParts = React.useMemo(() => reasoningPreviews(turn.activityParts), [turn.activityParts]);
-    const hoistedReasoning = React.useMemo(
-        () => new Set(turn.activityParts.flatMap((activity) => (
-            activity.kind === 'reasoning' && activity.part.type === 'reasoning' ? [activity.part.id] : []
-        ))),
-        [turn.activityParts],
-    );
     const hoistedShells = React.useMemo(
         () => latestShell ? new Set([latestShell.key]) : new Set<string>(),
         [latestShell],
@@ -266,6 +259,22 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     // disclosures. An absent choice follows execution; explicit reader choices
     // survive it.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+    const liveThought = React.useMemo(() => {
+        if (settled || liveTool) return undefined;
+        const parts = turn.assistantMessages.at(-1)?.parts ?? [];
+        for (let index = parts.length - 1; index >= 0; index -= 1) {
+            const part = parts[index];
+            if (part.type === 'reasoning' && part.time?.end === undefined) return part;
+        }
+        return undefined;
+    }, [liveTool, settled, turn.assistantMessages]);
+    const reasoningText = useStreamingTextThrottle({
+        text: !isExpanded && showReasoningTraces && liveThought?.type === 'reasoning' ? liveThought.text : '',
+        isStreaming: Boolean(liveThought) && !isExpanded && showReasoningTraces,
+        identityKey: liveThought?.id,
+        allowTextReplacement: true,
+    });
+    const reasoningPreview = React.useMemo(() => getCompactReasoningSummary(reasoningText), [reasoningText]);
     // The folded header sweeps a soft highlight along its whole text row once
     // the row has stopped changing for a second. The composer status stays
     // still. Permission waits and settled turns carry no shimmer.
@@ -316,7 +325,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     const headerTitle = t(settled ? 'chat.liveActivity.title'
         : waitingPermission ? 'chat.toolPart.status.waitingPermission'
             : waitingAnswer ? 'chat.toolPart.status.waitingAnswer'
-                : 'chat.liveActivity.title');
+                : liveThought ? 'chat.reasoningTrace.thinking' : 'chat.liveActivity.title');
     const label = (
         <>
             <span className="live-activity-icon inline-flex shrink-0" data-running={liveTool ? 'true' : undefined}>
@@ -342,6 +351,11 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                     ) : null}
                 </span>
             ) : null}
+            {liveThought && !isExpanded && showReasoningTraces && reasoningPreview ? (
+                <span className="min-w-0 flex-1 truncate text-start typography-meta" dir="auto" title={reasoningPreview}>
+                    {reasoningPreview}
+                </span>
+            ) : null}
             {fileLabel ? (
                 <span className="flex min-w-0 items-center gap-1 typography-meta @min-[560px]:shrink-0">
                     <span className="truncate">{fileLabel}</span>
@@ -360,9 +374,9 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     const headerIdentity = React.useMemo(() => [
         locale, headerTitle, String(settled), String(isExpanded), String(waitingPermission), String(waitingAnswer),
         String(terminalFailed), String(terminalStopped), liveTool?.label ?? '', liveTool?.description ?? '',
-        fileLabel ?? '', details, String(showReasoningTraces),
+        reasoningPreview ?? '', fileLabel ?? '', details, String(showReasoningTraces),
     ].join('\u0000'), [locale, headerTitle, settled, isExpanded, waitingPermission, waitingAnswer,
-        terminalFailed, terminalStopped, liveTool?.label, liveTool?.description,
+        terminalFailed, terminalStopped, liveTool?.label, liveTool?.description, reasoningPreview,
         fileLabel, details, showReasoningTraces]);
     const shimmer = useStableHeaderShimmer(headerIdentity, !settled && !waitingForUser && !isExpanded);
     const windowStore = React.useContext(TurnMessageWindowContext);
@@ -410,7 +424,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         pinnedForegroundMessageId, pinnedMessages, revealedRecords]);
     return (
         <LiveTurnHoistedInteractionsContext.Provider value={hoistedInteractions}>
-            <LiveActivityHoistedReasoningContext.Provider value={hoistedReasoning}>
             <LiveActivityHoistedShellsContext.Provider value={hoistedShells}>
             <LiveActivityInlineContentContext.Provider value>
             <LiveActivityToolsHiddenContext.Provider value={!isExpanded}>
@@ -436,7 +449,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                         </Button>
                     </div>
                 </div>
-                <LiveReasoningFold previews={reasoningParts} settled={settled} isWorking={isWorking} />
                 <LiveCommandPreview activities={turn.activityParts} directory={directory} visible />
                 <LiveActivityCollapse expanded={isExpanded} id={contentId} animate={expanded !== undefined}>
                     <div>
@@ -467,7 +479,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             </LiveActivityToolsHiddenContext.Provider>
             </LiveActivityInlineContentContext.Provider>
             </LiveActivityHoistedShellsContext.Provider>
-            </LiveActivityHoistedReasoningContext.Provider>
         </LiveTurnHoistedInteractionsContext.Provider>
     );
 }
