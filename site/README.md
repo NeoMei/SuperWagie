@@ -6,12 +6,20 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.95 for macOS Apple silicon and
+The website targets release 2.7.108 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
 Windows installer is unsigned. Precise installer sizes are added to the public
 site after the final artifacts are verified.
+
+Version 2.7.108 restores the OpenChamber 2.7.2 chat flow and native structured
+UI messages. Reasoning stays independent; consecutive shell commands share a
+bounded disclosure with a breathing header, no folded output echo and retained
+results after completion. The installers include OpenCode 2.3.0. The Chinese
+and English `/release-notes/` pages summarize this release and link to the full
+GitHub release history. Both pages are registered in `PAGES` so navigation,
+language switching, canonical metadata and the sitemap resolve consistently.
 
 The bundled OpenCode runs in SuperWagie's private application space. Its model
 settings, credentials and runtime data are separate from a system OpenCode
@@ -168,7 +176,7 @@ background and indexed for project retrieval. The Experiences checkbox can pause
 or resume learning. Sessions from before enablement require explicit processing.
 Methodology candidates require confirmation.
 
-Installer links point to the v2.7.95 GitHub Release assets. The unified release
+Installer links point to the v2.7.108 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 
@@ -348,7 +356,7 @@ and retrying.
 - Every page has a title, description, canonical, hreflang for `zh-CN`,
   `en` and `x-default`, Open Graph metadata and a Twitter card. JSON-LD
   describes the organization, website, application, FAQs and documentation.
-- `sitemap.xml` lists 32 canonical pages. Optional `lastmod` is omitted until
+- `sitemap.xml` lists 36 canonical pages. Optional `lastmod` is omitted until
   actual content modification dates are available. `robots.txt` disallows
   crawling `/downloads/`; this does not guarantee that linked installers
   stay out of search results.
