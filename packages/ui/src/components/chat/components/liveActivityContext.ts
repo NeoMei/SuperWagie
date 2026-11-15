@@ -16,9 +16,6 @@ export const LiveFinalActivityContext = createContext<LiveFinalActivityContextVa
 /** All interaction call IDs, so every disclosure suppresses duplicate cards. */
 export const LiveTurnHoistedInteractionsContext = createContext<ReadonlySet<string> | null>(null);
 
-/** Part IDs rendered by sibling thinking folds, never inside Activity. */
-export const LiveActivityHoistedReasoningContext = createContext<ReadonlySet<string> | null>(null);
-
 /** Shell part IDs rendered by the sibling command fold, never inside Activity. */
 export const LiveActivityHoistedShellsContext = createContext<ReadonlySet<string> | null>(null);
 

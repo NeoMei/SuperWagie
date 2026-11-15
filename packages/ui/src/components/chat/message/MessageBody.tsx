@@ -62,7 +62,7 @@ import { isShownInPlace } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
 import { LivePinnedMessageContext, RevealedTextPartContext, type LivePinnedMessagePresentation, type RevealedTextPartScope } from '../components/revealedTextContext';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../lib/turns/activityRows';
-import { LiveActivityHoistedReasoningContext, LiveActivityHoistedShellsContext, LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from '../components/liveActivityContext';
+import { LiveActivityHoistedShellsContext, LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from '../components/liveActivityContext';
 import {
     buildRevealedTailPart,
     buildRevealedTextPart,
@@ -1534,7 +1534,6 @@ const AssistantMessageBody = React.memo(({
     const vscodeApi = useRuntimeAPIs().vscode;
     const liveFinalActivity = React.useContext(LiveFinalActivityContext);
     const liveActivityToolsHidden = React.useContext(LiveActivityToolsHiddenContext);
-    const liveActivityHoistedReasoning = React.useContext(LiveActivityHoistedReasoningContext);
     const liveActivityHoistedShells = React.useContext(LiveActivityHoistedShellsContext);
     const inlineActivityReasoning = React.useContext(LiveActivityInlineContentContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
@@ -1971,10 +1970,6 @@ const AssistantMessageBody = React.memo(({
             }
 
             if (part.type === 'reasoning') {
-                if (liveActivityHoistedReasoning?.has(part.id)) {
-                    i++;
-                    continue;
-                }
                 // Empty reasoning draws nothing once it has ended, so it must
                 // not count as content before the answer (no divider). While it
                 // streams it stays mounted: ReasoningPart shows its busy header
@@ -2130,7 +2125,6 @@ const AssistantMessageBody = React.memo(({
         isMobile,
         liveFinalActivity,
         liveActivityToolsHidden,
-        liveActivityHoistedReasoning,
         liveActivityHoistedShells,
         inlineActivityReasoning,
         isLastAssistantInTurn,
