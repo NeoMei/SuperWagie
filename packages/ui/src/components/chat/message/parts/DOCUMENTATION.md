@@ -2,18 +2,14 @@
 
 This folder contains renderers for chat message parts (text, tools, reasoning, placeholders) and shared tool presentation helpers.
 
-Use this doc when you ask an agent to change tool/header/description behavior
-or the live turn's revealed prose boundary.
+Use this doc when changing message parts, tool disclosures, or timeline rendering.
 
 ## High-level flow
 
-- Message parts are rendered from `message/MessageBody.tsx`. A live turn pins prose
-  the reader already saw above its execution fold while later work folds below
-  it in the same message root.
-- There are two tool rendering paths:
-  - **Static tools** -> `StaticToolRow` in `ProgressiveGroup.tsx`
-  - **Expandable tools** -> `ToolPart.tsx`
-- Shared tool icon mapping is centralized in `toolPresentation.tsx` (`getToolIcon`).
+- `MessageList` projects turns into prompt, Activity, message-slice, and interaction rows.
+- `MessageBody` renders the authoritative parts in their original order. Long completed text can span several virtualized rows; copy and image export still use the complete message record.
+- Static tools use `StaticToolRow` in `ProgressiveGroup.tsx`; expandable tools use `ToolPart.tsx`.
+- Tool icon mapping belongs to `toolPresentation.tsx`.
 
 ## Which file controls what
 
@@ -62,98 +58,24 @@ or the live turn's revealed prose boundary.
   - Thinking block UI (`ReasoningTimelineBlock`), summary + optional duration.
 
 - `AssistantTextPart.tsx` and `message/MessageBody.tsx`
-  - `AssistantTextPart.tsx` resolves the text that reaches Markdown or a
-    generated-result card. In an outside-fold turn scope it records that exact
-    display string in `lib/turns/revealedText.ts`, using the runtime and
-    normalized directory from `RevealedTextTurnContext` and the part's
-    position and generation from `RevealedTextPartContext`. Invisible text,
-    reasoning, pinned copies and text inside a fold enter no records.
-  - `message/MessageBody.tsx` supplies the part index and message creation
-    time. Each original text part with revealed prose has one
-    `data-message-text-export-source` wrapper outside the folds for its
-    retired snapshots and current authoritative answer. Unshown text tails,
-    tool rows and reasoning go into the pinned inner fold. The pinned inner
-    `LiveActivityCollapse` renders even when it has no children, so every ID
-    named by the Activity header's `aria-controls` resolves to an element.
+  - Text follows upstream block commits while streaming. `MessageSliceContext` selects the visible range of a completed long message without changing the underlying record.
+  - A message's first slice owns its DOM navigation ID and header; its last slice owns the footer, error, and actions. Quote and selection helpers resolve ranges across its mounted slices.
 
 - `components/LiveTurnActivity.tsx` (relative to the chat folder)
-  - Owns the optional turn disclosure. `MessageList` enables it when Activity
-    Default is Collapsed and the turn has tools, visible reasoning or visible
-    earlier assistant prose. A lone answer does not create an Activity
-    disclosure. It also owns the turn's revealed-prose boundary: pinned original
-    messages sit above the Activity header, later messages go through the outer
-    `TurnMessageWindow`, and the current final or progress message stays at
-    the bottom of the turn. It reads the turn's reveal identity from
-    `getRuntimeKey`, the effective directory, the session ID and the turn ID.
-    A runtime endpoint or directory change gives later prose a separate
-    identity. It selects pinned messages from the turn's runtime records;
-    folding changes never retract prose the reader saw. Cold-loaded history
-    starts with no runtime records and stays folded.
-  - With no reader choice the process stays behind one activity summary during
-    execution and after it ends. `MessageList` caches explicit open and closed
-    choices by turn, so deltas, step changes, completion and virtualized remounts
-    preserve them.
-    A folded running turn keeps its latest visible assistant progress message
-    outside the log, including while a permission or form waits for the user.
-    Runtime-local revealed prose stays in the original `ChatMessage` root,
-    including a rewritten foreground. The current authoritative answer stays
-    outside the folds; unshown text tails, tool rows and reasoning go into a
-    pinned inner `LiveActivityCollapse`. The main Activity header opens and
-    closes every rendered outer fold and pinned inner fold at once. Its
-    `aria-controls` lists `contentId`, `finalContentId` when the final
-    message has a fold, `belowInteractionsContentId` when later messages
-    exist, and each pinned `contentId`. Its `aria-expanded` and tool
-    visibility use the effective state.
-    The open execution shows progress prose and compact thought/tool rows;
-    reasoning text and tool output remain behind their own requested details.
-    When Activity is collapsed, the latest shell call gets a sibling command
-    disclosure below the upstream header. It follows live output in a bounded
-    scroll area, folds when the call settles, and keeps the settled output
-    expandable. Its label reads the normalized tool description and accepts
-    legacy `command`/`cmd`/metadata fields; it never uses the aggregate command
-    count as the row title. Opening the outer Activity fold hides this sibling
-    so the upstream tool row remains the single detailed owner.
-  - Background children and shells keep the process active only while the
-    existing live indexes report work or a scoped permission/form waits. A
-    parent's answer does not finish its background work. Terminal reports win;
-    historical `metadata.status: running` alone never proves live work.
-  - `components/LiveActivityCollapse.tsx` owns disclosure layout. Automatic
-    execution completion settles immediately; an explicit reader toggle keeps
-    the short height transition and existing scroll-anchor behavior.
-    `components/liveActivityContext.ts` scopes the final message's non-text
-    disclosure and streaming progress text.
-    `components/revealedTextContext.ts` carries the turn's outside-fold flag,
-    the part's position, and a pinned message's records, interactions and
-    inner fold state.
-    `components/withPinnedMessage.tsx` renders each pinned original message
-    inside its local fold and reveal contexts.
-    `lib/turns/revealedText.ts` owns the renderer-local records and their
-    prefix chains. Turn identity is `runtimeKey`, `normalizePath(directory)`,
-    `sessionId` and `turnId`; a chain also keys on `messageId`, `partId`
-    and the text part's `generation`. The store keeps at most 4000 turns,
-    evicts the least recently used turn and publishes a numeric snapshot
-    version through `useSyncExternalStore`. Each reasoning row defaults to
-    a bounded excerpt of its latest model-provided heading or non-empty line.
-    Its full Markdown and capped scroll box mount only on a reader request or
-    a reasoning search reveal. Retired prose, the current authoritative
-    answer, questions and accepted interactive pages stay outside the outer
-    and pinned inner folds. Unshown text tails, tool rows and reasoning enter
-    those folds, and tool details keep their own controls.
-  - Only a pinned final message takes over the hoisted final interactions;
-    a pinned progress message keeps the interactive cards for its own call IDs.
-    One question, page or proposed workflow therefore has one card owner in
-    every fold state.
-  - `lib/turns/liveActivity.ts` owns final-answer and interruption boundaries.
-  - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
+  - Exports the upstream `TurnFold`. Expanded Activity is the default and renders the normal timeline without an outer disclosure.
+  - The optional Collapsed preference shows the latest seven actual rows while running and folds completed work. It does not copy reasoning, command strings, or output into the header.
+  - `useTurnFold` retains reader expansion within the session. `LiveActivityCollapse` mounts visible content immediately, with no height animation or scroll-to-bottom.
+  - Questions, accepted rendered pages, and proposed workflows remain accessible through the existing shown-interaction path. `LiveTurnHoistedPagesContext` prevents duplicate call cards.
+  - `lib/turns/liveActivity.ts` owns final-answer boundaries; `timelineRows.ts` owns stable list-row projection.
+
+- `CommandExecution.tsx`
+  - Owns each shell call's disclosure inside `ToolPart`; thinking is rendered separately by `ReasoningPart`.
+  - The fixed localized header never contains the command, target, or output. The command and stdout stay inside a bounded scrolling body.
+  - Running commands open automatically, completed commands close automatically, and reader choices are respected. Settled output remains expandable, including after remount from the authoritative record.
+  - Busy state uses the existing header shimmer. Shell/background status and stop actions remain owned by `ToolPart` and authoritative runtime state.
 
 - `ShownToolCard.tsx`
-  - What an interaction call shows (`isShownInPlace` in `@/lib/opencode/tools`): a question, the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the result envelope), or the page of an `openchamber_render` call. `getShownInteractions` preserves their call order outside collapsed Activity, and `LiveTurnHoistedInteractionsContext` prevents an opened fold from repeating them.
-  - A pinned message owns the cards for calls with its message ID. The hoisted
-    list and the final message own the remaining call IDs, so each call ID has
-    one card owner in every fold state. The hoisted ID set contains every call
-    ID and suppresses in-place cards inside every message body. Expanding an
-    outer or pinned inner fold draws no duplicate question, page or workflow
-    card.
+  - Draws questions, proposed workflow runs, and accepted `openchamber_render` pages in their call order. `getShownPages` uses the existing interaction classification; the hoisted call-ID set prevents duplicate in-place cards when the optional Activity fold is opened.
   - A question uses the existing `ToolPart` body, open by default in both activity modes. It shows the question and choices while pending or running, the recorded answer after completion, and the original question alongside a dismissal or failure reason. These remain available on revisit. Readers can explicitly close its details. Live choices, drafts, submit and dismiss stay in the authoritative `FormDock`; transcript history never manufactures a pending form or submits an answer.
   - The workflow card (`components/chat/workflows/WorkflowRunCard.tsx`) reads the run from the server's store, not from the call: the plan with its phases, the run's state, and Run and Don't run while it waits for approval, Stop while it runs, Resume after a failure or stop. The card is current after a reload and on every device; a run the server no longer has says so.
   - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
@@ -175,7 +97,8 @@ or the live turn's revealed prose boundary.
   - Full screen opens the page in a dialog, inset from its edges and as tall as the page up to the window, past which the page scrolls. Download saves the page with the theme it was viewed in; on Capacitor it goes through the native share sheet, and VS Code shows no download because its bridge has no save route for HTML.
   - A page can name an image file on the machine by its absolute path (`renderPageImages.ts`). The page cannot read files, so before drawing it the chat asks the image grant route for the paths the page names (the server checks them against the call's stored HTML; see `packages/web/server/lib/markdown-image-grants/`), reads each through `/api/fs/raw` as a data URL and puts it in place of the path. A data URL, not the asset URL: the asset URL carries the URL auth token, which the page's script would see. The page is drawn once its images are in, never before and again after, since a second draw reloads it; its space stays reserved meanwhile. The chat sends every path the page names in one request with the page's call id, and the server shows them in page order while their files add up to 25 MB; the agent's tool result names the rest. An image that does not load keeps its path. VS Code reads workspace images through its file bridge, one by one in page order up to the same 25 MB, since no server weighs the page there, and has no temporary-directory images. A page that scrolls away is remembered with its images in place so it comes back without reading them again; remembered pages are bounded by their total length, 100 MB of characters (about a byte each), and past it the oldest go and read their images again when scrolled back to.
   - VS Code's webview CSP allows inline scripts but no remote ones, and a `srcdoc` page inherits that policy, so the tool description tells agents to draw charts with inline SVG or their own script.
-  - With Activity collapsed, a page is never folded away. `LiveTurnActivity` collects the turn's interactions (`getShownInteractions`) and `LiveTurnHoistedInteractionsContext` keeps their rows out of the fold, so an opened fold does not draw them twice. A pinned page sits above its pinned inner fold; a hoisted page sits below the outer fold. While the turn works, and in a turn that ended without a final answer (stopped, failed), the pages sit right below the fold, and what the agent did after the last page (more steps, the reply it is still writing) is drawn below them, so the page stays put while new work appears under it; once the final answer arrives, the final message draws them above its first answer text. With Activity expanded, the outer and pinned inner disclosures are open and a page sits where its call ran.
+  - With the optional Activity fold collapsed, accepted pages stay outside it in call order. The hoisted call-ID context prevents duplicate cards when the fold is opened. With Activity expanded, a page appears where its call ran.
+
 
 - `BlockLine.tsx`
   - The vertical connector line left of a collapsible block's body. It is also a click target: clicking it folds/expands the block via its header toggle handler (`onToggle`), or toggles the nearest native `<details>` when no handler is passed (JSON summary sections). Geometry is inline-styled (12px hit strip centered on the 1px line) so it does not depend on compiled Tailwind classes.
@@ -440,185 +363,56 @@ The chat has one render mode: parts stream in and stay in the order they ran.
 The Sorted mode, which folded a turn's work into one block above its answers,
 was removed; a stored `chatRenderMode: 'sorted'` reads as Collapsed Activity
 (`lib/settings/parsers.ts`, `parseActivityRenderMode`). Expanded preserves the
-timeline without a turn disclosure. Collapsed adds one Activity header that
-starts with the first step and remains after completion or interruption. It
-controls the outer and pinned inner disclosures while preserving the original
-rows, their order, and their individual controls. It adds no tool subgroups,
-side line, height cap, or inner scroller. Subagent calls alone do not make a
-turn collapsible.
+timeline without a turn disclosure. Collapsed adds one Activity header after
+completion or interruption while preserving the original rows, their order, and
+their individual controls. It adds no tool subgroups, side line, height cap, or
+inner scroller. Subagent calls alone do not make a turn collapsible.
 
-The active turn has its Activity header from the first step. Renderer-local
-records hold the exact prose a reader saw outside the fold. A rewritten
-foreground, including a rewritten working progress message, keeps retired
-snapshots and the current authoritative answer in one
-`data-message-text-export-source` wrapper outside both the outer Activity
-disclosure and the pinned inner fold. Inactive chains, generation changes and
-authoritative text that no longer starts with the shown prefix keep their old
-prose above the fold. Only unshown text tails, tool rows and reasoning enter
-the pinned inner fold. While a turn works, `MessageBody` skips outer tool rows
-through `LiveActivityToolsHiddenContext`; a pinned message resets that
-context to draw its own rows inside the pinned inner fold. The main Activity
-header opens and closes every outer and pinned inner fold at once and names
-their IDs in `aria-controls`; a pinned inner fold renders with an empty body
-when needed so each named ID resolves. Cold-loaded history starts folded.
-A page refresh clears the records. There is no row trim or `+N more` count.
-The records stay in render-process view state. Persistence, synchronization,
-the event reducer and `TurnRecord.assistantMessages` never carry them.
+The active turn has its Activity header from the first step. Folded, it shows
+only the latest 7 rows (a text, a reasoning block or a tool call each;
+`lib/turns/activityRows.ts`); the header counts the earlier ones ("+N more")
+and opens them all. `LiveTurnActivity` leaves out the messages entirely above
+the cut and tells the message it cuts into, through
+`ActivityRowSkipContext`, how many of its first rows `MessageBody` skips; both
+count with the same rule. When the cut moves down, `useActivityRowGlide`
+replays the jump as a 220 ms glide of the rows (FLIP, `transform` only, skipped
+with reduced motion). While the turn works what stays in view (the rows
+above and below its pages) never shrinks (`useLiveRowsFloor`): it keeps the
+tallest height it has had, its rows right under the header and the space it
+keeps below the newest row, where the next step lands (kept above the rows, it
+read as a hole under the header). Rows differ in height (a one-line text, a tool row), so a step that
+pushed a tall row out for a short one shrank the window, and a reader following
+the end glided down for one step and was pulled back up by the next. A change of
+width is no step: the rows re-wrap and the floor takes their new height, or a
+chat narrowed and widened again (a panel opened and closed) kept the narrow
+height as empty space above the rows until the fold was opened. Nor is a big row
+leaving the window: the floor holds at most 96 px, or a long reply among the
+latest rows (one with a table, before the reader's answer to its question)
+left hundreds of pixels of empty space under the steps that followed. The trim
+stays while the settled fold closes and lifts when the reader opens it.
 
-Prose a reader has already seen outside the fold stays above the Activity
-header when a later step, final answer, continuation or turn retirement
-changes the turn's foreground message. `AssistantTextPart` records the exact
-`displayTextContent` that reaches `MarkdownRenderer` or resolves into a
-`GeneratedJsonResultCard`. A reveal record belongs to `runtimeKey`,
-`normalizePath(directory)`, `sessionId` and `turnId`; a switch of runtime
-endpoint or directory gives it a separate identity. Each prefix chain also
-keys on `messageId`, `partId` and `generation`, and records the message and
-part positions. `RevealedTextTurnContext` permits records for runtime-local
-prose outside any fold, including the bottom final or progress message and
-the rewritten pinned foreground. In an explicitly expanded history fold, text
-parts inside that fold carry `outsideFold: false`; plain rendering has no
-turn scope. Reasoning, invisible text and pinned copies stay out of the store.
-The records are view state; `sync/event-reducer.ts`,
-`TurnRecord.assistantMessages` and `displayMessages` stay unchanged.
-The store keeps at most 4000 turns and publishes a numeric snapshot version.
-Cold-loaded history stays folded and a page refresh clears the records.
-
-A pinned message keeps its original `ChatMessage` root, `MessageBody`,
-`data-message-id`, quote root, footer and actions. Retired snapshots and the
-current authoritative answer draw inside one
-`data-message-text-export-source` wrapper per original text part, outside an
-inner `LiveActivityCollapse`. Only unshown text tails, tools and reasoning draw
-inside that collapse. Later messages stay in the outer activity folds, with
-`TurnMessageWindow` for the main list, and the current final or progress
-message keeps its existing position. The inner collapse wrapper carries
-`data-message-image-export-exclude="true"`, which
-`cloneMessageImageExportSource` removes. Copy, whole-turn image export,
-plan, fork, TTS, error display, attachments, changed files and the footer
-continue to read the original `parts` and `turnGroupingContext`. Pinned copies
-draw recorded prose; the current authoritative answer shares their wrapper and
-the unshown tail stays folded.
-
-A growing part extends its record while the displayed and authoritative text
-both keep the recorded prefix. A shorter displayed string leaves the longer
-record intact. The inner fold crops the current authoritative text against the
-active record's displayed prefix; when that prefix no longer matches, the full
-authoritative text stays in the inner fold. A rewrite that breaks the prefix
-retires the old active chain and starts a new one. The retired prose stays
-above the fold, and the active chain's tail appears in the inner fold.
-Whitespace-only tails draw no empty prose wrapper. The store bounds itself to
-4000 turns and exposes a numeric snapshot version for `useSyncExternalStore`.
-
-A retry can repeat the same text part with a new `time.start` generation. An
-identical display string, authoritative string and presentation move that one
-record to the new generation instead of pinning the paragraph twice. Records
-left by an older renderer are also collapsed by their visible text when cropped.
-Text that actually changed keeps its separate retired record.
-
-A long turn, in either mode, mounts only a window of its rows
-(`lib/turns/turnMessageWindow.ts`, `components/TurnMessageWindow.tsx`): past
-60 rows its newest 40, with the rest behind spacers that mount 40 at a time as
-they near the viewport. It counts rows with the same rule as the fold, and the
-head may end inside a message, whose first rows `MessageBody` skips through
-`ActivityRowSkipContext`. Counting messages left a turn of a few steps with
-dozens of parallel calls each fully mounted.
+A long turn, in either mode, is several list rows: a row per step once the
+fold is open, a step that ran dozens of calls cut every 24 parts, and a long
+answer cut between its blocks (`lib/turns/timelineRows.ts`). The list mounts
+only the rows near the view.
 
 A final assistant message with `finish: stop`
-folds earlier messages and the final message's non-text parts, keeping the
-answer and its existing footer outside. Prose that lost foreground status stays
-in the original root above the header, with unshown work in its pinned inner
-fold; later messages use the outer folds. Intermediate text fallback and
-compaction summaries never become final answers. An older
-turn without a final answer collapses once a later visible turn has an
-assistant response; a queued user message alone is not enough. Hidden user
-continuations retain the visible-turn mapping established by
-`projectTurnRecords`. A notice the
+collapses the earlier messages and the final message's non-text parts, keeping
+the answer and its existing footer outside. Intermediate-text summary fallback
+and compaction summaries never become final answers. An older turn without a
+final answer collapses once a later visible turn has an assistant response;
+a queued user message alone is not enough. Hidden user continuations retain
+the visible-turn mapping established by `projectTurnRecords`. A notice the
 timeline skips that separates a `stop` answer from the next assistant message
 opens a turn there (`createNoticeTurnSplitter`), so each answer keeps its own
 Activity and stays outside it; a notice between steps of one run does not.
 
-Manual expansion survives later metadata updates, timeline virtualization
-and pinned-message remounts within the session. Every outer and pinned inner
-disclosure uses a finite 180ms height transition, respects reduced motion, and
-delegates end pinning to the existing timeline.
-It never calls scroll-to-bottom. Collapsed history does not mount its hidden
-message bodies; initial history loads do not animate collapse.
-Layout-effect replay after a Suspense hide/reveal must settle the requested
-height and retained children even when the expanded target did not change.
-Cleanup stops the animation, so a same-target early return can leave a cached
-pre-collapse height on the DOM indefinitely. Failed animations also settle;
-callbacks from cancelled, superseded animations never settle a newer target.
-Pinned prose adds an inner disclosure before the outer header. The main header
-controls multiple outer fold IDs and every pinned inner fold ID; its
-`aria-controls` names each rendered ID. Focused DOM tests cover order, root
-uniqueness and record state. A real browser check still needs to cover
-follow-stop placement, a clicked Activity header under the sticky user header,
-and `holdAnchor` for each outer and pinned inner fold.
+Manual expansion survives later metadata updates and timeline virtualization
+within the session. The disclosure opens and closes at once and delegates end
+pinning to the existing timeline. It never calls scroll-to-bottom. Collapsed
+history does not mount its hidden message bodies.
 
-The virtualizer also adds temporary end padding while compensating prepended
-history. `@legendapp/list` stores that padding's CSSOM read-back value (built
-in since 3.3.11; it was a Bun patch before): Chromium rounds fractional pixel
-strings, so comparing the original input with `style.paddingBottom` could skip
-cleanup permanently and leave a phantom tail even when every Activity region is
-already zero-height. `scripts/legend-list-padding.test.mjs` checks the
-installed version for it. Chat padding and scroll policies do not compensate
-for it.
-
-The Bun patch for `@legendapp/list@3.6.0` floors `roundSize` to the device
-pixel grid instead of eighth pixels, mirroring upstream LegendApp/legend-list#536.
-Rows the list has not measured yet are placed at the average measured height;
-with eighth-pixel precision their positions are fractional, the browser rounds
-each `scrollTop` correction, and the remainder is lost on every compensation
-pass. A history prepend then leaves the reader's row one to two pixels off
-(3.3.10 drifted too; the browser harness passed only because its row heights
-happened to average to a whole pixel). The patch covers both web entry points
-in ESM and CJS. Drop it once upstream ships #536 or an equivalent, and verify
-with `bun packages/ui/tests/chat-history-scroll.browser.mjs`, which runs the
-prepend scenarios over several row-height profiles for this reason.
-
-The same patch hands out containers in item order while the list's initial
-scroll is active, end-aligned included. Upstream reverses them for an
-end-aligned start (`renderPriority` in `findAvailableContainers`), so a
-freshly opened timeline was in reverse DOM order and the DOM-order pass
-(`useDOMOrder`) moved nearly every row about 300 ms after the reveal: each row
-restyled, and with an accessibility client on, the transcript re-serialized
-(about 40 ms on every session open and switch). Containers render in index
-order, so rows are now in DOM order (what screen readers and tab order follow)
-from the first paint, and the pass finds nothing to move. Scrolling up still
-recycles containers out of order; the pass corrects that as before. The patch
-also keeps the pass's own delay: it treats the list's mount as activity, so a
-pass that does have work waits for 500 ms of quiet instead of landing in the
-opening reveal. `scripts/legend-list-dom-order.test.mjs` runs the installed
-bundles' allocation and timer code for both.
-
-The header retains its report when expanded and has no hover background. Its
-left inset matches the tool rows. Diff deletions use the ASCII hyphen.
-The header reports five categories: changed files, codebase
-exploration, commands, web research, and subagents. Narrow chat columns only
-show file changes. Exploration and research are flags, not synthetic counts.
-Subagents count distinct child session IDs; commands count calls, not shell
-subcommands. Unknown tools and administrative tools stay in the disclosure
-without a guessed summary category.
-
-File statistics come exclusively from successful edit/write/patch tool
-results, not user-message summary diffs or the current workspace Git diff.
-Unique normalized paths determine file count; renames preserve identities.
-Line totals sum performed edits, including lines later removed by another
-call. Per-file patches/counts take precedence over a whole-call patch; the two
-representations are never added together. Missing or truncated diffs suppress
-the line total rather than presenting a partial total as complete. Write input
-content is not evidence of added lines. Repeated records of one call count once.
-
-The completed-turn file pills under the final answer (the "show changed files"
-setting) use the tool-result file identities, in first-touch order, with paths
-as the tools reported them (v2 assistant messages carry no working directory).
-Line counts come from each call's patch; a file with no recoverable counts
-shows its name alone. Every pill opens the turn diff: OpenCode 2 computes it on
-request (`GET /api/session/:id/diff`, `DiffView`'s "Last turn" scope) from the
-turn's start and end snapshots, merged per file, so it also covers a `write`
-result and the edits a `subagent` made in its child session, which the pills
-themselves cannot list. Past four pills the rest wait behind one `+N` pill
-that reveals them in the row; the same pill then hides them again. The list is projected once the last assistant message
-finished with `stop`, so no tool patch is parsed while the turn streams.
+The SuperWagie preference migration restores Expanded for installations that received the custom execution-fold default. Explicit settings synchronized from the server and later reader choices remain authoritative. Thinking uses the upstream preference independently; the command disclosure is not an Activity substitute.
 
 ### Why empty reasoning does not separate the answer
 
@@ -742,100 +536,12 @@ the same owner.
 - The result of a session the agent dispatched with `returnResult` arrives as a `synthetic` message with `source: "openchamber-session"` (`@/lib/opencode/dispatched-session`, delivered by the server's `lib/dispatch-results`). It is a background report like a subagent run (`isBackgroundReportEntry`): it opens a turn, so the woken agent's reply renders below it, and a fork after an answer cuts before it. `TimelineNotice` renders it as one collapsed row, `Session finished: <title>` (failed / stopped variants carry the status icon), that opens to the answer as Markdown with an `Open session` action going through `openSessionLink`.
 - A session notice is a labelled message OpenCode, a plugin or OpenChamber puts into a session: a `synthetic` message with a `description`, or the `system` message OpenCode writes when the session's instructions change. `@/lib/opencode/session-notices` decides which ones the timeline shows (plugin notices, a restart, a `!command` that could not start, a move to another folder), and its header lists every kind, shown and hidden, with the reason; change that list there when a kind turns out to be noise. The rest about the session's instructions (skills, MCP servers, instruction files, "Loaded AGENTS.md") stays hidden as noise. The live `session.instructions.updated` event gets the `instructionSources` metadata OpenCode stores, so a live move reads like one loaded from history. A shown notice draws through `SessionNoticeBlock` as one folded row with an info icon (a `!command` that could not start takes the error icon) that opens to the text the model received. `attachSyntheticContext` places it: a notice that lands while a step runs becomes a row of that step, the final step included after it answers (the notice came before the step's `time.completed`) and also when a prompt was queued behind the running step; one that lands before the run's first step joins that step, and until the step exists turn projection keeps it in the prompt's turn (`TurnRecord.waitingNotices`, drawn by `TurnItem`), so it shows even when the run fails or is stopped before its first token and the turn stays the live tail. The row is a tool part only OpenChamber makes (`SESSION_NOTICE_TOOL`) that records whether it sits before or after the step's own parts, so Activity counts and trims it with the step's other rows and `MessageBody` draws it as a notice; `streamingTailEntry` puts these rows back before or after the step's live parts, and a turn whose only row is a notice gets no Activity fold (`hasLiveActivity`). A notice after an answer stays its own entry between turns; when a step follows, the last such notice opens that step's turn, as a hidden one did before, and a notice the answer took moves out of it to open that turn.
 - Reasoning streaming presentation derives from the live stream phase (`streaming`/`cooldown`), never from missing persisted timing: a cached part without `time.end` is not live, and a part whose `time.end` is set never streams (issue #2020).
-- Reasoning receives actual text increments through the existing 100 ms throttle in every shared UI runtime. In execution history it stays in natural part order with progress prose and tools as a compact status row. The displayed excerpt comes from the latest real heading or non-empty line, bounded to the existing short preview length; no model text is invented. The folded live turn shows the same excerpt after its status label. A running tool replaces it with the current tool and command or target. The preview follows live activity, clears at completion, and respects the reasoning visibility preference; expanded turns show their details in the process instead. Full reasoning is not mounted by default, including while it streams. A click or reasoning search opens it; search and text-export markers remain intact. An empty live part shows only the localized waiting label; an empty settled part takes no space. Standalone reasoning and compaction notices retain their existing capped block and reader-controlled disclosure.
+- Reasoning uses the upstream bounded Markdown disclosure in its original part position. The existing streaming-expansion preference controls whether it opens while thinking; completion folds it without deleting the part. Its header does not mirror live reasoning or shell output. Actual text increments use the existing throttle; an empty settled part takes no space. Search can open a reasoning block.
 - Text that draws nothing takes no space (#5215). `lib/invisibleText.ts` supplies the shared test for whitespace and Unicode default-ignorable characters. Part renderers and turn projection use it for whole parts. `MarkdownArrivalBlock` omits an invisible-only streaming block before creating its wrapper; `remarkVisibleBlocks` in `streamdownPlugins.ts` filters top-level source ranges after disclosure reconstruction, including static rendering which bypasses that wrapper. Its source view omits the leading BOM as the parser does, so node offsets still identify the intended text. Both checks use the complete source block, so code fences and joiners inside visible text remain intact. The shared predicate avoids divergent definitions of empty text; CSS `:empty` cannot detect zero-width characters.
 - Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): the block-level reveal (`lib/streamTextCommit.ts`) holds a still-growing part's unfinished block, and the reply takes new text at most every 400 ms, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).
-- Only the resolved display text counts as revealed prose. Sealed parts record
-  their full text; a live part records the throttled prefix that reached the
-  renderer, leaving the rest in the inner fold. `AssistantTextPart` records
-  in a layout effect using the resolved visibility checks. Invisible text
-  never enters the records, while a generated result records its card
-  presentation. Pinned copies render a sealed `TextPart` with
-  `streamPhase="completed"` and their own `RevealedTextPartContext` flag.
-  They keep the same Markdown or
-  generated-result presentation the reader saw. The inner tail is a separate
-  synthetic part with a stable identity that includes the revealed length, so
-  shrinking the tail does not reuse a streaming throttle's older text.
+### Shared runtime behavior
 
-### Why questions stay outside execution
-
-A question blocks on the user, so an execution fold must never hide its content.
-The transcript shows the question and recorded answer through the existing tool
-renderer, open by default. The composer form remains the sole owner of live
-answers and drafts, so folding execution cannot reset or duplicate a submission.
-
-### Why shown prose stays above execution
-
-`LiveTurnActivity` used to recompute its foreground message from the latest
-turn state. A final answer, later tool step, expansion or turn retirement
-could unmount prose the reader had already seen outside the fold. The turn now
-keeps renderer-local records of the exact displayed text. Prose shown outside
-the execution fold stays above the Activity header; later actions fold below
-it. The pinned original `ChatMessage` root draws retired records and the
-current authoritative answer in one `data-message-text-export-source`
-wrapper outside the folds. Working progress rewrites also pin their old prose.
-Inactive chains, a changed generation and a broken displayed prefix retain
-the earlier prose outside the fold. Only unshown tails, tools and reasoning
-enter the pinned inner fold, while later messages use outer folds.
-Cold-loaded history has no records and stays folded. A refresh clears them.
-The reader never watches finished text disappear.
-
-The records stay in render-process view state. Persistence, synchronization,
-the event reducer and `TurnRecord.assistantMessages` never carry them. The
-store keeps at most 4000 turns and publishes a numeric snapshot version for
-`useSyncExternalStore`. Authoritative actions still read the original parts;
-the exact display string keeps an unshown streaming tail from being mistaken
-for text the reader saw. Multiple disclosures and scroll anchors need a real
-browser check: follow-stop placement, the clicked Activity header under the
-sticky user header, and `holdAnchor` for each outer and pinned inner fold.
-Static DOM tests cover order and state invariants only and cannot establish
-that the reader stays anchored to the same prose.
-
-Web: the browser renderer keeps its own reveal records and pins shown prose
-above execution.
-
-Electron desktop: the desktop window's renderer keeps its own reveal records
-and pins shown prose above execution.
-
-VS Code: the webview renderer keeps its own reveal records and pins shown
-prose above execution.
-
-Hosted mobile: the browser renderer keeps its own reveal records and pins
-shown prose above execution.
-
-Capacitor mobile: the native webview renderer keeps its own reveal records
-and pins shown prose above execution.
-
-These five runtimes share this chat UI and renderer-local records. A runtime
-endpoint or directory change gives later prose a separate identity, so prose
-from one runtime or directory never pins in another.
-
-### Why the original ChatMessage root stays and not a second lightweight renderer
-
-A pinned message keeps its original `ChatMessage` root, `MessageBody`,
-`data-message-id`, quote root, text export root, selection root, footer and
-actions. A second lightweight renderer would add a second root, leaving
-search, quote anchors, copy, image export, TTS, navigation and actions with
-two competing owners; one original root keeps retired prose and the current
-answer above the fold and folds only unrevealed tails, tools and reasoning.
-
-### Why reasoning uses throttled increments and not paragraph commits
-
-Reasoning must be readable while its block is open. Waiting for a complete
-paragraph can withhold an entire short thought until the update that folds
-the block, so `ReasoningPart` passes throttled text directly to Markdown.
-Assistant text outside the unified execution process retains its block commit
-policy above.
-
-### Why execution shows compact reasoning before its details
-
-Progress prose describes what the agent is doing and remains readable in the
-running conversation. Raw reasoning and tool output can be much longer, so
-their rows show a real compact status until a reader requests the details.
-Completed commentary and tools become turn history, while the final answer
-keeps its own layout. Automatic completion does not first mount that long raw
-body and then animate it away. The explicit Expanded activity preference keeps
-its existing individual-row presentation.
+Web, Electron, VS Code, hosted mobile, and Capacitor use this shared renderer. The row projection changes presentation only; it creates no persisted message copies, fabricated live state, or alternate execution history. Command status comes from the existing authoritative shell lifecycle. Historical missing timestamps never imply live activity.
 
 ## "I want to change description for Perplexity" (example recipe)
 
@@ -860,18 +566,8 @@ Why: only navigation tools use the compact static path; all other tools need obs
 - Do not duplicate icon logic; keep it in `toolPresentation.tsx`.
 - For static tool copy changes, prefer `ProgressiveGroup.tsx` first.
 - For expanded output changes, edit `ToolPart.tsx`.
-- Keep one `ChatMessage`, one `MessageBody`, one `data-message-id`, one
-  quote root, one text selection root and one text export source per text
-  part when a message is pinned. Record displayed text; copy and export read
-  the original parts.
-- After edits run:
-  - `bun run type-check`
-  - `bun run lint`
-  - `bun run build`
-- A changed fold also needs focused DOM-order and remount tests. After those
-  pass, check follow-stop placement, a clicked Activity header under the
-  sticky user header, and `holdAnchor` for each outer and pinned inner fold
-  in a real browser.
+- Preserve authoritative message records when slicing. Navigation identifies the first slice; quote and selection ranges may span several rows. Copy, TTS, and image export read the complete source text.
+- Run focused behavior tests and `bun run check:changed` before committing. Rendered browser checks must cover natural order, streaming, completion, reader expansion, history revisit, and narrow layouts.
 
 ## Quick map of files in this folder
 
@@ -1005,7 +701,7 @@ polling or model request selects copy.
 
 ### Why only the folded header shimmers
 
-The folded Activity header sweeps 2.8 s luminance bands from left to right
+The command disclosure header sweeps 2.8 s luminance bands from left to right
 through a masked copy of its own text. Each band repeats every 240 px, so a
 short header shows one highlight and a long header shows several moving
 highlights instead of one slow wash across the full width. Each band fades in
@@ -1015,9 +711,9 @@ font size. The copy keeps the original sizes and weights, and its white text is
 masked so only glyphs light up while the unchanged base label keeps its title
 and description colors at either side. The
 shimmer starts only after the visible header identity has held still for one
-second, and resets on any identity, tool, target or language change. The gray
+second, and resets when its running state or language changes. The gray
 status row and scroll pill stay still so their concrete work text reads
-cleanly. Permission waits, settled turns, hidden or offscreen headers,
+cleanly. Pending commands, settled calls, hidden or offscreen headers,
 minimized or tray-hidden native windows, paused clocks, inert subtrees and
 reduced-motion preferences stand still. The infinite CSS animation is listed in
 `lib/infiniteAnimations.test.ts`; its measured cost is recorded in

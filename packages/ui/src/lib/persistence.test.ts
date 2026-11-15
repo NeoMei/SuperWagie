@@ -1217,8 +1217,8 @@ describe('updateDesktopSettings', () => {
     }
   });
 
-  for (const savedExpansion of [undefined, false]) {
-    test(`applies ${savedExpansion === false ? 'a saved folded choice' : 'the new reasoning default'} after legacy hydration without writing it back`, async () => {
+  for (const savedExpansion of [undefined, false, true]) {
+    test(`applies ${savedExpansion === undefined ? 'the upstream reasoning default' : `a saved ${savedExpansion ? 'expanded' : 'folded'} choice`} after legacy hydration without writing it back`, async () => {
       const options = useUIStore.persist.getOptions();
       const original = useUIStore.getState();
       const hydration = deferred<{ version: number; state: ReturnType<typeof useUIStore.getInitialState> }>();
@@ -1226,7 +1226,7 @@ describe('updateDesktopSettings', () => {
       const hydratedExpansion: boolean[] = [];
       const saves: Array<Partial<SettingsPayload>> = [];
       let recording = false;
-      useUIStore.setState({ expandReasoningWhileStreaming: true });
+      useUIStore.setState({ expandReasoningWhileStreaming: false });
       useUIStore.persist.setOptions({ storage: {
         getItem: () => hydration.promise,
         setItem: () => undefined,
@@ -1244,7 +1244,7 @@ describe('updateDesktopSettings', () => {
           draftStartersCraftGoalAdded: true,
           draftStartersScheduleTaskAdded: true,
         };
-        if (savedExpansion === false) settings.expandReasoningWhileStreaming = false;
+        if (savedExpansion !== undefined) settings.expandReasoningWhileStreaming = savedExpansion;
         return {
           settings,
           source: 'web',
@@ -1267,8 +1267,8 @@ describe('updateDesktopSettings', () => {
         await sync;
         await delay(500);
 
-        expect(hydratedExpansion).toEqual([true]);
-        expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(savedExpansion !== false);
+        expect(hydratedExpansion).toEqual([false]);
+        expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(savedExpansion ?? false);
         expect(saves).toEqual([]);
       } finally {
         stopHydration();

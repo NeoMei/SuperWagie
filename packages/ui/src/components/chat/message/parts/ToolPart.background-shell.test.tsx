@@ -57,7 +57,8 @@ const themeContext: ThemeContextValue = {
 const withHarness = async (
   toolPart: ToolPartData,
   isExpanded: boolean,
-  run: (store: ReturnType<ReturnType<typeof useChildStoreManager>['ensureChild']>, container: HTMLElement, remount: (nextPart?: ToolPartData) => Promise<void>) => Promise<void>,
+  run: (store: ReturnType<ReturnType<typeof useChildStoreManager>['ensureChild']>, container: HTMLElement,
+    remount: (nextPart?: ToolPartData) => Promise<void>, update: (nextPart: ToolPartData) => Promise<void>) => Promise<void>,
 ) => {
   const happyWindow = new Window({ url: 'http://localhost' });
   const globals = {
@@ -72,6 +73,7 @@ const withHarness = async (
     Element: happyWindow.Element,
     HTMLElement: happyWindow.HTMLElement,
     SVGElement: happyWindow.SVGElement,
+    CustomEvent: happyWindow.CustomEvent,
     requestAnimationFrame: happyWindow.requestAnimationFrame.bind(happyWindow),
     cancelAnimationFrame: happyWindow.cancelAnimationFrame.bind(happyWindow),
     getComputedStyle: happyWindow.getComputedStyle.bind(happyWindow),
@@ -120,6 +122,11 @@ const withHarness = async (
       await act(async () => {
         currentPart = nextPart ?? currentPart;
         renderKey += 1;
+        render();
+      });
+    }, async (nextPart) => {
+      await act(async () => {
+        currentPart = nextPart;
         render();
       });
     });
@@ -326,6 +333,61 @@ test('native cancellation confirms stopped without a local request or shell inde
     await remount();
     expect(status(container)).toBe('stopped');
   });
+});
+
+test('a reader collapse survives a running foreground command moving to the background', async () => {
+  resetBackgroundShells();
+  const foreground: ToolPartData = { ...backgrounded, state: {
+    status: 'running', input: { command: shell.command }, metadata: { shellID: shell.shellID }, time: { start: 100 },
+  } };
+  try {
+    await withHarness(foreground, false, async (store, container, _remount, update) => {
+      await act(async () => { start(); });
+      const header = () => container.querySelector<HTMLElement>('[data-command-header]');
+      expect(header()?.getAttribute('aria-expanded')).toBe('true');
+      await act(async () => { header()?.click(); });
+      expect(header()?.getAttribute('aria-expanded')).toBe('false');
+      await update(backgrounded);
+      expect(status(container)).toBe('running');
+      expect(header()?.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => {
+        end({ kind: 'exited', status: 'exited', exit: 0 });
+        store.setState({ message: { parent: [completion({ state: 'completed', exit: 0 })] } });
+      });
+      expect(header()?.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => { header()?.click(); });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+      expect(container.querySelector('[data-command-output]')?.textContent).toContain('command output');
+    });
+  } finally { resetBackgroundShells(); }
+});
+
+test('a stopped command folds with its last observed output retained, then prefers the terminal report', async () => {
+  resetBackgroundShells();
+  const read = spyOn(opencodeClient, 'readShellOutput').mockResolvedValue({ output: 'before stop\n', cursor: 12, skipped: false });
+  const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+  try {
+    await withHarness(backgrounded, false, async (store, container, remount) => {
+      await act(async () => { start(); });
+      await flush();
+      expect(container.querySelector('[data-command-output]')?.textContent).toContain('before stop');
+      await act(async () => { end({ kind: 'removed' }); });
+      expect(status(container)).toBe('stopped');
+      expect(container.querySelector('[data-command-header]')?.getAttribute('aria-expanded')).toBe('false');
+      expect(container.querySelector('[data-command-output]')).toBeNull();
+      await act(async () => { container.querySelector<HTMLElement>('[data-command-header]')?.click(); });
+      await flush();
+      expect(container.querySelector('[data-command-output]')?.textContent).toContain('before stop');
+      expect(container.querySelector('[data-command-output]')?.textContent).toContain('Stopped by you');
+      await act(async () => store.setState({ message: { parent: [completion({ state: 'cancelled' })] } }));
+      expect(container.querySelector('[data-command-output]')?.textContent).toContain('command output');
+      expect(container.querySelector('[data-command-output]')?.textContent).not.toContain('before stop');
+      await remount();
+      await act(async () => { container.querySelector<HTMLElement>('[data-command-header]')?.click(); });
+      await flush();
+      expect(container.querySelector('[data-command-output]')?.textContent).toContain('command output');
+    });
+  } finally { read.mockRestore(); resetBackgroundShells(); }
 });
 
 test('the ordinary background stop confirms removal and keeps the stopped result after remount', async () => {

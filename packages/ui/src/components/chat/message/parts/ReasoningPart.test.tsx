@@ -1,7 +1,7 @@
 import React, { act } from 'react';
-import { describe, expect, test } from 'bun:test';
 import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
+import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -13,11 +13,9 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
 
 import { I18nProvider } from '@/lib/i18n';
-import { useUIStore } from '@/stores/useUIStore';
 import ReasoningPart, { ReasoningTimelineBlock } from './ReasoningPart';
 import type { StreamPhase } from '../types';
 import { onRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
-import { loadMarkdownRendererModule } from '../../markdownRendererLoader';
 
 // Bun does not implement Vite's asset-query imports. Preserve the real asset
 // URL while keeping the renderer and worker client modules unchanged.
@@ -30,6 +28,8 @@ plugin({
     }));
   },
 });
+
+
 
 const unavailable = (): never => { throw new Error('Reasoning scrolling must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {
@@ -238,6 +238,22 @@ describe('ReasoningTimelineBlock', () => {
     expect(markup).toContain('Planning accessible icon labels with translations');
     expect(markup).not.toContain('&lt;!-- --&gt;');
   });
+
+  test('a long trace is summarized from its start, without the fence a cut left open', () => {
+    const text = `\`\`\`ts\nconst first = 1;\n${'const next = [value_of * 2;\n'.repeat(20_000)}\`\`\`\n`;
+    const started = performance.now();
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock text={text} blockId="reasoning-long-test" />
+      </TestProviders>,
+    );
+    const title = /title="([^"]*)"/.exec(markup)?.[1] ?? '';
+
+    expect(title.startsWith('const first = 1;')).toBe(true);
+    expect(title.endsWith('…')).toBe(true);
+    // Stripping all 560,000 characters took seconds.
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });
 
 // Regression tests for issue #2020: a persisted reasoning part must not be
@@ -310,29 +326,14 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
     </TestProviders>,
   );
 
-  test('live reasoning keeps an actual text preview when automatic expansion is off', async () => {
-    const dom = installDomStub();
-    const root = createRoot(dom.container);
-    const previous = useUIStore.getState().expandReasoningWhileStreaming;
-    useUIStore.setState({ expandReasoningWhileStreaming: false });
+  test('live in-progress reasoning renders as streaming, folded to its header by default', () => {
+    // Genuinely live: the message-level stream phase reports streaming and the
+    // part has not ended. The header shows the busy indicator; the body stays
+    // folded so its closing at the end does not move the chat.
+    const markup = renderPart(makeReasoningPart({ start: 1_000 }), 'streaming');
 
-    try {
-      await act(async () => {
-        root.render(
-          <TestProviders>
-            <ReasoningPart part={makeReasoningPart({ start: 1_000 })} messageId="msg_2020" streamPhase="streaming" />
-          </TestProviders>,
-        );
-      });
-      const header = dom.container.querySelector('[role="button"][aria-expanded]');
-      expect(dom.container.querySelector('[data-busy-dots]')).not.toBeNull();
-      expect(header?.getAttribute('aria-expanded')).toBe('false');
-      expect(header?.textContent).toContain(SHORT_REASONING);
-    } finally {
-      await act(async () => { root.unmount(); });
-      useUIStore.setState({ expandReasoningWhileStreaming: previous });
-      dom.restore();
-    }
+    expect(markup).toContain(BUSY_INDICATOR);
+    expect(markup).toContain('aria-expanded="false"');
   });
 
   test('live in-progress reasoning opens while it streams when the setting asks for it', () => {
@@ -352,7 +353,10 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
     expect(markup).toContain('data-scrollable="true"');
   });
 
-  test('a live part with no text yet shows the busy header and no empty summary', () => {
+  test('a live part with no committed text yet shows the busy header and no empty summary', () => {
+    // The streaming early-return keeps the block mounted before the block-level
+    // reveal commits a first line. The header must read as busy and must not
+    // paint an empty summary row.
     const markup = renderPart(makeReasoningPart({ start: 1_000 }, ''), 'streaming');
     const withText = renderPart(makeReasoningPart({ start: 1_000 }), undefined);
 
@@ -405,102 +409,6 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
       dom.restore();
     }
   });
-});
-
-describe('ReasoningPart live text', () => {
-  const makePart = (text: string, ended = false): ReasoningPartFixture => ({
-    id: 'prt_live_text',
-    sessionID: 'ses_live_text',
-    messageID: 'msg_live_text',
-    type: 'reasoning',
-    text,
-    time: ended ? { start: 1_000, end: 2_000 } : { start: 1_000 },
-  });
-  const renderPart = (text: string, ended = false) => (
-    <TestProviders>
-      <ReasoningPart part={makePart(text, ended)} messageId="msg_live_text" streamPhase="streaming" />
-    </TestProviders>
-  );
-  const waitForText = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
-
-  for (const { language, first, next, final } of [
-    { language: 'Chinese', first: '先检查', next: '先检查当前状态，再核实变更。', final: '先检查当前状态，再核实变更。核实已完成。' },
-    { language: 'English', first: 'Check the', next: 'Check the current state before changing it.', final: 'Check the current state before changing it. The review is complete.' },
-  ]) {
-    test(`shows short ${language} increments before the reasoning ends, then folds for later review`, async () => {
-      const dom = installDomStub();
-      const root = createRoot(dom.container);
-      const previous = useUIStore.getState().expandReasoningWhileStreaming;
-      useUIStore.setState({ expandReasoningWhileStreaming: true });
-      const header = () => dom.container.querySelector<HTMLElement>('[role="button"][aria-expanded]');
-      const body = () => dom.container.querySelector('[data-message-text-export-source]');
-
-      try {
-        await loadMarkdownRendererModule();
-        await act(async () => { root.render(renderPart('')); });
-        expect(header()?.getAttribute('aria-expanded')).toBe('true');
-        expect(header()?.textContent).toContain('Thinking');
-        expect(dom.container.querySelector('[data-busy-dots]')).not.toBeNull();
-        expect(body()?.textContent).toBe('');
-
-        await act(async () => { root.render(renderPart(first)); });
-        await waitForText();
-        expect(body()?.textContent).toContain(first);
-        expect(header()?.getAttribute('aria-expanded')).toBe('true');
-        expect(dom.container.querySelector('[data-busy-dots]')).not.toBeNull();
-
-        await act(async () => { root.render(renderPart(next)); });
-        expect(body()?.textContent).toContain(first);
-        expect(body()?.textContent).not.toContain(next);
-        await waitForText();
-        expect(body()?.textContent).toContain(next);
-
-        // A part end is authoritative even while the message phase still streams.
-        await act(async () => { root.render(renderPart(final, true)); });
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        expect(header()?.textContent).toContain(final);
-        expect(dom.container.querySelector('[data-busy-dots]')).toBeNull();
-        await act(async () => { header()?.click(); });
-        expect(header()?.getAttribute('aria-expanded')).toBe('true');
-        expect(body()?.textContent).toContain(final);
-      } finally {
-        await act(async () => { root.unmount(); });
-        useUIStore.setState({ expandReasoningWhileStreaming: previous });
-        dom.restore();
-      }
-    });
-  }
-
-  for (const expanded of [false, true]) {
-    test(`keeps the reader choice expanded=${expanded} through updates and completion`, async () => {
-      const dom = installDomStub();
-      const root = createRoot(dom.container);
-      const previous = useUIStore.getState().expandReasoningWhileStreaming;
-      useUIStore.setState({ expandReasoningWhileStreaming: true });
-      const header = () => dom.container.querySelector<HTMLElement>('[role="button"][aria-expanded]');
-
-      try {
-        await loadMarkdownRendererModule();
-        await act(async () => { root.render(renderPart('Checking')); });
-        await act(async () => { header()?.click(); });
-        if (expanded) await act(async () => { header()?.click(); });
-        expect(header()?.getAttribute('aria-expanded')).toBe(String(expanded));
-
-        await act(async () => { root.render(renderPart('Checking the current state.')); });
-        await waitForText();
-        expect(header()?.getAttribute('aria-expanded')).toBe(String(expanded));
-        if (!expanded) expect(header()?.textContent).toContain('Checking the current state.');
-
-        await act(async () => { root.render(renderPart('Checking the current state.', true)); });
-        expect(header()?.getAttribute('aria-expanded')).toBe(String(expanded));
-        expect(dom.container.querySelector('[data-busy-dots]')).toBeNull();
-      } finally {
-        await act(async () => { root.unmount(); });
-        useUIStore.setState({ expandReasoningWhileStreaming: previous });
-        dom.restore();
-      }
-    });
-  }
 });
 
 describe('ReasoningTimelineBlock opened by the reader', () => {

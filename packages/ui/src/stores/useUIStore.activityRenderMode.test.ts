@@ -17,18 +17,25 @@ const hydrateFrom = async (version: number, activityRenderMode: 'collapsed' | 's
   await useUIStore.persist.rehydrate();
 };
 
-describe('activity render mode default', () => {
-  test('folds Activity by default', () => {
-    expect(useUIStore.getInitialState().activityRenderMode).toBe('collapsed');
+describe('upstream activity render mode', () => {
+  test('uses the normal information flow by default', () => {
+    expect(useUIStore.getInitialState().activityRenderMode).toBe('summary');
   });
 
-  test('a v24 store that held the old expanded default hydrates folded', async () => {
-    await hydrateFrom(24, 'summary');
-    expect(useUIStore.getState().activityRenderMode).toBe('collapsed');
-  });
+  for (const version of [24, 25, 26, 27]) {
+    test(`restores a v${version} custom execution-fold default`, async () => {
+      await hydrateFrom(version, 'collapsed');
+      expect(useUIStore.getState().activityRenderMode).toBe('summary');
+    });
+  }
 
-  test('keeps an expanded choice stored after the default changed', async () => {
-    await hydrateFrom(25, 'summary');
+  test('keeps an expanded choice through the restoration', async () => {
+    await hydrateFrom(27, 'summary');
     expect(useUIStore.getState().activityRenderMode).toBe('summary');
+  });
+
+  test('keeps a new collapsed choice after the restoration', async () => {
+    await hydrateFrom(28, 'collapsed');
+    expect(useUIStore.getState().activityRenderMode).toBe('collapsed');
   });
 });

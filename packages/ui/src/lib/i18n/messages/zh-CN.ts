@@ -223,7 +223,7 @@ export const dict: Record<I18nKey, string> = {
   'commitComparison.loadError': '无法加载提交',
   'commitComparison.noCommits': '未找到提交',
   'commitComparison.emptyDiff': '此提交没有更改',
-  'chat.liveActivity.title': '执行过程',
+  'chat.liveActivity.title': '活动',
   'chat.liveActivity.running': '正在执行',
   'chat.liveActivity.moreRows': '还有 {count} 项',
   'chat.liveActivity.changedFile': '更改了 {count} 个文件',

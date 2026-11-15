@@ -116,6 +116,8 @@ import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests'
 import { useBackgroundShellOutput } from './useBackgroundShellOutput';
 import { useToolContentCompletion } from './useToolContentCompletion';
 import { BusyDots } from '@/components/ui/busy-dots';
+import { CommandExecutionBody, CommandExecutionTitle } from './CommandExecution';
+import { useCommandDisclosure } from './useCommandDisclosure';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
 
@@ -1461,6 +1463,17 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const shouldRenderResult = (state.status === 'completed' && 'output' in state)
         || (isShellTool(part.tool) && hasVisibleOutput);
 
+    if (isShellTool(part.tool)) {
+        const command = coerceToText(input?.command) || coerceToText(input?.cmd)
+            || coerceToText(metadata?.command) || coerceToText(metadata?.cmd);
+        return <CommandExecutionBody command={command} output={capToolOutputText(outputString)}
+            error={state.status === 'error' ? coerceToText(state.error) : undefined}>
+            {outputString ? <CopyToolOutputButton output={outputString} /> : null}
+            {Array.isArray(attachments) && attachments.length > 0 && state.status === 'completed'
+                ? <MessageFilesDisplay files={attachments} onShowPopup={onShowPopup} compact /> : null}
+        </CommandExecutionBody>;
+    }
+
     return (
         <div
             className={cn(
@@ -1641,6 +1654,8 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = isSubagentTool(normalizedPartTool);
+    const isCommand = isShellTool(normalizedPartTool);
+    const contentId = React.useId();
     // The registry sees the full name OpenCode reported (`mcp.jira.search`);
     // the built-in switches below keep the normalized one.
     const presentation = useGuestToolPresentation(part.tool);
@@ -1781,11 +1796,11 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
         () => (presentation ? renderGuestToolHeader(presentation, { input, output: stateOutput, metadata }) : null),
         [input, metadata, presentation, stateOutput],
     );
-    const description = guestHeader?.subtitle ?? builtInDescription;
-    const displayName = guestHeader?.title ?? getToolMetadata(normalizedPartTool || part.tool).displayName;
+    const description = isCommand ? '' : guestHeader?.subtitle ?? builtInDescription;
+    const displayName = isCommand ? t('chat.commandTrace.title') : guestHeader?.title ?? getToolMetadata(normalizedPartTool || part.tool).displayName;
 
     // Opened, the body already carries the whole error and output.
-    const failureDetail = isError && !isExpanded ? failureReason : undefined;
+    const failureDetail = isError && !isExpanded && !isCommand ? failureReason : undefined;
 
     // Tool title/description — shown inline as context. A subtitle the
     // extension declared replaces it, since both land in the same slot.
@@ -1954,7 +1969,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     }
 
     return (
-        <div ref={rowRef}>
+        <div ref={rowRef} data-command-fold={isCommand ? part.id : undefined}>
             {}
             <div
                 className={cn(
@@ -1971,6 +1986,9 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                 role="button"
                 tabIndex={0}
                 aria-expanded={isExpanded}
+                aria-controls={contentId}
+                data-command-header={isCommand ? 'true' : undefined}
+                aria-label={isCommand ? t(isExpanded ? 'chat.commandTrace.collapseAria' : 'chat.commandTrace.expandAria') : undefined}
             >
                 <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center flex-shrink-0')}>
                     {isMultiFileApplyPatch ? (
@@ -2040,7 +2058,9 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 </div>
                             </div>
                             <div className={cn('flex items-center min-w-0 flex-1', quickOpenTarget || taskSessionId ? 'gap-1' : 'gap-2')}>
-                                <MinDurationShineText
+                                {isCommand ? <span className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')} style={titleStyle}>
+                                    <CommandExecutionTitle running={isActive} />
+                                </span> : <MinDurationShineText
                                     active={Boolean(isActive && !isError)}
                                     minDurationMs={300}
                                     className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
@@ -2048,7 +2068,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                     title={displayName}
                                 >
                                     {displayName}
-                                </MinDurationShineText>
+                                </MinDurationShineText>}
                                 {quickOpenTarget ? (
                                     <button
                                         type="button"
@@ -2158,6 +2178,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
 
             <div
                 ref={expandedContentRef}
+                id={contentId}
                 aria-hidden={!isExpanded}
                 style={{
                     height: isExpanded ? 'auto' : '0px',
@@ -2250,7 +2271,9 @@ class ToolPartErrorBoundary extends React.Component<{
 }
 
 /** A shell call OpenCode moved to the background, rendered from the command's own state (see `backgroundShellPart.ts`). */
-const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string }> = ({ shellID, ...props }) => {
+type CommandDisclosure = ReturnType<typeof useCommandDisclosure>;
+
+const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string; disclosure: CommandDisclosure }> = ({ shellID, disclosure, ...props }) => {
     const { t } = useI18n();
     const directory = useEffectiveDirectory();
     const running = useRunningShell(shellID);
@@ -2258,7 +2281,8 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
     const messages = useSessionMessages(props.part.sessionID, directory);
     const completion = React.useMemo(() => findShellCompletion(messages, shellID), [messages, shellID]);
     const isRunning = !completion && running !== undefined;
-    const liveOutput = useBackgroundShellOutput(shellID, running?.directory, isRunning && props.isExpanded);
+    const expanded = disclosure.choice ?? isRunning;
+    const liveOutput = useBackgroundShellOutput(shellID, running?.directory, isRunning && expanded);
     const [stopping, setStopping] = React.useState(false);
     const stoppedFromForeground = useForegroundShellStopping(shellID);
 
@@ -2269,7 +2293,9 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
         const stoppedAt = completion?.state === 'cancelled' ? completion.endedAt
             : ended?.status === 'stopped' && (!completion || completion.state === 'error') ? ended.endedAt : undefined;
         if (stoppedAt !== undefined) {
-            return { kind: 'stopped', endedAt: stoppedAt, notice: t('chat.toolPart.background.stoppedNotice') };
+            const output = completion?.output || liveOutput;
+            const notice = t('chat.toolPart.background.stoppedNotice');
+            return { kind: 'stopped', endedAt: stoppedAt, notice: output ? `${output}\n\n${notice}` : notice };
         }
         return completion ? { kind: 'finished', completion } : { kind: 'unknown' };
     }, [completion, ended, isRunning, liveOutput, t]);
@@ -2292,6 +2318,8 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
         <ToolPartContent
             {...props}
             part={part}
+            isExpanded={expanded}
+            onToggle={() => disclosure.toggle(expanded)}
             header={{
                 status: phase.kind === 'stopped' ? 'stopped'
                     : phase.kind === 'unknown' ? 'unknown'
@@ -2309,13 +2337,14 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
  * while it runs, so the expanded row reads the output from the shell service,
  * as a background row does, until the call settles with its final output.
  */
-const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
+const ShellToolPartContent: React.FC<ToolPartProps & { disclosure: CommandDisclosure }> = ({ disclosure, ...props }) => {
     const { t } = useI18n();
     const directory = useEffectiveDirectory();
     const shellID = readRunningShellID(props.part);
     const running = useRunningShell(shellID);
     const stopping = useForegroundShellStopping(shellID);
-    const liveOutput = useBackgroundShellOutput(shellID ?? '', running?.directory, shellID !== undefined && props.isExpanded);
+    const expanded = disclosure.choice ?? (props.part.state.status === 'pending' || props.part.state.status === 'running');
+    const liveOutput = useBackgroundShellOutput(shellID ?? '', running?.directory, shellID !== undefined && expanded);
     const part = React.useMemo((): ToolPartType => {
         const { state } = props.part;
         if (!liveOutput || state.status !== 'running') return props.part;
@@ -2340,7 +2369,15 @@ const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
         ? { stop: { onStop: stop, ariaLabel: t('chat.toolPart.foreground.stop') } }
         : undefined;
 
-    return <ToolPartContent {...props} part={part} header={header} />;
+    return <ToolPartContent {...props} part={part} header={header} isExpanded={expanded} onToggle={() => disclosure.toggle(expanded)} />;
+};
+
+/** Reader choices belong to the command, including a move to background execution. */
+const CommandToolPartContent: React.FC<ToolPartProps & { shellID?: string }> = ({ shellID, ...props }) => {
+    const disclosure = useCommandDisclosure({ id: props.part.id, expanded: props.isExpanded, onToggle: props.onToggle });
+    return shellID
+        ? <BackgroundShellToolPartContent key={shellID} {...props} shellID={shellID} disclosure={disclosure} />
+        : <ShellToolPartContent {...props} disclosure={disclosure} />;
 };
 
 /**
@@ -2449,13 +2486,11 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
             resetKey={props.part}
             toolName={toolName}
         >
-            {backgroundShellID
-                ? <BackgroundShellToolPartContent {...props} shellID={backgroundShellID} />
+            {isShellTool(toolName)
+                ? <CommandToolPartContent key={props.part.id} {...props} shellID={backgroundShellID} />
                 : isSubagentTool(toolName)
                     ? <SubagentToolPartContent {...props} />
-                    : isShellTool(toolName)
-                        ? <ShellToolPartContent {...props} />
-                        : <ToolPartContent {...props} />}
+                    : <ToolPartContent {...props} />}
         </ToolPartErrorBoundary>
     );
 };

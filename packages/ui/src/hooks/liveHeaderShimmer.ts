@@ -18,7 +18,7 @@ const nativeVisibilityEventSchema = z.object({ detail: z.boolean() });
 const domViewSchema = z.custom<Window & typeof globalThis>((value) => 'CustomEvent' in Object(value));
 
 /** Reads the environment inputs and reports each later change. */
-const readConditions = (element: HTMLButtonElement | null, onChange: () => void): ShimmerConditions => {
+const readConditions = (element: HTMLElement | null, onChange: () => void): ShimmerConditions => {
     const disposers: Array<() => void> = [];
     const preference = globalThis.matchMedia?.(REDUCED_MOTION_QUERY);
     const ownerDocument = element?.ownerDocument ?? globalThis.document;
@@ -101,7 +101,7 @@ export const isShimmerAllowed = (): boolean => {
 
 /** Keeps a mounted header's shimmer permission current until it unmounts. */
 export const watchHeaderShimmer = (
-    element: HTMLButtonElement | null,
+    element: HTMLElement | null,
     setAllowed: React.Dispatch<React.SetStateAction<boolean>>,
 ): (() => void) => {
     const update = (conditions: ShimmerConditions) => setAllowed(conditions.allowed());

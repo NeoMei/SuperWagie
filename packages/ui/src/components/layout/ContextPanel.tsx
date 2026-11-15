@@ -47,7 +47,7 @@ import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { productHelpPanelKey } from '@/lib/surfaces/panel-key';
 import { CONTEXT_SURFACE_WIDTHS, getContextSurfaceDefaultWidth } from '@/lib/surfaces/registry';
-import { beginLayoutAnimation, cancelWhenLayoutSettled, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { beginLayoutAnimation, cancelWhenLayoutSettled, holdLayoutAnimation, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
 import { setWorkStatusHost, useRightSlotStore } from './rightSlot';
@@ -630,6 +630,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // most every RESIZE_FOLLOW_INTERVAL_MS and the size transition smooths each
   // step, VS Code-style.
   const resizeAvailableSizeRef = React.useRef<number | null>(null);
+  const releaseResizeHoldRef = React.useRef<(() => void) | null>(null);
   const resizeFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applyFollowSize = React.useCallback(() => {
@@ -646,6 +647,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     if (resizeFollowTimerRef.current !== null) {
       clearTimeout(resizeFollowTimerRef.current);
     }
+    releaseResizeHoldRef.current?.();
+    releaseResizeHoldRef.current = null;
   }, []);
 
   const clampSizeForDrag = React.useCallback((nextSize: number) => {
@@ -671,6 +674,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       : (panelRef.current?.closest<HTMLElement>('[data-workspace-row]')?.clientWidth ?? 0) - otherSideRef.current;
     resizeAvailableSizeRef.current = available && available > 0 ? available : null;
     document.documentElement.style.cursor = isVertical ? 'row-resize' : 'col-resize';
+    releaseResizeHoldRef.current?.();
+    releaseResizeHoldRef.current = holdLayoutAnimation(isVertical ? 'height' : 'width');
     event.preventDefault();
   }, [directoryKey, isExpanded, isOpen, isVertical, size]);
 
@@ -693,6 +698,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     }
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
+    releaseResizeHoldRef.current?.();
+    releaseResizeHoldRef.current = null;
   }, [activeModeForWidth, clampSizeForDrag, directoryKey, isTreeOnly, isVertical, setContextEditorTreeWidth, setContextPanelHeight, setContextPanelWidth, size]);
 
   // Window-level drag listeners: tracking the pointer via the thin handle and
@@ -751,8 +758,14 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     if (!isResizing) {
       resizingSizeRef.current = null;
       document.documentElement.style.cursor = '';
+      releaseResizeHoldRef.current?.();
+      releaseResizeHoldRef.current = null;
     }
   }, [isResizing]);
+
+  React.useEffect(() => {
+    if (!isOpen && isResizing) finishResize();
+  }, [finishResize, isOpen, isResizing]);
 
   const handleClose = React.useCallback(() => {
     if (!directoryKey) {
