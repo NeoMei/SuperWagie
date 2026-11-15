@@ -18,16 +18,30 @@ const isRunningStatus = (status: string): boolean => (
     status === 'pending' || status === 'running' || status === 'started'
 );
 
+const isShellLikeTool = (tool: string | undefined): boolean => {
+    const normalized = tool?.trim().toLowerCase().split('.').at(-1)?.replace(/:\d+$/, '');
+    return isShellTool(tool) || normalized === 'bash' || normalized === 'cmd' || normalized === 'terminal' || normalized === 'shell_command';
+};
+
 /** Selects the latest shell so its output can fold independently of Activity. */
 export const latestShellPreview = (activities: readonly TurnActivityRecord[]): ShellPreview | undefined => {
     for (let index = activities.length - 1; index >= 0; index -= 1) {
         const activity = activities[index];
-        if (activity?.kind !== 'tool' || activity.part.type !== 'tool' || !isShellTool(activity.part.tool)) continue;
+        if (activity?.kind !== 'tool' || activity.part.type !== 'tool' || !isShellLikeTool(activity.part.tool)) continue;
         const state = activity.part.state;
         const metadata = 'metadata' in state ? state.metadata : undefined;
         const describedText = toolDescriptionText(toolDescription(activity.part.tool, state.input, metadata));
-        const commandText = describedText || coerceToText(state.input.command) || coerceToText(metadata?.command);
-        const descriptionText = coerceToText(state.input.description) || coerceToText(metadata?.description);
+        const commandText = describedText
+            || coerceToText(state.input.command)
+            || coerceToText(state.input.cmd)
+            || coerceToText(state.input.script)
+            || coerceToText(state.input.code)
+            || coerceToText(metadata?.command)
+            || coerceToText(metadata?.cmd)
+            || coerceToText(metadata?.title);
+        const descriptionText = coerceToText(state.input.description)
+            || coerceToText(metadata?.description)
+            || coerceToText(metadata?.title);
         const running = isRunningStatus(state.status);
         const shellID = running ? readRunningShellID(activity.part) : readBackgroundShellID(activity.part);
         const output = running
