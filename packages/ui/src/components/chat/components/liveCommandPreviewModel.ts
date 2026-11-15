@@ -1,6 +1,6 @@
 import type { ToolPart } from '@/lib/opencode/model';
 import { readBackgroundShellID, readRunningShellID, readRunningShellOutput } from '@/lib/opencode/background-shell';
-import { isShellTool } from '@/lib/opencode/tools';
+import { isShellTool, toolDescription, toolDescriptionText } from '@/lib/opencode/tools';
 import { coerceToText } from '../message/toolRenderers';
 import type { TurnActivityRecord } from '../lib/turns/types';
 
@@ -24,8 +24,10 @@ export const latestShellPreview = (activities: readonly TurnActivityRecord[]): S
         const activity = activities[index];
         if (activity?.kind !== 'tool' || activity.part.type !== 'tool' || !isShellTool(activity.part.tool)) continue;
         const state = activity.part.state;
-        const commandText = coerceToText(state.input.command);
-        const descriptionText = coerceToText(state.input.description);
+        const metadata = 'metadata' in state ? state.metadata : undefined;
+        const describedText = toolDescriptionText(toolDescription(activity.part.tool, state.input, metadata));
+        const commandText = describedText || coerceToText(state.input.command) || coerceToText(metadata?.command);
+        const descriptionText = coerceToText(state.input.description) || coerceToText(metadata?.description);
         const running = isRunningStatus(state.status);
         const shellID = running ? readRunningShellID(activity.part) : readBackgroundShellID(activity.part);
         const output = running
