@@ -81,17 +81,47 @@ try {
   appChild = spawn(executable, [`--remote-debugging-port=${debugPort}`, '--disable-features=MacAppCodeSignClone'], { cwd: project, env: environment, windowsHide: true, stdio: 'ignore' });
   const target = await until(async () => { assert(!stopped(appChild)); const page = await findPageTarget(debugPort); return page.url.startsWith('openchamber-ui://app/') && !page.url.includes('__splash') && page; });
   cdp = new CdpClient(target.webSocketDebuggerUrl); await cdp.connect();
+  const navigationStarted = Date.now();
+  receipt.navigationEvents = [];
+  const navigationEvent = (kind, origin) => {
+    if (receipt.navigationEvents.length < 40) receipt.navigationEvents.push({ kind, elapsedMillis: Date.now() - navigationStarted, origin: origin ?? null });
+  };
+  cdp.on('Runtime.executionContextsCleared', () => navigationEvent('contexts-cleared'));
+  cdp.on('Runtime.executionContextDestroyed', () => navigationEvent('context-destroyed'));
+  cdp.on('Page.frameNavigated', ({ frame }) => {
+    if (frame?.parentId) return;
+    let origin = 'other';
+    try { const url = new URL(frame.url); origin = ['openchamber-ui:', 'http:', 'https:'].includes(url.protocol) ? `${url.protocol}//${url.host}` : url.protocol; } catch { /* Keep URLs and private paths out of receipts. */ }
+    navigationEvent('top-frame-navigated', origin);
+  });
+  const cdpFailureKind = (text) => /execution context.*destroyed/i.test(text) ? 'execution-context-destroyed'
+    : /cannot find context|context.*not found/i.test(text) ? 'execution-context-not-found'
+      : /runtime authentication unavailable/i.test(text) ? 'runtime-auth-unavailable'
+        : /failed to fetch|fetch failed/i.test(text) ? 'fetch-failed' : 'other-cdp-error';
+  const observedRendererEvaluation = async (expression) => {
+    try {
+      const evaluated = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+      if (evaluated.exceptionDetails) receipt.rendererEvaluationFailure = cdpFailureKind(`${evaluated.exceptionDetails.text ?? ''} ${evaluated.exceptionDetails.exception?.description ?? ''}`);
+      return evaluated.result?.value;
+    } catch (error) {
+      receipt.rendererEvaluationFailure = cdpFailureKind(String(error?.message ?? error));
+      throw error;
+    }
+  };
   let rendererFailure = false;
   cdp.on('Runtime.exceptionThrown', () => { rendererFailure = true; });
   cdp.on('Runtime.consoleAPICalled', event => { if (event.args.some(argument => argument.value === 'Error caught by boundary:')) rendererFailure = true; });
-  await cdp.send('Runtime.enable', {}, { timeoutMs: 10_000 });
+  await Promise.all([cdp.send('Runtime.enable', {}, { timeoutMs: 10_000 }), cdp.send('Page.enable', {}, { timeoutMs: 10_000 })]);
   const ui = await until(() => evaluateValue(cdp, `(() => ({packaged:location.origin==='openchamber-ui://app',mounted:[...(document.querySelector('#root')?.children??[])].some(element=>Object.keys(element).some(key=>key.startsWith('__reactFiber'))),textLength:document.body?.innerText.length??0,bridge:!!window.__OPENCHAMBER_DESKTOP__,vite:[...document.scripts].some(script=>script.src.includes('/@vite/client'))}))()`)
     .then(value => value?.mounted && value.textLength > 10 && value));
   assert.equal(ui.packaged, true); assert.equal(ui.bridge, true); assert.equal(ui.vite, false);
   receipt.packagedRenderer = ui;
   // Runtime credentials stay inside the application page. Only these test API results cross CDP.
   const rendererFetch = async (pathname, init = {}) => {
-    const result = await evaluateValue(cdp, `(async()=>{const c=window.__OPENCHAMBER_READ_RUNTIME_CONFIG__?.()??{};const base=window.__OPENCHAMBER_API_BASE_URL__||c.apiBaseUrl||window.__OPENCHAMBER_LOCAL_ORIGIN__||c.localOrigin;const token=window.__OPENCHAMBER_CLIENT_TOKEN__||c.clientToken;if(!base||!token)throw new Error('Runtime authentication unavailable');const options=${JSON.stringify(init)};const response=await fetch(new URL(${JSON.stringify(pathname)},base),{...options,headers:{...options.headers,'Content-Type':'application/json',Authorization:'Bearer '+token}});return{status:response.status,text:await response.text()}})()`);
+    const result = await observedRendererEvaluation(`(async()=>{const c=window.__OPENCHAMBER_READ_RUNTIME_CONFIG__?.()??{};const base=window.__OPENCHAMBER_API_BASE_URL__||c.apiBaseUrl||window.__OPENCHAMBER_LOCAL_ORIGIN__||c.localOrigin;const token=window.__OPENCHAMBER_CLIENT_TOKEN__||c.clientToken;if(!base||!token)throw new Error('Runtime authentication unavailable');const options=${JSON.stringify(init)};const response=await fetch(new URL(${JSON.stringify(pathname)},base),{...options,headers:{...options.headers,'Content-Type':'application/json',Authorization:'Bearer '+token}});const text=await response.text();let json=false;try{JSON.parse(text);json=true}catch{}return{status:response.status,text,contentType:response.headers.get('content-type')?.split(';')[0]??null,json}})()`);
+    receipt.lastRendererApi = { stage: receipt.stage, status: result && Number.isInteger(result.status) ? result.status : null,
+      contentType: ['application/json', 'text/html', 'text/plain'].includes(result?.contentType) ? result.contentType : 'other',
+      bodyIsJson: result?.json === true };
     assert(result && Number.isInteger(result.status), 'Renderer API call failed');
     return new Response(result.status === 204 ? null : result.text, { status: result.status, headers: { 'Content-Type': 'application/json' } });
   };
@@ -110,12 +140,23 @@ try {
     if (request.headers.has('x-opencode-directory')) options.headers = { 'x-opencode-directory': request.headers.get('x-opencode-directory') };
     return rendererFetch(url.pathname + url.search, options);
   } });
-  checkpoint('authenticated engine and history readback');
-  const info = await sdk.server.info(); assert.equal(info.version, receipt.expectedEngineVersion);
+  checkpoint('authenticated engine info readback');
+  const info = await sdk.server.info();
+  receipt.engineVersionMatches = info.version === receipt.expectedEngineVersion;
+  checkpoint('authenticated engine info result');
+  assert.equal(info.version, receipt.expectedEngineVersion);
+  receipt.engineVersion = info.version;
+  checkpoint('authenticated existing session readback');
   const restored = await sdk.session.get({ sessionID: session.id });
+  receipt.restoredSession = { titleMatches: restored.title === title, directoryMatches: path.resolve(restored.location.directory) === project };
+  checkpoint('authenticated existing session result');
   assert.equal(restored.title, title); assert.equal(path.resolve(restored.location.directory), project);
-  assert(JSON.stringify((await sdk.message.list({ sessionID: session.id })).data).includes(note));
-  receipt.engineVersion = info.version; receipt.existingSessionAndSyntheticHistoryRead = true; receipt.signedOutBusinessApiRefused = true;
+  checkpoint('authenticated history messages readback');
+  const messages = await sdk.message.list({ sessionID: session.id });
+  receipt.syntheticHistory = { messagesIsArray: Array.isArray(messages.data), messageCount: Array.isArray(messages.data) ? messages.data.length : null, markerPresent: JSON.stringify(messages.data).includes(note) };
+  checkpoint('authenticated history messages result');
+  assert(receipt.syntheticHistory.markerPresent);
+  receipt.existingSessionAndSyntheticHistoryRead = true; receipt.signedOutBusinessApiRefused = true;
   if (process.platform === 'win32') {
     checkpoint('Windows multiline PowerShell');
     // Console.WriteLine uses the Windows host code page unless the script
@@ -149,9 +190,16 @@ try {
   assert.equal(appChild.exitCode, 0);
   await until(() => new Promise(resolve => { const socket = connect({ host: '127.0.0.1', port }); socket.once('connect', () => { socket.destroy(); resolve(false); }); socket.once('error', () => resolve(true)); socket.setTimeout(1000, () => { socket.destroy(); resolve(false); }); }), 5000);
   receipt.nativeQuit = true; receipt.backendPortClosed = true; receipt.passed = true;
-} catch {
+} catch (error) {
   receipt.failedStage = receipt.stage;
-  receipt.failure = 'The recorded stage failed'; process.exitCode = 1;
+  receipt.failure = 'The recorded stage failed';
+  receipt.failureName = ['AssertionError', 'Error', 'TypeError', 'SyntaxError', 'TimeoutError', 'AbortError', 'ClientError', 'UnauthorizedError', 'InvalidRequestError', 'SessionNotFoundError', 'LocationNotFoundError'].includes(error?.name) ? error.name : 'OtherError';
+  if (receipt.failureName === 'ClientError') {
+    receipt.clientErrorReason = ['Transport', 'UnexpectedStatus', 'UnsupportedContentType', 'MalformedResponse'].includes(error.reason) ? error.reason : 'other';
+    if (Number.isInteger(error.cause?.status)) receipt.clientErrorStatus = error.cause.status;
+  }
+  if (['ERR_ASSERTION', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT'].includes(error?.code)) receipt.failureCode = error.code;
+  process.exitCode = 1;
 } finally {
   cdp?.close();
   await stop(seedChild).catch(() => { receipt.cleanupFailed = true; process.exitCode = 1; });
