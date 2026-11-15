@@ -94,9 +94,7 @@ or the live turn's revealed prose boundary.
     choices by turn, so deltas, step changes, completion and virtualized remounts
     preserve them.
     A folded running turn keeps its latest visible assistant progress message
-    outside the log when it is between execution steps or waiting for a
-    permission/form. While a shell or thought is actively streaming, the
-    bounded priority preview owns that live content so it is not drawn twice.
+    outside the log, including while a permission or form waits for the user.
     Runtime-local revealed prose stays in the original `ChatMessage` root,
     including a rewritten foreground. The current authoritative answer stays
     outside the folds; unshown text tails, tool rows and reasoning go into a
@@ -108,19 +106,11 @@ or the live turn's revealed prose boundary.
     visibility use the effective state.
     The open execution shows progress prose and compact thought/tool rows;
     reasoning text and tool output remain behind their own requested details.
-    While the activity fold is closed, the current reasoning stream keeps its
-    bounded priority preview and the latest shell call gets a sibling command
-    disclosure at the same level. The command disclosure follows live output
-    until the reader scrolls upward, opens while the command runs, and
-    auto-folds when it settles; its output remains available by expanding that
-    command row. The shell part is hoisted out of the outer Activity fold so
-    reasoning is never nested inside command execution. A shell ID uses the
-    live shell cursor when available, with OpenCode's running output metadata
-    as the fallback for foreground calls that have not published an ID yet.
-    A missing shell ID or directory produces no polled shell preview; a
-    foreground output metadata snapshot can still render while OpenCode has
-    not published the shell ID. A settled thought produces no live preview;
-    the settled command disclosure remains as a collapsed historical row.
+    When Activity is collapsed, the latest shell call gets a sibling command
+    disclosure below the upstream header. It follows live output in a bounded
+    scroll area, folds when the call settles, and keeps the settled output
+    expandable. Opening the outer Activity fold hides this sibling so the
+    upstream tool row remains the single detailed owner.
   - Background children and shells keep the process active only while the
     existing live indexes report work or a scoped permission/form waits. A
     parent's answer does not finish its background work. Terminal reports win;

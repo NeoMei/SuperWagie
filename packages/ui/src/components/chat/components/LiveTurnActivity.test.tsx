@@ -823,7 +823,7 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('Check the current model');
     });
 
-    test('keeps command execution in a sibling fold instead of nesting thought inside it', async () => {
+    test('keeps the command in a sibling fold and retains it after execution', async () => {
         const thought: Part = { type: 'reasoning', id: 'current', sessionID: 'session', messageID: 'step', text: 'Inspecting the model', time: { start: 1 } };
         const command: Part = { type: 'tool', tool: 'shell', id: 'command', callID: 'command', sessionID: 'session', messageID: 'step',
             state: { status: 'running', input: { command: 'bun run type-check', description: 'Check types' }, time: { start: 2 } } };
@@ -832,16 +832,13 @@ describe('live Activity with the real message body', () => {
         expect(header()?.textContent).toContain('Inspecting the model');
         await act(async () => root.render(<Harness record={turn([assistant('step', [thought, command])])} />));
         const commandFold = () => container.querySelector<HTMLElement>('[data-live-command-fold="command"]');
-        expect(commandFold()).not.toBeNull();
+        expect(header()?.textContent).not.toContain('bun run type-check');
         expect(commandFold()?.textContent).toContain('bun run type-check');
-        expect(commandFold()?.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('true');
         expect(commandFold()?.closest('[data-live-activity-content]')).toBeNull();
         const finished: Part = { ...command, state: { status: 'completed', input: { command: 'bun run type-check' }, output: 'Passed', metadata: {}, time: { start: 2, end: 3 } } };
         await act(async () => root.render(<Harness record={turn([assistant('step', [finished], 'tool-calls')])} />));
-        expect(commandFold()).not.toBeNull();
         expect(commandFold()?.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('false');
         await act(async () => commandFold()?.querySelector<HTMLElement>('[role="button"]')?.click());
-        expect(commandFold()?.querySelector('[role="button"]')?.getAttribute('aria-expanded')).toBe('true');
         expect(commandFold()?.textContent).toContain('Passed');
     });
 
@@ -998,10 +995,10 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('Recorded thought');
     });
 
-    test('shows the running command in its own sibling fold', async () => {
+    test('shows the running command in a sibling fold', async () => {
         const shell: Part = {
             type: 'tool', tool: 'shell', id: 'shell', callID: 'shell', sessionID: 'session', messageID: 'progress',
-            state: { status: 'running', input: { command: 'npm test' }, metadata: { output: 'running test suite' }, time: { start: 1 } },
+            state: { status: 'running', input: { command: 'npm test' }, time: { start: 1 } },
         };
         const progress = assistant('progress', [text('progress-text', 'Checking'), shell], 'tool-calls');
         await act(async () => root.render(<Harness record={turn([progress])} initialExpanded={false} />));
@@ -1010,43 +1007,10 @@ describe('live Activity with the real message body', () => {
         expect(container.querySelector('.live-activity-icon[data-running="true"]')).not.toBeNull();
         expect(container.querySelector('[data-work-glyph]')).toBeNull();
         const commandFold = container.querySelector<HTMLElement>('[data-live-command-fold="shell"]');
-        expect(commandFold).not.toBeNull();
         expect(commandFold?.textContent).toContain('npm test');
-        expect(commandFold?.textContent).toContain('running test suite');
         expect(commandFold?.closest('[data-live-activity-content]')).toBeNull();
-        expect(container.textContent).not.toContain('Checking');
-    });
-
-    test('shows streaming reasoning in the bounded priority preview and folds it when settled', async () => {
-        const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'Checking the next step', time: { start: 1 } };
-        const progress = assistant('progress', [thought], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([progress])} working />));
-        expect(container.querySelector('[data-live-reasoning-preview="true"]')).not.toBeNull();
-        expect(container.querySelector('[data-live-reasoning-preview="true"]')?.textContent).toContain('Checking the next step');
-
-        await act(async () => root.render(<Harness record={turn([assistant('final', [text('final', 'Done')], 'stop')])} working={false} />));
-        expect(container.querySelector('[data-live-reasoning-preview="true"]')).toBeNull();
-    });
-
-    test('keeps settled thought and command details behind the expandable fold', async () => {
-        const thought: Part = {
-            type: 'reasoning', id: 'settled-thought', sessionID: 'session', messageID: 'final',
-            text: 'Recorded thought', time: { start: 1, end: 2 },
-        };
-        const shell: Part = {
-            type: 'tool', tool: 'shell', id: 'settled-shell', callID: 'settled-shell', sessionID: 'session', messageID: 'final',
-            state: { status: 'completed', input: { command: 'npm test' }, output: 'all tests passed', metadata: {}, time: { start: 2, end: 3 } },
-        };
-        const final = assistant('final', [thought, shell, text('answer', 'Done')], 'stop');
-        await act(async () => root.render(<Harness record={turn([final])} working={false} />));
-        const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        expect(header?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.querySelector('[data-live-command-preview="true"]')).toBeNull();
-        expect(container.textContent).not.toContain('Recorded thought');
-        expect(container.textContent).not.toContain('all tests passed');
-
         await act(async () => header?.click());
-        expect(container.textContent).toContain('Recorded thought');
+        expect(container.querySelector('[data-live-command-fold="shell"]')).toBeNull();
         expect(container.textContent).toContain('npm test');
     });
 

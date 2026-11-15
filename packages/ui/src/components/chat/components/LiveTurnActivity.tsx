@@ -11,7 +11,7 @@ import { getLiveFinalMessage, getShownInteractions } from '../lib/turns/liveActi
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { latestRunningTool } from '../lib/turns/liveActivityStatus';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
-import { LiveActivityHoistedShellsContext, LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from './liveActivityContext';
+import { LiveActivityInlineContentContext, LiveActivityToolsHiddenContext, LiveFinalActivityContext, LiveTurnHoistedInteractionsContext } from './liveActivityContext';
 import { ShownToolCard } from '../message/parts/ShownToolCard';
 import { TurnMessageWindow } from './TurnMessageWindow';
 import { TurnMessageWindowContext, initialMessageWindow, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
@@ -45,7 +45,6 @@ import { RevealedTextTurnContext, type LivePinnedMessagePresentation } from './r
 import { PinnedMessage } from './withPinnedMessage';
 import { LiveCommandPreview } from './liveCommandPreview';
 import { latestShellPreview } from './liveCommandPreviewModel';
-import { LiveReasoningPreview } from './liveReasoningPreview';
 
 const SHIMMER_STABLE_DELAY_MS = 1000;
 const subscribeRuntimeKey = (notify: () => void): (() => void) => subscribeRuntimeEndpointChanged(() => notify());
@@ -199,33 +198,12 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     // disclosures explicitly; the live header carries the current state and
     // latest running tool.
     const isExpanded = expanded ?? false;
-    const liveTool = React.useMemo(
-        () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
-        [turn.activityParts],
-    );
-    const liveShell = React.useMemo(() => turn.activityParts.some((activity) => (
-        activity.part.type === 'tool'
-        && isShellTool(activity.part.tool)
-        && (activity.part.state.status === 'pending' || activity.part.state.status === 'running')
-    )), [turn.activityParts]);
-    const liveThought = React.useMemo(() => {
-        if (settled || liveTool) return undefined;
-        const parts = turn.assistantMessages.at(-1)?.parts ?? [];
-        for (let index = parts.length - 1; index >= 0; index -= 1) {
-            const part = parts[index];
-            if (part.type === 'reasoning' && part.time?.end === undefined) return part;
-        }
-        return undefined;
-    }, [liveTool, settled, turn.assistantMessages]);
     // One latest progress update remains readable while the execution log is
-    // folded between live steps. A live shell or thought owns the priority
-    // preview instead; opening the fold shows the historical work without a
-    // second copy in the transcript.
+    // folded. Messages whose prose was already shown keep their original root
+    // above it; opening the folds shows the unrevealed work without a second
+    // copy in the transcript.
     const progressMessage = React.useMemo(() => {
-        // The priority preview owns the live thought/command region. Keeping
-        // the same progress text outside it duplicates the current content
-        // directly below the folded header.
-        if (finalMessage || isExpanded || liveShell || liveThought || (!isWorking && !waitingForUser) || hasLaterAssistant) return null;
+        if (finalMessage || isExpanded || (!isWorking && !waitingForUser) || hasLaterAssistant) return null;
         for (let index = turn.assistantMessages.length - 1; index >= 0; index -= 1) {
             const message = turn.assistantMessages[index];
             if (message.info.role !== 'assistant') continue;
@@ -233,7 +211,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             if (parts.length > 0) return { ...message, parts };
         }
         return null;
-    }, [finalMessage, isExpanded, isWorking, liveShell, liveThought, waitingForUser, hasLaterAssistant, turn.assistantMessages]);
+    }, [finalMessage, isExpanded, isWorking, waitingForUser, hasLaterAssistant, turn.assistantMessages]);
     const foregroundMessage = finalMessage ?? progressMessage;
     const foregroundMessageId = foregroundMessage?.info.id;
     // Runtime-local revealed prose stays in the original ChatMessage root
@@ -268,6 +246,20 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     const pinnedMessageIds = React.useMemo(() => new Set(pinnedMessages.map((message) => message.info.id)), [pinnedMessages]);
     const foldedMessages = React.useMemo(() => activityMessages.filter((message) => !pinnedMessageIds.has(message.info.id)),
         [activityMessages, pinnedMessageIds]);
+    const latestShell = React.useMemo(() => latestShellPreview(turn.activityParts), [turn.activityParts]);
+    const liveTool = React.useMemo(
+        () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
+        [turn.activityParts],
+    );
+    const liveThought = React.useMemo(() => {
+        if (settled || liveTool) return undefined;
+        const parts = turn.assistantMessages.at(-1)?.parts ?? [];
+        for (let index = parts.length - 1; index >= 0; index -= 1) {
+            const part = parts[index];
+            if (part.type === 'reasoning' && part.time?.end === undefined) return part;
+        }
+        return undefined;
+    }, [liveTool, settled, turn.assistantMessages]);
     // The turn owns one effective state for all outer and pinned inner
     // disclosures. An absent choice follows execution; explicit reader choices
     // survive it.
@@ -286,11 +278,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
     // including after the turn ends without a final answer. Each call ID has
     // one card owner: a pinned message, the hoisted list or the final message.
     const interactions = React.useMemo(() => getShownInteractions(turn.assistantMessages), [turn.assistantMessages]);
-    const latestShell = React.useMemo(() => latestShellPreview(turn.activityParts), [turn.activityParts]);
-    const hoistedShells = React.useMemo(
-        () => latestShell ? new Set([latestShell.key]) : null,
-        [latestShell],
-    );
     // While the turn works, steps after the last interaction and the reply
     // being written stay below it in the order they happened. When the answer
     // arrives, later work folds below the retained prose and the answer.
@@ -431,7 +418,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
         pinnedForegroundMessageId, pinnedMessages, revealedRecords]);
     return (
         <LiveTurnHoistedInteractionsContext.Provider value={hoistedInteractions}>
-            <LiveActivityHoistedShellsContext.Provider value={hoistedShells}>
             <LiveActivityInlineContentContext.Provider value>
             <LiveActivityToolsHiddenContext.Provider value={!isExpanded}>
             <RevealedTextTurnContext.Provider value={turnScope}>
@@ -456,8 +442,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
                         </Button>
                     </div>
                 </div>
-                <LiveCommandPreview activities={turn.activityParts} directory={directory} />
-                {!liveTool ? <LiveReasoningPreview text={reasoningText} visible={!isExpanded && Boolean(liveThought)} /> : null}
+                <LiveCommandPreview activities={turn.activityParts} directory={directory} visible={!isExpanded} />
                 <LiveActivityCollapse expanded={isExpanded} id={contentId} animate={expanded !== undefined}>
                     <div>
                         <TurnMessageWindow turnId={turn.turnId} messages={messagesAboveInteractions} renderMessage={renderMessage} />
@@ -486,7 +471,6 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, isWorking, expanded,
             </RevealedTextTurnContext.Provider>
             </LiveActivityToolsHiddenContext.Provider>
             </LiveActivityInlineContentContext.Provider>
-            </LiveActivityHoistedShellsContext.Provider>
         </LiveTurnHoistedInteractionsContext.Provider>
     );
 }
