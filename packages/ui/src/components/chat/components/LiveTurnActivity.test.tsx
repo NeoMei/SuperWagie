@@ -1,5 +1,5 @@
 import React, { act } from 'react';
-import { afterEach, beforeEach, describe, expect, jest, setDefaultTimeout, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test';
 import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -7,39 +7,31 @@ import { dirname, resolve } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
-import type { Part, AssistantMessage, Session, ToolPart } from '@/lib/opencode/model';
+import type { Part, AssistantMessage } from '@/lib/opencode/model';
 import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { RuntimeAPIs } from '@/lib/api/types';
-import { SyncProvider, useChildStoreManager } from '@/sync/sync-context';
+import { SyncProvider } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
 import type { ChatMessageEntry, TurnChangedFile, TurnRecord } from '../lib/turns/types';
-import { getLiveFinalMessage } from '../lib/turns/liveActivity';
-import { resetRevealedTextForTests } from '../lib/turns/revealedText';
-import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
-import type { MessageListHandle } from '../MessageList';
-import { requestReasoningReveal } from '../search/reasoningReveal';
-import { applyGlobalBlockingRequestEvents, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
-
+import { useTurnFoldContexts } from './useTurnFold';
+import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
+import { buildTimelineRows } from '../lib/turns/timelineRows';
+import { MessageSliceContext } from '../message/messageSliceContext';
 import { useWorkflowRunsStore } from '@/lib/workflows/store';
 import type { WorkflowRun } from '@/lib/workflows/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { ChatColumnSessionContext } from '../chatColumnSession';
-
-const expectNeutralHeader = (root: HTMLElement) => {
-    const header = root.querySelector<HTMLElement>('button[aria-controls]');
-    expect(header?.querySelectorAll('.oc-activity-tone')).toHaveLength(0);
-    expect(header?.getAttribute('data-activity-tone')).toBeNull();
-    expect(header?.querySelector('.oc-activity-title')?.className).toContain('text-[var(--tools-title)]');
-};
+import { ActivityGroupsContext } from './activityGroupsContext';
+import { getActivityGroups } from '../lib/turns/activityGroups';
 
 plugin({
-    name: 'live-activity-worker-url',
+    name: 'live-activity-provider-logos',
     setup(build) {
         build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
             contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`, loader: 'js',
@@ -56,9 +48,12 @@ plugin({
     },
 });
 
-const { LiveTurnActivity } = await import('./LiveTurnActivity');
+// Loaded after the plugin: its imports reach the logo glob that Bun cannot
+// expand on its own.
+const { TurnFold, TurnPagesRow } = await import('./LiveTurnActivity');
 const { PendingWorkflowApprovals } = await import('../workflows/PendingWorkflowApprovals');
 const { WorkflowsPanel } = await import('../workflows/WorkflowsPanel');
+
 const unavailable = (): never => { throw new Error('Activity rendering must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {
     runtime: { platform: 'web', isDesktop: false, isVSCode: false },
@@ -84,7 +79,6 @@ const sdk = OpenCode.make({ baseUrl: 'http://localhost', fetch: async () => new 
 // trigger, so the changed-file toggle is the one that opens no popup.
 const changedFilesToggle = () => document.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]:not([aria-haspopup])');
 let MessageBody: typeof import('../message/MessageBody').default;
-let MessageList: typeof import('../MessageList').default;
 
 function assistant(id: string, parts: Part[], finish?: AssistantMessage['finish']): ChatMessageEntry {
     const info: AssistantMessage = {
@@ -97,22 +91,9 @@ function assistant(id: string, parts: Part[], finish?: AssistantMessage['finish'
 function text(id: string, content: string): Part {
     return { type: 'text', id, text: content, sessionID: 'session', messageID: 'message' };
 }
-function textPart(id: string, content: string, messageID: string, timing?: { start: number; end?: number }): Part {
-    return { type: 'text', id, text: content, sessionID: 'session', messageID, time: timing };
-}
 const readPart: Part = {
     type: 'tool', tool: 'read', id: 'read', callID: 'read', sessionID: 'session', messageID: 'progress',
     state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: 'code', metadata: {}, time: { start: 1, end: 2 } },
-};
-const questionPart: ToolPart = {
-    type: 'tool', tool: 'question', id: 'question', callID: 'question', sessionID: 'session', messageID: 'asked',
-    state: {
-        status: 'running',
-        input: { questions: [{ question: 'Which layout should I build?', header: 'Layout', options: [
-            { label: 'Compact', description: 'Use less space' }, { label: 'Comfortable', description: 'Use more space' },
-        ] }] },
-        time: { start: 2 },
-    },
 };
 function turn(messages: ChatMessageEntry[]): TurnRecord {
     return projectTurnRecords([{
@@ -121,77 +102,72 @@ function turn(messages: ChatMessageEntry[]): TurnRecord {
     }, ...messages]).turns[0];
 }
 
-function Harness({ record, retired = false, hasLaterAssistant, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn, initialExpanded, working, captureManager, plain = false }: {
+// The rows a turn under a fold becomes in the list, drawn the way MessageList draws them.
+function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
+    record: TurnRecord;
+    retired: boolean;
+    expanded: boolean;
+    onToggle: () => void;
+    renderMessage: (message: ChatMessageEntry) => React.ReactNode;
+}) {
+    const rows = buildTimelineRows([{ kind: 'turn', key: 'turn', turn: record, isLastTurn: true, hasLaterAssistant: retired }], {
+        collapsedActivity: true, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
+    }, []);
+    const finalMessageId = rows.find((row) => row.kind === 'turn-fold')?.finalMessageId;
+    const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId);
+    return <ActivityGroupsContext.Provider value={getActivityGroups(record.assistantMessages)}>
+    <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
+        {rows.map((row) => {
+            if (row.kind === 'turn-fold') {
+                return <TurnFold key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded}
+                    finalMessageId={row.finalMessageId} onToggle={onToggle} renderMessage={renderMessage} />;
+            }
+            if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} />;
+            if (row.kind !== 'turn-message') return null;
+            const message = record.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
+            if (!message) return null;
+            return <MessageSliceContext.Provider key={row.key} value={row.slice}>
+                {row.final ? <LiveFinalActivityContext.Provider value={finalContext}>{renderMessage(message)}</LiveFinalActivityContext.Provider> : renderMessage(message)}
+            </MessageSliceContext.Provider>;
+        })}
+    </LiveTurnHoistedPagesContext.Provider>
+    </ActivityGroupsContext.Provider>;
+}
+
+function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn }: {
     record: TurnRecord;
     retired?: boolean;
-    hasLaterAssistant?: boolean;
     changedFiles?: TurnChangedFile[];
     isLatestTurn?: boolean;
     onCopyMessage?: (messageId: string) => boolean;
     onCopyTurn?: () => Promise<boolean>;
-    initialExpanded?: boolean;
-    working?: boolean;
-    captureManager?: (manager: ReturnType<typeof useChildStoreManager>) => void;
-    plain?: boolean;
 }) {
-    const [expanded, setExpanded] = React.useState<boolean | undefined>(initialExpanded);
-    const isWorking = working ?? (!retired && !getLiveFinalMessage(record.assistantMessages));
+    const [expanded, setExpanded] = React.useState(false);
     const renderMessage = (message: ChatMessageEntry) => (
         <div key={message.info.id} data-fixture-message={message.info.id}>
             <MessageBody
                 messageId={message.info.id} parts={message.parts} isUser={false}
-                messageCreatedAt={message.info.role === 'assistant' ? message.info.time.created : undefined}
                 isMessageCompleted={message.info.role === 'assistant' && Boolean(message.info.finish)}
                 messageFinish={message.info.role === 'assistant' ? message.info.finish : undefined}
                 isMobile={false} copiedCode={null} onCopyCode={() => undefined} expandedTools={new Set()}
-                onToggleTool={() => undefined} onShowPopup={() => undefined}
-                streamPhase={isWorking && message.info.role === 'assistant' && !message.info.time.completed ? 'streaming' : 'completed'} allowAnimation={false}
+                onToggleTool={() => undefined} onShowPopup={() => undefined} streamPhase="completed" allowAnimation={false}
                 hasTextContent={message.parts.some((part) => part.type === 'text')} showReasoningTraces
                 onCopyMessage={onCopyMessage ? () => onCopyMessage(message.info.id) : undefined}
                 onCopyTurn={message === record.assistantMessages.at(-1) ? onCopyTurn : undefined}
                 turnGroupingContext={{
                     turnId: 'user', isFirstAssistantInTurn: message === record.assistantMessages[0],
                     isLastAssistantInTurn: message === record.assistantMessages.at(-1),
-                    isLatestTurn, changedFiles, isWorking, hasTools: record.hasTools, hasReasoning: record.hasReasoning,
+                    isLatestTurn, changedFiles, isWorking: false, hasTools: record.hasTools, hasReasoning: record.hasReasoning,
                 }}
             />
         </div>
     );
-    function CaptureManager() {
-        const manager = useChildStoreManager();
-        React.useLayoutEffect(() => captureManager?.(manager), [manager]);
-        return null;
-    }
-    return <RuntimeAPIContext.Provider value={runtimeApis}>
-        <ThemeSystemContext.Provider value={themeContext}>
-            <SyncProvider sdk={sdk} directory="/project">
-                {captureManager ? <CaptureManager /> : null}
-                <I18nProvider>
-                    {plain ? record.assistantMessages.map(renderMessage) : (
-                        <LiveTurnActivity turn={record} hasLaterAssistant={hasLaterAssistant ?? retired} expanded={expanded} isWorking={isWorking}
-                            onToggle={setExpanded} renderMessage={renderMessage} />
-                    )}
-                </I18nProvider>
-            </SyncProvider>
-        </ThemeSystemContext.Provider>
-    </RuntimeAPIContext.Provider>;
-}
-
-function ListHarness({ record, working, listRef, listKey = 'list' }: {
-    record: TurnRecord;
-    working: boolean;
-    listRef?: React.Ref<MessageListHandle>;
-    listKey?: string;
-}) {
     return <RuntimeAPIContext.Provider value={runtimeApis}>
         <ThemeSystemContext.Provider value={themeContext}>
             <SyncProvider sdk={sdk} directory="/project">
                 <I18nProvider>
-                    <MessageList key={listKey} ref={listRef} sessionKey={listKey} directory="/project"
-                        messages={[record.userMessage, ...record.assistantMessages]} sessionIsWorking={working} isLoadingOlder={false}
-                        activeStreamingMessageId={working ? record.assistantMessages.at(-1)?.info.id : null}
-                        activeStreamingPhase={working ? 'streaming' : null}
-                        scrollContainerProps={{ 'data-scrollbar': 'chat' }} />
+                    <TurnRows record={record} retired={retired} expanded={expanded}
+                        onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage} />
                 </I18nProvider>
             </SyncProvider>
         </ThemeSystemContext.Provider>
@@ -207,12 +183,10 @@ describe('live Activity with the real message body', () => {
     let root: Root;
     let container: HTMLDivElement;
     let restore: () => void;
-    let geometry: ReturnType<typeof spyOn<typeof HTMLElement.prototype, 'getBoundingClientRect'>> | undefined;
     beforeEach(async () => {
-        resetRevealedTextForTests();
         const win = new Window({ url: 'http://localhost', settings: { device: { prefersReducedMotion: 'reduce' } } });
         const globals = {
-            window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage,
+            window: win, document: win.document, Event: win.Event, CustomEvent: win.CustomEvent, navigator: win.navigator, localStorage: win.localStorage,
             customElements: win.customElements,
             Node: win.Node, NodeList: win.NodeList, Element: win.Element, HTMLElement: win.HTMLElement, SVGElement: win.SVGElement,
             HTMLAnchorElement: win.HTMLAnchorElement,
@@ -222,11 +196,6 @@ describe('live Activity with the real message body', () => {
         };
         const previous = Object.keys(globals).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
         for (const [name, value] of Object.entries(globals)) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-        // Happy DOM has no layout. A viewport lets the real virtualized list
-        // mount its rows; restore the prototype method after every test.
-        geometry = spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-            () => new window.DOMRect(0, 0, 1000, 800),
-        );
         // Reduced motion makes the disclosure lifecycle deterministic without
         // replacing the real component or animation module.
         restore = () => {
@@ -238,23 +207,14 @@ describe('live Activity with the real message body', () => {
         container = document.createElement('div');
         document.body.append(container);
         root = createRoot(container);
-        useUIStore.setState({ collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showReasoningTraces: true, showSplitAssistantMessageActions: false });
+        useUIStore.setState({ collapsibleThinkingBlocks: false, showSplitAssistantMessageActions: false });
         useDirectoryStore.setState({ currentDirectory: '/project' });
         useI18nStore.getState().setLocale('en');
-        replaceGlobalSessionStatusById(new Map());
-        resetGlobalBlockingRequests();
         MessageBody = (await import('../message/MessageBody')).default;
-        MessageList = (await import('../MessageList')).default;
     });
     afterEach(async () => {
         await act(async () => root.unmount());
-        resetRevealedTextForTests();
-        replaceGlobalSessionStatusById(new Map());
-        resetGlobalBlockingRequests();
-        requestReasoningReveal(null);
         useWorkflowRunsStore.getState().reset();
-        geometry?.mockRestore();
-        geometry = undefined;
         restore();
     });
 
@@ -309,8 +269,6 @@ describe('live Activity with the real message body', () => {
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(0);
         await act(async () => root.render(draw([], 'other')));
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(0);
-        await act(async () => { useWorkflowRunsStore.getState().reset(); root.render(draw([])); });
-        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(0);
     });
 
     test('the real live row and footer share workflow call parts while the message snapshot stays stale', async () => {
@@ -354,7 +312,7 @@ describe('live Activity with the real message body', () => {
         };
         await act(async () => store.setState({ part: { 'live-step': [...step.parts, call] } }));
         expect(messages[1].parts).toEqual(step.parts);
-        expect(container.querySelectorAll('[data-turn-id] [data-component="workflow-run"]')).toHaveLength(1);
+        expect(container.querySelectorAll('[data-turn-row] [data-component="workflow-run"]')).toHaveLength(1);
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
         await act(async () => useUIStore.setState({ activityRenderMode: 'collapsed' }));
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
@@ -363,11 +321,7 @@ describe('live Activity with the real message body', () => {
         const next = assistant('next-step', [text('continuation', 'Continuing the work')]);
         messages = [...messages, next];
         await act(async () => root.render(draw()));
-        expect(container.querySelectorAll('[data-turn-id] [data-component="workflow-run"]')).toHaveLength(1);
-        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
-        // Empty live arrays preserve the call already committed to the snapshot.
-        messages = [messages[0], { ...step, parts: [...step.parts, call] }, next];
-        await act(async () => { store.setState({ part: { 'live-step': [] } }); root.render(draw()); });
+        expect(container.querySelectorAll('[data-turn-row] [data-component="workflow-run"]')).toHaveLength(1);
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
         geometry.mockRestore();
     });
@@ -409,607 +363,39 @@ describe('live Activity with the real message body', () => {
         }
     });
 
-    test('keeps execution details folded while the latest progress and final answer stay visible', async () => {
+    test('keeps active prose and tools visible; stop folds history but leaves the answer', async () => {
         const progress = assistant('progress', [text('progress-text', 'Checking the source'), readPart], 'tool-calls');
         await act(async () => root.render(<Harness record={turn([progress])} />));
         expect(container.textContent).toContain('Checking the source');
+        // The header shows from the first step, folded to the latest rows.
         expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.textContent).not.toContain('source.ts');
+        expect(container.textContent).toContain('Activity');
         const final = assistant('final', [text('final-text', 'The final answer')], 'stop');
         await act(async () => root.render(<Harness record={turn([progress, final])} />));
         expect(container.textContent).toContain('The final answer');
-        const shownProse = () => [...container.querySelectorAll('[data-message-text-export-source]')]
-            .filter((element) => !element.closest('[data-live-activity-content]'))
-            .map((element) => element.textContent ?? '').join('\n');
-        expect(shownProse()).toContain('Checking the source');
-        expect(shownProse().match(/Checking the source/g)).toHaveLength(1);
-        expect(container.querySelector('[data-fixture-message="progress"]')).not.toBeNull();
-        expect(container.querySelectorAll('[data-fixture-message="progress"]')).toHaveLength(1);
-        // Nothing runs any more, so the mark is back to the stack glyph.
-        expect(container.querySelector('[data-work-glyph]')).toBeNull();
+        expect(container.textContent).not.toContain('Checking the source');
         const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
         expect(header?.getAttribute('aria-expanded')).toBe('false');
         expect(header?.textContent).toContain('Explored codebase');
         await act(async () => header?.click());
         expect(header?.textContent).toContain('Explored codebase');
         expect(container.textContent).toContain('Checking the source');
-        expect(container.textContent).toContain('source.ts');
         expect(container.textContent).toContain('The final answer');
-        expect(shownProse().match(/Checking the source/g)).toHaveLength(1);
         await act(async () => root.render(<Harness record={turn([progress, { ...final, parts: [...final.parts] }])} />));
         expect(header?.getAttribute('aria-expanded')).toBe('true');
     });
 
-    test('keeps shown prose above later tools, answers, continuations and remounts', async () => {
-        const outsideFoldText = () => [...container.querySelectorAll('[data-message-text-export-source]')]
-            .filter((element) => !element.closest('[data-live-activity-content]'))
-            .map((element) => element.textContent ?? '').join('\n');
-        const shownOnce = (phrase: string) => expect(outsideFoldText().match(new RegExp(phrase, 'g'))).toHaveLength(1);
-        const uniqueRoots = () => {
-            const ids = [...container.querySelectorAll('[data-message-id]')].map((element) => element.getAttribute('data-message-id'));
-            expect(new Set(ids).size).toBe(ids.length);
-            for (const attribute of ['data-message-text-export-root', 'data-chat-quote-root']) {
-                expect(container.querySelectorAll(`[${attribute}]`).length).toBeGreaterThan(0);
-            }
-        };
-        const first = assistant('prose', [textPart('prose-part', 'Reading the project layout', 'prose', { start: 2, end: 3 })], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([first])} working />));
-        expect(outsideFoldText()).toContain('Reading the project layout');
-        uniqueRoots();
-
-        const toolStep = assistant('tool-step', [{ ...readPart, id: 'later-read', callID: 'later-read', messageID: 'tool-step' }], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([first, toolStep])} working />));
-        shownOnce('Reading the project layout');
-        expect(container.querySelector('[data-live-activity-content]')?.getAttribute('aria-hidden')).toBe('true');
-
-        const answer = assistant('answer', [textPart('answer-part', 'The layout is ready', 'answer', { start: 4, end: 5 })], 'stop');
-        await act(async () => root.render(<Harness record={turn([first, toolStep, answer])} working={false} />));
-        shownOnce('Reading the project layout');
-        shownOnce('The layout is ready');
-        expect(outsideFoldText().indexOf('Reading the project layout')).toBeLessThan(outsideFoldText().indexOf('The layout is ready'));
-        expect(container.textContent).not.toContain('source.ts');
-        uniqueRoots();
-
-        const continuation = assistant('continuation', [textPart('continuation-part', 'Checking one more file', 'continuation', { start: 6, end: 7 })], 'tool-calls');
-        const finalRecord = turn([first, toolStep, answer, continuation]);
-        await act(async () => root.render(<Harness record={finalRecord} working />));
-        shownOnce('Reading the project layout');
-        shownOnce('The layout is ready');
-        shownOnce('Checking one more file');
-        expect(container.textContent).not.toContain('source.ts');
-        uniqueRoots();
-
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        shownOnce('Reading the project layout');
-        shownOnce('The layout is ready');
-        uniqueRoots();
-        expect(container.textContent).toContain('source.ts');
-
-        await act(async () => root.render(<Harness key="revisited" record={finalRecord} working />));
-        shownOnce('Reading the project layout');
-        shownOnce('The layout is ready');
-        shownOnce('Checking one more file');
-        uniqueRoots();
-        await act(async () => root.render(<ListHarness record={finalRecord} working listKey="reveal-list" />));
-        shownOnce('Reading the project layout');
-        shownOnce('The layout is ready');
-        uniqueRoots();
-    });
-
-    test('keeps a rewritten stream prefix and the authoritative answer outside the fold', async () => {
-        const outsideFold = () => [...container.querySelectorAll('[data-message-text-export-source]')]
-            .filter((element) => !element.closest('[data-live-activity-content]'))
-            .map((element) => element.textContent ?? '').join('\n');
-        const original = assistant('rewrite', [textPart('rewrite-part', 'First complete paragraph.\n\nUnfinished tail', 'rewrite', { start: 8 })]);
-        const earlier = assistant('earlier', [textPart('earlier-part', 'Earlier completed work.\n\n', 'earlier', { start: 2, end: 3 })], 'tool-calls');
-        const read = { ...readPart, id: 'rewrite-read', callID: 'rewrite-read', messageID: 'earlier' };
-        const step = { ...earlier, parts: [...earlier.parts, read] };
-        await act(async () => root.render(<Harness record={turn([step, original])} working />));
-        const rewritten = assistant('rewrite', [textPart('rewrite-part', 'Finished rewriting this answer.', 'rewrite', { start: 8, end: 11 })], 'stop');
-        await act(async () => root.render(<Harness record={turn([step, rewritten])} working={false} />));
-        expect(outsideFold()).toContain('First complete paragraph.');
-        expect(outsideFold()).toContain('Finished rewriting this answer.');
-        expect(outsideFold().indexOf('First complete paragraph.')).toBeLessThan(outsideFold().indexOf('Finished rewriting this answer.'));
-        expect(container.querySelectorAll('[data-message-text-export-source]').length).toBe(1);
-        expect(new Set([...container.querySelectorAll('[data-message-id]')].map((node) => node.getAttribute('data-message-id'))).size)
-            .toBe(container.querySelectorAll('[data-message-id]').length);
-    });
-
-    test('does not show the same prose twice when a retry changes only the text generation', async () => {
-        const outsideFold = () => [...container.querySelectorAll('[data-message-text-export-source]')]
-            .filter((element) => !element.closest('[data-live-activity-content]'))
-            .map((element) => element.textContent ?? '').join('\n');
-        const first = assistant('retry', [textPart('retry-part', 'Same paragraph', 'retry', { start: 2, end: 3 })], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([first])} working />));
-        expect(outsideFold().match(/Same paragraph/g)).toHaveLength(1);
-        const retried = assistant('retry', [textPart('retry-part', 'Same paragraph', 'retry', { start: 4, end: 5 })], 'stop');
-        await act(async () => root.render(<Harness record={turn([retried])} working={false} />));
-        expect(outsideFold().match(/Same paragraph/g)).toHaveLength(1);
-        await act(async () => root.render(<Harness key="retry-revisited" record={turn([retried])} working={false} />));
-        expect(outsideFold().match(/Same paragraph/g)).toHaveLength(1);
-    });
-
-    for (const rewrittenGeneration of [8, 9] as const) {
-        test(`pins a rewritten progress update and keeps one interaction card (generation ${rewrittenGeneration})`, async () => {
-            const outsideFold = () => [...container.querySelectorAll('[data-message-text-export-source]')]
-                .filter((element) => !element.closest('[data-live-activity-content]'))
-                .map((element) => element.textContent ?? '').join('\n');
-            const foldContents = () => [...container.querySelectorAll('[data-live-activity-content]')]
-                .map((element) => element.textContent ?? '');
-            const assertFoldControls = () => {
-                const controls = container.querySelector<HTMLButtonElement>('button[aria-controls]')
-                    ?.getAttribute('aria-controls')?.split(/\s+/).filter(Boolean) ?? [];
-                for (const id of controls) {
-                    expect([...container.querySelectorAll('[id]')].some((node) => node.id === id)).toBe(true);
-                }
-            };
-            const read = { ...readPart, id: 'progress-read', callID: 'progress-read', messageID: 'earlier' };
-            const question: ToolPart = { ...questionPart, messageID: 'earlier' };
-            const earlier = assistant('earlier', [read, question], 'tool-calls');
-            const original = assistant('rewrite', [textPart('rewrite-part', 'First progress block.\n\nUnfinished tail', 'rewrite', { start: 8 })]);
-            await act(async () => root.render(<Harness record={turn([earlier, original])} working />));
-            expect(outsideFold()).toContain('First progress block.');
-
-            const rewritten = assistant('rewrite', [textPart('rewrite-part', 'Rewritten progress update.', 'rewrite', {
-                start: rewrittenGeneration, end: 11,
-            })], 'tool-calls');
-            await act(async () => root.render(<Harness record={turn([earlier, rewritten])} working />));
-            const prose = outsideFold();
-            expect(prose).toContain('First progress block.');
-            expect(prose).toContain('Rewritten progress update.');
-            expect(prose.indexOf('First progress block.')).toBeLessThan(prose.indexOf('Rewritten progress update.'));
-            expect(container.querySelectorAll('[data-fixture-message="rewrite"]')).toHaveLength(1);
-            expect(container.textContent?.match(/Which layout should I build\?/g)).toHaveLength(1);
-            expect(foldContents().some((content) => content.includes('Which layout'))).toBe(false);
-            expect(container.textContent).not.toContain('source.ts');
-            assertFoldControls();
-
-            await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-            expect(container.textContent?.match(/Which layout should I build\?/g)).toHaveLength(1);
-            expect(foldContents().some((content) => content.includes('source.ts'))).toBe(true);
-            expect(outsideFold()).toContain('First progress block.');
-            expect(outsideFold()).toContain('Rewritten progress update.');
-
-            const finalRecord = turn([earlier, rewritten]);
-            await act(async () => root.render(<Harness key="revisited" record={finalRecord} working />));
-            expect(outsideFold()).toContain('First progress block.');
-            expect(outsideFold()).toContain('Rewritten progress update.');
-            expect(container.querySelectorAll('[data-fixture-message="rewrite"]')).toHaveLength(1);
-            assertFoldControls();
-        });
-    }
-
-    test('many running steps remain one summary and only the latest progress is foregrounded', async () => {
-        const steps = Array.from({ length: 12 }, (_, index) => assistant(`step-${index}`, [
-            text(`progress-${index}`, `Progress update ${index}`),
-            { ...readPart, id: `read-${index}`, callID: `read-${index}` },
-            { type: 'reasoning', id: `thought-${index}`, sessionID: 'session', messageID: `step-${index}`, text: `Private thought ${index}`, time: { start: 1, end: 2 } },
-        ], 'tool-calls'));
-        await act(async () => root.render(<Harness record={turn(steps)} />));
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.querySelectorAll('[data-message-text-export-source]').length).toBe(1);
-        expect(container.textContent).toContain('Progress update 11');
-        expect(container.textContent).not.toContain('Progress update 0');
-        expect(container.textContent).not.toContain('Private thought');
-        expect(container.querySelectorAll('[data-reasoning-block-id]').length).toBe(0);
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent).toContain('Progress update 0');
-        expect(container.textContent).toContain('Progress update 11');
-        expect(container.querySelectorAll('[data-reasoning-block-id]').length).toBe(12);
-        expect(container.querySelectorAll('[data-message-text-export-source]').length).toBe(12);
-    });
-
-    for (const status of ['pending', 'running'] as const) {
-        test(`shows a ${status} question outside execution even when the user folded it`, async () => {
-            const question: ToolPart = { ...questionPart, state: status === 'pending'
-                ? { status, input: questionPart.state.input, raw: JSON.stringify(questionPart.state.input) }
-                : { status, input: questionPart.state.input, time: { start: 2 } },
-            };
-            const record = turn([assistant('asked', [readPart, question], 'tool-calls')]);
-            await act(async () => root.render(<Harness record={record} initialExpanded={false} working={false} />));
-
-            expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-            expect(container.textContent).toContain('Which layout should I build?');
-            expect(container.textContent).toContain('Compact');
-            expect(container.textContent).not.toContain('source.ts');
-            expect(container.querySelector('[data-live-activity-content]')?.textContent).not.toContain('Which layout');
-
-            await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-            expect(container.textContent?.match(/Which layout should I build\?/g)).toHaveLength(1);
-            expect(container.textContent).toContain('source.ts');
-        });
-    }
-
-    test('keeps the question context visible while an authoritative form waits for an answer', async () => {
-        const capture = new Map<string, ReturnType<typeof useChildStoreManager>>();
-        const captureManager = (value: ReturnType<typeof useChildStoreManager>) => { capture.set('manager', value); };
-        const record = turn([assistant('asked', [text('context', 'Choose a layout before I continue.'), questionPart], 'tool-calls')]);
-        await act(async () => root.render(<Harness record={record} working={false} captureManager={captureManager} />));
-        const manager = capture.get('manager');
-        if (!manager) throw new Error('Expected sync manager');
-        const child = manager.ensureChild('/project', { bootstrap: false });
-        await act(async () => child.setState({ status: 'complete', form: { session: [{
-            id: 'form-layout', sessionID: 'session', title: 'Layout',
-            fields: [{ key: 'layout', type: 'string', title: 'Which layout should I build?' }],
-        }] } }));
-        expect(container.textContent).toContain('Choose a layout before I continue.');
-        expect(container.textContent).toContain('Which layout should I build?');
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Waiting for an answer');
-    });
-
-    test('keeps answered questions above the final answer and out of execution after a remount', async () => {
-        const answered: ToolPart = { ...questionPart, state: {
-            status: 'completed', input: questionPart.state.input, metadata: {}, time: { start: 2, end: 3 },
-            output: 'User has answered your questions: "Which layout should I build?"="Comfortable". You can now continue.',
-        } };
-        const record = turn([
-            assistant('asked', [text('prose', 'Checking the layout options'), readPart, answered], 'tool-calls'),
-            assistant('final', [text('answer', 'Building the selected layout.')], 'stop'),
-        ]);
-        await act(async () => root.render(<Harness record={record} />));
-        expect(container.textContent).toContain('Which layout should I build?');
-        expect(container.textContent).toContain('Comfortable');
-        expect(container.textContent?.indexOf('Which layout')).toBeLessThan(container.textContent?.indexOf('Building the selected layout.') ?? -1);
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent?.match(/Which layout should I build\?/g)).toHaveLength(1);
-        await act(async () => root.render(<Harness key="revisited" record={record} />));
-        expect(container.textContent).toContain('Which layout should I build?');
-        expect(container.textContent).toContain('Comfortable');
-    });
-
-    test('shows the question body when activity defaults to expanded', async () => {
-        const record = turn([assistant('asked', [questionPart], 'tool-calls')]);
-        await act(async () => root.render(<Harness record={record} working={false} plain />));
-        expect(container.textContent).toContain('Which layout should I build?');
-        expect(container.textContent).toContain('Compact');
-    });
-
-    test('keeps a dismissed question visible with its failure reason', async () => {
-        const dismissed: ToolPart = { ...questionPart, state: {
-            status: 'error', input: questionPart.state.input, error: 'The user dismissed this question.',
-            time: { start: 2, end: 3 },
-        } };
-        const record = turn([assistant('asked', [dismissed], 'tool-calls')]);
-        await act(async () => root.render(<Harness record={record} working={false} />));
-        expect(container.textContent).toContain('Which layout should I build?');
-        expect(container.textContent).toContain('The user dismissed this question.');
-    });
-
-    test('keeps reasoning compact between tools and opens its real text only on request', async () => {
-        const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'A short thought', time: { start: 1 } };
-        await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
-        expect(container.querySelector<HTMLButtonElement>('button[aria-controls]')?.textContent).toContain('A short thought');
-        expect(container.querySelector('[data-reasoning-block-id]')).toBeNull();
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent).toContain('A short thought');
-        expect(container.querySelector('[data-reasoning-message-id="step"]')).not.toBeNull();
-        expect(container.querySelector('[data-reasoning-block-id] [role="button"]')?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.querySelector('[data-reasoning-block-id] [data-message-text-export-source]')).toBeNull();
-        expect(container.querySelector('[data-reasoning-block-id] [data-scrollable]')).toBeNull();
-        const ended: Part = { ...thought, text: 'A short thought, now complete', time: { start: 1, end: 2 } };
-        const progress = assistant('step', [ended, text('progress', 'Now inspect the source'), readPart], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([progress])} />));
-        expect(container.textContent).toContain('A short thought, now complete');
-        const content = container.textContent ?? '';
-        expect(content.indexOf('A short thought')).toBeLessThan(content.indexOf('Now inspect the source'));
-        expect(content.indexOf('Now inspect the source')).toBeLessThan(content.indexOf('source.ts'));
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        const final = assistant('final', [text('answer', 'Final answer stays visible')], 'stop');
-        await act(async () => root.render(<Harness record={turn([progress, final])} />));
-        expect(container.textContent).not.toContain('A short thought');
-        expect(container.textContent).toContain('Final answer stays visible');
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent).toContain('A short thought, now complete');
-        expect(container.textContent).toContain('Now inspect the source');
-        expect(container.textContent).toContain('source.ts');
-        const reasoningHeader = container.querySelector<HTMLElement>('[data-reasoning-block-id] [role="button"]');
-        expect(reasoningHeader?.getAttribute('aria-expanded')).toBe('false');
-        await act(async () => reasoningHeader?.click());
-        expect(container.querySelector('[data-reasoning-block-id] [data-message-text-export-source]')?.textContent).toContain('A short thought, now complete');
-    });
-
-    test('long reasoning uses its latest real heading while raw text stays unmounted', async () => {
-        const raw = '# Inspecting the configuration\n' + 'Details that belong behind a user request. '.repeat(100) + '\n## Comparing the two approaches\nThe latest thought continues here.';
-        const thought: Part = { type: 'reasoning', id: 'long-thought', sessionID: 'session', messageID: 'step', text: raw, time: { start: 1 } };
-        await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        const block = container.querySelector('[data-reasoning-block-id="long-thought"]');
-        expect(block?.textContent).toContain('Comparing the two approaches');
-        expect(block?.textContent).not.toContain('Details that belong behind a user request.');
-        expect(block?.querySelector('[data-message-text-export-source]')).toBeNull();
-        await act(async () => block?.querySelector<HTMLElement>('[role="button"]')?.click());
-        expect(block?.querySelector('[data-message-text-export-source]')?.textContent).toContain('Details that belong behind a user request.');
-    });
-
-    test('the complete message list keeps a manual collapse across steps, completion, and remount', async () => {
-        const thought: Part = { type: 'reasoning', id: 'list-thought', sessionID: 'session', messageID: 'list-step', text: 'List thought', time: { start: 1 } };
-        const initial = turn([assistant('list-step', [thought])]);
-        initial.turnId = 'list-user';
-        initial.userMessage.info.id = 'list-user';
-        await act(async () => root.render(<ListHarness record={initial} working listKey="manual-list" />));
-        const header = () => container.querySelector<HTMLButtonElement>('[data-live-turn-activity] button[aria-controls]');
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        await act(async () => header()?.click());
-        expect(header()?.getAttribute('aria-expanded')).toBe('true');
-        await act(async () => header()?.click());
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        const final = turn([assistant('list-step', [{ ...thought, text: 'List thought grows', time: { start: 1, end: 2 } }], 'tool-calls'), assistant('list-final', [text('answer', 'List final answer')], 'stop')]);
-        final.userMessage.info.id = 'list-user';
-        await act(async () => root.render(<ListHarness record={final} working={false} listKey="manual-list" />));
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.textContent).toContain('List final answer');
-        await act(async () => root.render(<ListHarness record={final} working={false} listKey="manual-list-remount" />));
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.textContent).not.toContain('List thought grows');
-        const fresh = turn([assistant('fresh-step', [{ ...thought, messageID: 'fresh-step', text: 'Fresh turn thought' }])]);
-        fresh.userMessage.info.id = 'fresh-user';
-        await act(async () => root.render(<ListHarness record={fresh} working listKey="fresh-list" />));
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        expect(header()?.textContent).toContain('Fresh turn thought');
-        expect(container.querySelector('[data-reasoning-block-id]')).toBeNull();
-    });
-
-    test('reasoning search opens the complete message list fold and reveals final-message reasoning directly', async () => {
-        const thought: Part = { type: 'reasoning', id: 'search-thought', sessionID: 'session', messageID: 'search-final', text: 'Searchable reasoning detail', time: { start: 1, end: 2 } };
-        const record = turn([assistant('search-final', [thought, text('answer', 'Search final answer')], 'stop')]);
-        record.userMessage.info.id = 'search-user';
-        const listRef = React.createRef<MessageListHandle>();
-        await act(async () => root.render(<ListHarness record={record} working={false} listRef={listRef} listKey="search-list" />));
-        const header = () => container.querySelector<HTMLButtonElement>('[data-live-turn-activity] button[aria-controls]');
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.querySelector('[data-reasoning-message-id="search-final"]')).toBeNull();
-        await act(async () => {
-            requestReasoningReveal('search-final');
-            listRef.current?.alignViewportAnchor({ messageId: 'search-final', offsetTop: 0 });
-        });
-        expect(header()?.getAttribute('aria-expanded')).toBe('true');
-        expect(container.querySelector('[data-reasoning-message-id="search-final"]')?.textContent).toContain('Searchable reasoning detail');
-        expect(container.textContent).toContain('Search final answer');
-        expect(container.querySelector('[data-reasoning-message-id="search-final"] [role="button"]')?.getAttribute('aria-expanded')).toBe('true');
-        expect(container.querySelector('[data-reasoning-message-id="search-final"] [data-message-text-export-source]')?.textContent).toContain('Searchable reasoning detail');
-    });
-
-    test('an explicit reasoning opt-out still hides thought content in the complete message list', async () => {
-        useUIStore.setState({ showReasoningTraces: false });
-        const thought: Part = { type: 'reasoning', id: 'hidden-thought', sessionID: 'session', messageID: 'hidden-step', text: 'Opted-out reasoning', time: { start: 1 } };
-        const record = turn([assistant('hidden-step', [thought, readPart])]);
-        record.userMessage.info.id = 'hidden-user';
-        await act(async () => root.render(<ListHarness record={record} working listKey="hidden-list" />));
-        await act(async () => container.querySelector<HTMLButtonElement>('[data-live-turn-activity] button[aria-controls]')?.click());
-        expect(container.querySelector('[data-reasoning-block-id]')).toBeNull();
-        expect(container.textContent).not.toContain('Opted-out reasoning');
-        expect(container.textContent).toContain('source.ts');
-    });
-
-    test('keeps a manual collapse through increments, another step, and completion', async () => {
-        const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'First thought', time: { start: 1 } };
-        await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
-        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        await act(async () => header()?.click());
-        expect(header()?.getAttribute('aria-expanded')).toBe('true');
-        await act(async () => header()?.click());
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        const next = assistant('next', [text('progress', 'Another step'), readPart], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([assistant('step', [{ ...thought, text: 'First thought with more text' }]), next])} />));
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.textContent).not.toContain('First thought');
-        expect(container.textContent).toContain('Another step');
-        await act(async () => root.render(<Harness record={turn([next, assistant('final', [text('final', 'Done')], 'stop')])} />));
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.textContent).toContain('Done');
-        expect(container.textContent).toContain('Another step');
-        expect(container.textContent?.match(/Another step/g)).toHaveLength(1);
-    });
-
-    test('previews only the current thought while folded and follows its streamed updates', async () => {
-        const thought: Part = { type: 'reasoning', id: 'current', sessionID: 'session', messageID: 'step', text: '# Inspect configuration\nEarlier details', time: { start: 1 } };
-        const earlier: Part = { ...thought, id: 'earlier', text: 'Outdated thought', time: { start: 1, end: 2 } };
-        await act(async () => root.render(<Harness record={turn([assistant('step', [earlier, thought])])} />));
-        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        expect(header()?.getAttribute('aria-expanded')).toBe('false');
-        expect(header()?.textContent).toContain('Thinking');
-        expect(header()?.textContent).toContain('Inspect configuration');
-        expect(header()?.textContent).not.toContain('#');
-        expect(header()?.textContent).not.toContain('Outdated thought');
-        expect(container.querySelector('[data-reasoning-block-id]')).toBeNull();
-        await act(async () => {
-            root.render(<Harness record={turn([assistant('step', [{ ...thought, text: '# Inspect configuration\nEarlier details\n## Check the current model\nMore details' }])])} />);
-            await new Promise((resolve) => setTimeout(resolve, 120));
-        });
-        expect(header()?.textContent).toContain('Check the current model');
-        expect(header()?.textContent).not.toContain('Inspect configuration');
-        await act(async () => header()?.click());
-        expect(header()?.textContent).not.toContain('Check the current model');
-        expect(container.textContent).toContain('Check the current model');
-    });
-
-    test('replaces the folded thought with the current command and clears it after execution', async () => {
-        const thought: Part = { type: 'reasoning', id: 'current', sessionID: 'session', messageID: 'step', text: 'Inspecting the model', time: { start: 1 } };
-        const command: Part = { type: 'tool', tool: 'shell', id: 'command', callID: 'command', sessionID: 'session', messageID: 'step',
-            state: { status: 'running', input: { command: 'bun run type-check', description: 'Check types' }, time: { start: 2 } } };
-        await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
-        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        expect(header()?.textContent).toContain('Inspecting the model');
-        await act(async () => root.render(<Harness record={turn([assistant('step', [thought, command])])} />));
-        expect(header()?.textContent).toContain('bun run type-check');
-        expect(header()?.textContent).not.toContain('Inspecting the model');
-        const finished: Part = { ...command, state: { status: 'completed', input: { command: 'bun run type-check' }, output: 'Passed', metadata: {}, time: { start: 2, end: 3 } } };
-        await act(async () => root.render(<Harness record={turn([assistant('step', [finished], 'tool-calls')])} />));
-        expect(header()?.textContent).not.toContain('bun run type-check');
-        expect(header()?.textContent).not.toContain('Inspecting the model');
-    });
-
-    test('a folded preview respects the reasoning opt-out and live turn lifecycle', async () => {
-        const thought: Part = { type: 'reasoning', id: 'current', sessionID: 'session', messageID: 'step', text: 'Current thought', time: { start: 1 } };
-        const record = turn([assistant('step', [thought])]);
-        await act(async () => root.render(<Harness record={record} />));
-        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        expect(header()?.textContent).toContain('Current thought');
-        await act(async () => useUIStore.setState({ showReasoningTraces: false }));
-        expect(header()?.textContent).not.toContain('Current thought');
-        await act(async () => useUIStore.setState({ showReasoningTraces: true }));
-        await act(async () => root.render(<Harness record={record} working={false} />));
-        expect(header()?.textContent).not.toContain('Current thought');
-    });
-
-    test('updates an unfinished reasoning sentence before the turn ends', async () => {
-        const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'Inspecting', time: { start: 1 } };
-        await act(async () => root.render(<Harness record={turn([assistant('step', [thought])])} />));
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent).toContain('Inspecting');
-        await act(async () => {
-            root.render(<Harness record={turn([assistant('step', [{ ...thought, text: 'Inspecting the current configuration' }])])} />);
-            await new Promise((resolve) => setTimeout(resolve, 120));
-        });
-        expect(container.textContent).toContain('Inspecting the current configuration');
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('true');
-    });
-
-    test('an empty live thought shows a waiting label and an empty settled thought takes no row', async () => {
-        const empty: Part = { type: 'reasoning', id: 'empty', sessionID: 'session', messageID: 'step', text: '', time: { start: 1 } };
-        await act(async () => root.render(<Harness record={turn([assistant('step', [empty])])} />));
-        expect(container.textContent).toContain('Thinking');
-        expect(container.querySelector('[data-reasoning-block-id="empty"]')).toBeNull();
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.querySelector('[data-reasoning-block-id="empty"] [role="button"]')?.getAttribute('aria-expanded')).toBe('false');
-        await act(async () => root.render(<Harness record={turn([assistant('step', [empty])])} working={false} initialExpanded />));
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.querySelector('[data-reasoning-block-id="empty"]')).toBeNull();
-    });
-
-    test('the final answer stays outside history and reasoning text remains an explicit detail', async () => {
-        const thought: Part = { type: 'reasoning', id: 'final-thought', sessionID: 'session', messageID: 'final', text: 'Final step reasoning', time: { start: 1, end: 2 } };
-        const final = assistant('final', [thought, text('answer', 'Independent final answer')], 'stop');
-        await act(async () => root.render(<Harness record={turn([final])} />));
-        expect(container.textContent).not.toContain('Final step reasoning');
-        expect(container.textContent).toContain('Independent final answer');
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent).toContain('Final step reasoning');
-        expect(container.textContent).toContain('Independent final answer');
-        expect(container.querySelector('[data-reasoning-message-id="final"] [data-message-text-export-source]')).toBeNull();
-        await act(async () => container.querySelector<HTMLElement>('[data-reasoning-message-id="final"] [role="button"]')?.click());
-        expect(container.querySelector('[data-reasoning-message-id="final"] [data-message-text-export-source]')?.textContent).toContain('Final step reasoning');
-    });
-
-    test('a running background child keeps the process visible after the parent answers', async () => {
-        const child: Part = {
-            type: 'tool', tool: 'subagent', id: 'child', callID: 'child', sessionID: 'session', messageID: 'progress',
-            state: { status: 'completed', input: { description: 'Inspect source', prompt: 'Inspect source', subagent_type: 'explore', background: true },
-                output: 'Started', metadata: { sessionID: 'child-session', status: 'running' }, time: { start: 1, end: 2 } },
-        };
-        replaceGlobalSessionStatusById(new Map([['child-session', { status: { type: 'busy' }, directory: '/project' }]]));
-        const record = turn([assistant('progress', [child], 'tool-calls'), assistant('final', [text('answer', 'Parent answer')], 'stop')]);
-        await act(async () => root.render(<Harness record={record} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Execution details');
-        expect(container.querySelector('button[aria-controls]')?.textContent).not.toContain('Working');
-        expect(container.textContent).toContain('Parent answer');
-        expect(container.textContent).not.toContain('Inspect source');
-        await act(async () => replaceGlobalSessionStatusById(new Map()));
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.textContent).toContain('Parent answer');
-    });
-
-    test('a cross-directory background child waiting for permission keeps its status visible', async () => {
-        const child: Part = {
-            type: 'tool', tool: 'subagent', id: 'child', callID: 'child', sessionID: 'session', messageID: 'progress',
-            state: { status: 'completed', input: { description: 'Inspect source', prompt: 'Inspect source', agent: 'explore', background: true },
-                output: 'Started', metadata: { sessionID: 'waiting-child', status: 'running' }, time: { start: 1, end: 2 } },
-        };
-        applyGlobalBlockingRequestEvents('/other-project', [{ type: 'permission.asked', properties: {
-            id: 'approval', sessionID: 'waiting-child', action: 'edit', resources: [],
-        } }]);
-        const record = turn([assistant('progress', [child], 'tool-calls'), assistant('final', [text('answer', 'Parent answer')], 'stop')]);
-        await act(async () => root.render(<Harness record={record} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Waiting for approval');
-        await act(async () => applyGlobalBlockingRequestEvents('/other-project', [{ type: 'permission.replied', properties: {
-            sessionID: 'waiting-child', requestID: 'approval',
-        } }]));
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-    });
-
-    test('a complete live child directory clears a stale permission index from its old directory', async () => {
-        const child: Part = {
-            type: 'tool', tool: 'subagent', id: 'child', callID: 'child', sessionID: 'session', messageID: 'progress',
-            state: { status: 'completed', input: { description: 'Inspect source', prompt: 'Inspect source', agent: 'explore', background: true },
-                output: 'Started', metadata: { sessionID: 'moved-child', status: 'running' }, time: { start: 1, end: 2 } },
-        };
-        applyGlobalBlockingRequestEvents('/old-project', [{ type: 'permission.asked', properties: {
-            id: 'old-approval', sessionID: 'moved-child', action: 'edit', resources: [],
-        } }]);
-        let manager: ReturnType<typeof useChildStoreManager> | undefined;
-        const captureManager = (value: ReturnType<typeof useChildStoreManager>) => { manager = value; };
-        const record = turn([assistant('progress', [child], 'tool-calls'), assistant('final', [text('answer', 'Parent answer')], 'stop')]);
-        await act(async () => root.render(<Harness record={record} working={false} captureManager={captureManager} />));
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Waiting for approval');
-        if (!manager) throw new Error('Expected sync manager');
-        const live = manager.ensureChild('/new-project', { bootstrap: false });
-        const session: Session = {
-            id: 'moved-child', parentID: 'session', projectID: 'p', directory: '/new-project', title: 'Inspect source', agent: 'explore',
-            cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-            time: { created: 1, updated: 3 },
-        };
-        await act(async () => live.setState({ status: 'complete', session: [session], permission: {}, form: {} }));
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.querySelector('button[aria-controls]')?.textContent).not.toContain('Waiting for approval');
-    });
-
-    test('folded work names an authoritative stopped or failed final step', async () => {
-        const failed = assistant('step', [text('progress', 'Unfinished response'), readPart], 'error');
-        if (failed.info.role !== 'assistant') throw new Error('Expected assistant fixture');
-        failed.info.error = { type: 'ProviderError', message: 'Unavailable' };
-        await act(async () => root.render(<Harness record={turn([failed])} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Failed');
-        const stopped: ChatMessageEntry = { ...failed, info: { ...failed.info, error: { type: 'MessageAbortedError', message: 'Step interrupted' } } };
-        await act(async () => root.render(<Harness record={turn([stopped])} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Stopped');
-        const recovered = assistant('final', [text('answer', 'Recovered successfully')], 'stop');
-        await act(async () => root.render(<Harness record={turn([failed, recovered])} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.textContent).not.toContain('Failed');
-        expect(container.textContent).toContain('Recovered successfully');
-    });
-
-    test('preserves a manual expansion when the turn completes', async () => {
-        const progress = assistant('step', [text('progress', 'Working through details'), readPart], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([progress])} />));
-        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        await act(async () => header()?.click());
-        await act(async () => root.render(<Harness record={turn([progress, assistant('final', [text('final', 'Done')], 'stop')])} />));
-        expect(header()?.getAttribute('aria-expanded')).toBe('true');
-        expect(container.textContent).toContain('Working through details');
-        expect(container.textContent).toContain('Done');
-    });
-
-    test('folds stopped work without a final answer and opens the recorded reasoning in one click', async () => {
-        const thought: Part = { type: 'reasoning', id: 'thought', sessionID: 'session', messageID: 'step', text: 'Recorded thought', time: { start: 1 } };
-        const record = turn([assistant('step', [thought])]);
-        await act(async () => root.render(<Harness record={record} working />));
-        await act(async () => root.render(<Harness record={record} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.getAttribute('aria-expanded')).toBe('false');
-        expect(container.textContent).not.toContain('Recorded thought');
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent).toContain('Recorded thought');
-    });
-
-    test('shows the running command in the folded Activity header', async () => {
-        const shell: Part = {
-            type: 'tool', tool: 'shell', id: 'shell', callID: 'shell', sessionID: 'session', messageID: 'progress',
-            state: { status: 'running', input: { command: 'npm test' }, time: { start: 1 } },
-        };
-        const progress = assistant('progress', [text('progress-text', 'Checking'), shell], 'tool-calls');
-        await act(async () => root.render(<Harness record={turn([progress])} initialExpanded={false} />));
+    test('counts a command run once when folding the rows before the seven-row preview', async () => {
+        const calls: Part[] = [
+            ...Array.from({ length: 7 }, (_, index): Part => ({ ...readPart, id: `read-${index}`, callID: `read-${index}` })),
+            ...Array.from({ length: 30 }, (_, index): Part => ({
+                type: 'tool', tool: 'shell', id: `shell-${index}`, callID: `shell-${index}`, sessionID: 'session', messageID: 'progress',
+                state: { status: 'completed', input: { command: `echo ${index}` }, output: `Result ${index}`, metadata: {}, time: { start: 1, end: 2 } },
+            })),
+        ];
+        await act(async () => root.render(<Harness record={turn([assistant('progress', calls, 'tool-calls')])} />));
         const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        expect(header?.textContent).toContain('Shell Command');
-        expect(header?.textContent).toContain('npm test');
-        expect(header?.textContent).not.toContain('Working');
-        expect(container.querySelector('.live-activity-icon[data-running="true"]')).not.toBeNull();
-        expect(container.querySelector('[data-work-glyph]')).toBeNull();
-        // The row itself waits behind the header; opening it moves the command
-        // out of the preview and into the detailed list.
-        await act(async () => header?.click());
-        expect(header?.textContent).not.toContain('npm test');
-        expect(container.textContent).toContain('npm test');
+        expect(header?.textContent).toContain('+1 more');
     });
 
     test('draws a page the agent showed above the answer, outside the folded Activity', async () => {
@@ -1071,11 +457,7 @@ describe('live Activity with the real message body', () => {
         const html = container.innerHTML;
         expect(html.indexOf('title="Pick a layout"')).toBeGreaterThan(-1);
         expect(html.indexOf('Building layout B')).toBeGreaterThan(html.indexOf('title="Pick a layout"'));
-        expect(container.textContent).not.toContain('Looking around');
-        expect(container.querySelectorAll('iframe')).toHaveLength(1);
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent).toContain('Building layout B');
-        expect(container.textContent).toContain('Looking around');
+        expect(html.indexOf('Looking around')).toBeLessThan(html.indexOf('title="Pick a layout"'));
         expect(container.querySelectorAll('iframe')).toHaveLength(1);
     });
 
@@ -1109,17 +491,12 @@ describe('live Activity with the real message body', () => {
         const record = turn([assistant('progress', [text('progress-text', 'Still working'), readPart], 'tool-calls')]);
         await act(async () => root.render(<Harness record={record} />));
         expect(container.textContent).toContain('Still working');
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Execution details');
+        expect(container.textContent).toContain('Activity');
         await act(async () => root.render(<Harness record={record} retired />));
-        expect(container.textContent).toContain('Still working');
-        expect(container.textContent?.match(/Still working/g)).toHaveLength(1);
-        for (const fold of container.querySelectorAll('[data-live-activity-content]')) {
-            expect(fold.textContent).not.toContain('Still working');
-        }
-        expect(container.textContent).toContain('Execution details');
+        expect(container.textContent).not.toContain('Still working');
+        expect(container.textContent).toContain('Activity');
         await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.textContent).toContain('Still working');
-        expect(container.textContent?.match(/Still working/g)).toHaveLength(1);
     });
 
     test('the answer copies the whole turn while each earlier step copies only itself', async () => {
@@ -1218,9 +595,9 @@ describe('live Activity with the real message body', () => {
             { file: 'src/c.ts', additions: 1, deletions: 0, inTurnDiff: false },
         ]} />));
         expect(container.querySelector('button[aria-label="Open src/a.ts"]')?.textContent).toBe('a.ts');
-        expect(container.querySelector('button[aria-label="Open src/b.ts"]')?.textContent).toBe('b.ts+1/-2');
+        expect(container.querySelector('button[aria-label="Open src/b.ts"]')?.textContent).toBe('b.ts+1 −2');
         expect(container.querySelector('button[aria-label="Open src/c.ts"]')).toBeNull();
-        expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1/-0');
+        expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1 −0');
     });
 
     test('keeps historical files informational and withholds the list before stop', async () => {
@@ -1233,126 +610,5 @@ describe('live Activity with the real message body', () => {
         await act(async () => changedFilesToggle()?.click());
         expect(container.textContent).toContain('file-4.ts');
         expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(0);
-    });
-
-    test('keeps the folded header neutral through work, waits, errors, completion and cold history', async () => {
-        const step = assistant('step', [text('progress', 'Checking'), readPart], 'tool-calls');
-        const final = assistant('final', [text('answer', 'Done')], 'stop');
-        const failed = assistant('failed', [text('answer', 'Unfinished')], 'error');
-        if (failed.info.role !== 'assistant') throw new Error('Expected assistant fixture');
-        failed.info.error = { type: 'ProviderError', message: 'Unavailable' };
-        const capture = new Map<string, ReturnType<typeof useChildStoreManager>>();
-        const captureManager = (value: ReturnType<typeof useChildStoreManager>) => { capture.set('manager', value); };
-        await act(async () => root.render(<Harness record={turn([step])} working captureManager={captureManager} />));
-        expectNeutralHeader(container);
-        const currentManager = capture.get('manager');
-        if (!currentManager) throw new Error('Expected sync manager');
-
-        const child = currentManager.ensureChild('/project', { bootstrap: false });
-        await act(async () => child.setState({ permission: { session: [{
-            id: 'approval', sessionID: 'session', action: 'edit', resources: [],
-        }] } }));
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Waiting for approval');
-        expectNeutralHeader(container);
-        await act(async () => child.setState({ permission: {} }));
-        expectNeutralHeader(container);
-
-        await act(async () => root.render(<Harness record={turn([step])} working={false} />));
-        expectNeutralHeader(container);
-
-        await act(async () => root.render(<Harness record={turn([failed])} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Failed');
-        expectNeutralHeader(container);
-        const stopped: ChatMessageEntry = { ...failed, info: { ...failed.info, error: { type: 'MessageAbortedError', message: 'Step interrupted' } } };
-        await act(async () => root.render(<Harness record={turn([stopped])} working={false} />));
-        expect(container.querySelector('button[aria-controls]')?.textContent).toContain('Stopped');
-        expectNeutralHeader(container);
-
-        jest.useFakeTimers();
-        try {
-            await act(async () => root.render(<Harness record={turn([step])} working />));
-            expectNeutralHeader(container);
-            await act(async () => root.render(<Harness record={turn([step, final])} working={false} />));
-            expectNeutralHeader(container);
-            await act(async () => jest.advanceTimersByTime(3001));
-            expectNeutralHeader(container);
-            await act(async () => root.render(<Harness record={turn([step])} working />));
-            expectNeutralHeader(container);
-        } finally {
-            jest.useRealTimers();
-        }
-        await act(async () => root.render(<Harness record={turn([final])} working={false} />));
-        expectNeutralHeader(container);
-    });
-
-    test('a historical turn and the shimmer copy keep the folded header neutral', async () => {
-        const step = assistant('step', [text('progress', 'Checking'), readPart], 'tool-calls');
-        const final = assistant('final', [text('answer', 'Done')], 'stop');
-        await act(async () => root.render(<Harness record={turn([step])} working retired />));
-        expectNeutralHeader(container);
-        await act(async () => root.render(<Harness record={turn([step, final])} working={false} hasLaterAssistant />));
-        expectNeutralHeader(container);
-
-        const previousMatchMedia = Object.getOwnPropertyDescriptor(globalThis, 'matchMedia');
-        Object.defineProperty(globalThis, 'matchMedia', {
-            configurable: true, writable: true,
-            value: (query: string): MediaQueryList => window.matchMedia(query.replace('reduce', 'no-preference')),
-        });
-        jest.useFakeTimers();
-        try {
-            await act(async () => root.render(<Harness record={turn([step])} working initialExpanded={false} />));
-            await act(async () => jest.advanceTimersByTime(1000));
-            const copy = container.querySelector('.oc-live-header-shimmer');
-            expect(copy).not.toBeNull();
-            expect(copy?.querySelectorAll('.oc-activity-tone, [data-activity-tone]')).toHaveLength(0);
-            expect(copy?.className).toContain('oc-live-header-shimmer');
-            expect(copy?.querySelector('.oc-activity-title')?.className).toContain('text-[var(--tools-title)]');
-            expectNeutralHeader(container);
-        } finally {
-            jest.useRealTimers();
-            if (previousMatchMedia) Object.defineProperty(globalThis, 'matchMedia', previousMatchMedia);
-            else Reflect.deleteProperty(globalThis, 'matchMedia');
-        }
-    });
-
-    test('shimmers the folded header only after its text stays still for one second', async () => {
-        const shell = (command: string): Part => ({
-            type: 'tool', tool: 'shell', id: 'shell', callID: 'shell', sessionID: 'session', messageID: 'progress',
-            state: { status: 'running', input: { command }, time: { start: 1 } },
-        });
-        const record = (command: string) => turn([assistant('progress', [text('progress-text', 'Checking'), shell(command)], 'tool-calls')]);
-        const header = () => container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        const previousMatchMedia = Object.getOwnPropertyDescriptor(globalThis, 'matchMedia');
-        jest.useFakeTimers();
-        try {
-            // The suite runs with reduced motion to keep disclosure tests
-            // deterministic; this test opts into the shimmer preference.
-            Object.defineProperty(globalThis, 'matchMedia', {
-                configurable: true,
-                writable: true,
-                value: (query: string): MediaQueryList => window.matchMedia(query.replace('reduce', 'no-preference')),
-            });
-            await act(async () => root.render(<Harness record={record('npm test')} initialExpanded={false} />));
-            expect(header()?.getAttribute('data-shimmer')).toBeNull();
-            await act(async () => jest.advanceTimersByTime(999));
-            expect(header()?.getAttribute('data-shimmer')).toBeNull();
-            await act(async () => jest.advanceTimersByTime(1));
-            expect(header()?.getAttribute('data-shimmer')).toBe('ready');
-            expect(header()?.querySelector('.oc-live-header-shimmer')?.textContent).toContain('npm test');
-
-            await act(async () => root.render(<Harness record={record('bun test')} initialExpanded={false} />));
-            expect(header()?.getAttribute('data-shimmer')).toBeNull();
-            expect(header()?.querySelector('.oc-live-header-shimmer')).toBeNull();
-            await act(async () => jest.advanceTimersByTime(1000));
-            expect(header()?.querySelector('.oc-live-header-shimmer')?.textContent).toContain('bun test');
-
-            await act(async () => root.render(<Harness record={record('bun test')} working={false} initialExpanded={false} />));
-            expect(header()?.getAttribute('data-shimmer')).toBeNull();
-            expect(header()?.querySelector('.oc-live-header-shimmer')).toBeNull();
-        } finally {
-            jest.useRealTimers();
-            if (previousMatchMedia) Object.defineProperty(globalThis, 'matchMedia', previousMatchMedia);
-            else Reflect.deleteProperty(globalThis, 'matchMedia');
-        }
     });
 });

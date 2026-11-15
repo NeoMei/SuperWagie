@@ -42,7 +42,7 @@ describe('live Activity collapse layout lifecycle', () => {
     test('settles the target height when React cleans up and replays a collapse layout effect', async () => {
         await act(async () => root.render(
             <StrictMode>
-                <LiveActivityCollapse expanded={false} animateOnMount>
+                <LiveActivityCollapse expanded={false}>
                     <div ref={(node) => {
                         if (!node?.parentElement) return;
                         // Happy DOM has no layout engine. Supply the height
@@ -58,7 +58,7 @@ describe('live Activity collapse layout lifecycle', () => {
     });
 
     test('an automatic finish removes the body immediately without a height tween', async () => {
-        const render = (expanded: boolean) => <LiveActivityCollapse expanded={expanded} animate={false}>
+        const render = (expanded: boolean) => <LiveActivityCollapse expanded={expanded}>
             <div>Recorded execution</div>
         </LiveActivityCollapse>;
         await act(async () => root.render(render(true)));
@@ -79,7 +79,7 @@ describe('live Activity collapse layout lifecycle', () => {
         }
         const render = () => (
             <Suspense fallback={<div>Loading history</div>}>
-                <LiveActivityCollapse expanded={false} animateOnMount>
+                <LiveActivityCollapse expanded={false}>
                     <div ref={(node) => {
                         if (!node?.parentElement) return;
                         Object.defineProperty(node.parentElement, 'scrollHeight', { configurable: true, get: () => 2400 });
@@ -123,8 +123,8 @@ describe('live Activity collapse layout lifecycle', () => {
         suspended = false;
         await act(async () => { release(); });
         const region = container.querySelector<HTMLElement>('[data-live-activity-content]');
-        expect(region?.style.height).toBe('auto');
-        expect(region?.style.overflow).toBe('visible');
+        expect(region?.style.height).toBe('');
+        expect(region?.style.overflow).toBe('');
         expect(region?.textContent).toBe('Historical activity');
     });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { Window } from 'happy-dom';
 
 import { FormMarkdown } from './FormMarkdown';
 
@@ -12,9 +13,13 @@ describe('FormMarkdown', () => {
 
     const html = renderToStaticMarkup(<FormMarkdown content={content} size="meta" />);
 
-    expect(html).toBe(
-      `<div class="form-markdown typography-meta whitespace-pre-wrap">${content}</div>`,
-    );
+    const host = new Window().document.createElement('div');
+    host.innerHTML = html;
+    const fallback = host.querySelector('.form-markdown');
+    expect(fallback?.textContent).toBe(content);
+    expect(fallback?.classList.contains('typography-meta')).toBe(true);
+    expect(fallback?.classList.contains('whitespace-pre-wrap')).toBe(true);
+    expect(fallback?.querySelector('strong, code, a')).toBeNull();
   });
 
   test('applies meta typography and caller classes', () => {

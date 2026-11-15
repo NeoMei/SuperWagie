@@ -106,6 +106,17 @@ test("does not request a message outside the displayed transcript", async () => 
   expect(paths).toEqual([])
 })
 
+test("completes only the explicit displayed store while routing through the session owner", async () => {
+  const owner = stores.getChild(directory)
+  if (!owner) throw new Error("Owner store missing")
+  const displayed = stores.ensureChild("/repo/display", { bootstrap: false })
+  displayed.setState({ message: owner.getState().message, part: owner.getState().part })
+  parentResult()
+  await completeToolContent({ ...target, storeDirectory: "/repo/display" }, messageID)
+  expect(displayed.getState().part[messageID].every((part) => toolContentShellChars(part) === null)).toBe(true)
+  expect(owner.getState().part[messageID].some((part) => toolContentShellChars(part) !== null)).toBe(true)
+})
+
 test("a removed message is not resurrected by the ancestor result", async () => {
   parentResult(() => stores.getChild(directory)!.setState({ message: {}, part: {} }))
   await completeToolContent(target, messageID)

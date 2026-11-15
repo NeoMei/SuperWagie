@@ -4,7 +4,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { beginLayoutAnimation, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { beginLayoutAnimation, holdLayoutAnimation, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import type { SidebarPeek } from './useSidebarPeek';
 
@@ -33,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     const startWidthRef = React.useRef(sidebarWidth || SIDEBAR_CONTENT_WIDTH);
     const resizingWidthRef = React.useRef<number | null>(null);
     const activeResizePointerIDRef = React.useRef<number | null>(null);
+    const releaseResizeHoldRef = React.useRef<(() => void) | null>(null);
     const sidebarRef = React.useRef<HTMLDivElement | null>(null);
     const titlebarOverlayRef = React.useRef<HTMLElement | null>(null);
 
@@ -85,8 +86,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         if (!isResizing) {
             resizingWidthRef.current = null;
             activeResizePointerIDRef.current = null;
+            releaseResizeHoldRef.current?.();
+            releaseResizeHoldRef.current = null;
         }
     }, [isResizing]);
+
+    // Closing mid-drag removes the handle before it can receive pointerup.
+    React.useEffect(() => {
+        if (!isOpen && isResizing) setIsResizing(false);
+    }, [isOpen, isResizing]);
+
+    React.useEffect(() => () => {
+        releaseResizeHoldRef.current?.();
+        releaseResizeHoldRef.current = null;
+    }, []);
 
     const openWidth = Math.min(
         SIDEBAR_MAX_WIDTH,
@@ -159,6 +172,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         startWidthRef.current = appliedWidth;
         resizingWidthRef.current = appliedWidth;
         applyLiveWidth(appliedWidth);
+        releaseResizeHoldRef.current?.();
+        releaseResizeHoldRef.current = holdLayoutAnimation();
         event.preventDefault();
     };
 
@@ -194,6 +209,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         resizingWidthRef.current = null;
         setIsResizing(false);
         setSidebarWidth(finalWidth);
+        releaseResizeHoldRef.current?.();
+        releaseResizeHoldRef.current = null;
     };
 
     // The column never changes its own accessibility state: a toggle hides or
@@ -252,6 +269,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                     onPointerMove={handlePointerMove}
                     onPointerUp={handlePointerEnd}
                     onPointerCancel={handlePointerEnd}
+                    onLostPointerCapture={handlePointerEnd}
                     role="separator"
                     aria-orientation="vertical"
                     aria-label={t('sidebar.resize.leftPanelAria')}

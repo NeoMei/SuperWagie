@@ -10,6 +10,7 @@
  * command reads like any other command.
  */
 
+import { z } from 'zod';
 import { shellCompletionFailed, type ShellCompletion } from '@/lib/opencode/background-shell';
 import type { ToolPart } from '@/lib/opencode/model';
 
@@ -19,8 +20,8 @@ export type BackgroundShellPhase =
     /** OpenCode reported how the command ended. */
     | { kind: 'finished'; completion: ShellCompletion }
     /**
-     * A native cancellation or observed removal confirmed the stop. OpenCode
-     * can report removal as an error; the row shows the translated notice.
+     * The user stopped it. OpenCode reports that as an error, which is not
+     * what happened, so the row shows the stop instead (`notice`, translated).
      */
     | { kind: 'stopped'; endedAt: number; notice: string }
     /**
@@ -67,4 +68,21 @@ export const toBackgroundShellPart = (part: ToolPart, phase: BackgroundShellPhas
         case 'unknown':
             return { ...part, state: { ...state, output: withoutModelInstruction(state.output) } };
     }
+};
+
+/**
+ * A shell call the turn waited for and the user stopped. OpenCode 2.3.0+
+ * fails it with `metadata.interrupted`, its message being the output so far
+ * followed by `metadata.notice` (where the full output is, for the model).
+ * The row shows it as stopped with that output instead of as a failure;
+ * `notice` (translated) stands in when the command printed nothing.
+ */
+export const toInterruptedShellPart = (part: ToolPart, notice: string): ToolPart => {
+    const state = part.state;
+    if (state.status !== 'error' || state.metadata?.interrupted !== true) return part;
+    const { input, metadata, time } = state;
+    const text = state.output ?? state.error;
+    const modelNotice = z.string().safeParse(metadata.notice).data ?? '';
+    const output = modelNotice && text.endsWith(modelNotice) ? text.slice(0, -modelNotice.length).trimEnd() : text;
+    return { ...part, state: { status: 'completed', input, output: output || notice, metadata, time } };
 };

@@ -24,7 +24,8 @@ import { copyMarkdownToClipboard, copyTextToClipboard } from '@/lib/clipboard';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { ToolPopupContent } from './message/types';
-import { getMarkdownProcessingOptions, markdownCjk, markdownMath } from './markdown/streamdownPlugins';
+import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath, remarkLiteralText } from './markdown/streamdownPlugins';
+import { fenceUiBlocks } from './uiBlocks/taggedBlocks';
 import { MarkdownMediaProvider, type MarkdownDocumentAssets } from './markdown/MarkdownMediaContext';
 import {
   MarkdownImage,
@@ -41,8 +42,10 @@ import {
 } from './markdown/MarkdownPresentationContext';
 import { MarkdownLink, MarkdownInlineCode } from './markdown/MarkdownLink';
 import { MarkdownCode } from './markdown/MarkdownCode';
+import { MarkdownBlockquote } from './markdown/MarkdownBlockquote';
 import { MarkdownTable, MarkdownTableCell } from './markdown/MarkdownTable';
 import { MarkdownMermaid } from './markdown/MarkdownMermaid';
+import { MarkdownUiBlock } from './markdown/MarkdownUiBlock';
 import { createMarkdownCodePlugin } from './markdown/streamdownCode';
 import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
@@ -140,7 +143,7 @@ const components: Components = {
   p: MarkdownBodyParagraph,
   strong: ({ node: _node, ...props }) => <strong {...props} />,
   li: ({ node: _node, ...props }) => <li {...props} dir="auto" />,
-  blockquote: ({ node: _node, ...props }) => <blockquote {...props} dir="auto" />,
+  blockquote: MarkdownBlockquote,
   summary: ({ node: _node, children, ...props }) => (
     <summary {...props}>
       <span data-oc-disclosure-icon="" aria-hidden="true"><Icon name="arrow-right-s" className="size-3.5" /></span>
@@ -148,7 +151,10 @@ const components: Components = {
     </summary>
   ),
 };
-const renderers = [{ language: 'mermaid', component: MarkdownMermaid }];
+const renderers = [
+  { language: 'mermaid', component: MarkdownMermaid },
+  { language: 'openui-lang', component: MarkdownUiBlock },
+];
 const linkSafety = { enabled: false };
 const remend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: false };
 // Static mode renders the document whole and never reads the block split, but
@@ -213,7 +219,7 @@ function selectedCopyPayload(element: HTMLElement): { text: string; html: string
   if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
 
   const range = selection.getRangeAt(0);
-  if (!element.contains(range.startContainer) || !element.contains(range.endContainer)) return null;
+  if (!element.contains(range.startContainer)) return null;
 
   const containingCode = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest('pre code');
   const code = containingCode(range.startContainer);
@@ -250,6 +256,7 @@ export interface MarkdownContentProps {
   mediaMode?: 'assistant' | 'local';
   isStreaming?: boolean;
   allowRawHtml?: boolean;
+  singleTilde?: boolean;
   directory?: string;
   settled?: boolean;
   sessionId?: string;
@@ -265,6 +272,10 @@ export interface MarkdownContentProps {
   purpose?: 'copy' | 'image';
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
+  /** Preserve person-authored HTML and entity characters instead of interpreting them. */
+  literalText?: boolean;
+  /** Draw UI fences only in assistant/subagent replies; exports retain source. */
+  uiBlocks?: boolean;
 }
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
@@ -276,6 +287,7 @@ export function MarkdownContent({
   mediaMode = 'local',
   isStreaming = false,
   allowRawHtml = false,
+  singleTilde = true,
   directory = '',
   settled = !isStreaming,
   sessionId,
@@ -291,6 +303,8 @@ export function MarkdownContent({
   purpose,
   preparedHighlights,
   onExportCode,
+  literalText = false,
+  uiBlocks = false,
 }: MarkdownContentProps) {
   const themeSystem = useOptionalThemeSystem();
   const theme = themeSystem?.currentTheme ?? getDefaultTheme(
@@ -378,7 +392,11 @@ export function MarkdownContent({
       : undefined;
     return createMarkdownCodePlugin({ isVSCode, purpose, prepared: preparedHighlights, resolvePaths });
   }, [isVSCode, purpose, preparedHighlights, fileReferences, directory, confirmFile]);
-  const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: markdownCjk, renderers }), [code]);
+  const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: getMarkdownCjk(singleTilde), renderers }), [code, singleTilde]);
+  const processingOptions = React.useMemo(() => {
+    const base = getMarkdownProcessingOptions(allowRawHtml, isVSCode, singleTilde);
+    return literalText ? { ...base, remarkPlugins: [...(base.remarkPlugins ?? []), remarkLiteralText] } : base;
+  }, [allowRawHtml, isVSCode, literalText, singleTilde]);
   const presentation = React.useMemo(() => ({
     directory,
     fileReferences,
@@ -386,6 +404,8 @@ export function MarkdownContent({
     loopbackPreview,
     settled,
     purpose,
+    uiBlocks: uiBlocks && !purpose,
+    settledReply: uiBlocks && !purpose && settled && sessionId && messageId ? { sessionId, messageId } : null,
     disableLinkSafety,
     theme,
     mermaidControls,
@@ -396,13 +416,13 @@ export function MarkdownContent({
     confirmFile,
     code,
   }), [
-    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, disableLinkSafety, theme,
+    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, sessionId, messageId, disableLinkSafety, theme,
     mermaidControls, allowMermaidWheelEvents, passiveSvg, onShowPopup, onExportCode, confirmFile, code,
   ]);
 
   let body = (
     <Streamdown
-      {...getMarkdownProcessingOptions(allowRawHtml, isVSCode)}
+      {...processingOptions}
       data-oc-streamdown=""
       components={components}
       plugins={plugins}
@@ -503,7 +523,9 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   const body = (
     <MarkdownContent
       key={identity}
-      content={content}
+      content={variant === 'assistant' ? fenceUiBlocks(content) : content}
+      singleTilde={false}
+      uiBlocks={variant === 'assistant'}
       mode={renderMode.identity === identity ? renderMode.mode : initialMode}
       mediaMode={variant === 'assistant' ? 'assistant' : 'local'}
       isStreaming={isStreaming}

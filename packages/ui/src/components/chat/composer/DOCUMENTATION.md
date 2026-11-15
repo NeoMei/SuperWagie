@@ -216,24 +216,10 @@ mounted so the recap hint hides instead of landing over the transcript.
 Unmounting clears the offset and the marker; resizing or collapsing the frame
 updates it.
 
-`ChatContainer.tsx` owns the one execution-status dot among these riders.
-`deriveChatActivityTone` reads live session status, messages, permissions and
-forms. `useChatActivityTone` keeps the completion marker green for 3 s and an
-error marker red until the next turn. A user stop, cold history and resumed
-work return to neutral. The active tones use `--status-warning`,
-`--status-error`, `--status-success` and a mix of warning and error tokens;
-the neutral tone uses `--surface-muted-foreground`. Forced-colors mode uses
-CanvasText for the dot and its outline. `ClockPausedContext` pauses the green
-expiry and `useWaitingBlink` on the shared one-second clock. The dot mounts in
-the floating status row, the scroll-to-bottom pill, or a zero-height layer
-outside the measured status overlay when neither chip is visible.
-`ChatActivityToneHost` has zero layout height, so a completion or error dot
-does not change `--chat-floating-panel-clearance` or the transcript's end
-inset. Work text, chip surfaces and the folded Activity header stay neutral.
-
-The shared UI applies this behavior on web, Electron desktop, VS Code, hosted
-mobile and Capacitor mobile. Each renderer derives the same state and shows one
-dot in the same selected host.
+The floating status row and scroll-to-bottom pill use the upstream status
+presentation and provider mark. The column adds no separate completion/error
+dot or status-color lifecycle. A hidden row or pill carries no duplicate mark.
+This shared behavior applies to web, Electron, VS Code and both mobile shells.
 
 ## Floating composer
 

@@ -1,5 +1,87 @@
 [
   {
+    "version": "2.7.99",
+    "date": "2026-11-14",
+    "title": "Reliable chat folds",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [
+        "**Chat:** Live command output and current thinking stay in one bounded priority panel while they run. When they finish, the preview closes cleanly and the activity record remains available to expand without duplicating the live content.",
+        "About: opening the About dialog checks for updates once automatically."
+      ],
+      "fixes": [],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
+    "version": "2.7.98",
+    "date": "2026-11-14",
+    "title": "Priority chat output",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [
+        "**Chat:** Running commands and current thinking now share a bounded priority panel under the activity header. The panel follows live output while you read the latest lines and folds away as the command or thought ends; full details remain available on expansion."
+      ],
+      "fixes": [],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
+    "version": "2.7.97",
+    "date": "2026-11-14",
+    "title": "Cleaner command output",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [
+        "**Chat:** The latest running command shows live output in a bounded activity panel; it folds when the command ends, while the full result stays available on expansion."
+      ],
+      "fixes": [],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
+    "version": "2.7.96",
+    "date": "2026-11-14",
+    "title": "Wallet and orders read again",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "**Wallet and orders:** A stale local lock kept account purchases from loading. The membership page now recovers the lock when its owner has exited, and an unfinished old payment says its status is unconfirmed.",
+        "**Account:** When the server cannot return wallet or order details, Manage subscription and Buy credits stay disabled with the error message and Refresh wallet and orders available. A successful refresh restores both entries."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.95",
     "date": "2026-11-14",
     "title": "OpenChamber 2.7.1 upgrade on OpenCode 2.3.0",

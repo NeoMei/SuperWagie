@@ -111,6 +111,38 @@ beforeEach(() => {
   opencodeClient.clearConfigCache()
 })
 
+describe('UI block answer input', () => {
+  test('resumes through synthetic input with a stable caller id, metadata and directory', async () => {
+    responses.push(json({ id: 'msg_block_retry' }))
+    await opencodeClient.resumeWithSyntheticInput({
+      runtimeKey, id: 'msg_block_retry', sessionId: 'ses_block', directory: '/repo/中文 folder',
+      text: 'Choice A', metadata: { openchamberUiBlockAnswer: { block: 'block-key', messageId: 'msg_reply' } },
+    })
+    expect(requests).toHaveLength(1)
+    expect(requests[0].url.pathname).toBe('/api/session/ses_block/synthetic')
+    expect(requests[0].headers.get('x-opencode-directory')).toBe(encodeURIComponent('/repo/中文 folder'))
+    expect(requests[0].body).toEqual({
+      id: 'msg_block_retry', text: 'Choice A', resume: true,
+      metadata: { openchamberUiBlockAnswer: { block: 'block-key', messageId: 'msg_reply' } },
+    })
+  })
+
+  test('refuses an answer from a previous runtime before writing any input', async () => {
+    await expect(opencodeClient.resumeWithSyntheticInput({
+      runtimeKey: 'previous-runtime', id: 'msg_old', sessionId: 'ses_block', text: 'Choice A', metadata: {},
+    })).rejects.toThrow()
+    expect(requests).toHaveLength(0)
+  })
+
+  test('commits the staged branch through the official revert endpoint', async () => {
+    responses.push(noContent())
+    await opencodeClient.commitRevert('ses_block', '/repo/branch')
+    expect(requests).toHaveLength(1)
+    expect(requests[0].url.pathname).toBe('/api/session/ses_block/revert/commit')
+    expect(requests[0].method).toBe('POST')
+  })
+})
+
 describe('experimental OpenCode requests', () => {
   test('uses the text endpoint with the selected model and directory', async () => {
     responses.push(json({ location: { directory: '/repo/中文 folder' }, data: { text: 'generated' } }))

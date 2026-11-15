@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage, Part, ToolPart, ToolStateCompleted } from '@/lib/opencode/model';
+import { isShownInPlace } from '@/lib/opencode/tools';
 import { attachSyntheticContext } from '../attachSyntheticContext';
-import { getLiveFinalMessage, getTurnsWithLaterAssistant, hasLiveActivity } from './liveActivity';
+import { getLiveFinalMessage, getShownPages, getTurnsWithLaterAssistant, hasLiveActivity, uiPageMessageId } from './liveActivity';
 import { projectTurnRecords } from './projectTurnRecords';
 import { summarizeLiveActivity } from './liveActivitySummary';
 import type { ChatMessageEntry } from './types';
@@ -156,27 +157,11 @@ describe('live turn boundaries', () => {
         expect(hasLiveActivity(projectTurnRecords([user(), assistant('a', [text('Hello')], { finish: 'stop' })]).turns[0], true)).toBe(false);
     });
 
-    test('subagent work participates in the same execution fold as other tools', () => {
+    test('a turn that only ran subagents gets no fold', () => {
         const onlySubagent = projectTurnRecords([user(), assistant('a', [tool('sub', 'subagent'), text('Done')], { finish: 'stop' })]).turns[0];
-        expect(hasLiveActivity(onlySubagent, true)).toBe(true);
+        expect(hasLiveActivity(onlySubagent, true)).toBe(false);
         const withRead = projectTurnRecords([user(), assistant('a', [tool('sub', 'subagent'), tool('read', 'read'), text('Done')], { finish: 'stop' })]).turns[0];
         expect(hasLiveActivity(withRead, true)).toBe(true);
-    });
-
-    test('folds confirmed earlier prose but keeps a lone streaming answer outside Activity', () => {
-        const progress = assistant('progress', [text('Checking the request')], { finish: 'tool-calls' });
-        const final = assistant('final', [text('Done')], { finish: 'stop' });
-        expect(hasLiveActivity(projectTurnRecords([user(), progress]).turns[0], true)).toBe(true);
-        expect(hasLiveActivity(projectTurnRecords([user(), progress, final]).turns[0], true)).toBe(true);
-        expect(hasLiveActivity(projectTurnRecords([user(), assistant('single', [text('Still writing')])]).turns[0], true, true)).toBe(false);
-    });
-
-    test('an empty reasoning placeholder belongs to Activity only during a live turn', () => {
-        const reasoning: Part = { type: 'reasoning', id: 'empty', messageID: 'a', sessionID: 'session', text: '', time: { start: 1 } };
-        const turn = projectTurnRecords([user(), assistant('a', [reasoning])]).turns[0];
-        expect(hasLiveActivity(turn, true, true)).toBe(true);
-        expect(hasLiveActivity(turn, true, false)).toBe(false);
-        expect(hasLiveActivity(turn, false, true)).toBe(false);
     });
 });
 
@@ -316,4 +301,61 @@ describe('live activity report', () => {
             { file: '/project/empty', additions: 0, deletions: 0, status: 'added' },
         ] } })])])).toMatchObject({ files: 1, additions: 0, deletions: 0, hasCompleteDiff: true });
     });
+});
+
+describe('getShownPages', () => {
+    test('a rendered page maps to the final row only when the collapsed turn has a final answer', () => {
+        const page = { ...tool('page', 'openchamber_render', { input: { action: 'render.page', parameters: { ui: 'root = Stack([])' } }, metadata: { openchamber: { ok: true } } }), messageID: 'source' };
+        const source = assistant('source', [page], { finish: 'tool-calls' });
+        const answer = assistant('answer', [text('Done')], { finish: 'stop' });
+        const pending = projectTurnRecords([user(), source], { showTurnChangedFiles: false }).turns[0];
+        const complete = projectTurnRecords([user(), source, answer], { showTurnChangedFiles: false }).turns[0];
+        expect(uiPageMessageId(pending, false, 'source', 'page')).toBe('source');
+        expect(uiPageMessageId(complete, false, 'source', 'page')).toBe('answer');
+        expect(uiPageMessageId(complete, true, 'source', 'page')).toBe('source');
+    });
+
+    test('keeps text with a UI block in view, except the final answer and code samples', () => {
+        const block = text('Overview:\n```openui-lang\nroot = Stack([])\n```');
+        const sample = text('```openui-lang literal\nroot = Stack([])\n```');
+        const step = assistant('step', [block, sample], { finish: 'tool-calls' });
+        const answer = assistant('answer', [text('```openui-lang\nroot = Stack([])\n```')], { finish: 'stop' });
+        expect(getShownPages([step, answer], answer)).toEqual([block]);
+    });
+
+    test('a form stays in view while it waits and folds with Activity once it settles; a page that only shows stays', () => {
+        const form = { action: 'render.page', parameters: { ui: 'root = Stack([])', title: 'Scope', awaitAnswer: true } };
+        const page = { action: 'render.page', parameters: { html: '<p>a</p>', title: 'Mockup' } };
+        const waiting = tool('waiting', 'openchamber_render', { status: 'running', input: form });
+        const answered = tool('answered', 'openchamber_render', { input: form, metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Minimal', data: {} } } } });
+        const inChat = tool('in-chat', 'openchamber_render', { input: form, metadata: { openchamber: { ok: true, answer: { answered: false } } } });
+        const stopped = tool('stopped', 'openchamber_render', { status: 'error', input: form, error: 'aborted' });
+        const shown = tool('shown', 'openchamber_render', { input: page, metadata: { openchamber: { ok: true } } });
+        const step = assistant('step', [waiting, answered, inChat, stopped, shown], { finish: 'tool-calls' });
+        expect(getShownPages([step]).map((part) => part.id)).toEqual(['waiting', 'shown']);
+    });
+
+    test('a settled form after shown text stays between it and the reply; a secret card still folds', () => {
+        const form = { action: 'render.page', parameters: { ui: 'root = Stack([])', title: 'Scope', awaitAnswer: true } };
+        const answer = { metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Minimal', data: {} } } } };
+        const lead = text('Overview:\n```openui-lang\nroot = Stack([])\n```\nThe one decision:');
+        const asked = tool('asked', 'openchamber_render', { input: form, ...answer });
+        const again = tool('again', 'openchamber_render', { input: form, ...answer });
+        const reply = assistant('reply', [text('It stayed scoped.')], { finish: 'stop' });
+        const step = assistant('step', [lead, asked, again], { finish: 'tool-calls' });
+        expect(getShownPages([step, reply], reply)).toEqual([lead, asked, again]);
+
+        const secret = tool('secret', 'openchamber_secret', { input: { action: 'secret.request', parameters: { name: 'TOKEN' } } });
+        expect(getShownPages([assistant('step', [lead, secret], { finish: 'tool-calls' })])).toEqual([lead]);
+    });
+});
+
+
+test('unsupported image and secret calls remain ordinary tools rather than disappearing into shown cards', () => {
+    const secret = tool('secret', 'openchamber_secret', { status: 'running', input: { action: 'secret.request', parameters: { label: 'Token', reason: 'Use it' } } });
+    const image = tool('image', 'openchamber_image', { metadata: { openchamber: { ok: true } } });
+    const generated: ToolPart = { ...image, state: { ...image.state, status: 'completed', input: {}, output: JSON.stringify({ ok: true, action: 'image.generate', data: { images: [{ path: '/tmp/result.png' }] } }), time: { start: 1, end: 2 } } };
+    expect(isShownInPlace(secret.tool, secret.state)).toBe(false);
+    expect(isShownInPlace(generated.tool, generated.state)).toBe(false);
+    expect(getShownPages([assistant('step', [secret, generated, tool('read', 'read')])])).toEqual([]);
 });

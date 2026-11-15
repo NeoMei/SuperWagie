@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFrameAnnotation } from '@/components/browser/useFrameAnnotation';
-import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { BrowserAnnotationPayload } from '@/lib/browser/contract';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -22,7 +21,7 @@ import { answerRenderedPage } from '@/lib/renderPageAnswer';
 import { openExternalUrl } from '@/lib/url';
 import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { dispatchFrameScroll } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { dispatchFrameScroll, dispatchPageWaiting } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { dispatchFrameSelection, frameRectInApp } from '../frameSelection';
 import {
@@ -54,6 +53,8 @@ import {
     type HtmlRenderTheme,
 } from './htmlRender';
 import { useRenderPageHtml } from './renderPageImages';
+import { UiPageFrame } from './UiPageFrame';
+import { PageAskStatus } from './PageAskStatus';
 
 const DEFAULT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
 const DEFAULT_MONO = 'ui-monospace, "SFMono-Regular", Menlo, monospace';
@@ -380,7 +381,10 @@ export function ShownPage({ part }: { part: ToolPart }) {
     // its answer state again on every render.
     const { t } = useI18n();
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-    return page ? <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} /> : null;
+    if (!page) return null;
+    return page.ui !== undefined
+        ? <UiPageFrame part={part} source={page.ui} ask={page.ask} />
+        : <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} />;
 }
 
 interface HtmlRenderFrameProps {
@@ -424,11 +428,6 @@ function PageToolButton({ label, icon, pressed, onClick }: {
  * frame takes the height the page reports, so the page scrolls with the chat;
  * annotation, full screen and download sit in a row above it.
  */
-// Its own component: the blink re-renders this dot once a second, not the page around it.
-function WaitingDot() {
-    const blink = useWaitingBlink(true);
-    return <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full bg-[var(--primary-base)]', blink)} />;
-}
 
 function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     const { t } = useI18n();
@@ -513,17 +512,15 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         }
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
-    const status = answeredSummary !== undefined
-        ? t('chat.htmlRender.answered', { summary: answeredSummary })
-        : ask.kind === 'waiting'
-            ? t('chat.htmlRender.waiting')
-            : ask.kind === 'answered-in-chat'
-                ? t('chat.htmlRender.answeredInChat')
-                : ask.kind === 'unanswered' ? t('chat.htmlRender.unanswered') : null;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined;
+    // Frames outside the viewport report height after they come into view.
+    const blockRef = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+        if (waiting) dispatchPageWaiting(blockRef.current);
+    }, [height, waiting]);
 
     return (
-        <div className="group/html-render my-2">
+        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={waiting ? partId : undefined}>
         {isMobile ? null : (
             // A row of its own above the page: over the page the buttons
             // covered its own controls in the top corner. The row keeps its
@@ -581,12 +578,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                 </>
             )}
         </PageSelectionScope>
-        {status ? (
-            <div className="mt-1 flex items-center gap-1.5 typography-meta text-muted-foreground" data-html-render-status={ask.kind}>
-                {waiting ? <WaitingDot /> : null}
-                <span className="min-w-0 truncate" title={status}>{status}</span>
-            </div>
-        ) : null}
+        <PageAskStatus ask={ask} answeredSummary={answeredSummary} />
         </div>
     );
 }

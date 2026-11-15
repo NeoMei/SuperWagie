@@ -5,7 +5,7 @@ import { materializeSessionSnapshots } from "./materialization"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { getSyncChildStores } from "./sync-refs"
 
-type CompletionTarget = { directory: string; sessionID: string }
+type CompletionTarget = { directory: string; storeDirectory?: string; sessionID: string }
 
 const completions = new Map<string, Promise<void>>()
 
@@ -20,13 +20,15 @@ const completions = new Map<string, Promise<void>>()
 export function completeToolContent(target: CompletionTarget, messageID: string): Promise<void> {
   const isCurrent = captureRuntimeInstance()
   const runtimeKey = getRuntimeKey()
-  const key = `${runtimeKey}\u0000${target.directory}\u0000${target.sessionID}\u0000${messageID}`
+  const storeDirectory = target.storeDirectory ?? target.directory
+  const storeTarget = { directory: storeDirectory, sessionID: target.sessionID }
+  const key = `${runtimeKey}\u0000${target.directory}\u0000${storeDirectory}\u0000${target.sessionID}\u0000${messageID}`
   const pending = completions.get(key)
   if (pending) return pending
-  const store = getSyncChildStores().getChild(target.directory)
+  const store = getSyncChildStores().getChild(storeDirectory)
   if (!store) return Promise.resolve()
   const loader = getImperativeSessionMessageLoader()
-  const generation = loader?.getSnapshot(target).generation
+  const generation = loader?.getSnapshot(storeTarget).generation
   const state = store.getState()
   const parts = state.part[messageID]
   if (!state.message[target.sessionID]?.some((message) => message.id === messageID)
@@ -36,8 +38,8 @@ export function completeToolContent(target: CompletionTarget, messageID: string)
   const completion = opencodeClient.getToolContentMessage(target.sessionID, messageID, target.directory)
     .then((record) => {
       if (!isCurrent()) return
-      if (getSyncChildStores().getChild(target.directory) !== store) return
-      if (getImperativeSessionMessageLoader() !== loader || loader?.getSnapshot(target).generation !== generation) return
+      if (getSyncChildStores().getChild(storeDirectory) !== store) return
+      if (getImperativeSessionMessageLoader() !== loader || loader?.getSnapshot(storeTarget).generation !== generation) return
       const state = store.getState()
       if (state.part[messageID] !== parts) return
       if (!state.message[target.sessionID]?.some((message) => message.id === messageID)) return

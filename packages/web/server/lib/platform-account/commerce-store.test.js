@@ -42,6 +42,42 @@ describe('commerce recovery store', () => {
     await expect(openCommerceStore(f.directory)).rejects.toThrow('platform_commerce_store_busy');
     expect(await fs.readFile(lockPath, 'utf8')).toBe('stale-process:preserve');
   });
+  it('recovers an owner lock from an exited process without changing the journal', async () => {
+    const f = await fixture();
+    await f.store.mutate((intents) => { intents['entry-a'] = f.intent; });
+    const before = await fs.readFile(path.join(f.directory, 'unihub-commerce/state.json'), 'utf8');
+    await f.store.close();
+    const lockPath = path.join(f.directory, 'unihub-commerce/writer.lock');
+    await fs.writeFile(lockPath, `999999999:${crypto.randomUUID()}`);
+    const recovered = await openCommerceStore(f.directory); cleanups.push(() => recovered.close());
+    expect(recovered.read()['entry-a']).toEqual(f.intent);
+    expect(await fs.readFile(path.join(f.directory, 'unihub-commerce/state.json'), 'utf8')).toBe(before);
+    await expect(openCommerceStore(f.directory)).rejects.toThrow('platform_commerce_store_busy');
+  });
+  it('keeps a lock whose recorded owner is still alive', async () => {
+    const f = await fixture(); await f.store.close();
+    const lockPath = path.join(f.directory, 'unihub-commerce/writer.lock');
+    const owner = `${process.pid}:${crypto.randomUUID()}`;
+    await fs.writeFile(lockPath, owner);
+    await expect(openCommerceStore(f.directory)).rejects.toThrow('platform_commerce_store_busy');
+    expect(await fs.readFile(lockPath, 'utf8')).toBe(owner);
+  });
+  it('preserves a legacy ledger operation receipt through dead-owner recovery and another write', async () => {
+    const f = await fixture(); await f.store.close();
+    const legacy = { ...f.intent, operationId: 'operation-a' };
+    const file = path.join(f.directory, 'unihub-commerce/state.json');
+    await fs.writeFile(file, JSON.stringify({ version: 1, intents: { legacy } }));
+    const lockPath = path.join(f.directory, 'unihub-commerce/writer.lock');
+    await fs.writeFile(lockPath, `999999999:${crypto.randomUUID()}`);
+    const recovered = await openCommerceStore(f.directory); cleanups.push(() => recovered.close());
+    expect(recovered.read().legacy).toEqual(legacy);
+    await recovered.mutate((intents) => { intents.current = f.intent; });
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    expect(stored.version).toBe(2);
+    expect(stored.intents.legacy).toEqual(legacy);
+    expect(stored.intents.legacy.operationId).toBe('operation-a');
+    expect(recovered.read().legacy.operationId).toBe('operation-a');
+  });
   it('rejects symlinked state without writing through the link', async () => {
     const f = await fixture(); await f.store.close();
     const target = path.join(f.directory, 'other.json'); await fs.writeFile(target, '{"private":"untouched"}');

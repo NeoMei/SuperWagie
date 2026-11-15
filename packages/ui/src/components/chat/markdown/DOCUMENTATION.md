@@ -40,3 +40,39 @@ image render. Scripts, event attributes, HTML, animation, style attributes,
 external resources, processing instructions, document types and entities also
 reject the image path. No SVG markup enters page DOM.
 Ordinary chat fences, standalone SVG files and Mermaid keep their prior paths.
+
+## Chat and file text parsing
+
+Chat messages and chat exports keep single tildes literal; double tildes still
+mark strikethrough. File previews keep single-tilde strikethrough by default.
+The renderer selects stable GFM and CJK parser policies together, so changing
+the policy with unchanged source also updates the rendered text.
+
+User-authored Markdown enables `literalText`: HTML-looking text and character
+entities stay as typed. This disables their parser constructs instead of
+escaping the source, preserving the characters inside inline code and math.
+Runtime file resolution, media authorization and passive SVG remain owned by
+their existing opt-in paths.
+
+## UI fences in replies
+
+Only assistant replies and explicitly marked subagent output draw
+`openui-lang` fences as blocks. Assistant tags and `openui` fences normalize
+through the shared `taggedBlocks` parser. Reasoning, user text, documents,
+ordinary tool output and chat exports retain source code.
+
+A block can answer only a settled assistant reply with its original session,
+message and directory. Streaming replies and finished subagent output have no
+answer destination, so their controls remain disabled. The block renderer
+loads on demand and keeps source visible while loading or after load failure;
+the UI-block module owns its validation and answer lifecycle.
+
+Tool output tagged `ansi` is shown without terminal escape sequences, including
+before the highlighter loads. Highlighted tool views use a supported related
+lexer before falling back to escaped plain text. The Markdown worker's Shiki
+fallback and source-offset contract remain separate.
+
+- GitHub alerts use the upstream titled blockquote component, including the
+  localized title and status icon. Copying across transcript rows belonging to
+  the same answer uses the complete ordered Markdown selection; selections
+  spanning unrelated documents remain native.

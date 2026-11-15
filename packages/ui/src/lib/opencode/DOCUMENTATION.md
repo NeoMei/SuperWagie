@@ -17,6 +17,10 @@ transcript. Session stores retain ownership of the visible child records.
 - Returned content is projected under the displayed session's identity.
 - Completion cannot resurrect a removed message, replace newer tool parts or
   commit after store replacement or loader-generation invalidation.
+- Tool completion reads through the session's owning directory and can fill an
+  explicitly supplied displayed-store directory. Its default remains the owning
+  directory. Request sharing includes both directories, and runtime, displayed
+  store, loader generation and original part identity still guard the merge.
 - Resource availability reads `skill.use`, `mcp.use` and `plugin.use`, plus
   legacy `integration.use` rules with their exact kind prefix. Bare integration
   patterns remain account/provider policy and cannot deny unrelated resources.
@@ -58,3 +62,11 @@ MCP payloads. The app has no first-token metric or MCP subscription consumer.
 Neither frame establishes session activity, message content, permissions or
 catalog changes, so projecting either into those existing states would invent
 authority. Their explicit ignore cases keep the wire union exhaustive.
+
+### Structured reply input and compaction attribution
+
+Structured reply answers use `resumeWithSyntheticInput`, the official session
+synthetic endpoint with a stable caller-minted ID, answer metadata and
+`resume: true`. A staged revert must be committed before admitting that input.
+The completed compaction's recorded model passes through projection unchanged;
+running or failed compactions never borrow the session's current model.

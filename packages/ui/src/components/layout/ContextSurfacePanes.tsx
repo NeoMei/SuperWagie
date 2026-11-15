@@ -590,6 +590,18 @@ export const ContextSurfacePanes: React.FC = () => {
   // The header slot goes to the pane on screen in its zone only.
   const headerSlotFor = (zone: ContextZone, active: boolean): HTMLElement | null => (active ? headerSlots[zone] : null);
 
+  // A restored extension starts its page only when first shown this run.
+  // Keep it mounted afterwards so switching tabs preserves the page's state.
+  const [seenPluginTabs, setSeenPluginTabs] = React.useState<ReadonlySet<string>>(() => new Set());
+  const newlyShownPluginTabs = pluginTabs.filter((tab) => {
+    if (seenPluginTabs.has(tab.id)) return false;
+    const zone = zoneFor(tab.mode);
+    return zone.isOpen && zone.activeTab?.id === tab.id;
+  });
+  if (newlyShownPluginTabs.length > 0) {
+    setSeenPluginTabs(new Set([...seenPluginTabs, ...newlyShownPluginTabs.map((tab) => tab.id)]));
+  }
+
   return (
     <>
       {hasFileTabs ? (
@@ -744,6 +756,7 @@ export const ContextSurfacePanes: React.FC = () => {
         </ZonePane>
       ) : null}
       {pluginTabs.map((tab) => {
+        if (!seenPluginTabs.has(tab.id)) return null;
         if (!isPluginContextPanelMode(tab.mode)) return null;
         const pluginZone = zoneFor(tab.mode);
         // A shared-surface extension's picture is drawn by the host and

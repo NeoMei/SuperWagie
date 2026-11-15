@@ -22,13 +22,17 @@ const hydrateFrom = async (version: number, reasoning: {
 };
 
 describe('reasoning streaming default', () => {
-  test('opens incoming reasoning by default', () => {
-    expect(useUIStore.getInitialState().expandReasoningWhileStreaming).toBe(true);
+  test('preserves an explicit streaming expansion preference', async () => {
+    await hydrateFrom(27, { expandReasoningWhileStreaming: true });
+    expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(true);
+  });
+  test('uses the upstream folded reasoning default', () => {
+    expect(useUIStore.getInitialState().expandReasoningWhileStreaming).toBe(false);
   });
 
-  test('upgrades the old indistinguishable local false once', async () => {
+  test('preserves a saved folded preference during legacy hydration', async () => {
     await hydrateFrom(26, { expandReasoningWhileStreaming: false });
-    expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(true);
+    expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(false);
   });
 
   test('keeps a local false saved after the default changed', async () => {
@@ -36,15 +40,15 @@ describe('reasoning streaming default', () => {
     expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(false);
   });
 
-  test('keeps reasoning hidden when upgrading the streaming default', async () => {
+  test('keeps reasoning hidden during hydration', async () => {
     await hydrateFrom(26, { expandReasoningWhileStreaming: false, showReasoningTraces: false });
-    expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(true);
+    expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(false);
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
   });
 
-  test('keeps noncollapsible reasoning when upgrading the streaming default', async () => {
+  test('keeps noncollapsible reasoning during hydration', async () => {
     await hydrateFrom(26, { expandReasoningWhileStreaming: false, collapsibleThinkingBlocks: false });
-    expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(true);
+    expect(useUIStore.getState().expandReasoningWhileStreaming).toBe(false);
     expect(useUIStore.getState().collapsibleThinkingBlocks).toBe(false);
   });
 });

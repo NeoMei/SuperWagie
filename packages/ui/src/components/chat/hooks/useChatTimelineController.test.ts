@@ -102,6 +102,7 @@ describe('loadHistoryUntilMessage', () => {
     const renderHarness = (options: {
         pages: ChatMessageEntry[][];
         complete?: boolean;
+        initialRows?: readonly string[];
     }) => {
         const dom = installMinimalDom();
         Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: false });
@@ -109,11 +110,23 @@ describe('loadHistoryUntilMessage', () => {
         let messages: ChatMessageEntry[] = [userMessage('msg_9', 9)];
         let calls = 0;
         let controller!: UseChatTimelineControllerResult;
+        let renderedRows = new Set(options.initialRows ?? messages.map((message) => message.info.id));
+        const list: MessageListHandle = {
+            resolveUiPageMessageId: (id) => id, scrollToUiPageRow: () => false,
+            scrollToTurnId: () => false, scrollToMessageId: () => false,
+            captureViewportAnchor: () => null, restoreViewportAnchor: () => false,
+            alignViewportAnchor: () => 'missing', hasMessageRow: (id) => renderedRows.has(id),
+            holdViewportAnchor: () => {}, isHistoryVirtualized: () => false, scrollToBottom: () => {},
+        };
+        const messageListRef = { current: list };
         const Harness = () => {
+            React.useLayoutEffect(() => {
+                if (calls > 0) renderedRows = new Set(messages.map((message) => message.info.id));
+            });
             controller = useChatTimelineController({
                 sessionId: 'session', sessionKey: 'runtime\n/repo\nsession', messages,
                 historyMeta: { limit: messages.length, complete: options.complete === true, loading: false },
-                scrollRef: { current: null }, messageListRef: { current: null }, isPinned: true, showScrollButton: false,
+                scrollRef: { current: null }, messageListRef, isPinned: true, showScrollButton: false,
                 loadMoreMessages: async () => {
                     const page = options.pages[calls] ?? [];
                     calls += 1;
@@ -145,6 +158,15 @@ describe('loadHistoryUntilMessage', () => {
         } finally {
             harness.dispose();
         }
+    });
+
+    test('cached messages count as loaded only after their row commits', async () => {
+        const harness = renderHarness({ pages: [[userMessage('prompt', 1)]], initialRows: [] });
+        try {
+            await harness.ready();
+            expect(await harness.controller.loadHistoryUntilMessage('msg_9', { maxBatches: 3 })).toBe(true);
+            expect(harness.calls).toBe(1);
+        } finally { harness.dispose(); }
     });
 
     test('gives up after the batch limit when the message never arrives', async () => {
@@ -193,6 +215,7 @@ describe('useChatTimelineController identity lifecycle', () => {
             captureViewportAnchor: () => null, restoreViewportAnchor: () => false, alignViewportAnchor: () => 'missing',
             isHistoryVirtualized: () => false, scrollToTurnId: () => false, scrollToMessageId: () => false,
             holdViewportAnchor: () => {}, scrollToBottom: () => {},
+            resolveUiPageMessageId: (messageId) => messageId, scrollToUiPageRow: () => false, hasMessageRow: () => false,
         };
         const Harness = () => {
             controller = useChatTimelineController({

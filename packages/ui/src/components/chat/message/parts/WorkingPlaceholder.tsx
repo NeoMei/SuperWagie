@@ -2,8 +2,7 @@ import React from 'react';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { agentStatusSignature, type AgentStatus } from '@/lib/agentStatus';
 import { useAgentStatusLabel } from '@/hooks/useAgentStatusLabel';
-import { useProviderLogo } from '@/hooks/useProviderLogo';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { ProviderLogo } from '@/components/ui/ProviderLogo';
 
 interface WorkingPlaceholderProps {
   isWorking: boolean;
@@ -14,8 +13,6 @@ interface WorkingPlaceholderProps {
   agentName?: string;
   modelName?: string | null;
   providerId?: string | null;
-  /** False when the surrounding status row already shows the provider mark. */
-  showProviderLogo?: boolean;
 }
 
 const STATUS_DISPLAY_TIME_MS = 1200;
@@ -66,12 +63,8 @@ export function WorkingPlaceholder({
   retryInfo,
   modelName,
   providerId,
-  showProviderLogo = true,
 }: WorkingPlaceholderProps) {
   const { t, locale } = useI18n();
-  const { src: providerLogoSrc, onError: handleProviderLogoError, hasLogo: hasProviderLogo } = useProviderLogo(providerId ?? null);
-  const { currentTheme } = useThemeSystem();
-  const isDarkTheme = currentTheme?.metadata.variant === 'dark';
   const [displayedText, setDisplayedText] = React.useState<AgentStatus | null>(null);
   const [displayedPermission, setDisplayedPermission] = React.useState<boolean>(false);
   const displayedTextRef = React.useRef(displayedText);
@@ -159,7 +152,7 @@ export function WorkingPlaceholder({
       return;
     }
 
-    if (incomingPermission || !displayedTextRef.current) {
+    if (!displayedTextRef.current) {
       showStatus(incomingText, incomingPermission);
       return;
     }
@@ -199,23 +192,14 @@ export function WorkingPlaceholder({
     return null;
   }
 
-  const providerLogo = showProviderLogo && hasProviderLogo && providerLogoSrc ? (
+  const providerLogo = providerId ? (
     // Flex sibling of the label, never an inline rider on the text line: a
     // tall inline-block drags the line box with it and the label drifts off
     // the chip's vertical center. As flex children both center independently.
-    <img
-      src={providerLogoSrc}
-      alt=""
-      aria-hidden="true"
-      // 16px box like the scroll pill's arrow icon. The padding normalizes
-      // the mark to the arrow glyph's geometry (~10.4px wide, ~2.8px inset),
-      // so equal boxes and equal paddings also mean equal visible edges.
-      className="h-4 w-4 shrink-0 p-[1.3px] me-1.5"
-      style={{
-        filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
-      }}
-      onError={handleProviderLogoError}
-    />
+    // 16px box like the scroll pill's arrow icon. The padding normalizes
+    // the mark to the arrow glyph's geometry (~10.4px wide, ~2.8px inset),
+    // so equal boxes and equal paddings also mean equal visible edges.
+    <ProviderLogo providerId={providerId} alt="" fallback={null} className="h-4 w-4 shrink-0 p-[1.3px] me-1.5" />
   ) : null;
 
   // Retry state: show countdown and attempt info

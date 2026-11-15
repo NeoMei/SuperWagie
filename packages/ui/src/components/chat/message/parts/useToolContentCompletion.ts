@@ -20,7 +20,7 @@ const PROGRESS_DELAY_MS = 500;
  * part this row renders stops being a shell. A request that fails, or answers
  * without the message, is reported as `failed`, never as an empty result.
  */
-export const useToolContentCompletion = (part: ToolPart, needed: boolean): ToolContentCompletion => {
+export const useToolContentCompletion = (part: ToolPart, needed: boolean, storeDirectory?: string): ToolContentCompletion => {
   const isShell = toolContentShellChars(part) !== null;
   const [attempt, setAttempt] = React.useState(0);
   const [failedAttempt, setFailedAttempt] = React.useState<number | null>(null);
@@ -36,7 +36,7 @@ export const useToolContentCompletion = (part: ToolPart, needed: boolean): ToolC
       return;
     }
     const slow = setTimeout(() => setSlowAttempt(attempt), PROGRESS_DELAY_MS);
-    completeToolContent({ directory, sessionID }, messageID).then(
+    completeToolContent({ directory, storeDirectory, sessionID }, messageID).then(
       // Resolving with the call still a shell means the message was not
       // completed (dropped meanwhile, or the server sent a shell again).
       () => { if (active) setFailedAttempt(attempt); },
@@ -46,7 +46,7 @@ export const useToolContentCompletion = (part: ToolPart, needed: boolean): ToolC
       active = false;
       clearTimeout(slow);
     };
-  }, [attempt, isShell, messageID, needed, sessionID]);
+  }, [attempt, isShell, messageID, needed, sessionID, storeDirectory]);
 
   const retry = React.useCallback(() => setAttempt((value) => value + 1), []);
   if (!isShell) return { status: 'whole' };

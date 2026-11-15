@@ -40,6 +40,8 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   // toasts, and the update store opens the dialog when something is found.
   const canCheckUpdates = DESKTOP_SELF_UPDATES_ENABLED && isElectronShell();
   const checking = useUpdateStore((state) => state.checking);
+  const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
+  const autoCheckInitiatedRef = React.useRef(false);
   // undefined while the first lookup runs, null once it finished without a version.
   const [version, setVersion] = React.useState<string | null | undefined>(undefined);
   const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null | undefined>(undefined);
@@ -47,6 +49,16 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   const [copiedDiagnostics, setCopiedDiagnostics] = React.useState(false);
   const [diagnosticsReport, setDiagnosticsReport] = React.useState<string | null>(null);
   const [isPreparingDiagnostics, setIsPreparingDiagnostics] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open) {
+      autoCheckInitiatedRef.current = false;
+      return;
+    }
+    if (!canCheckUpdates || autoCheckInitiatedRef.current) return;
+    autoCheckInitiatedRef.current = true;
+    void checkForUpdates();
+  }, [canCheckUpdates, checkForUpdates, open]);
 
   const handleCopyDiagnostics = React.useCallback(async () => {
     if (!showDiagnostics) return;

@@ -255,6 +255,7 @@ export type CompactionMessage = MessageBase & {
   status: "running" | "completed" | "failed"
   reason: "auto" | "manual"
   summary: string
+  model?: ModelRef
   error?: StructuredError
   cost?: number
   tokens?: TokenUsageInfo

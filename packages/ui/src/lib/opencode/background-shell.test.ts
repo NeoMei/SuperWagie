@@ -5,6 +5,7 @@ import {
   readShellCancellation,
   shellCancellationNote,
   readBackgroundShellID,
+  readRunningShellOutput,
   readShellCompletion,
   runningShellFromWire,
   shellCompletionFailed,
@@ -53,6 +54,33 @@ describe("readBackgroundShellID", () => {
     })
     expect(readBackgroundShellID(part)).toBeUndefined()
     expect(readBackgroundShellID(call({ status: "running", input: { command: "ls" }, time: { start: 1 } }))).toBeUndefined()
+  })
+})
+
+describe("readRunningShellOutput", () => {
+  test("reads output metadata from a running foreground call", () => {
+    expect(readRunningShellOutput(call({
+      status: "running",
+      input: { command: "npm test" },
+      metadata: { output: "running test suite" },
+      time: { start: 1000 },
+    }))).toBe("running test suite")
+  })
+
+  test("ignores settled calls and non-string metadata", () => {
+    expect(readRunningShellOutput(call({
+      status: "completed",
+      input: { command: "npm test" },
+      output: "done",
+      metadata: { output: "done" },
+      time: { start: 1000, end: 1100 },
+    }))).toBeUndefined()
+    expect(readRunningShellOutput(call({
+      status: "running",
+      input: { command: "npm test" },
+      metadata: { output: 1 },
+      time: { start: 1000 },
+    }))).toBeUndefined()
   })
 })
 

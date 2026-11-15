@@ -1,7 +1,7 @@
 import React from 'react';
 import { z } from 'zod';
 import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
-import type { JsonValue, Message, ModelRef, Part, ReasoningPart, StructuredError, TextPart, ToolInput, ToolPart } from '@/lib/opencode/model';
+import type { JsonValue, Message, ModelRef, Part, ReasoningPart, StructuredError, TextPart, ToolPart } from '@/lib/opencode/model';
 import {
     executeHasBackgroundableWork,
     isExecuteTool,
@@ -16,8 +16,10 @@ import type { OpenChamberToolCall } from '@/lib/opencode/tools';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { selectMcpServersForDirectory, useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSession, useSessionMessages, useSessionPermissions, useSessionForms, useSessionStatus } from '@/sync/sync-context';
+import { formTurnHold, useRecoverableQuestionsStore } from '@/sync/recoverable-questions';
+import { useDirectorySync, useSession, useSessionMessages, useSessionPermissions, useSessionStatus } from '@/sync/sync-context';
 import { useSessionActivity } from './useSessionActivity';
 import type { AgentStatus } from '@/lib/agentStatus';
 import type { I18nKey } from '@/lib/i18n';
@@ -105,7 +107,8 @@ type ToolBucket = 'read' | 'search' | 'edit' | 'command' | 'lookup' | 'delegate'
 // Several tools share one phrase, so parallel calls of the same kind can be
 // counted together ("reading 3 files"). The timeline names the exact tool.
 // v2 tool names: `shell` replaced `bash`, `subagent` replaced `task`, and
-// `todowrite`/`todoread`/`list`/`lsp` are gone.
+// `todoread`/`list`/`lsp` are gone. `todowrite` is back behind an experimental
+// flag and has no phrase: updating the list is not work to report.
 const TOOL_BUCKETS = new Map<string, ToolBucket>(Object.entries({
     read: 'read',
     'file-diff': 'read',
@@ -137,80 +140,22 @@ const BUCKET_STATUS = {
     skill: ['chat.agentStatus.skill', 'chat.agentStatus.skill.count'],
 } satisfies Record<ToolBucket, readonly [I18nKey, I18nKey]>;
 
-const BUCKET_STATUS_WITH_TARGET = {
-    read: 'chat.agentStatus.read.withTarget',
-    search: 'chat.agentStatus.search.withTarget',
-    edit: 'chat.agentStatus.edit.withTarget',
-    command: 'chat.agentStatus.command.withTarget',
-    lookup: 'chat.agentStatus.lookup.withTarget',
-    delegate: 'chat.agentStatus.delegate.withTarget',
-    question: 'chat.agentStatus.question.withTarget',
-    skill: 'chat.agentStatus.skill.withTarget',
-} satisfies Record<ToolBucket, I18nKey>;
-
-const TARGET_FIELDS = {
-    read: ['path', 'filePath', 'file_path'],
-    search: ['pattern', 'query', 'path', 'filePath', 'file_path'],
-    edit: ['path', 'filePath', 'file_path'],
-    command: ['command', 'description'],
-    lookup: ['url', 'query', 'search'],
-    delegate: ['description', 'agent', 'prompt'],
-    question: ['question', 'header', 'title'],
-    skill: ['name', 'skill', 'id', 'title'],
-} satisfies Record<ToolBucket, readonly string[]>;
-
-const SENSITIVE_TARGET_FIELD = /^(?:api[_-]?key|token|password|passwd|secret|authorization|cookie|credential|private[_-]?key|access[_-]?key|refresh[_-]?token|content|html|text|patchText|code|raw)$/i;
-const MAX_TARGET_LENGTH = 60;
-const CONTROL_CHARACTER = String.fromCharCode(0);
-const CONTROL_CHARACTER_PATTERN = new RegExp(`[\r\t${CONTROL_CHARACTER}-${String.fromCharCode(31)}]+`, 'g');
-const FIRST_LINE = new RegExp("[\r]?\n");
-const RESIDUAL_CONTROL_CHARACTER = new RegExp(`[${CONTROL_CHARACTER}-${String.fromCharCode(31)}${String.fromCharCode(127)}]`);
-
-const JsonString = z.string();
-const ToolInputObject = z.record(z.string(), z.json());
-
-const nestedToolInput = (input: JsonValue | undefined): ToolInput | undefined => {
-    const parsed = ToolInputObject.safeParse(input);
-    return parsed.success ? parsed.data : undefined;
-};
-
-/** A short, readable name for one concrete call. Streamed raw input and secrets stay out. */
-const getToolTarget = (toolName: string, input: ToolInput | undefined, running: boolean): string | undefined => {
-    if (!input || !running) return undefined;
-    const bucket = TOOL_BUCKETS.get(toolName);
-    if (!bucket) return undefined;
-    const fields = TARGET_FIELDS[bucket];
-    const field = fields.find((name) => JsonString.safeParse(input[name]).success);
-    const value = field ? JsonString.safeParse(input[field]) : undefined;
-    if (!field || !value?.success || SENSITIVE_TARGET_FIELD.test(field)) return undefined;
-    let target = value.data.replace(CONTROL_CHARACTER_PATTERN, ' ').trim().split(FIRST_LINE)[0]?.trim() ?? '';
-    if (!target) return undefined;
-    if (field === 'url') {
-        try { target = new URL(target).hostname; } catch {
-            const host = target.match(/^(?:[a-z][a-z0-9+.-]*:\/\/)?([^/?#\s]+)/i)?.[1];
-            if (!host || /[\s@]/.test(host)) return undefined;
-            target = host.replace(/:\d+$/, '');
-        }
-    } else if (/^(?:path|filePath|file_path)$/.test(field)) {
-        target = target.split(/[\\/]/).filter(Boolean).at(-1) ?? target;
-    } else if (field === 'command') {
-        target = target.replace(/\s+/g, ' ');
-    }
-    target = target.replace(/\s+/g, ' ').trim();
-    if (!target || RESIDUAL_CONTROL_CHARACTER.test(target) || /\s*\S*@\S+\s*/.test(target)) return undefined;
-    if (/[?&](?:token|key|secret|password)=/i.test(target)) return undefined;
-    const visible = Array.from(target);
-    return visible.length > MAX_TARGET_LENGTH
-        ? `${visible.slice(0, MAX_TARGET_LENGTH - 1).join('')}…`
-        : target;
-};
-
 // Shown while no part says what the turn does; one per turn, picked by its key.
 const WORKING_STATUS: readonly I18nKey[] = [
     'chat.agentStatus.working',
+    'chat.agentStatus.generic.processing',
     'chat.agentStatus.generic.preparing',
+    'chat.agentStatus.generic.warmingUp',
+    'chat.agentStatus.generic.gearsTurning',
+    'chat.agentStatus.generic.computing',
+    'chat.agentStatus.generic.calculating',
     'chat.agentStatus.generic.analyzing',
+    'chat.agentStatus.generic.wheelsSpinning',
+    'chat.agentStatus.generic.calibrating',
+    'chat.agentStatus.generic.synthesizing',
     'chat.agentStatus.generic.connectingDots',
+    'chat.agentStatus.generic.inspectingLogic',
+    'chat.agentStatus.generic.weighingOptions',
 ];
 
 const status = (key: I18nKey): AgentStatus => ({ key });
@@ -243,6 +188,9 @@ const OPENCHAMBER_STATUS = new Map(Object.entries<ToolActionStatus>({
             'session.fork': 'chat.agentStatus.sessions.fork',
             'session.moveToWorktree': 'chat.agentStatus.sessions.moveToWorktree',
             'session.link': 'chat.agentStatus.sessions.link',
+            'session.unlink': 'chat.agentStatus.sessions.unlink',
+            'session.markDone': 'chat.agentStatus.sessions.markDone',
+            'session.track': 'chat.agentStatus.sessions.track',
             'file.open': 'chat.agentStatus.sessions.openFile',
         },
     },
@@ -279,9 +227,10 @@ const OPENCHAMBER_STATUS = new Map(Object.entries<ToolActionStatus>({
         },
     },
     openchamber_notify: { fallback: 'chat.agentStatus.notify' },
+    openchamber_usage: { fallback: 'chat.agentStatus.usage' },
     openchamber_render: { fallback: 'chat.agentStatus.render' },
     openchamber_image: { fallback: 'chat.agentStatus.image' },
-    openchamber_secret: { fallback: 'chat.agentStatus.secret' },
+    openchamber_secret: { fallback: 'chat.agentStatus.secret', actions: { 'secret.run': 'chat.agentStatus.secretRun' } },
 }));
 
 /**
@@ -304,20 +253,27 @@ const OPENCODE_NAMESPACE_STATUS = new Map(Object.entries<I18nKey>({
     models: 'chat.agentStatus.sessions.models',
     list_mcp_resources: 'chat.agentStatus.mcp.listResources',
     read_mcp_resource: 'chat.agentStatus.mcp.readResource',
+    schedule_create: 'chat.agentStatus.opencode.schedules',
+    schedule_list: 'chat.agentStatus.opencode.schedules',
+    schedule_pause: 'chat.agentStatus.opencode.schedules',
+    schedule_resume: 'chat.agentStatus.opencode.schedules',
+    schedule_delete: 'chat.agentStatus.opencode.schedules',
+    artifact_create: 'chat.agentStatus.opencode.artifacts',
+    artifact_read: 'chat.agentStatus.opencode.artifacts',
+    artifact_update: 'chat.agentStatus.opencode.artifacts',
+    artifact_delete: 'chat.agentStatus.opencode.artifacts',
 }));
 
 const asWords = (name: string): string => name.replace(/[_-]+/g, ' ').trim();
 
 const usingTool = (name: string): AgentStatus => ({ key: 'chat.agentStatus.usingTool', name: asWords(name) });
 
-const getToolStatus = (toolName: string, count = 1, target?: string): AgentStatus => {
+const getToolStatus = (toolName: string, count = 1): AgentStatus => {
     const bucket = TOOL_BUCKETS.get(toolName);
     // A plugin tool nobody described: its name, read as words.
     if (!bucket) return usingTool(toolName);
     const [one, many] = BUCKET_STATUS[bucket];
-    if (count > 1 && many !== one) return { key: many, count };
-    if (target) return status(BUCKET_STATUS_WITH_TARGET[bucket]);
-    return status(one);
+    return count > 1 && many !== one ? { key: many, count } : status(one);
 };
 
 /**
@@ -348,34 +304,28 @@ const getNamedToolStatus = (
  * of sitting on a generic status for its whole run. Parallel commands are the
  * exception: one call's name cannot speak for several, so they count instead.
  */
-const getRunningToolStatus = (part: ToolPart, toolName: string, count: number, mcpServers: readonly string[]): AgentStatus => {
+/**
+ * A secret call keeps running after the user answered, while its command runs,
+ * so it waits on the user only while the server announces its card as waiting
+ * (`waitingCalls`, the session's waiting pages). Without that list a running
+ * call counts as waiting.
+ */
+const getRunningToolStatus = (part: ToolPart, toolName: string, count: number, mcpServers: readonly string[], waitingCalls?: ReadonlySet<string>): AgentStatus => {
     const state = part.state;
-    const running = state?.status === 'running';
+    const running = state?.status === 'running'
+        && (!waitingCalls || part.tool !== 'openchamber_secret' || waitingCalls.has(part.callID));
     const named = getNamedToolStatus(toolName, state?.input, running, mcpServers);
     if (named) {
         return named;
     }
-    const target = getToolTarget(toolName, state?.input, running);
-    const bucket = TOOL_BUCKETS.get(toolName);
     if (!isExecuteTool(toolName) || count > 1) {
-        const resolved = getToolStatus(toolName, count, target);
-        return target && bucket && resolved.key === BUCKET_STATUS_WITH_TARGET[bucket]
-            ? { ...resolved, target }
-            : resolved;
+        return getToolStatus(toolName, count);
     }
     const last = lastExecuteToolCall(state && 'metadata' in state ? state.metadata : undefined);
-    if (!last || last.status === 'completed' || last.status === 'error') {
+    if (!last) {
         return getToolStatus(toolName);
     }
-    const nested = getNamedToolStatus(last.tool, last.input, false, mcpServers);
-    if (nested) return nested;
-    const nestedInput = nestedToolInput(last.input);
-    const nestedTarget = getToolTarget(last.tool, nestedInput, true);
-    const resolved = getToolStatus(last.tool, 1, nestedTarget);
-    const nestedBucket = TOOL_BUCKETS.get(last.tool);
-    return nestedTarget && nestedBucket && resolved.key === BUCKET_STATUS_WITH_TARGET[nestedBucket]
-        ? { ...resolved, target: nestedTarget }
-        : resolved;
+    return getNamedToolStatus(last.tool, last.input, false, mcpServers) ?? getToolStatus(last.tool);
 };
 
 const hashString = (value: string): number => {
@@ -405,7 +355,7 @@ export const hasBackgroundableWork = (parts: readonly Part[]): boolean => parts.
 });
 
 /** `mcpServers`: the configured MCP server names, which name the integration an MCP tool comes from. */
-export const createParsedStatus = (parts: Part[], genericKey: string, mcpServers: readonly string[] = []): ParsedStatusResult => {
+export const createParsedStatus = (parts: Part[], genericKey: string, mcpServers: readonly string[] = [], waitingCalls?: ReadonlySet<string>): ParsedStatusResult => {
     const runningToolCounts = countRunningToolCalls(parts);
     let activePartType: ParsedStatusResult['activePartType'] = undefined;
     let activeToolName: string | undefined = undefined;
@@ -433,7 +383,7 @@ export const createParsedStatus = (parts: Part[], genericKey: string, mcpServers
                     const bucket = TOOL_BUCKETS.get(toolName);
                     activePartType = bucket === 'edit' ? 'editing' : 'tool';
                     activeToolName = toolName;
-                    activeToolStatus = getRunningToolStatus(part, toolName, runningToolCounts.get(bucket ?? toolName) ?? 1, mcpServers);
+                    activeToolStatus = getRunningToolStatus(part, toolName, runningToolCounts.get(bucket ?? toolName) ?? 1, mcpServers, waitingCalls);
                 }
                 break;
             }
@@ -474,10 +424,7 @@ const encodeParsedStatus = (status: ParsedStatusResult): string => {
         status.activePartType ?? '',
         status.activeToolName ?? '',
         // The signature decides re-renders: equal statuses encode the same.
-        JSON.stringify([
-            status.status.key, status.status.count ?? null, status.status.name ?? null,
-            status.status.seed ?? null, status.status.target ?? null,
-        ]),
+        JSON.stringify([status.status.key, status.status.count ?? null, status.status.name ?? null, status.status.seed ?? null]),
         status.isGenericStatus ? '1' : '0',
         status.canBackground ? '1' : '0',
     ].join(STATUS_SIGNATURE_SEPARATOR);
@@ -487,14 +434,11 @@ const decodeStatus = (encoded: string | undefined): AgentStatus => {
     if (!encoded) return { key: 'chat.agentStatus.working' };
     // SAFETY: `encodeParsedStatus` wrote this tuple from an AgentStatus, and the
     // signature only travels from that encoder to this decoder.
-    const [key, count, name, seed, target] = JSON.parse(encoded) as [
-        I18nKey, number | null, string | null, string | null, string | null,
-    ];
+    const [key, count, name, seed] = JSON.parse(encoded) as [I18nKey, number | null, string | null, string | null];
     const decoded: AgentStatus = { key };
     if (count !== null) decoded.count = count;
     if (name !== null) decoded.name = name;
     if (seed !== null) decoded.seed = seed;
-    if (target !== null) decoded.target = target;
     return decoded;
 };
 
@@ -669,17 +613,31 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     }, [currentSessionDirectory, loadMcpConfigs]);
     const mcpServers = React.useMemo(() => mcpServerConfigs.map((server) => server.name), [mcpServerConfigs]);
 
+    // The calls whose page or secret card waits for the user, as one stable string.
+    const waitingCallIds = useGlobalBlockingRequestsStore(React.useCallback(
+        (state) => (currentSessionId ? state.bySession.get(currentSessionId)?.pages.map((page) => page.id).join('\n') ?? '' : ''),
+        [currentSessionId],
+    ));
+    const waitingCalls = React.useMemo(() => new Set(waitingCallIds ? waitingCallIds.split('\n') : []), [waitingCallIds]);
     const lastAssistantStatusSignature = useDirectorySync(
         React.useCallback((state) => {
             const genericKey = `${currentSessionId ?? ''}:${lastAssistantId ?? ''}`;
             const parts = lastAssistantId ? (state.part[lastAssistantId] ?? EMPTY_PARTS) : EMPTY_PARTS;
-            return encodeParsedStatus(createParsedStatus(parts, genericKey, mcpServers));
-        }, [currentSessionId, lastAssistantId, mcpServers]),
+            return encodeParsedStatus(createParsedStatus(parts, genericKey, mcpServers, waitingCalls));
+        }, [currentSessionId, lastAssistantId, mcpServers, waitingCalls]),
         currentSessionDirectory ?? undefined,
     );
 
     const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
-    const sessionFormRequests = useSessionForms(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    // Only a form that still holds the turn pauses the status: one whose tool
+    // call has ended leaves the turn running (#5391), as in useSessionActivity.
+    const releasedForms = useRecoverableQuestionsStore((state) => state.releasedForms);
+    const formHoldsTurn = useDirectorySync(
+        React.useCallback((state) => (
+            state.form[currentSessionId ?? '']?.some((form) => formTurnHold(form, state.part, releasedForms) !== 'released') ?? false
+        ), [currentSessionId, releasedForms]),
+        currentSessionDirectory ?? undefined,
+    );
 
     const sessionAbortRecord = useSessionUIStore(
         React.useCallback((state) => {
@@ -794,7 +752,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         }
 
         const hasPendingPermission = sessionPermissionRequests.length > 0;
-        const hasPendingForm = sessionFormRequests.length > 0;
+        const hasPendingForm = formHoldsTurn;
 
         if (!hasPendingPermission && !hasPendingForm) {
             return baseWorking;
@@ -823,7 +781,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             retryInfo: null,
             canBackground: false,
         };
-    }, [baseWorking, sessionPermissionRequests, sessionFormRequests]);
+    }, [baseWorking, sessionPermissionRequests, formHoldsTurn]);
 
     return {
         activeModel: activeAssistant.model,

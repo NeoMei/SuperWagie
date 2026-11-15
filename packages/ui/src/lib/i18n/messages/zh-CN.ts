@@ -1,3 +1,4 @@
+import { chatStreamI18n } from './chat-stream.i18n';
 import { productHelpI18n } from './product-help.i18n';
 import { platformAccountI18n } from './platform-account.i18n';
 import { platformUsageActivityI18n } from './platform-usage-activity.i18n';
@@ -46,7 +47,7 @@ import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
-export const dict: Record<I18nKey, string> = {
+const baseDict = {
   'mobile.official.desktopSelectionOnly': '请在这台主机运行的桌面应用中选择资料。',
   'mobile.official.manage': '手机可见资料',
   'mobile.official.revokeFailed': '无法撤销此项资料。',
@@ -223,7 +224,7 @@ export const dict: Record<I18nKey, string> = {
   'commitComparison.loadError': '无法加载提交',
   'commitComparison.noCommits': '未找到提交',
   'commitComparison.emptyDiff': '此提交没有更改',
-  'chat.liveActivity.title': '执行过程',
+  'chat.liveActivity.title': '活动',
   'chat.liveActivity.running': '正在执行',
   'chat.liveActivity.moreRows': '还有 {count} 项',
   'chat.liveActivity.changedFile': '更改了 {count} 个文件',
@@ -2959,6 +2960,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.reasoningTrace.expandAria': '展开推理轨迹',
   'chat.reasoningTrace.collapseAria': '折叠推理轨迹',
   'chat.reasoningTrace.thought': '已思考',
+  'chat.commandTrace.expandAria': '展开命令输出',
+  'chat.commandTrace.collapseAria': '折叠命令输出',
+  'chat.commandTrace.title': '命令执行',
   'chat.messageBody.subtask.title': '委派任务',
   'chat.messageBody.subtask.hidePrompt': '隐藏提示',
   'chat.messageBody.subtask.showPrompt': '显示提示',
@@ -4163,3 +4167,5 @@ export const dict: Record<I18nKey, string> = {
   'references.pasted.remove': '删除链接',
   'references.pasted.close': '关闭',
 };
+
+export const dict: Record<I18nKey, string> = { ...baseDict, ...chatStreamI18n["zh-CN"] };

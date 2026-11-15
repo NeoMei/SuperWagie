@@ -2,6 +2,32 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.99] - 2026-11-14
+
+### Improvements
+
+- **Chat:** Live command output and current thinking stay in one bounded priority panel while they run. When they finish, the preview closes cleanly and the activity record remains available to expand without duplicating the live content.
+- About: opening the About dialog checks for updates once automatically.
+
+## [2.7.98] - 2026-11-14
+
+### Improvements
+
+- **Chat:** Running commands and current thinking now share a bounded priority panel under the activity header. The panel follows live output while you read the latest lines and folds away as the command or thought ends; full details remain available on expansion.
+
+## [2.7.97] - 2026-11-14
+
+### Improvements
+
+- **Chat:** The latest running command shows live output in a bounded activity panel; it folds when the command ends, while the full result stays available on expansion.
+
+## [2.7.96] - 2026-11-14
+
+### Fixes
+
+- **Wallet and orders:** A stale local lock kept account purchases from loading. The membership page now recovers the lock when its owner has exited, and an unfinished old payment says its status is unconfirmed.
+- **Account:** When the server cannot return wallet or order details, Manage subscription and Buy credits stay disabled with the error message and Refresh wallet and orders available. A successful refresh restores both entries.
+
 ## [2.7.95] - 2026-11-14
 
 ### Improvements

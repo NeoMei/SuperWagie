@@ -75,6 +75,8 @@ export function readBackgroundShellIDFromMetadata(metadata: Metadata | undefined
 
 const runningCallMetadataSchema = z.object({ shellID: z.string().min(1) })
 
+const runningCallOutputSchema = z.object({ output: z.string() })
+
 /**
  * The shell id of a call the turn still waits for, or undefined for any other
  * call. While the command runs, OpenCode's only progress update carries just
@@ -84,6 +86,13 @@ export function readRunningShellID(part: ToolPart): string | undefined {
   if (part.state.status !== "running") return undefined
   const parsed = runningCallMetadataSchema.safeParse(part.state.metadata ?? {})
   return parsed.success ? parsed.data.shellID : undefined
+}
+
+/** Output OpenCode has attached to a foreground shell before publishing its id. */
+export function readRunningShellOutput(part: ToolPart): string | undefined {
+  if (part.state.status !== "running") return undefined
+  const parsed = runningCallOutputSchema.safeParse(part.state.metadata ?? {})
+  return parsed.success ? parsed.data.output : undefined
 }
 
 const completionMetadataSchema = z.object({

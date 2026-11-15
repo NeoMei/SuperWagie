@@ -1629,8 +1629,8 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
-        expandReasoningWhileStreaming: true,
-        activityRenderMode: 'collapsed',
+        expandReasoningWhileStreaming: false,
+        activityRenderMode: 'summary',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoSaveEnabled: true,
@@ -3564,7 +3564,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 27,
+        version: 28,
         merge: (persistedState, currentState) => {
           const merged = Object.assign({}, currentState, persistedState);
           const helpPanel = merged.contextPanelByDirectory?.[PRODUCT_HELP_PANEL_KEY];
@@ -3583,12 +3583,11 @@ export const useUIStore = create<UIStore>()(
           }
           const state = persistedState as Record<string, unknown>;
 
-          // v26 -> v27: expand incoming reasoning. Old local false values do
-          // not distinguish the default from a choice, so both upgrade once.
-          // Settings sync runs after hydration and restores an explicit saved
-          // false. Local choices saved at v27 and later remain unchanged.
-          if (version < 27) {
-            state.expandReasoningWhileStreaming = true;
+          // v27 -> v28: restore the upstream information flow after the
+          // custom execution-fold default. Synced explicit preferences still
+          // apply after hydration; later local choices remain reader-owned.
+          if (version < 28) {
+            state.activityRenderMode = 'summary';
           }
 
           // v25 -> v26: a file preview starts without the directory tree, so
@@ -3596,13 +3595,6 @@ export const useUIStore = create<UIStore>()(
           // tree; that choice then persists.
           if (version < 26) {
             state.contextEditorTreeVisible = false;
-          }
-
-          // v24 -> v25: Activity starts folded. The local copy only ever held
-          // the old default; an explicit choice is restored from synced
-          // settings after hydration.
-          if (version < 25) {
-            state.activityRenderMode = 'collapsed';
           }
 
           // v22 -> v23: table cell wrap is on by default. The local copy only

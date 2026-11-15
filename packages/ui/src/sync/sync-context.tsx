@@ -134,7 +134,7 @@ import {
   type SessionMaterializationRequest,
 } from "./materialization"
 import { openSessionFromToast } from "./session-navigation"
-import { revealRequest } from "./request-reveal"
+import { revealRequest, revealWaitingPage } from "./request-reveal"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
 import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
@@ -2006,7 +2006,13 @@ const notifyWaitingPage = (event: Extract<SyncEvent, { type: "openchamber.page-w
   toast.info(page.title, {
     id: `page-${sessionID}:${page.id}`,
     description: FORM_TOAST_DESCRIPTION,
-    action: { label: "Open session", onClick: () => openSessionFromToast(sessionID, directory) },
+    action: {
+      label: "Open session",
+      onClick: () => {
+        revealWaitingPage(sessionID)
+        openSessionFromToast(sessionID, directory)
+      },
+    },
   })
 }
 
@@ -3907,14 +3913,6 @@ export function useSessionPermissions(sessionID: string, directory?: string, opt
     return subscribeDirectoryPermission(store, sessionID, notify)
   }, [sessionID, store])
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-}
-
-/** Get pending forms for a specific session */
-export function useSessionForms(sessionID: string, directory?: string) {
-  return useDirectorySync(
-    useCallback((state: State) => state.form[sessionID] ?? EMPTY_FORM_REQUESTS, [sessionID]),
-    directory,
-  )
 }
 
 type SessionBlockingRequests = {

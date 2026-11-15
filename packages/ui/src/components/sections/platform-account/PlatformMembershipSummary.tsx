@@ -14,6 +14,7 @@ export const PlatformMembershipSummary: React.FC<{
     openAddon: () => void;
     membershipOpen: boolean;
     addonOpen: boolean;
+    disabled: boolean;
   } | null;
 }> = ({ account, actions }) => {
   const { t } = useI18n();
@@ -35,8 +36,8 @@ export const PlatformMembershipSummary: React.FC<{
         </div>)}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" aria-pressed={actions.membershipOpen} onClick={actions.openMembership}>{t(active ? 'platformAccount.manageMembership' : 'platformAccount.membershipPlans')}</Button>
-        {showPoints && <Button size="sm" aria-pressed={actions.addonOpen} onClick={actions.openAddon}>{t('platformAccount.addonPlans')}</Button>}
+        <Button size="sm" variant="outline" disabled={actions.disabled} aria-pressed={actions.membershipOpen} onClick={actions.openMembership}>{t(active ? 'platformAccount.manageMembership' : 'platformAccount.membershipPlans')}</Button>
+        {showPoints && <Button size="sm" disabled={actions.disabled} aria-pressed={actions.addonOpen} onClick={actions.openAddon}>{t('platformAccount.addonPlans')}</Button>}
       </div>}
     </div>
     {showPoints && <>
