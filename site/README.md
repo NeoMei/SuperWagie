@@ -6,12 +6,23 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.109 for macOS Apple silicon and
+The website targets release 2.7.110 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
 Windows installer is unsigned. Precise installer sizes are added to the public
 site after the final artifacts are verified.
+
+Version 2.7.110 keeps the available Workbench first in the sidebar toolbar,
+including narrow windows, and removes its duplicate from page overflow. A
+status read started before prompt admission preserves execution status when
+it returns after admission. Newer completion, error, deletion and rollback
+still take precedence, and a later fresh snapshot can settle the turn. This
+keeps a first reply eligible for recovery when its live updates were missed.
+The regression is reproduced with controlled fixtures. The packaged Apple
+silicon application also completed one physically submitted first prompt
+against a local fixture and displayed its reply, with Workbench visible.
+The original reported failure and remote providers require separate evidence.
 
 Version 2.7.109 removes fixed input-byte ceilings from Word, Excel and
 PowerPoint previews. The packaged Mac application read a 73.52 MiB, 63-slide PPTX
@@ -184,7 +195,7 @@ background and indexed for project retrieval. The Experiences checkbox can pause
 or resume learning. Sessions from before enablement require explicit processing.
 Methodology candidates require confirmation.
 
-Installer links point to the v2.7.109 GitHub Release assets. The unified release
+Installer links point to the v2.7.110 GitHub Release assets. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 

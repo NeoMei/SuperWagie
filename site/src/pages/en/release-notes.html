@@ -1,7 +1,16 @@
 <section class="section-tight">
   <div class="wrap prose">
     <h1>Release notes</h1>
-    <p class="lead">Current version 2.7.109 · 16 November 2026</p>
+    <p class="lead">Current version 2.7.110 · 16 November 2026</p>
+    <h2>2.7.110 · Workbench shortcut and first-prompt status fixes</h2>
+    <ul>
+      <li>Keep Workbench first in the sidebar toolbar, including narrow windows. Remove its duplicate from the page menu.</li>
+      <li>Fix execution status becoming idle too early after the first prompt. Automatic recovery can still display a reply whose live updates were missed.</li>
+      <li>Completion, errors, session deletion and send rollback continue to settle status. Later checks still recognize completed turns.</li>
+      <li>Keep large Office file previews from 2.7.109, along with the chat flow and bounded command disclosures from 2.7.108.</li>
+    </ul>
+    <p>Apple silicon Mac and Windows x64 installers are available from the <a href="/en/download/">download page</a>, along with checksums.</p>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.110">View the full 2.7.110 release information</a></p>
     <h2>2.7.109 · Preview large Office files</h2>
     <ul>
       <li>Remove the fixed input-size ceiling for Office previews. Word, Excel and PowerPoint files no longer face the previous 30 MiB or 50 MiB input rejection.</li>
