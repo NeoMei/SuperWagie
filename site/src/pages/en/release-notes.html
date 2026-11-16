@@ -1,7 +1,15 @@
 <section class="section-tight">
   <div class="wrap prose">
     <h1>Release notes</h1>
-    <p class="lead">Current version 2.7.111 · 16 November 2026</p>
+    <p class="lead">Current version 2.7.112 · 16 November 2026</p>
+    <h2>2.7.112 · Faster user information page and working Alipay checkout</h2>
+    <ul>
+      <li>Fix the slow first open of the user information page. Session restoration, including account key verification and conversation memory migration, now runs in the background and is deduplicated per identity.</li>
+      <li>Fix the Alipay tab on the recharge page failing to open. After a checkout is restored from the server and remounted, switching payment channel now derives the offer from the checkout intent and recreates the Alipay payment.</li>
+      <li>Keep the completed command summaries and bounded knowledge preparation from 2.7.111, along with the Workbench shortcut and first-prompt status fixes from 2.7.110.</li>
+    </ul>
+    <p>Apple silicon Mac and Windows x64 installers are available from the <a href="/en/download/">download page</a>, along with checksums.</p>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.112">View the full 2.7.112 release information</a></p>
     <h2>2.7.111 · Keep completed command summaries and bound knowledge preparation</h2>
     <ul>
       <li>Folded command headers show a short summary of the latest completed action and the completed count, including while the next command runs.</li>
