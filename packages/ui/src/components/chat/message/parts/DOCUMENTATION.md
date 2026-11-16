@@ -77,7 +77,7 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
 
 - `CommandActivityGroup.tsx` and `CommandExecution.tsx`
   - Consecutive shell calls share one fixed header and one bounded scrolling body. Each call keeps its original input, stdout, error, attachments, copy, and stop control inside that body.
-  - The group opens while any member is active, closes when all members settle, and preserves reader choices as further calls append. Its header never contains command or output text; the existing shimmer belongs to the active header.
+  - The group opens while any member is active, closes when all members settle, and preserves reader choices as further calls append. Its folded header retains the completed-call count and latest completed action, including while another member runs. Arguments and output stay in the body; the existing shimmer belongs to the active title.
   - `ToolPart` retains authoritative foreground/background lifecycle, cancellation, and content completion. Member controllers remain mounted while folded; output polling and content mounting stop with group expansion.
 
 - `ShownToolCard.tsx`
@@ -395,8 +395,23 @@ retain native controllers after the visual body closes; output mounting and
 polling respect its visibility. Both thinking and commands follow the existing
 streaming-expansion preference. Completion folds automatic expansion while an
 explicit reader choice remains open, as upstream thinking does. Only command
-headers retain the requested breathing highlight, without echoing command or
-output text in the collapsed row.
+headers retain the requested breathing highlight. Their folded row shows a
+completed-call count and the latest completed action from `ToolPart` lifecycle
+reports. A completed tool record whose background shell still runs does not
+advance that count. Running, failed, stopped and unknown reports leave the
+previous completed action visible. Replacing input under the same part ID
+recomputes the label; no summary is stored in conversation data.
+
+### Why command summaries describe actions
+
+OpenCode 2.x shell calls normally provide a command without a human description.
+`lib/opencode/shell-command-summary.ts` derives a bounded semantic action from
+known command names and preserves only safe executable or script basenames.
+Compound and unrecognized syntax use conservative labels. A supplied legacy
+description remains readable. The UI translates the action and completed-call
+count without another model request. Labels such as "Run tests" describe the
+action; they do not infer a successful test result from its command name.
+Thinking keeps its existing summary and expansion rules.
 
 The projection cache is keyed by the immutable source-message array. It stores
 no runtime authority or persisted conversation data. The same presentation

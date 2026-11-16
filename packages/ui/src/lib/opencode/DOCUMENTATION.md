@@ -5,10 +5,19 @@
 The client wrapper owns official wire calls and domain projection.
 `message-ownership.ts` resolves parent-owned tool results for a displayed child
 transcript. Session stores retain ownership of the visible child records.
+`tools.ts` owns tool-input accessors. Its shell summary classifier supplies
+action categories for the shared command header; rendering owns translation
+and execution state.
 
 ## Invariants
 
 - Ordinary message reads, pins and existence checks remain session-strict.
+- Shell summaries inspect a bounded command string without executing it or
+  reading output. Inferred labels contain only action categories or validated
+  executable/script names. Environment values, URLs and inline code stay out.
+  Explicit legacy descriptions remain bounded labels.
+- Command summaries describe an action, never its success. Foreground and
+  background completion authority stays with the native tool controllers.
 - `applySendSelection` is shared by sends and form continuations. Model and
   agent writes retain their captured runtime instance, including an A-to-B-to-A
   endpoint round trip, and stop before the next write after an instance change.
@@ -37,6 +46,14 @@ transcript. Session stores retain ownership of the visible child records.
   their authority.
 
 ## Decisions
+
+### Why shell summaries classify a limited command prefix
+
+OpenCode shell input usually contains only the command, without a description.
+A small quote-aware classifier can name common actions and script basenames
+without a model call. Leading environment assignments and a simple `cd &&`
+prefix do not name the action. Compound or unfamiliar syntax keeps a general
+label instead of inferring a business result from arguments or output.
 
 ### Why ancestor reads are limited to tool completion
 

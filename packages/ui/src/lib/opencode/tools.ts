@@ -22,6 +22,7 @@
 import { z } from "zod"
 
 import type { JsonValue, Metadata, ToolInput, ToolState } from "./model"
+import { summarizeShellCommand, type ShellCommandSummary } from "./shell-command-summary"
 
 /** Built-in tool names as the server reports them. */
 export const OPENCODE_TOOLS = {
@@ -225,6 +226,12 @@ const metadataSchema = z
 type ParsedInput = z.infer<typeof inputSchema>
 
 const readInput = (input: ToolInput | undefined): ParsedInput => inputSchema.parse(input ?? {})
+
+/** The command header's action summary, independent of command output. */
+export function shellCommandSummary(input: ToolInput | undefined): ShellCommandSummary {
+  const parsed = readInput(input)
+  return summarizeShellCommand(parsed.command, parsed.description)
+}
 
 // A page shared with other people through the relay: who gets a link, for an
 // html page the agent's one-line summary of what it asks, and whether it takes

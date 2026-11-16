@@ -172,6 +172,7 @@ const end = (value: ShellEnd) => applyBackgroundShellEvents('/workspace', [{ typ
   shellID: shell.shellID, end: value, endedAt: 140,
 } }]);
 const status = (container: HTMLElement) => container.querySelector('[data-tool-status]')?.getAttribute('data-tool-status');
+const completedSummary = (container: HTMLElement) => container.querySelector('[data-command-summary]')?.textContent;
 
 test('a grouped background command follows authoritative completion while collapsed', async () => {
   resetBackgroundShells();
@@ -179,6 +180,8 @@ test('a grouped background command follows authoritative completion while collap
   try {
     await withHarness(backgrounded, false, async (store, container, remount) => {
       const header = () => container.querySelector<HTMLElement>('[data-command-header]');
+      expect(status(container)).toBe('unknown');
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
       await act(async () => { start(); });
       expect(status(container)).toBe('running');
       expect(header()?.getAttribute('aria-expanded')).toBe('true');
@@ -186,6 +189,7 @@ test('a grouped background command follows authoritative completion while collap
       expect(container.querySelector('button[aria-label="Stop command"]') !== null).toBe(true);
       await act(async () => { header()?.click(); });
       expect(header()?.getAttribute('aria-expanded')).toBe('false');
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
       expect(container.querySelector('[data-command-scroll]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden')).toBe('true');
       const reads = read.mock.calls.length;
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1100)); });
@@ -195,6 +199,7 @@ test('a grouped background command follows authoritative completion while collap
         store.setState({ message: { parent: [completion({ state: 'completed', exit: 2 })] } });
       });
       expect(status(container)).toBe('failed');
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
       expect(header()?.getAttribute('aria-expanded')).toBe('false');
       await act(async () => { header()?.click(); });
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 130)); });
@@ -203,6 +208,7 @@ test('a grouped background command follows authoritative completion while collap
       expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('exited (2)');
       await remount();
       expect(status(container)).toBe('failed');
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
       expect(header()?.getAttribute('aria-expanded')).toBe('false');
     });
   } finally { read.mockRestore(); resetBackgroundShells(); }
@@ -219,12 +225,40 @@ test('a grouped command does not infer stop from disappearance or a rejected sto
       await act(async () => { button?.click(); });
       expect(stop.mock.calls).toHaveLength(1);
       expect(status(container)).toBe('running');
+      await act(async () => container.querySelector<HTMLElement>('[data-command-header]')?.click());
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
       await act(async () => replaceDirectoryShells('/workspace', [], backgroundShellRevision()));
       expect(status(container)).toBe('unknown');
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
       expect(container.querySelector('[data-command-header]')?.getAttribute('aria-expanded')).toBe('false');
       await act(async () => store.setState({ message: { parent: [completion({ state: 'cancelled' })] } }));
       expect(status(container)).toBe('stopped');
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
       expect(container.querySelector('[data-command-header]')?.getAttribute('aria-expanded')).toBe('false');
     });
   } finally { stop.mockRestore(); resetBackgroundShells(); }
+});
+
+test('a grouped background command joins the completed count only after its native completion report', async () => {
+  resetBackgroundShells();
+  const read = spyOn(opencodeClient, 'readShellOutput').mockResolvedValue({ output: 'live output', cursor: 11, skipped: false });
+  try {
+    await withHarness(backgrounded, false, async (store, container, remount) => {
+      expect(status(container)).toBe('unknown');
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
+      await act(async () => { start(); });
+      expect(status(container)).toBe('running');
+      await act(async () => container.querySelector<HTMLElement>('[data-command-header]')?.click());
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
+      await act(async () => { end({ kind: 'exited', status: 'exited', exit: 0 }); });
+      expect(status(container)).toBe('unknown');
+      expect(completedSummary(container)).toBe('Completed 1 command · Run echo');
+      await act(async () => store.setState({ message: { parent: [completion({ state: 'completed', exit: 0 })] } }));
+      expect(status(container)).toBe('completed');
+      expect(completedSummary(container)).toBe('Completed 2 commands · Run echo');
+      await remount();
+      expect(status(container)).toBe('completed');
+      expect(completedSummary(container)).toBe('Completed 2 commands · Run echo');
+    });
+  } finally { read.mockRestore(); resetBackgroundShells(); }
 });
