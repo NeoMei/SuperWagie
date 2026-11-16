@@ -17,6 +17,7 @@ import {
   renderedPage,
   lastExecuteToolCall,
   subagentSessionId,
+  shellCommandSummary,
   toolDescription,
   toolFileDiffs,
   toolInputPath, isShownInPlace, proposedWorkflowRunId } from "./tools"
@@ -51,6 +52,13 @@ describe("tool identity", () => {
 })
 
 describe("tool input and metadata", () => {
+  test("command summaries validate each input field without exposing unrelated values", () => {
+    expect(shellCommandSummary({ command: "bun test", description: 4, token: "private" })).toEqual({ kind: "test" })
+    expect(shellCommandSummary({ command: { token: "private" }, description: "  Check tests  " })).toEqual({ kind: "description", text: "Check tests" })
+    expect(shellCommandSummary({ command: ["private"], description: false })).toEqual({ kind: "generic" })
+    expect(shellCommandSummary(undefined)).toEqual({ kind: "generic" })
+  })
+
   test("reads the v2 path key and the legacy ones MCP tools use", () => {
     expect(toolInputPath({ path: "src/a.ts" })).toBe("src/a.ts")
     expect(toolInputPath({ filePath: "src/b.ts" })).toBe("src/b.ts")

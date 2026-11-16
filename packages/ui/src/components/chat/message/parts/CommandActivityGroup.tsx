@@ -1,12 +1,29 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import type { ToolPart as ToolPartData } from '@/lib/opencode/model';
+import { shellCommandSummary } from '@/lib/opencode/tools';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ToolPopupContent } from '../types';
 import { ReasoningTimelineBlock } from './ReasoningPart';
 import { CommandExecutionTitle } from './CommandExecution';
 import { CommandGroupContext, type CommandMemberState } from './commandGroupContext';
 import ToolPart from './ToolPart';
+
+const SUMMARY_KEYS = {
+    generic: 'chat.commandTrace.summary.generic',
+    compound: 'chat.commandTrace.summary.compound',
+    search: 'chat.commandTrace.summary.search',
+    list: 'chat.commandTrace.summary.list',
+    read: 'chat.commandTrace.summary.read',
+    gitStatus: 'chat.commandTrace.summary.gitStatus',
+    gitDiff: 'chat.commandTrace.summary.gitDiff',
+    gitHistory: 'chat.commandTrace.summary.gitHistory',
+    test: 'chat.commandTrace.summary.test',
+    lint: 'chat.commandTrace.summary.lint',
+    build: 'chat.commandTrace.summary.build',
+    python: 'chat.commandTrace.summary.python',
+    node: 'chat.commandTrace.summary.node',
+} as const;
 
 type CommandActivityGroupProps = {
     id: string;
@@ -38,6 +55,18 @@ export const CommandActivityGroup: React.FC<CommandActivityGroupProps> = ({
         const status = reported.get(part.id)?.status ?? part.state.status;
         return status === 'pending' || status === 'running';
     });
+    // Native controllers distinguish a finished call from a shell still
+    // running in the background. Only completed lifecycle reports count.
+    const completed = parts.filter((part) => reported.get(part.id)?.status === 'completed');
+    const latestInput = completed.at(-1)?.state.input;
+    const summary = React.useMemo(() => shellCommandSummary(latestInput), [latestInput]);
+    const action = summary.kind === 'description' ? summary.text
+        : summary.kind === 'command' ? t('chat.commandTrace.summary.command', { name: summary.name })
+            : summary.kind === 'script' ? t('chat.commandTrace.summary.script', { name: summary.name })
+                : t(SUMMARY_KEYS[summary.kind]);
+    const completedSummary = completed.length === 0 ? undefined
+        : completed.length === 1 ? t('chat.commandTrace.completedSingle', { summary: action })
+            : t('chat.commandTrace.completedMultiple', { count: completed.length, summary: action });
     // The existing row-expansion set can request an open after a reader folded
     // the block. Only its rising edge creates a new reveal request.
     const [reveal, setReveal] = React.useState({ id, expanded: isExpanded, request: 0 });
@@ -57,6 +86,7 @@ export const CommandActivityGroup: React.FC<CommandActivityGroupProps> = ({
         onExpandedChange={(expanded) => { if (expanded !== isExpanded) onToggle(id); }}
         presentation={{
             kind: 'command', icon: 'terminal-box', title: <CommandExecutionTitle running={active} />,
+            completedSummary,
             expandLabel: t('chat.commandTrace.expandAria'), collapseLabel: t('chat.commandTrace.collapseAria'),
             markdownVariant: 'tool', maxHeightClassName: 'max-h-80',
         }}

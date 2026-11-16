@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, jest, spyOn, test } from 'bun:test';
 import { setSessionProjectContextPin, syncSessionKnowledge } from './sessionKnowledgeApi';
 
 const SPACE_DIRECTORY = '/spaces/a1b2c3d4e5f6/repo';
@@ -19,6 +19,7 @@ const capturePaths = (): string[] => {
 afterEach(() => {
   request?.mockRestore();
   request = null;
+  jest.useRealTimers();
 });
 
 // The session lives in the space's OpenCode, so a write or pin that reaches
@@ -49,5 +50,37 @@ describe('session knowledge writes for a session in an isolated space', () => {
     await syncSessionKnowledge('/home/me/repo', 'session-1');
     await setSessionProjectContextPin('/home/me/repo', 'session-1', 'note', 'note-1', true);
     expect(paths).toEqual(['/api/session-knowledge/sync -', '/api/session-knowledge/pin -']);
+  });
+
+  test('a stalled optional background request releases the send and aborts its transport', async () => {
+    jest.useFakeTimers();
+    const dispatched = new Promise<void>((resolve) => {
+      request = spyOn(globalThis, 'fetch').mockImplementation(() => {
+        resolve();
+        return new Promise<Response>(() => {});
+      });
+    });
+    let released = false;
+    const pending = syncSessionKnowledge('/home/me/repo', 'session-1').then(() => { released = true; });
+    await dispatched;
+
+    jest.advanceTimersByTime(5_999);
+    await Promise.resolve();
+    expect(released).toBe(false);
+    jest.advanceTimersByTime(1);
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+
+    expect(released).toBe(true);
+    expect(request?.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    expect(request).toHaveBeenCalledTimes(1);
+    await pending;
+  });
+
+  test('a successful background sync releases its deadline without later cancellation', async () => {
+    jest.useFakeTimers();
+    capturePaths();
+    await syncSessionKnowledge('/home/me/repo', 'session-1');
+    jest.advanceTimersByTime(6_000);
+    expect(request?.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
   });
 });

@@ -289,8 +289,9 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     readSessionMetadata = null,
     persistSessionMetadata = null,
     // The session's instruction entries in OpenCode: `put(sessionId,
-    // directory, key, text)` and `remove(sessionId, directory, key)`. Both are
-    // idempotent there, so writing an unchanged value tells the agent nothing.
+    // directory, key, text, signal)` and `remove(sessionId, directory, key,
+    // signal)`. Both are idempotent there, so writing an unchanged value tells
+    // the agent nothing. The signal cancels requests after preparation expires.
     instructionEntries = null,
     recallConversationMemory = null,
   } = dependencies;
@@ -448,39 +449,61 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    */
   const recallRevisions = new Map();
   const recallWrites = new Map();
-  const writeRecall = (sessionId, directory, revision, text) => {
+  const writeRecall = (sessionId, directory, revision, text, signal) => {
     const previous = recallWrites.get(sessionId) ?? Promise.resolve();
     const next = previous.catch(() => {}).then(() => {
-      if (recallRevisions.get(sessionId) !== revision) return;
-      return text ? instructionEntries.put(sessionId, directory, 'openchamber.recalled', text)
-        : instructionEntries.remove(sessionId, directory, 'openchamber.recalled');
+      if (signal.aborted || recallRevisions.get(sessionId) !== revision) return;
+      return text ? instructionEntries.put(sessionId, directory, 'openchamber.recalled', text, signal)
+        : instructionEntries.remove(sessionId, directory, 'openchamber.recalled', signal);
     });
     recallWrites.set(sessionId, next);
     void next.finally(() => { if (recallWrites.get(sessionId) === next) recallWrites.delete(sessionId); }).catch(() => {});
     return next;
   };
-  const sync = async (sessionId, directory, query = '') => {
-    if (!instructionEntries || !sessionId) return false;
+  const sync = async (sessionId, directory, query = '', { signal: callerSignal } = {}) => {
+    if (!instructionEntries || !sessionId || callerSignal?.aborted) return false;
+    const controller = new AbortController();
+    const { signal } = controller;
+    let cancel;
+    const cancelled = new Promise((resolve) => {
+      cancel = () => { controller.abort(); resolve(false); };
+    });
+    const deadline = setTimeout(cancel, 5000);
+    callerSignal?.addEventListener('abort', cancel, { once: true });
     const revision = (recallRevisions.get(sessionId) ?? 0) + 1;
     recallRevisions.set(sessionId, revision);
-    try {
-      const session = await readStoredSession(sessionId).catch(() => null);
-      const entries = buildKnowledgeEntries(await collect(directory, readPins(session)));
-      let recalled = '';
-      if (recallConversationMemory && query.trim()) {
-        try { recalled = await recallConversationMemory({ sessionId, directory, query }); }
-        catch { /* Failed retrieval removes the previous prompt's recall. */ }
+    const prepare = async () => {
+      try {
+        const session = await readStoredSession(sessionId).catch(() => null);
+        if (signal.aborted) return false;
+        const entries = buildKnowledgeEntries(await collect(directory, readPins(session)));
+        if (signal.aborted) return false;
+        let recalled = '';
+        if (recallConversationMemory && query.trim()) {
+          try { recalled = await recallConversationMemory({ sessionId, directory, query }); }
+          catch { /* Failed retrieval removes the previous prompt's recall. */ }
+        }
+        if (signal.aborted) return false;
+        const writes = await Promise.allSettled([...Object.entries(entries).map(([key, text]) => (text
+          ? instructionEntries.put(sessionId, directory, key, text, signal)
+          : instructionEntries.remove(sessionId, directory, key, signal))), writeRecall(sessionId, directory, revision, recalled, signal)]);
+        if (signal.aborted) return false;
+        const failed = writes.find((write) => write.status === 'rejected');
+        if (failed) console.warn('[session-knowledge] entry write failed:', failed.reason?.message || failed.reason);
+        return !failed;
+      } catch (error) {
+        if (signal.aborted) return false;
+        await writeRecall(sessionId, directory, revision, '', signal).catch(() => {});
+        if (signal.aborted) return false;
+        console.warn('[session-knowledge] sync failed:', error?.message || error);
+        return false;
       }
-      const writes = await Promise.allSettled([...Object.entries(entries).map(([key, text]) => (text
-        ? instructionEntries.put(sessionId, directory, key, text)
-        : instructionEntries.remove(sessionId, directory, key))), writeRecall(sessionId, directory, revision, recalled)]);
-      const failed = writes.find((write) => write.status === 'rejected');
-      if (failed) console.warn('[session-knowledge] entry write failed:', failed.reason?.message || failed.reason);
-      return !failed;
-    } catch (error) {
-      await writeRecall(sessionId, directory, revision, '').catch(() => {});
-      console.warn('[session-knowledge] sync failed:', error?.message || error);
-      return false;
+    };
+    try {
+      return await Promise.race([prepare(), cancelled]);
+    } finally {
+      clearTimeout(deadline);
+      callerSignal?.removeEventListener('abort', cancel);
     }
   };
 

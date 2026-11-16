@@ -128,6 +128,8 @@ type ReasoningTimelineBlockProps = {
         collapseLabel: string;
         markdownVariant: MarkdownVariant;
         maxHeightClassName: string;
+        /** Settled command progress remains visible while another member runs. */
+        completedSummary?: string;
     };
 };
 
@@ -240,8 +242,9 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         return () => observer.disconnect();
     }, [isStreaming, shouldRenderExpandedContent]);
 
-    // The header shows no summary while the part streams.
-    const summary = React.useMemo(() => (isStreaming ? '' : getReasoningSummary(text)), [isStreaming, text]);
+    const summary = React.useMemo(() => presentation?.kind === 'command'
+        ? presentation.completedSummary ?? ''
+        : isStreaming ? '' : getReasoningSummary(text), [presentation?.kind, presentation?.completedSummary, isStreaming, text]);
     const toggleAriaLabel = isExpanded
         ? presentation?.collapseLabel ?? t('chat.reasoningTrace.collapseAria')
         : presentation?.expandLabel ?? t('chat.reasoningTrace.expandAria');
@@ -472,8 +475,10 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 </div>
 
                 <div className={cn('flex items-center gap-1 flex-1 min-w-0', TOOL_ROW_DESCRIPTION_CLASS)} style={{ color: 'var(--tools-description)' }}>
-                    {!isStreaming && !isExpanded && summary ? (
+                    {!isExpanded && summary ? (
                         <span
+                            data-command-summary={presentation?.kind === 'command' ? 'true' : undefined}
+                            dir={presentation?.kind === 'command' ? 'auto' : undefined}
                             className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
                             style={{ color: 'var(--tools-description)' }}
                             title={summary}

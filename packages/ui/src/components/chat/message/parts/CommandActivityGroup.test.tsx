@@ -7,7 +7,7 @@ import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 import type { ToolPart as ToolPartData } from '@/lib/opencode/model';
 import { SyncProvider } from '@/sync/sync-context';
-import { I18nProvider } from '@/lib/i18n';
+import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { getChatQuoteSourceMessageId } from '@/lib/chatQuoteAnchor';
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { getDefaultTheme } from '@/lib/theme/themes';
@@ -85,6 +85,8 @@ const withCommands = async (run: (harness: {
     const previousPreference = useUIStore.getState().expandReasoningWhileStreaming;
     const previousDirectory = useDirectoryStore.getState().currentDirectory;
     const previousGuests = useGuestsStore.getState();
+    const previousI18n = useI18nStore.getState();
+    useI18nStore.getState().setLocale('en');
     useUIStore.setState({ expandReasoningWhileStreaming: autoExpand });
     useDirectoryStore.setState({ currentDirectory: '/synthetic/command-group' });
     useGuestsStore.setState({ status: 'ready', guests: [], runtimeKey: 'test' });
@@ -122,6 +124,7 @@ const withCommands = async (run: (harness: {
         useUIStore.setState({ expandReasoningWhileStreaming: previousPreference });
         useDirectoryStore.setState({ currentDirectory: previousDirectory });
         useGuestsStore.setState(previousGuests);
+        useI18nStore.setState(previousI18n);
         await happyWindow.happyDOM.abort();
         for (const [name, descriptor] of previous) {
             if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);
@@ -134,7 +137,7 @@ test('consecutive commands share one header and capped scroller while retaining 
         await render([command('one', 'completed', 'first result'), { ...command('two', 'running', 'second result'), messageID: 'msg_second' }]);
         expect(container.querySelectorAll('[data-command-header]').length).toBe(1);
         expect(header('one').getAttribute('aria-expanded')).toBe('true');
-        expect(header('one').textContent).not.toContain('echo');
+        expect(header('one').textContent).not.toContain('echo two');
         expect(header('one').textContent).not.toContain('result');
         const output = container.querySelector('[data-command-scroll]');
         expect(output?.textContent).toContain('echo one');
@@ -152,6 +155,63 @@ test('consecutive commands share one header and capped scroller while retaining 
         await click('one');
         expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('first result');
         expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('second result');
+    });
+});
+
+const commandWithInput = (id: string, status: 'running' | 'completed' | 'error', input: ToolPartData['state']['input']): ToolPartData => {
+    const part = command(id, status, 'private command output');
+    return { ...part, state: { ...part.state, input } };
+};
+
+test('the folded command header retains completed progress while subsequent calls run', async () => {
+    await withCommands(async ({ container, render, click, header }) => {
+        const status = (state: 'running' | 'completed') => commandWithInput('status', state, { command: 'git status --short' });
+        const tests = (state: 'running' | 'completed') => commandWithInput('tests', state, { command: 'bun test' });
+        await render([status('running')]);
+        expect(header('status').textContent).not.toContain('Completed');
+        await render([status('completed')]);
+        const stableHeader = header('status');
+        expect(stableHeader.getAttribute('aria-expanded')).toBe('false');
+        expect(stableHeader.textContent).toContain('Completed 1 command · Check Git status');
+
+        await render([status('completed'), tests('running')]);
+        await click('status');
+        expect(header('status')).toBe(stableHeader);
+        expect(stableHeader.getAttribute('aria-expanded')).toBe('false');
+        expect(stableHeader.textContent).toContain('Completed 1 command · Check Git status');
+        expect(stableHeader.textContent).not.toContain('Run tests');
+        await render([status('completed'), tests('completed')]);
+        expect(stableHeader.textContent).toContain('Completed 2 commands · Run tests');
+        expect(stableHeader.textContent).not.toContain('private command output');
+        expect(stableHeader.textContent).not.toContain('bun test');
+        await click('status');
+        expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('private command output');
+    });
+});
+
+test('failed calls do not replace the most recent successful completion summary', async () => {
+    await withCommands(async ({ render, header }) => {
+        const success = commandWithInput('status', 'completed', { command: 'git status' });
+        await render([success, commandWithInput('build', 'error', { command: 'bun run build' })]);
+        expect(header('status').textContent).toContain('Completed 1 command · Check Git status');
+        expect(header('status').textContent).not.toContain('Build project');
+        await render([commandWithInput('only-failure', 'error', { command: 'bun run build' })]);
+        expect(header('only-failure').textContent).not.toContain('Completed');
+    });
+});
+
+test('completion summaries follow replacement input and locale without resetting disclosure', async () => {
+    await withCommands(async ({ render, header }) => {
+        await render([commandWithInput('same', 'completed', { command: 'git status' })]);
+        const stableHeader = header('same');
+        expect(stableHeader.textContent).toContain('Check Git status');
+        await render([commandWithInput('same', 'completed', { command: 'git diff' })]);
+        expect(stableHeader.textContent).toContain('View Git changes');
+        expect(stableHeader.textContent).not.toContain('Check Git status');
+        await act(async () => { useI18nStore.getState().setLocale('zh-CN'); });
+        expect(header('same')).toBe(stableHeader);
+        expect(stableHeader.getAttribute('aria-expanded')).toBe('false');
+        expect(stableHeader.textContent).toContain('已完成 1 条 · 查看 Git 差异');
     });
 });
 

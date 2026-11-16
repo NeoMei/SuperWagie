@@ -33,7 +33,19 @@ export const registerSessionKnowledgeRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'sessionId and directory are required' });
     }
     const query = z.string().catch('').parse(body.query).slice(0, 32_000);
-    return res.json({ synced: await sessionKnowledgeRuntime.sync(sessionId, directory, query) });
+    const controller = new AbortController();
+    const cancel = () => { controller.abort(); };
+    const onClose = () => { if (!res.writableEnded) cancel(); };
+    req.once('aborted', cancel);
+    res.once('close', onClose);
+    if (req.aborted || res.destroyed) cancel();
+    try {
+      const synced = await sessionKnowledgeRuntime.sync(sessionId, directory, query, { signal: controller.signal });
+      if (!res.destroyed) return res.json({ synced });
+    } finally {
+      req.removeListener('aborted', cancel);
+      res.removeListener('close', onClose);
+    }
   });
 
   /** Counts and names for the work status panel; assembles no text. */

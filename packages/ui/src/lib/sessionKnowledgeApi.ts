@@ -26,15 +26,28 @@ export const syncSessionKnowledge = async (
 ): Promise<void> => {
   if (!directory || !sessionId) return;
   invalidateSummary(directory, sessionId);
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  // The server has a five-second overall budget. Also bound transports whose
+  // auth preparation or runtime bridge does not settle when aborted.
+  const deadline = new Promise<void>((resolve) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      resolve();
+    }, 6_000);
+  });
   try {
-    await runtimeFetch('/api/session-knowledge/sync', {
+    await Promise.race([runtimeFetch('/api/session-knowledge/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ directory, sessionId, query }),
       directory,
-    });
+      signal: controller.signal,
+    }), deadline]);
   } catch {
     // Only means this message goes without its background.
+  } finally {
+    clearTimeout(timeout);
   }
 };
 
