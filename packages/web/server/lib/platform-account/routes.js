@@ -5,6 +5,10 @@ import { sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
 /** start/callback use one-time capabilities and an HttpOnly browser transaction cookie. */
 export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, onSessionRead, isRequestOriginAllowed = () => false }) => {
   const cookieName = (req) => sessionCookieNameForRequest(req, 'oc_platform_login');
+  // Consumer restoration repairs per-process in-memory state after a restart.
+  // It is not part of answering a verified account read, so it runs in the
+  // background and concurrent reads for one login share a single restoration.
+  const restorations = new Map();
   const route = (handler) => async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -37,11 +41,16 @@ export const registerPlatformAccountRoutes = (app, { runtime, resolveIdentity, o
       void Promise.resolve().then(() => runtime.startUsageActivity?.(who)).catch(() => {});
     }
     if (result.status === 'signed-in' && onSessionRead) {
-      const session = runtime.captureIdentitySession(who);
-      const owner = result.accountId ? runtime.actor(who) : null;
-      try { await onSessionRead(who); } catch { /* Consumer recovery cannot deny a verified account read. */ }
-      session.assertCurrent();
-      if (owner && runtime.actor(who).authSession !== owner.authSession) throw new PlatformAccountError('platform_session_changed', 409);
+      // Key on the runtime identity, which is stable across the account reads
+      // the user center issues together; a login/account change still produces
+      // a new restoration through the next call.
+      const scope = JSON.stringify(who);
+      let restore = restorations.get(scope);
+      if (!restore) {
+        restore = Promise.resolve().then(() => onSessionRead(who)).catch(() => { /* Consumer recovery is best effort and never denies identity. */ });
+        restorations.set(scope, restore);
+        void restore.then(() => { if (restorations.get(scope) === restore) restorations.delete(scope); });
+      }
     }
     res.json(result);
   });

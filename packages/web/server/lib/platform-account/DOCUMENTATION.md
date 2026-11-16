@@ -69,10 +69,15 @@ UniHub already returns an exact query total beside one requested row. Saving tha
 ### Why identity reads restore account-key consumer ownership
 
 After a successful identity or account read, the server can restore the current
-account-key receipt's in-memory owner. This hook never issues a key, starts a
-probe or changes selected models. A missing receipt or a consumer recovery
-failure leaves the verified identity usable. Identity is checked again after
-the hook; account projections also retain their original payer fence.
+account-key receipt's in-memory owner. This is per-process state repair, not
+part of answering the read: it runs in the background and concurrent reads for
+one runtime identity share a single restoration, so opening the user center
+never waits on provider verification or conversation-store migration. The hook
+never issues a key, starts a probe or changes selected models. A missing
+receipt or a consumer recovery failure leaves the verified identity usable.
+The account projection is captured before restoration is scheduled, so a
+later account or login change cannot make a stale read visible; the change
+is reflected on the next read.
 
 The captured commerce session allows model discovery, key issuance and exact
 same-key `POST /api-keys/:id/models` additions and `POST /api-keys/:id/scope`

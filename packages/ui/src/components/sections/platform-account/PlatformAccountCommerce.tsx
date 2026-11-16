@@ -204,10 +204,21 @@ export const PlatformAccountCommerce: React.FC<{
    * never change hands here, so no confirmation is asked twice.
    */
   const switchChannel = async (provider: 'wechat' | 'alipay') => {
+    if (!activeCheckout || mutationActive.current) return;
+    // A remount restores the active checkout from the server while the local
+    // command ref is still empty. The matching intent is authoritative about
+    // which offer or quote the waiting checkout was created for, so derive the
+    // replacement from it and keep the in-session ref only as a fallback.
+    const intent = state?.intents.find((item) => item.kind === 'checkout' && item.resourceId === activeCheckout.id && (item.offerId || item.quoteId));
+    const spec: { offerId?: string; quoteId?: string } | undefined = intent
+      ? (intent.quoteId ? { quoteId: intent.quoteId } : { offerId: intent.offerId })
+      : lastCheckout.current;
+    if (!spec || (!spec.offerId && !spec.quoteId)) {
+      setError('platformAccount.commerceFailed');
+      return;
+    }
     setPaymentChannel(provider);
     setQuote(null);
-    const spec = lastCheckout.current;
-    if (!activeCheckout || (!spec.offerId && !spec.quoteId) || mutationActive.current) return;
     mutationActive.current = true;
     const version = ++generation.current;
     let readStarted = false;
