@@ -78,6 +78,24 @@ some context; a failed send costs the user their message. `sync` never throws:
 it resolves `false` and the message goes out. One entry that fails to write does
 not hold back the others.
 
+Every `sync` has one five-second budget covering metadata, collection, recall
+and all entry writes, including calls made in process by queues, schedulers
+and dispatch. It resolves `false` when that budget expires or its optional
+fourth argument's `signal` is aborted. The HTTP route cancels that signal when
+the client disconnects before the response. Web, Electron and remote mobile
+clients use the same server boundary; direct engine connections retain their
+existing unsupported optional knowledge behavior.
+
+Cancellation stops a late collection or recall from starting entry writes. The
+same `AbortSignal` reaches every instruction-entry `put` and `remove`, including
+serialized recall writes; the dependency accepts it as its final argument and
+passes it to the OpenCode client request. Expired queued recall writes are
+skipped without breaking per-session serialization. Already committed entries
+remain valid; cancellation is not a transaction rollback. A dependency that
+ignores cancellation may finish its current operation, but cannot hold up the
+sender beyond the overall budget. Cancellation itself never clears existing
+entries, and does not retry or replay the user's prompt.
+
 While memory is on, every session is told when to save, even with an empty
 store. The tool description alone is read only when the agent already means to
 call it, so agents told nothing here saved only when the user said "remember".

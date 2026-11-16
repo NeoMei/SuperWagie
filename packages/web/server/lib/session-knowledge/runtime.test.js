@@ -34,7 +34,7 @@ const createRuntime = (overrides = {}) => {
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
     'isPageRenderingAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries',
-    'recallConversationMemory',
+    'recallConversationMemory', 'resolveProjectId',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -191,6 +191,130 @@ describe('writing the knowledge into a session', () => {
 
   test('does nothing without OpenCode wired', async () => {
     expect(await createRuntime(pinnedStore()).sync('ses_a', DIRECTORY)).toBe(false);
+  });
+
+  test('bounds unresolved collection and entry writes without blocking another session', async () => {
+    let releaseCollection;
+    let releaseWrite;
+    const collection = new Promise((resolve) => { releaseCollection = resolve; });
+    const write = new Promise((resolve) => { releaseWrite = resolve; });
+    const collectedEntries = createEntriesStub();
+    const writtenEntries = createEntriesStub();
+    const put = writtenEntries.put;
+    let writeSignal;
+    writtenEntries.put = async (...args) => {
+      if (args[2] === 'openchamber.product') {
+        writeSignal = args[4];
+        await write;
+      }
+      return put(...args);
+    };
+    const collecting = createRuntime({
+      ...pinnedStore(), instructionEntries: collectedEntries,
+      resolveProjectId: async (directory) => directory === '/work/waiting' ? 'waiting_project' : PROJECT_ID,
+      projectContextRuntime: {
+        readContext: async (projectId) => projectId === 'waiting_project' ? collection : { notes: [], plans: [] },
+      },
+    });
+    const writing = createRuntime({ ...pinnedStore(), instructionEntries: writtenEntries });
+    const results = [];
+    const pending = [
+      collecting.sync('ses_waiting', '/work/waiting').then((result) => { results[0] = result; }),
+      writing.sync('ses_a', DIRECTORY).then((result) => { results[1] = result; }),
+    ];
+    try {
+      expect(await collecting.sync('ses_ready', DIRECTORY)).toBe(true);
+      expect(collectedEntries.calls.every((call) => call[1] === 'ses_ready')).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 5100));
+      expect(results).toEqual([false, false]);
+      expect(writeSignal).toBeInstanceOf(AbortSignal);
+      expect(writeSignal.aborted).toBe(true);
+    } finally {
+      releaseCollection({ notes: [], plans: [] });
+      releaseWrite();
+      await Promise.all(pending);
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(collectedEntries.calls.every((call) => call[1] === 'ses_ready')).toBe(true);
+  }, 8000);
+
+  test('caller cancellation prevents a late collection from writing or clearing recall', async () => {
+    const instructionEntries = createEntriesStub();
+    instructionEntries.held.set('openchamber.recalled', 'Previous reference');
+    let release;
+    let entered;
+    const waiting = new Promise((resolve) => { release = resolve; });
+    const started = new Promise((resolve) => { entered = resolve; });
+    const runtime = createRuntime({
+      ...pinnedStore(), instructionEntries,
+      projectContextRuntime: { readContext: async () => { entered(); await waiting; return { notes: [], plans: [] }; } },
+    });
+    const controller = new AbortController();
+    const pending = runtime.sync('ses_a', DIRECTORY, '', { signal: controller.signal });
+    await started;
+    controller.abort();
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    try {
+      expect(settled).toBe(true);
+      expect(await pending).toBe(false);
+    } finally {
+      release();
+      await pending;
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(instructionEntries.calls).toEqual([]);
+    expect(instructionEntries.held.get('openchamber.recalled')).toBe('Previous reference');
+  });
+
+  test('passes one live cancellation signal to put, remove and serialized recall', async () => {
+    const instructionEntries = createEntriesStub();
+    const signals = [];
+    const put = instructionEntries.put;
+    const remove = instructionEntries.remove;
+    instructionEntries.put = async (...args) => { signals.push(args[4]); return put(...args); };
+    instructionEntries.remove = async (...args) => { signals.push(args[3]); return remove(...args); };
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries, recallConversationMemory: async () => 'Current reference' });
+    expect(await runtime.sync('ses_a', DIRECTORY, 'Current prompt')).toBe(true);
+    expect(instructionEntries.held.get('openchamber.recalled')).toBe('Current reference');
+    expect(signals.length).toBeGreaterThan(1);
+    expect(signals.every((signal) => signal instanceof AbortSignal && signal === signals[0] && !signal.aborted)).toBe(true);
+  });
+
+  test('cancels an in-flight recall write and lets the next serialized clear finish', async () => {
+    const instructionEntries = createEntriesStub();
+    instructionEntries.held.set('openchamber.recalled', 'Previous reference');
+    const put = instructionEntries.put;
+    let entered;
+    let release;
+    const started = new Promise((resolve) => { entered = resolve; });
+    instructionEntries.put = async (...args) => {
+      if (args[2] === 'openchamber.recalled') {
+        const signal = args[4];
+        entered(signal);
+        await new Promise((resolve, reject) => {
+          release = resolve;
+          signal?.addEventListener('abort', () => reject(new Error('request aborted')), { once: true });
+        });
+      }
+      return put(...args);
+    };
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries, recallConversationMemory: async () => 'Old reference' });
+    const controller = new AbortController();
+    const pending = runtime.sync('ses_a', DIRECTORY, 'Old prompt', { signal: controller.signal });
+    try {
+      expect(await started).toBeInstanceOf(AbortSignal);
+      controller.abort();
+      expect(await pending).toBe(false);
+      expect(instructionEntries.held.get('openchamber.recalled')).toBe('Previous reference');
+      expect(await runtime.sync('ses_a', DIRECTORY)).toBe(true);
+      expect(instructionEntries.held.has('openchamber.recalled')).toBe(false);
+    } finally {
+      controller.abort();
+      release();
+      await pending;
+    }
   });
 });
 

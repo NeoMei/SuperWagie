@@ -38,6 +38,10 @@ mobile connection orchestration own their respective authentication flows.
   credential preparation began. URL-token minting rejects a changed auth
   generation before dispatch and rejects stale responses from issued requests.
 - This transport adds no background work.
+- Optional session knowledge preparation has a six-second UI deadline, outside
+  the owning server runtime's five-second budget. Expiry aborts the request and
+  releases the original send even if transport preparation does not settle;
+  it never resends the prompt or changes the reasoning display.
 - Session-expiry confirmations capture the runtime instance before the deferred
   transport import and validate it before dispatch and result publication.
   Each current instance owns its pending confirmation and 15-second suspicion

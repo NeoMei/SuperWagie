@@ -1267,10 +1267,10 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   // Pins are read from and written to OpenChamber's own store.
   persistSessionMetadata: (sessionID, directory, patch) => persistSessionMetadataPatch(sessionID, patch, { directory }),
   instructionEntries: {
-    put: (sessionID, directory, key, value) => openCodeSessionClient(directory)
-      .session.instructions.entry.put({ sessionID, key, value }),
-    remove: (sessionID, directory, key) => openCodeSessionClient(directory)
-      .session.instructions.entry.remove({ sessionID, key }),
+    put: (sessionID, directory, key, value, signal) => openCodeSessionClient(directory)
+      .session.instructions.entry.put({ sessionID, key, value }, { signal }),
+    remove: (sessionID, directory, key, signal) => openCodeSessionClient(directory)
+      .session.instructions.entry.remove({ sessionID, key }, { signal }),
   },
 });
 
