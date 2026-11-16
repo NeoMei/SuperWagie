@@ -44,7 +44,7 @@ import { retry } from "./retry"
 import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
-import { readDirectoryFormSnapshot, readDirectoryPermissionSnapshot, recordDirectoryRecoveryEvent, selectHeldSessionStatuses } from "./directory-recovery-snapshots"
+import { readDirectoryFormSnapshot, readDirectoryPermissionSnapshot, readDirectoryStatusSnapshot, recordDirectoryRecoveryEvent, selectHeldSessionStatuses } from "./directory-recovery-snapshots"
 import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
 import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
@@ -927,7 +927,11 @@ async function resyncDirectorySessionStatuses(
   isStale?: () => boolean,
 ): Promise<DirectorySessionStatusSnapshot | null> {
   const invalidatedAtStart = store.getState().sessionStatusInvalidated
-  const nextStatuses = await opencodeClient.getActiveSessionStatuses(directory)
+  const nextStatuses = await readDirectoryStatusSnapshot(store, async () => {
+    const statuses = await opencodeClient.getActiveSessionStatuses(directory)
+    if (statuses === null) throw new Error("session.active failed")
+    return statuses
+  }).catch(() => null)
   // null = fetch failed; preserve existing state. {} or populated = a snapshot
   // of active sessions — reconciled per `mode` (absence ≠ idle under monotonic).
   if (nextStatuses === null || isStale?.()) return null

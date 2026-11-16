@@ -53,6 +53,7 @@ export function readDirectoryStatusSnapshot(
   read: () => Promise<State["session_status"]>,
 ): Promise<State["session_status"]> {
   const before = source.getState().session_status
+  const sendingBefore = withPromptsInFlight({}, before)
   const changes = new Map<string, SessionStatus | null>()
   return withRecoveryObserver(source, (event) => {
     if (event.type === "session.status") changes.set(event.properties.sessionID, event.properties.status)
@@ -64,9 +65,9 @@ export function readDirectoryStatusSnapshot(
   }, async () => {
     const fetched = await read()
     const current = source.getState().session_status
-    // OpenCode lists a session as active only once it admits the prompt, so
-    // the snapshot cannot speak for a prompt this page is still sending.
-    const snapshot = { ...withPromptsInFlight(fetched, current) }
+    // A pre-admission read can return after the prompt request completes.
+    // Protect its status across that boundary; newer mutations/events win below.
+    const snapshot = { ...sendingBefore, ...withPromptsInFlight(fetched, current) }
     for (const id of new Set([...Object.keys(before), ...Object.keys(current)])) {
       if (before[id] === current[id]) continue
       if (current[id]) snapshot[id] = current[id]

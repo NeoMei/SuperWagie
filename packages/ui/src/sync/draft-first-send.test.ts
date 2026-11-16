@@ -60,6 +60,7 @@ const openDraft = (draftId: number): NewSessionDraftState => ({
 })
 
 const originalClient = {
+  getSession: opencodeClient.getSession,
   createSession: opencodeClient.createSession,
   sendMessage: opencodeClient.sendMessage,
   shellSession: opencodeClient.shellSession,
@@ -157,6 +158,7 @@ beforeEach(() => {
   setImperativeSessionMessageLoader(loader)
   opencodeClient.setDirectory(DIRECTORY)
   useConfigStore.setState({ isConnected: true, hasEverConnected: true })
+  opencodeClient.getSession = async (id, directory) => sessionRecord(id, directory ?? DIRECTORY)
   opencodeClient.createSession = async (params, directory) => {
     createSessionCalls.push({ id: params?.id, directory })
     await creation.promise
@@ -182,6 +184,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  opencodeClient.getSession = originalClient.getSession
   opencodeClient.createSession = originalClient.createSession
   opencodeClient.sendMessage = originalClient.sendMessage
   opencodeClient.shellSession = originalClient.shellSession

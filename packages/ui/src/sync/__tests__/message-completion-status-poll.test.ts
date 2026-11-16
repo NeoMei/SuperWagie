@@ -10,6 +10,7 @@ import { create, type StoreApi } from "zustand"
 import type { SessionStatus } from "@/lib/opencode/model"
 import { INITIAL_STATE } from "../types"
 import type { DirectoryStore } from "../child-store"
+import { trackPromptInFlight } from "../prompts-in-flight"
 
 type StatusSnapshot = Record<string, SessionStatus | undefined>
 
@@ -137,6 +138,38 @@ describe("maybePollStatusAfterMessageCompletion (issue OPE-193)", () => {
     // Failure is not treated as authoritative empty: the busy status stays
     // until the watchdog poll (or a live event) corrects it.
     expect(store.getState().session_status?.ses_1?.type).toBe("busy")
+  })
+
+  test("a pre-admission status read cannot settle the prompt after its request completes", async () => {
+    const store = createStore({ type: "busy" })
+    const release = trackPromptInFlight("ses_1")
+    let finishRead: (() => void) | undefined
+    let markReadStarted!: () => void
+    const readStarted = new Promise<void>((resolve) => { markReadStarted = resolve })
+    respondWithSnapshot = () => {
+      if (statusSnapshotCalls.length > 1) return Promise.resolve({})
+      markReadStarted()
+      return new Promise((resolve) => { finishRead = () => resolve({}) })
+    }
+    try {
+      maybePollStatusAfterMessageCompletion("/test/project", store, "ses_1")
+      await readStarted
+      release()
+      finishRead?.()
+      await sleep(50)
+
+      expect(store.getState().session_status?.ses_1?.type).toBe("busy")
+      expect(statusSnapshotCalls).toHaveLength(1)
+
+      // A fresh poll after admission can still confirm the completed turn.
+      respondWithSnapshot = () => Promise.resolve({})
+      maybePollStatusAfterMessageCompletion("/test/project", store, "ses_1")
+      await waitForPollSettled()
+      expect(store.getState().session_status?.ses_1?.type).toBe("idle")
+    } finally {
+      release()
+      finishRead?.()
+    }
   })
 
   test("schedules one check for a burst of completions on the same session", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createStore } from "zustand/vanilla"
-import type { PermissionRequest, FormRequest, Session } from "@/lib/opencode/model"
+import type { PermissionRequest, FormRequest, Session, UserMessage } from "@/lib/opencode/model"
+import type { MessagePage } from "@/lib/opencode/client"
 import { INITIAL_STATE, type State } from "./types"
 import {
   readDirectoryPermissionSnapshot,
@@ -9,10 +10,12 @@ import {
   recordDirectoryRecoveryEvent,
 } from "./directory-recovery-snapshots"
 import { ChildStoreManager } from "./child-store"
-import { createEventRoutingIndex, handleEvent } from "./sync-context"
+import { applySessionStatusSnapshot, createEventRoutingIndex, handleEvent, needsSnapshotAfterStatusPoll } from "./sync-context"
+import { SessionMessageLoader } from "./session-message-loader"
 import { getRuntimeKey } from "../lib/runtime-switch"
 import { replaceGlobalSessionStatusById } from "./global-session-status"
 import { trackPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
+import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
@@ -160,6 +163,118 @@ describe("directory recovery snapshots", () => {
     }
     expect(await readDirectoryStatusSnapshot(store, async () => ({}))).toEqual({})
   })
+
+  test("an empty status read started before prompt admission keeps that session recoverable after admission", async () => {
+    const store = source({
+      session: [session],
+      session_status: { session: { type: "busy" } },
+      message: { session: [{ id: "prompt", sessionID: "session", role: "user", time: { created: 1 } }] },
+      part: { prompt: [{ id: "text", sessionID: "session", messageID: "prompt", type: "text", text: "Fixture prompt" }] },
+    })
+    const response = deferred<State["session_status"]>()
+    const release = trackPromptInFlight("session")
+    try {
+      const snapshot = readDirectoryStatusSnapshot(store, () => response.promise)
+      // The server read preceded admission, but its response reaches the UI
+      // after the prompt request completes. No live event repaired the gap.
+      release()
+      response.resolve({})
+      const committed = await snapshot
+      store.setState({ session_status: committed })
+
+      expect(committed).toEqual({ session: { type: "busy" } })
+      expect(getReconnectCandidateSessionIds(store.getState())).toEqual(["session"])
+    } finally {
+      release()
+      response.resolve({})
+    }
+  })
+
+  test("a completed first reply missed by the stream is recovered without another prompt", async () => {
+    const manager = new ChildStoreManager()
+    const target = { directory: "/repo", sessionID: session.id }
+    const prompt: UserMessage = { id: "first-prompt", sessionID: session.id, role: "user", time: { created: 1 } }
+    const promptParts = [{ id: "first-text", messageID: prompt.id, sessionID: session.id, type: "text", text: "Fixture prompt" }] satisfies MessagePage["items"][number]["parts"]
+    const page: MessagePage = { items: [
+      { info: prompt, parts: promptParts },
+      { info: {
+        id: "first-answer", sessionID: session.id, role: "assistant", agent: "build", providerID: "fixture", modelID: "fixture",
+        time: { created: 2, completed: 3 }, finish: "stop",
+      }, parts: [{ id: "answer-text", messageID: "first-answer", sessionID: session.id, type: "text", text: "Fixture completed answer" }] },
+    ], cursor: {} }
+    let historyReads = 0
+    const loader = new SessionMessageLoader(manager, {
+      runtimeKey: getRuntimeKey(),
+      sdk: { getSessionMessages: async () => { historyReads += 1; return page } },
+    })
+    const store = manager.ensureChild(target.directory, { bootstrap: false })
+    store.setState({ session: [session], session_status: { [session.id]: { type: "busy" } } })
+    loader.initializeCreatedSession(target)
+    loader.optimisticAdd({ ...target, message: prompt, parts: promptParts })
+    const response = deferred<State["session_status"]>()
+    const release = trackPromptInFlight(session.id)
+    try {
+      const initializing = readDirectoryStatusSnapshot(store, () => response.promise)
+      release()
+      response.resolve({})
+      store.setState({ session_status: await initializing })
+
+      // Exercise the watchdog's real selection, escalation and message loader.
+      // Its next status read observes the already completed turn, with no
+      // second user message or live event needed to make recovery eligible.
+      const beforePoll = store.getState()
+      const candidates = getReconnectCandidateSessionIds(beforePoll)
+      applySessionStatusSnapshot(store, {}, candidates, "monotonic")
+      for (const id of candidates) {
+        if (!needsSnapshotAfterStatusPoll(beforePoll, id, undefined)) continue
+        applySessionStatusSnapshot(store, {}, [id], "authoritative")
+        await loader.refreshTail({ ...target, sessionID: id }, 100)
+      }
+
+      const state = store.getState()
+      expect(historyReads).toBe(1)
+      expect(state.message[session.id].map((message) => message.role)).toEqual(["user", "assistant"])
+      expect(state.message[session.id][1].time).toEqual({ created: 2, completed: 3 })
+      expect(state.part["first-answer"]).toEqual(page.items[1].parts)
+      expect(state.session_status[session.id]).toEqual({ type: "idle" })
+      expect(getReconnectCandidateSessionIds(state)).toEqual([])
+      expect(await readDirectoryStatusSnapshot(store, async () => ({}))).toEqual({})
+    } finally {
+      release()
+      response.resolve({})
+      loader.dispose()
+      manager.disposeAll()
+    }
+  })
+
+  for (const settlement of ["idle", "error", "delete", "rejected send"] as const) {
+    test(`a newer ${settlement} supersedes pre-admission status protection`, async () => {
+      const store = source({ session_status: { session: { type: "busy" }, other: { type: "busy" } } })
+      const response = deferred<State["session_status"]>()
+      const release = trackPromptInFlight(session.id)
+      try {
+        const snapshot = readDirectoryStatusSnapshot(store, () => response.promise)
+        release()
+        if (settlement === "idle") {
+          recordDirectoryRecoveryEvent(store, { type: "session.idle", properties: { sessionID: session.id } })
+        } else if (settlement === "error") {
+          recordDirectoryRecoveryEvent(store, { type: "session.error", properties: { sessionID: session.id, error: { type: "fixture", message: "Rejected" } } })
+        } else if (settlement === "delete") {
+          recordDirectoryRecoveryEvent(store, { type: "session.deleted", properties: { sessionID: session.id } })
+        } else {
+          store.setState({ session_status: { ...store.getState().session_status, [session.id]: { type: "idle" } } })
+        }
+        response.resolve({})
+        const committed = await snapshot
+        expect(committed).toEqual(settlement === "delete" ? {} : { session: { type: "idle" } })
+        store.setState({ session_status: committed })
+        expect(await readDirectoryStatusSnapshot(store, async () => ({}))).toEqual({})
+      } finally {
+        release()
+        response.resolve({})
+      }
+    })
+  }
 
   test("a snapshot keeps the active status only of sessions whose prompt is being sent", () => {
     const snapshot = { listed: { type: "busy" } } satisfies State["session_status"]

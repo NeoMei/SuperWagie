@@ -50,7 +50,7 @@ type Props = {
 };
 
 /**
- * Whether every extension page gets its own button next to the built-in pages
+ * Whether the remaining extension pages get buttons next to the fixed pages
  * without pushing into the list controls. All or nothing: once they stop
  * fitting, they all move into one menu, so a page never hops between the row
  * and the menu as the sidebar resizes. The measured parts don't change with
@@ -122,9 +122,10 @@ function SidebarPageButton({ label, pressed, onClick, className, children }: {
 
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
-  // Creation has its own four-entry section above the session list; the
-  // extension-page menu keeps the workbench and any other page.
-  const guestPages = useGuestPages().filter((guest) => guest.id !== CREATION_GUEST_ID);
+  const availableGuestPages = useGuestPages();
+  const workbenchPage = availableGuestPages.find((guest) => guest.id === 'openchamber-builtin-workbench');
+  // Workbench stays in the fixed page group; creation has its own section.
+  const guestPages = availableGuestPages.filter((guest) => guest.id !== CREATION_GUEST_ID && guest.id !== workbenchPage?.id);
   const {
     hideDirectoryControls,
     showProjectDisplayControls,
@@ -335,6 +336,17 @@ export function SidebarHeader(props: Props): React.ReactNode {
               titlebar controls. */}
           <div className="ms-[3px] flex min-w-0 items-center gap-1.5">
             <div ref={builtinPagesRef} className="flex items-center gap-1.5">
+              {workbenchPage ? (
+                <SidebarPageButton
+                  label={workbenchPage.pageTitle ?? workbenchPage.name}
+                  pressed={openGuestPageId === workbenchPage.id}
+                  onClick={() => useUIStore.getState().setOpenGuestPage(openGuestPageId === workbenchPage.id ? null : workbenchPage.id)}
+                  className={cn(headerActionButtonClass, 'shrink-0')}
+                >
+                  <GuestIcon icon={resolveGuestIconName(workbenchPage.icon)} iconSrc={guestPackageIconSrc(workbenchPage.id, workbenchPage.icon, getRuntimeUrlResolver().authenticatedAsset)} className={headerActionIconClass} />
+                </SidebarPageButton>
+              ) : null}
+
               {showSourceBoard && overviewAvailable ? (
                 <SidebarPageButton
                   label={t('overview.title')}
