@@ -247,23 +247,38 @@ describe('personal SuperWagie API key metadata', () => {
 });
 
 describe('platform account OIDC and runtime isolation', () => {
-  it('restores consumer context after successful signed-in reads without allowing hook errors to deny identity', async () => {
+  it('restores consumer context in the background without delaying signed-in reads or denying identity on hook errors', async () => {
     const f = await fixture();
     const observed = [];
     let rejectRestore = false;
+    let releaseRestore;
+    let restoreStarted;
+    const restoreGate = new Promise((resolve) => { releaseRestore = resolve; });
     const app = express();
     registerPlatformAccountRoutes(app, { runtime: f.runtime, resolveIdentity: async () => identity,
       onSessionRead: async (who) => {
         observed.push({ identity: who, actor: f.runtime.actor(who).actingUserId });
+        restoreStarted?.();
+        await restoreGate;
         if (rejectRestore) throw new Error('fixture-private-restore-failure');
       },
     });
     expect((await request(app).get('/api/platform-account/session')).body.status).toBe('signed-out');
     expect(observed).toEqual([]);
     await f.runtime.callback(await f.begin());
-    expect((await request(app).get('/api/platform-account/session')).body.status).toBe('signed-in');
-    expect((await request(app).get('/api/platform-account')).body.status).toBe('signed-in');
-    expect(observed).toEqual([{ identity, actor: 'actor-a' }, { identity, actor: 'actor-a' }]);
+    const started = new Promise((resolve) => { restoreStarted = resolve; });
+    const responses = await Promise.all([
+      request(app).get('/api/platform-account/session'),
+      request(app).get('/api/platform-account'),
+    ]);
+    expect(responses.map((response) => response.body.status)).toEqual(['signed-in', 'signed-in']);
+    // A blocked restoration must not hold the verified account read open.
+    await started;
+    expect(observed).toEqual([{ identity, actor: 'actor-a' }]);
+    releaseRestore();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Concurrent reads for one login share a single restoration.
+    expect(observed).toHaveLength(1);
     rejectRestore = true;
     const response = await request(app).get('/api/platform-account/session');
     expect(response.status).toBe(200);
@@ -272,20 +287,28 @@ describe('platform account OIDC and runtime isolation', () => {
     expect(f.tokenRequests()).toBe(1);
   });
 
-  it.each(['account', 'logout'])('keeps consumer restoration scoped to identity when %s changes during its read', async (change) => {
+  it('keeps consumer restoration scoped to the login that triggered it after an account change', async () => {
     const f = await fixture();
     await f.runtime.callback(await f.begin());
     await f.runtime.selectAccount(identity, 'personal-a');
+    let restoreStarted;
+    const started = new Promise((resolve) => { restoreStarted = resolve; });
+    let releaseRestore;
+    const gate = new Promise((resolve) => { releaseRestore = resolve; });
     const app = express();
     registerPlatformAccountRoutes(app, { runtime: f.runtime, resolveIdentity: async () => identity,
       onSessionRead: async () => {
-        if (change === 'account') await f.runtime.selectAccount(identity, 'team-a');
-        else f.runtime.logout(identity);
+        restoreStarted();
+        await gate;
+        await f.runtime.selectAccount(identity, 'team-a');
       },
     });
     const response = await request(app).get('/api/platform-account/session');
-    expect(response.status).toBe(change === 'account' ? 200 : 409);
-    expect(response.body).toMatchObject(change === 'account' ? { status: 'signed-in', user: { id: 'actor-a' } } : { error: 'platform_session_changed' });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ status: 'signed-in', user: { id: 'actor-a' } });
+    await started;
+    releaseRestore();
+    await expect.poll(() => f.runtime.actor(identity).billingAccountId).toBe('team-a');
   });
 
   it('runs signed Code+PKCE and keeps platform sessions and tokens isolated', async () => {
