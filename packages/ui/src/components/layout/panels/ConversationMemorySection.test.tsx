@@ -24,6 +24,7 @@ const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
 const { createWebAPIs } = await import('../../../../../web/src/api/index');
 const { peekMessageFocus, settleMessageFocus } = await import('@/lib/router/messageFocus');
 const { ConversationMemorySection } = await import('./ConversationMemorySection');
+const { withConversationMemoryTimeout, ConversationMemoryError } = await import('@/lib/conversationMemory');
 const apis = createWebAPIs();
 const initialStatus: ConversationMemoryStatus = { enabled: false, state: 'off', pending: 0, failed: 0, unknown: 0, entries: 1, lastError: null };
 const initialEntry: ConversationMemoryEntry = {
@@ -162,6 +163,15 @@ describe('conversation memory management', () => {
     expect(host.textContent).toContain('index_unavailable');
     await render('/project', true);
     expect(host.textContent).toBe('');
+  });
+
+  test('a stalled status request ends the loading state through the load timeout', async () => {
+    const controller = new AbortController();
+    const pending = new Promise<never>(() => {});
+    let caught: unknown;
+    try { await withConversationMemoryTimeout(pending, controller.signal, 5); } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(ConversationMemoryError);
+    if (caught instanceof ConversationMemoryError) expect(caught.code).toBe('request_timeout');
   });
 
   test('shows separate review and blocked counts, engine health and actionable entry failures', async () => {

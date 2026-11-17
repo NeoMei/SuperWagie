@@ -127,6 +127,44 @@ test('status derives its error from current failures without a coupling write', 
   } finally { await h.runtime.stop(); }
 });
 
+test('a terminal unknown outcome stays in the counts without becoming the visible error', async () => {
+  let persisted;
+  const h = await harness({ autoStart: false, store: {
+    read: () => persisted.read(),
+    update: (...args) => persisted.update(...args),
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await persisted.update((state) => {
+    state.enabled = true;
+    state.jobs.push({ id: 'crashed', segment, state: 'unknown', error: 'generation_outcome_unknown', attempts: 0 });
+  });
+  try {
+    await h.runtime.start();
+    expect(await h.runtime.status()).toMatchObject({ lastError: null, unknown: 1 });
+  } finally { await h.runtime.stop(); }
+});
+
+test('status does not wait forever for a slow startup', async () => {
+  const entered = deferred();
+  const release = deferred();
+  let persisted;
+  const h = await harness({ autoStart: false, startupTimeoutMs: 20, knowledgeLibrary: {
+    setMemoryDemand: async () => { entered.resolve(); await release.promise; },
+  }, store: {
+    read: () => persisted.read(),
+    update: (...args) => persisted.update(...args),
+  } });
+  persisted = createConversationMemoryStore({ dataDir: h.dataDir });
+  await persisted.update((state) => { state.enabled = true; });
+  try {
+    const statusPromise = h.runtime.status();
+    await entered.promise;
+    const status = await statusPromise;
+    expect(status.enabled).toBe(true);
+    release.resolve();
+  } finally { release.resolve(); await h.runtime.stop(); }
+});
+
 test('a capture failure stays visible until a later capture succeeds', async () => {
   let unavailable = true;
   const h = await harness({

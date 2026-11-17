@@ -43,6 +43,16 @@ OpenCode remains the conversation authority.
   records, then from startup, coupling and transient errors. Recovering a stored
   failure clears the visible error when the authoritative state has no remaining
   failed record.
+- An unknown job with `generation_outcome_unknown` keeps its unknown and failed
+  counts and its stored error, but never becomes the visible status error. The
+  panel has no retry action for an interrupted extraction with no receipt, so
+  showing it as the current error would never clear. Other failed jobs and
+  entry, indexing and withdrawal failures remain visible.
+- `status()` waits at most `startupTimeoutMs` (5 seconds by default) for a
+  pending first start. It returns the current authoritative state when the
+  wait expires, and startup continues in the background. The UI bounds its own
+  status and entries reads so a stalled backend cannot hold the panel in a
+  loading state forever.
 - Capture failures and transient processing errors record a current in-memory
   failure, so status reports them until the next successful drain. A persisted
   `lastError` without a current failure stays invisible across restarts.
@@ -187,6 +197,18 @@ drain or startup failure. Cleanup matches the recorded owner exactly, so an
 unowned drain or sweep cannot clear an unrecovered manual failure. Alternative
 rejected: clearing the whole transient error on any successful operation,
 which hid the newest failure.
+
+### Why a status read is time-bounded
+
+The experiences panel previously showed a permanent loading state when a
+shared ledger write or startup recovery stalled behind another backend call.
+The server now caps how long a status read waits for startup and the client
+caps how long it waits for status and entries. Both keep the last known data
+visible when a read times out. A terminal unknown extraction outcome stays in
+the counts and stored ledger but is excluded from the visible error, because
+the panel cannot retry it and the message would never clear. Alternative
+rejected: clearing stored unknown jobs during recovery, which would erase the
+record that an extraction outcome is genuinely unknown.
 
 ### Why capture and indexing have separate durable transitions
 

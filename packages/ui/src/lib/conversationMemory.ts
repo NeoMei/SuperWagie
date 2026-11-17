@@ -50,6 +50,20 @@ export class ConversationMemoryError extends Error {
   }
 }
 
+const CONVERSATION_MEMORY_LOAD_TIMEOUT_MS = 8_000;
+
+/** Bound a request so a stalled memory backend cannot hold the panel in a loading state. */
+export const withConversationMemoryTimeout = <T>(promise: Promise<T>, signal: AbortSignal, timeoutMs = CONVERSATION_MEMORY_LOAD_TIMEOUT_MS): Promise<T> => {
+  if (signal.aborted) return Promise.reject(new DOMException('The request was aborted', 'AbortError'));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new ConversationMemoryError('request_timeout')), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+};
+
 const errorSchema = z.object({ error: z.string() });
 const queuedSchema = z.object({ queued: z.boolean() });
 const forgottenSchema = z.object({ forgotten: z.literal(true), pendingCleanup: z.boolean() });

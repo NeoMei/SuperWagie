@@ -49,13 +49,17 @@ const listedPageSchema = z.object({
 const withdrawalFailureSchema = z.object({ state: z.string(), error: z.string().nullable().optional() });
 const legacyProjectionFailureSchema = z.object({ error: z.string().nullable().optional() });
 const SESSION_PAGE_SIZE = 200;
+// A crashed extraction with no receipt becomes terminal on recovery. It has no
+// retry entry in the panel and stays in the unknown/failed counts, so it must
+// not surface as the current visible error forever.
+const TERMINAL_UNRETRYABLE_ERRORS = new Set(['generation_outcome_unknown']);
 
 export const createConversationMemoryRuntime = ({
   dataDir, resolveProjectId, createClient, readSegments, distill, renderMarkdown,
   knowledgeLibrary, globalEventHub = null, isBlocked = () => false, resolveSessionDirectory = null, readSessionSource = null, distillMethodology = null,
   persistKnowledgeLibraryEnabled = null,
   readKnowledgeLibraryEnabled = null,
-  now = () => Date.now(), debounceMs = 1500, indexPollMs = 2000, recallTimeoutMs = 1500, store: suppliedStore = null, organizer = null, memoryBackend = null,
+  now = () => Date.now(), debounceMs = 1500, indexPollMs = 2000, recallTimeoutMs = 1500, startupTimeoutMs = 5000, store: suppliedStore = null, organizer = null, memoryBackend = null,
   manualIndex = null, isManualEnabled = async () => false,
 }) => {
   const store = suppliedStore ?? createConversationMemoryStore({ dataDir });
@@ -92,7 +96,7 @@ export const createConversationMemoryRuntime = ({
     if (transientError && transientError.sequence <= sequence && transientError.owner === owner) transientError = null;
   };
   const currentFailureCode = (state) => {
-    const job = [...state.jobs, ...state.syntheses].find((item) => item.state === 'failed' || item.state === 'unknown');
+    const job = [...state.jobs, ...state.syntheses].find((item) => (item.state === 'failed' || item.state === 'unknown') && !TERMINAL_UNRETRYABLE_ERRORS.has(item.error));
     if (job) return job.error ?? 'memory_job_failed';
     const entry = state.entries.find((item) => ['active', 'candidate'].includes(item.status)
       && (item.indexState === 'failed' || item.error || item.cleanupPending && item.error));
@@ -896,7 +900,13 @@ export const createConversationMemoryRuntime = ({
     return Promise.all([core, startupMigration]).then(() => {});
   };
   const status = async () => {
-    await start().catch(() => {});
+    let timer;
+    try {
+      await Promise.race([
+        start().catch(() => {}),
+        new Promise((resolve) => { timer = setTimeout(resolve, startupTimeoutMs); timer.unref?.(); }),
+      ]);
+    } finally { clearTimeout(timer); }
     return currentStatus();
   };
   const tidy = createHyMemoryTidy({ store, requireScope, now, verifySources: (input) => verifyEntrySources({ ...input, reconcile: false }) });
