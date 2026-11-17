@@ -7,14 +7,13 @@ import { compileSlidePrompt } from '../styles/prompt-compiler.js';
 import { builtInStyleAssetsRoot, selectStyleVariant } from '../styles/catalog.js';
 import type { ResolvedStyle } from '../styles/schemas.js';
 import { submissionNote } from '../generation/image-intent.js';
-import { styleSelection } from '../styles/selection.js';
+import { styleSelection, type StyleSelection } from '../styles/selection.js';
 import { writeStyleSelectionView } from '../styles/selection-view.js';
 import { taskPath } from '../project/task-store.js';
 import { readPlanningContext } from '../planning/context.js';
 import { buildReviewModel } from '../planning/review-model.js';
 import { markdownFileLink } from '../project/markdown-link.js';
 import { loadRemoteStyleAssets, type RemoteStyleAssets } from '../styles/remote-assets.js';
-import { styleSelection, type StyleSelection } from '../styles/selection.js';
 
 export const variantKey = (style: Pick<ResolvedStyle, 'id' | 'level' | 'paletteId'>) => `${style.id}/${style.level}/${style.paletteId}`;
 export const samplePrompts = (plan: PlanBundle) => Object.fromEntries(plan.styles.flatMap(style =>
