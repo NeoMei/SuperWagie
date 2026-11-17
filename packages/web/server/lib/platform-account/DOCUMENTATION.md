@@ -335,8 +335,13 @@ A checkout uses exactly one offer or external upgrade quote and an explicit
 WeChat or Alipay provider. The backend persists the original idempotency key,
 actor, service, account, product, amount and provider before dispatch. An unknown
 create is recovered with that same key. A known checkout reconciles its original
-record. Unresolved local checkout intent blocks a new payment attempt. UniHub
-owns cross-instance commercial exclusion, verified payment and fulfillment.
+record. An unresolved local checkout intent blocks a new payment attempt while its
+code can still be paid. Once the code's session deadline passes, the local
+checkout recovery intent is released so another payment can be created; a
+payment observed after the deadline keeps the intent pending through UniHub's
+REVIEW path. This release changes only local admission control. UniHub owns
+cross-instance commercial exclusion, verified payment, refund and fulfillment,
+and its checkout state is unchanged by local expiration.
 
 External quote requests include `payment_source: external`. Local quote storage
 retains the funding source; wallet acceptance refuses an external quote and
@@ -362,7 +367,10 @@ Refund recovery persists its original refund key before network IO, including
 for a server-listed checkout first recovered on this instance. Expiration is
 only display metadata; it never proves closure. Capability loss does not hide
 existing checkout records. Old servers lacking the checkout capability retain
-their existing wallet path.
+their existing wallet path. Expiration is only display metadata for an
+upstream checkout: it never proves closure, refund or fulfillment. For local
+admission control, a passed session deadline releases the local recovery
+intent after the code can no longer be paid.
 
 Refund reasons must be nonempty and at most 80 UTF-8 bytes. The HTTP action and
 new journal writes share that contract before a refund key or reason is saved.

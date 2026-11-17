@@ -81,6 +81,29 @@ it('keeps an uncertain close pending until the original checkout confirms closur
     '/v1/accounts/acct/checkouts', '/v1/accounts/acct/checkouts/check1/close', '/v1/accounts/acct/checkouts/check1/reconcile',
   ]);
 });
+it('releases an expired local checkout intent so a new payment can be created', async () => {
+  const f = await setup(); f.state.lose = false;
+  await f.runtime.createCheckout({}, f.body);
+  f.state.checkout.payment_status = 'UNKNOWN';
+  f.state.checkout.expires_at = new Date(Date.now() - 60000).toISOString();
+  f.state.checkout.session.expires_at = new Date(Date.now() - 60000).toISOString();
+  expect((await f.runtime.overview({})).intents[0].status).toBe('FAILED');
+  const created = await f.runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID() });
+  expect(created).toMatchObject({ status: 'PENDING', resourceId: 'check2' });
+});
+
+it('frees the local guard when closing an expired checkout still returns a pending provider state', async () => {
+  const f = await setup(); f.state.lose = false;
+  await f.runtime.createCheckout({}, f.body);
+  f.state.checkout.payment_status = 'UNKNOWN';
+  f.state.checkout.expires_at = new Date(Date.now() - 60000).toISOString();
+  f.state.checkout.session.expires_at = new Date(Date.now() - 60000).toISOString();
+  const closed = await f.runtime.checkoutAction({}, 'check1', 'close', { accountId: 'acct' });
+  expect(closed.payment_status).toBe('UNKNOWN');
+  expect((await f.runtime.overview({})).intents[0].status).toBe('FAILED');
+  await expect(f.runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID() })).resolves.toMatchObject({ status: 'PENDING', resourceId: 'check2' });
+});
+
 it('keeps payment, fulfillment and refund state separate and rejects unsafe redirect URLs', async () => {
   const f = await setup(); f.state.lose = false;
   await f.runtime.createCheckout({}, f.body);

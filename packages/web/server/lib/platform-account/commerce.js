@@ -112,7 +112,14 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
   };
   const checkoutValues = (intent, checkout) => {
     if (checkout.account_id !== intent.accountId || checkout.product_id !== intent.productId || checkout.provider !== intent.provider || checkout.amount !== intent.amount) fail('platform_response_invalid', 502);
-    return { resourceId: checkout.id, status: checkout.refund_status === 'SUCCEEDED' || checkout.payment_status === 'CLOSED' ? 'FAILED' : checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'FULFILLED' && ['', 'REJECTED'].includes(checkout.refund_status) ? 'APPLIED' : 'PENDING', errorCode: checkout.error_code };
+    // UniHub keeps an expired QR/PENDING checkout authoritative until the
+    // provider confirms a terminal state. A code cannot be paid after its
+    // session deadline, so the local recovery intent no longer blocks a new
+    // payment once that deadline passes. Any payment observed after expiry is
+    // flagged REVIEW upstream, which keeps this intent pending instead. This
+    // changes only local admission control, not the upstream checkout state.
+    const expired = checkout.payment_status !== 'PAID' && checkout.payment_status !== 'REVIEW' && !checkout.refund_status && now() > Date.parse(checkout.session?.expires_at ?? checkout.expires_at);
+    return { resourceId: checkout.id, status: checkout.refund_status === 'SUCCEEDED' || checkout.payment_status === 'CLOSED' || expired ? 'FAILED' : checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'FULFILLED' && ['', 'REJECTED'].includes(checkout.refund_status) ? 'APPLIED' : 'PENDING', errorCode: checkout.error_code };
   };
   const mutateIntent = async (journal, storageId, values) => journal.mutate((intents) => {
     const intent = intents[storageId];
