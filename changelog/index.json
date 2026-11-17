@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.7.115",
+    "date": "2026-11-17",
+    "title": "Typed tasks reach execution",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "**Workbench:** Text you type in the task box now carries into the task when you create it, even if the task list refreshes in the background while you type."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.114",
     "date": "2026-11-17",
     "title": "Stable conversation-memory status",

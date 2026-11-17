@@ -18,6 +18,10 @@ locales to the page, rail and background action.
 - A language redraw retains composer text, sticky-note drafts, unsaved task
   fields, segmented choices, selection, focus and scroll position. It does not
   write tasks, notes, schedules or sessions.
+- The composer draft lives in page state and survives every redraw, including
+  session and task refreshes that rebuild the page. Create task and Start read
+  that draft, so a background refresh cannot empty what the user typed before
+  execution. A redraw while the composer is focused keeps its caret and focus.
 - Task titles, notes, session titles, project names and physical file paths are
   user content. Their bytes, task metadata and existing IDs do not change
   with the interface language. Newly created session attachment labels use the
@@ -90,6 +94,14 @@ customizations; the mounted-page test checks its absence in both languages.
 The page already redraws its DOM from local task state. A locale-only redraw
 captures and restores in-progress form edits instead of repeating bootstrap or
 remounting the iframe, which would discard drafts and issue unnecessary reads.
+
+### Why the composer draft lives in state
+
+Session and task events call the same redraw that rebuilds the whole page, so
+a draft held only on the input node vanished on the next background event.
+Keeping it in `state.composerDraft` and restoring focus makes the typed prompt
+survive until the user starts a task or session, regardless of when a refresh
+lands.
 
 ### Why task paths remain Chinese
 

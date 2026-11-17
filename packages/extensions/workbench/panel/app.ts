@@ -134,6 +134,7 @@ interface State {
   query: string;
   busy: boolean;
   notes: WorkbenchNote[];
+  composerDraft: string;
   noteDraft: string;
   noteEdits: Map<string, string>;
 }
@@ -154,6 +155,7 @@ const state: State = {
   query: '',
   busy: false,
   notes: loadWorkbenchNotes(),
+  composerDraft: '',
   noteDraft: '',
   noteEdits: new Map(),
 };
@@ -952,6 +954,8 @@ const renderHome = (): HTMLElement => {
   input.id = 'wb-composer';
   input.placeholder = t('composerPlaceholder');
   input.setAttribute('aria-label', t('composerLabel'));
+  input.value = state.composerDraft;
+  input.addEventListener('input', () => { state.composerDraft = input.value; });
   composer.append(input);
 
   const row = el('div', 'composer-row');
@@ -1427,6 +1431,8 @@ const render = (): void => {
   const focused = document.activeElement;
   const noteFocus = focused instanceof HTMLTextAreaElement && focused.classList.contains('note-body')
     ? { id: focused.id, start: focused.selectionStart, end: focused.selectionEnd, scrollTop: focused.scrollTop } : null;
+  const composerFocus = focused instanceof HTMLInputElement && focused.id === 'wb-composer'
+    ? { start: focused.selectionStart, end: focused.selectionEnd } : null;
   redrawing = true;
   try {
     stopNoteReorder?.();
@@ -1445,6 +1451,13 @@ const render = (): void => {
       input.focus({ preventScroll: true });
       input.setSelectionRange(noteFocus.start, noteFocus.end);
       input.scrollTop = noteFocus.scrollTop;
+    }
+    if (composerFocus) {
+      const composer = root.querySelector<HTMLInputElement>('#wb-composer');
+      if (composer) {
+        composer.focus({ preventScroll: true });
+        composer.setSelectionRange(composerFocus.start, composerFocus.end);
+      }
     }
   } finally {
     redrawing = false;
