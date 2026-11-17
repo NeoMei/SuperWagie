@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.7.113",
+    "date": "2026-11-17",
+    "title": "Clickable SuperPPT styles in chat",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "**SuperPPT:** Style showcase images in the chat are now selectable. Click a style image to send that choice back to the agent, so you can switch style directly in the conversation instead of only viewing the images."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.99",
     "date": "2026-11-14",
     "title": "Reliable chat folds",
