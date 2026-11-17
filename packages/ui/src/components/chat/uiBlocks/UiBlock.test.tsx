@@ -350,3 +350,23 @@ describe('a Steps block', () => {
     expect(classOf(markOf(2))).toContain('text-muted-foreground');
   });
 });
+
+test('pressing an image choice in a reply sends its label as the decision', async () => {
+  const answers: { answer: ReplyAnswer; text: string }[] = [];
+  const source = 'root = Stack([styles])\n'
+    + 'styles = ImageChoice("style", ['
+    + '{label: "选择玻璃", caption: "玻璃", image: "https://g.imgtg.com/uploads/a.png"},'
+    + '{label: "选择商务风格", caption: "商务风格", image: "https://g.imgtg.com/uploads/b.png"}'
+    + '], "点击图片选择风格")';
+  await drawReply(source, async (answer, text) => { answers.push({ answer, text }); });
+  expect(host.textContent).toContain('点击图片选择风格');
+  const tiles = [...host.querySelectorAll('button[aria-pressed]')];
+  expect(tiles).toHaveLength(2);
+  const first = tiles[0]! as HTMLElement;
+  expect(first.querySelector('img')?.getAttribute('src')).toBe('https://g.imgtg.com/uploads/a.png');
+  await act(async () => first.click());
+  expect(answers).toHaveLength(1);
+  expect(answers[0].answer.picks).toEqual([{ button: '选择玻璃', value: 'style' }]);
+  expect(answers[0].text).toContain('- style: 选择玻璃');
+  expect(host.textContent).toContain('Sent');
+});

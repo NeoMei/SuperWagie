@@ -314,3 +314,28 @@ describe('extension blocks', () => {
 
 test('the SDK reserves exactly the names of the catalog', () => {
 });
+
+test('ImageChoice parses HTTPS image options and is one reply decision', () => {
+  const source = `root = Stack([styles])
+styles = ImageChoice("style", [
+  {label: "选择玻璃", caption: "玻璃", image: "https://g.imgtg.com/uploads/a.png"},
+  {label: "选择商务风格", caption: "商务风格", image: "https://g.imgtg.com/uploads/b.png"}
+], "点击图片选择风格")`;
+  const parsed = parseUiBlock(source, true);
+  if (parsed.kind !== 'ready') throw new Error(`expected ready, got ${parsed.kind}`);
+  const [imageChoice] = childrenOf(parsed.root);
+  expect(imageChoice.typeName).toBe('ImageChoice');
+  const props = blockProps.ImageChoice.parse(imageChoice.props);
+  expect(props.name).toBe('style');
+  expect(props.label).toBe('点击图片选择风格');
+  expect(props.options.map((option) => option.image)).toEqual([
+    'https://g.imgtg.com/uploads/a.png',
+    'https://g.imgtg.com/uploads/b.png',
+  ]);
+  expect(blockDecisions(parsed.root)).toEqual(['style']);
+});
+
+test('ImageChoice rejects an insecure image URL when complete', () => {
+  const source = 'root = Stack([s])\ns = ImageChoice("style", [{label: "x", image: "http://g.imgtg.com/a.png"}])';
+  expect(parseUiBlock(source, true).kind).toBe('invalid');
+});

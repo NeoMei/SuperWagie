@@ -30,6 +30,11 @@ waiting rendered pages use the existing OpenChamber render-answer route.
   await, then checks them before admission and before confirming the result.
 - Waiting pages submit only the existing `summary` and `data` contract. This
   renderer adds no decline, deferred-page, secret or third-party execution route.
+- `ImageChoice` is a reply-only image grid. Each option uses an HTTPS `image`,
+  shows its `caption`, and sends its `label` as the answer to the block's
+  `name`. One press answers that decision through the existing reply-answer
+  path; there is no separate send step. The browser fetches image URLs with
+  `referrerPolicy="no-referrer"`.
 - This SDK has no extension block-frame contract. Unknown extension names follow
   the normal parser diagnostics and source fallback; the renderer never mounts
   an unapproved frame or fabricates an extension catalog.
