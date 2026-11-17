@@ -644,3 +644,24 @@ test('refreshing newly fulfilled checkout benefits refreshes the account once wi
   commerce.checkouts[0].refund_status='SUCCEEDED';
   await act(async()=>button('Refresh wallets and orders').click());expect(accountRefreshes).toBe(2);expect(writes).toBe(0);
 });
+
+test('a refunded checkout does not hold the purchase panel open', async () => {
+  // A refunded PAID checkout keeps fulfillment NOT_STARTED on the server. It
+  // is settled money and must not grey out the buying task, matching the
+  // server commercialClear() which excludes refund_status = SUCCEEDED.
+  commerce.checkouts = [
+    { id: 'refunded-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'alipay', offer_name: 'Refunded membership', amount: '10000000', currency: 'CNY', payment_status: 'PAID', fulfillment_status: 'NOT_STARTED', refund_status: 'SUCCEEDED', expires_at: '2027-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z', session: { kind: 'redirect', url: 'https://openapi.alipay.com/gateway.do?sign=fixture', expires_at: '2027-01-01T00:00:00Z' } },
+    { id: 'refunded-wechat', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Refunded addon', amount: '9800000', currency: 'CNY', payment_status: 'PAID', fulfillment_status: 'NOT_STARTED', refund_status: 'SUCCEEDED', expires_at: '2027-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z' },
+  ];
+  activeMembership = false;
+  await render('overview');
+  expect(host?.textContent).not.toContain('An earlier request is unresolved. Check its original status before starting another purchase or recharge.');
+  expect(button('Subscribe').disabled).toBe(false);
+  expect(button('Buy extra credits').disabled).toBe(false);
+  const membership = host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]');
+  expect(membership?.disabled).toBe(false);
+  await act(async () => membership?.click());
+  const purchase = () => [...(host?.querySelectorAll('button') ?? [])].find((item) => item.textContent?.startsWith('Buy SuperWagie Plus'));
+  expect(purchase()?.disabled).toBe(false);
+  expect(paymentMutations()).toHaveLength(0);
+});
