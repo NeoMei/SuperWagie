@@ -28,6 +28,7 @@ import {
   updateConversationMemorySettings,
   type ConversationMemoryEntry,
   type ConversationMemoryStatus,
+  withConversationMemoryTimeout,
 } from '@/lib/conversationMemory';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { reportSettingsSaveState } from '@/lib/persistence';
@@ -54,6 +55,7 @@ const engineStateKeys = {
   ready: 'conversationMemory.state.ready', unavailable: 'conversationMemory.state.unavailable',
 } satisfies Record<NonNullable<ConversationMemoryStatus['engine']>['state'], I18nKey>;
 const errorKeyOf = (code: string): I18nKey => {
+  if (code === 'request_timeout') return 'conversationMemory.error.timeout';
   if (code === 'managed_derivation_scope_unavailable') return 'conversationMemory.error.projectScope';
   if (code === 'hy_runtime_not_installed') return 'conversationMemory.error.engineMissing';
   if (code === 'hy_worker_exited') return 'conversationMemory.error.engineStopped';
@@ -115,8 +117,8 @@ const ConversationMemoryContent: React.FC<ConversationMemorySectionProps> = ({ d
     if (signal.aborted || mutating.current) return;
     const readRevision = ++revision.current;
     const [nextStatus, nextEntries] = await Promise.allSettled([
-      readConversationMemoryStatus(signal),
-      directory ? listConversationMemoryEntries({ directory, query, signal }) : Promise.resolve([]),
+      withConversationMemoryTimeout(readConversationMemoryStatus(signal), signal),
+      directory ? withConversationMemoryTimeout(listConversationMemoryEntries({ directory, query, signal }), signal) : Promise.resolve([]),
     ]);
     if (signal.aborted || readRevision !== revision.current) return;
     if (nextStatus.status === 'fulfilled') setStatus(nextStatus.value);
