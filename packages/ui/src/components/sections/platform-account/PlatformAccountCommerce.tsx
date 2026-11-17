@@ -15,6 +15,10 @@ type PendingCommand = { kind: 'checkout'; offerId?: string; quoteId?: string; pr
 /** A payment attempt the account has not settled yet. */
 const WAITING_PAYMENT = ['CREATED', 'PENDING', 'UNKNOWN'];
 const waitingCheckout = (checkout: { payment_status: string; refund_status: string }) => WAITING_PAYMENT.includes(checkout.payment_status) && !checkout.refund_status;
+const checkoutExpired = (checkout: PlatformCheckout, at: number = Date.now()) => {
+  const deadline = Date.parse(checkout.session?.expires_at ?? checkout.expires_at);
+  return Number.isFinite(deadline) && at > deadline;
+};
 const settledCheckout = (checkout: { payment_status: string; fulfillment_status: string; refund_status: string }) => (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'FULFILLED') || checkout.refund_status === 'SUCCEEDED';
 /** The provider is queried on this cadence while a code is on screen. */
 const PAYMENT_POLL_MS = 4000;
@@ -217,17 +221,26 @@ export const PlatformAccountCommerce: React.FC<{
       setError('platformAccount.commerceFailed');
       return;
     }
-    setPaymentChannel(provider);
-    setQuote(null);
     mutationActive.current = true;
     const version = ++generation.current;
     let readStarted = false;
     setBusy(true); setError(null);
     try {
-      await updatePlatformCheckout(accountId, activeCheckout.id, 'close');
+      const closed = await updatePlatformCheckout(accountId, activeCheckout.id, 'close');
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
+      // A close that still reports a live payment keeps the original attempt
+      // authoritative: creating a replacement would be refused as a second
+      // pending payment. An expired QR can no longer be paid, so let the
+      // channel switch continue and rely on the server to release the expired
+      // local guard. A late payment on that code is handled upstream as REVIEW.
+      if (waitingCheckout(closed) && !checkoutExpired(closed)) {
+        setError('platformAccount.error.operationPending');
+        return;
+      }
       await createPlatformCheckout({ accountId, offerId: spec.offerId, quoteId: spec.quoteId, provider, idempotencyKey: crypto.randomUUID() });
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
+      setPaymentChannel(provider);
+      setQuote(null);
       readStarted = true; const next = await readPlatformCommerce();
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
       if (next.accountId !== accountId) throw new PlatformAccountError('platform_account_changed');

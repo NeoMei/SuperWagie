@@ -44,6 +44,7 @@ let commerceReads = 0;
 let purchaseFailure: 'operation' | 'read' | null = null;
 let checkoutActionFailure: 'operation' | 'read' | null = null;
 let paymentMutationsBeforePurchase = 0;
+let checkoutCloseStatus = 'CLOSED';
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   const path = String(input instanceof Request ? input.url : input);
   if (init?.method && init.method !== 'GET') { writes++; mutations.push({ path, body: String(init.body) }); }
@@ -61,7 +62,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   if (checkoutActionFailure === 'operation' && path.includes('/waiting-checkout/')) return Response.json({ error: 'platform_unavailable' }, { status: 503 });
   const waitingCheckout = commerce.checkouts?.find((item) => item.id === 'waiting-checkout');
   if (waitingCheckout && path.includes('/waiting-checkout/') && path.endsWith('/reconcile')) return Response.json(waitingCheckout);
-  if (waitingCheckout && path.includes('/waiting-checkout/') && path.endsWith('/close')) return Response.json({ ...waitingCheckout, payment_status: 'CLOSED' });
+  if (waitingCheckout && path.includes('/waiting-checkout/') && path.endsWith('/close')) return Response.json({ ...waitingCheckout, payment_status: checkoutCloseStatus });
   if (method === 'GET' && (path.includes('/usage/') || path.includes('/activity'))) return Response.json({ error: 'not_found' }, { status: 404 });
   if (path.endsWith('/checkouts')) {
     const body = JSON.parse(String(init?.body));
@@ -100,7 +101,7 @@ const button = (text: string) => {
 };
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined; host?.remove(); host = undefined;
-  writes = 0; accountRefreshes = 0; mutations.length = 0; Object.assign(commerce, structuredClone(initialCommerce)); activeMembership = true; currentMembership = undefined; upgradeQuote = undefined; loseUpgradeResponse = false; upgradeRejection = null; commerceReadFailures = 0; commerceReads = 0; purchaseFailure = null; checkoutActionFailure = null; paymentMutationsBeforePurchase = 0; usePlatformAccountTabStore.getState().setTab('billing');
+  writes = 0; accountRefreshes = 0; mutations.length = 0; Object.assign(commerce, structuredClone(initialCommerce)); activeMembership = true; currentMembership = undefined; upgradeQuote = undefined; loseUpgradeResponse = false; upgradeRejection = null; commerceReadFailures = 0; commerceReads = 0; purchaseFailure = null; checkoutActionFailure = null; paymentMutationsBeforePurchase = 0; checkoutCloseStatus = 'CLOSED'; usePlatformAccountTabStore.getState().setTab('billing');
 });
 afterAll(async () => {
   fetchFixture.mockRestore(); await browser.happyDOM.close();
@@ -563,6 +564,44 @@ test('switching a restored waiting checkout uses its checkout intent to recreate
     '/api/platform-account/commerce/checkouts',
   ]);
   expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
+});
+
+test('an unresolved checkout close keeps the original channel and shows the pending error', async () => {
+  commerce.payments = { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] };
+  commerce.checkouts = [{ id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z', session: { kind: 'qr', url: 'weixin://pay/fixture', expires_at: '2099-01-01T00:00:00Z' } }];
+  commerce.intents = [{ idempotencyKey: 'restored-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '10000000', offerId: 'membership-a', resourceId: 'waiting-checkout', provider: 'wechat', status: 'PENDING', createdAt: '2026-11-08T00:00:00Z' }];
+  checkoutCloseStatus = 'PENDING';
+  await render('orders');
+  expect(host?.textContent).toContain('WeChat Pay');
+  const channelGroup = [...(host?.querySelectorAll('[role="group"]') ?? [])].find((item) => item.getAttribute('aria-label') === 'Payment method');
+  const alipay = [...(channelGroup?.querySelectorAll('button') ?? [])].find((item) => item.textContent === 'Alipay' && item.getAttribute('aria-pressed') !== 'true');
+  expect(alipay).toBeDefined();
+  await act(async () => alipay?.click());
+  expect(paymentMutations().map((item) => item.path)).toEqual([
+    '/api/platform-account/commerce/checkouts/waiting-checkout/close',
+  ]);
+  expect(host?.textContent).toContain('An earlier request is unresolved. Check its original status before starting another purchase or recharge.');
+  expect(host?.textContent).toContain('WeChat Pay');
+  expect(channelGroup?.querySelector('[aria-pressed="true"]')?.textContent).toBe('WeChat Pay');
+});
+
+test('switching from an expired waiting checkout creates the payment on the other channel', async () => {
+  commerce.payments = { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] };
+  commerce.checkouts = [{ id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2020-01-01T00:00:00Z', created_at: '2020-01-01T00:00:00Z', session: { kind: 'qr', url: 'weixin://pay/fixture', expires_at: '2020-01-01T00:00:00Z' } }];
+  commerce.intents = [{ idempotencyKey: 'restored-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '10000000', offerId: 'membership-a', resourceId: 'waiting-checkout', provider: 'wechat', status: 'PENDING', createdAt: '2020-01-01T00:00:00Z' }];
+  checkoutCloseStatus = 'PENDING';
+  await render('orders');
+  expect(host?.textContent).toContain('WeChat Pay');
+  const channelGroup = [...(host?.querySelectorAll('[role="group"]') ?? [])].find((item) => item.getAttribute('aria-label') === 'Payment method');
+  const alipay = [...(channelGroup?.querySelectorAll('button') ?? [])].find((item) => item.textContent === 'Alipay' && item.getAttribute('aria-pressed') !== 'true');
+  expect(alipay).toBeDefined();
+  await act(async () => alipay?.click());
+  expect(paymentMutations().map((item) => item.path)).toEqual([
+    '/api/platform-account/commerce/checkouts/waiting-checkout/close',
+    '/api/platform-account/commerce/checkouts',
+  ]);
+  expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
+  expect(host?.textContent).not.toContain('An earlier request is unresolved. Check its original status before starting another purchase or recharge.');
 });
 
 test('reopening retains paid activation and refund states without presenting another payment link', async () => {
