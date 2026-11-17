@@ -2,6 +2,12 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.116] - 2026-11-17
+
+### Fixes
+
+- Payments: an expired QR-code checkout no longer blocks switching to another payment method; late payment on the expired code still stays under review.
+
 ## [2.7.115] - 2026-11-17
 
 ### Fixes

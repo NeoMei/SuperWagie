@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.7.116",
+    "date": "2026-11-17",
+    "title": "Expired payment codes release their hold",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "Payments: an expired QR-code checkout no longer blocks switching to another payment method; late payment on the expired code still stays under review."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.115",
     "date": "2026-11-17",
     "title": "Typed tasks reach execution",
