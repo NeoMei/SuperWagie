@@ -14,7 +14,7 @@ const setup = async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-checkout-'));
   cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
   const offer = { id: 'points', product_id: 'superwagie', name: 'Points', account_kind: 'both', kind: 'membership', period: 'month', price: '1000000', monthly_credit: '2000000', validity_months: 0, rank: 1, sandbox: false, status: 'published', entitlements: { pricing_program: 'superwagie-ai-points-v1' } };
-  const state = { refundSubmissions: 0, checkoutSequence: 0, checkoutKey: null, quoteNumber: 0, rejectQuote: false, rejectStatus: 409, failCheckoutRead: false, ready: true, configured: true, lose: true, refundLoss: false, calls: [], checkout: null, url: 'weixin://wxpay/bizpayurl?pr=test' };
+  const state = { refundSubmissions: 0, checkoutSequence: 0, checkoutKey: null, quoteNumber: 0, rejectQuote: false, rejectStatus: 409, createErrorCode: null, createStatus: 409, failCheckoutRead: false, ready: true, configured: true, lose: true, refundLoss: false, calls: [], checkout: null, url: 'weixin://wxpay/bizpayurl?pr=test' };
   const accountRuntime = { captureCommerceSession: () => ({ billingAccountId: 'acct', actingUserId: 'actor', serviceId: 'service', request: async (route, init) => {
     state.calls.push({ route, init });
     if (route === '/v1/accounts') return [{ id: 'acct', kind: 'personal', role: 'owner' }];
@@ -37,6 +37,7 @@ const setup = async () => {
     if (route.endsWith('/checkouts') && init?.method === 'POST') {
       const saved = JSON.parse(await fs.readFile(path.join(dir, 'unihub-commerce/state.json'), 'utf8'));
       expect(Object.values(saved.intents).find(item => item.idempotencyKey === init.headers['Idempotency-Key']).status).toBe('UNKNOWN');
+      if (state.createErrorCode) throw new PlatformAccountError(state.createErrorCode, state.createStatus);
       if (state.rejectQuote) throw new PlatformAccountError('quote_invalidated',state.rejectStatus);
       if (state.checkoutKey !== init.headers['Idempotency-Key']) state.checkout = null;
       state.checkoutKey = init.headers['Idempotency-Key'];
@@ -188,6 +189,51 @@ it('does not infer the resource of an unknown create from a completed checkout l
   const f=await setup();expect((await f.runtime.createCheckout({},f.body)).status).toBe('UNKNOWN');f.state.checkout.payment_status='PAID';f.state.checkout.fulfillment_status='FULFILLED';
   expect((await f.runtime.overview({})).intents[0].status).toBe('UNKNOWN');
   await expect(f.runtime.createCheckout({}, {...f.body,idempotencyKey:crypto.randomUUID()})).rejects.toMatchObject({code:'platform_operation_pending'});
+});
+
+it('heals a poisoned pre-admission operation_pending checkout from an older journal', async () => {
+  const f = await setup();
+  // Reproduce the user's live record: an alipay checkout that UniHub rejected
+  // before admission, leaving UNKNOWN with no resource ID.
+  const original = await f.runtime.createCheckout({}, f.body);
+  expect(original.status).toBe('UNKNOWN');
+  await f.runtime.close();
+  const file = path.join(f.dir, 'unihub-commerce/state.json');
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  const intent = Object.values(saved.intents)[0];
+  intent.provider = 'alipay';
+  intent.resourceId = undefined;
+  intent.status = 'UNKNOWN';
+  intent.errorCode = 'operation_pending';
+  intent.updatedAt = new Date(Date.now() - 120000).toISOString();
+  await fs.writeFile(file, JSON.stringify(saved));
+  const runtime = f.create();
+  const overview = await runtime.overview({});
+  expect(overview.intents[0]).toMatchObject({ status: 'FAILED', errorCode: 'operation_pending' });
+  const next = await runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID(), provider: 'alipay' });
+  expect(next).toMatchObject({ status: 'UNKNOWN' });
+});
+
+it('a pre-admission operation_pending create leaves a releasable unknown checkout', async () => {
+  const f = await setup();
+  f.state.createErrorCode = 'operation_pending';
+  f.state.lose = false;
+  const created = await f.runtime.createCheckout({}, f.body);
+  expect(created).toMatchObject({ status: 'UNKNOWN', errorCode: 'operation_pending' });
+  expect(created.resourceId).toBeUndefined();
+  // A fresh key still blocks while the short protective window is open.
+  await expect(f.runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID() })).rejects.toMatchObject({ code: 'platform_operation_pending' });
+  // Pass the protective window by aging the saved record, then overview heals it.
+  await f.runtime.close();
+  const file = path.join(f.dir, 'unihub-commerce/state.json');
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  const intent = Object.values(saved.intents)[0];
+  intent.updatedAt = new Date(Date.now() - 120000).toISOString();
+  await fs.writeFile(file, JSON.stringify(saved));
+  const runtime = f.create();
+  expect((await runtime.overview({})).intents[0].status).toBe('FAILED');
+  f.state.createErrorCode = null;
+  await expect(runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID() })).resolves.toMatchObject({ status: 'PENDING' });
 });
 
 it.each(['x'.repeat(81), '退'.repeat(27)])('rejects a refund reason above 80 UTF-8 bytes before journaling: %s', async (reason) => {

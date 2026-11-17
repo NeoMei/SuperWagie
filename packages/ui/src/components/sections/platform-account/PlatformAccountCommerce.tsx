@@ -292,7 +292,8 @@ export const PlatformAccountCommerce: React.FC<{
   const addonNeedsMembership = !hasActiveMembership && selectedOffer?.kind === 'addon' && selectedOffer.productId === 'superwagie';
   // One open attempt is enough: an unsettled payment, an unfinished
   // activation or a refund under review justifiably holds the next purchase.
-  const unresolved = !!command || !!state?.checkouts?.some((item) => waitingCheckout(item) || item.payment_status === 'REVIEW' || (item.payment_status === 'PAID' && item.fulfillment_status !== 'FULFILLED') || ['PENDING', 'REVIEW'].includes(item.refund_status)) || !!state?.intents.some((intent) => intent.status === 'PREPARED' || intent.status === 'UNKNOWN');
+  const unresolvedPayment = (item: PlatformCheckout) => !settledCheckout(item) && (waitingCheckout(item) || item.payment_status === 'REVIEW' || (item.payment_status === 'PAID' && item.fulfillment_status !== 'FULFILLED') || ['PENDING', 'REVIEW'].includes(item.refund_status));
+  const unresolved = !!command || !!state?.checkouts?.some(unresolvedPayment) || !!state?.intents.some((intent) => intent.status === 'PREPARED' || intent.status === 'UNKNOWN');
   const finance = state?.financialAccess === true;
   const walletName = (product: string) => product === 'superwagie' ? t('platformAccount.membershipWallet') : product === 'llmrouter' ? t('platformAccount.modelWallet') : product === '' ? t('platformAccount.unifiedWallet') : t('platformAccount.originalRequest');
   const purchaseName = (product: string) => t(product === 'superwagie' ? 'platformAccount.membershipPlans' : product === 'llmrouter' ? 'platformAccount.addonPlans' : 'platformAccount.originalRequest');
@@ -360,7 +361,7 @@ export const PlatformAccountCommerce: React.FC<{
 
   const checkouts = state.checkouts ?? [];
   // One attempt stays in front: still payable, activating, or under review.
-  const payment = checkouts.find((item) => waitingCheckout(item) || item.payment_status === 'REVIEW' || (item.payment_status === 'PAID' && item.fulfillment_status !== 'FULFILLED') || ['PENDING', 'REVIEW'].includes(item.refund_status)) ?? null;
+  const payment = checkouts.find(unresolvedPayment) ?? null;
   const pastPayments = checkouts.filter((item) => item.id !== payment?.id);
   const recoverableIntents = state.intents.filter((intent) => intent.status !== 'APPLIED' && intent.status !== 'FAILED');
   const historyIntents = state.intents.filter((intent) => intent.productId === 'superwagie' || intent.productId === 'llmrouter' || (intent.status !== 'APPLIED' && intent.status !== 'FAILED'));

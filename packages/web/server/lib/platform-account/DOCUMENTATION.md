@@ -343,6 +343,17 @@ REVIEW path. This release changes only local admission control. UniHub owns
 cross-instance commercial exclusion, verified payment, refund and fulfillment,
 and its checkout state is unchanged by local expiration.
 
+A pre-admission operation_pending response is different: UniHub returns it
+from its commercial check before any checkout record exists, so there is no
+resource or provider session to reconcile. The BFF still records an UNKNOWN
+intent under the original key to cover a late duplicate of an already admitted
+request, but releases that hold after a short bounded window. Both the overview
+reconciliation and the write guard heal older journal records of this exact
+shape (checkout, no resource ID, UNKNOWN, errorCode operation_pending). UniHub's
+authoritative commercial exclusion remains unchanged; this only stops a local
+admission guard from blocking every future checkout forever after a rejected
+create. Genuinely pending checkouts with a resource ID remain blocking.
+
 External quote requests include `payment_source: external`. Local quote storage
 retains the funding source; wallet acceptance refuses an external quote and
 external checkout refuses a wallet quote. The authoritative external quote must
