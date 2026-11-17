@@ -73,6 +73,13 @@ const publicIntent = (intent) => ({ idempotencyKey: intent.idempotencyKey, kind:
 const intentId = (session, accountId, idempotencyKey) => crypto.createHash('sha256').update(JSON.stringify([session.serviceId, session.actingUserId, accountId, idempotencyKey])).digest('hex');
 const safeError = (error) => error instanceof PlatformAccountError && /^[a-z][a-z0-9_]{0,100}$/.test(error.code) ? error.code : 'platform_commerce_unavailable';
 const rejectedCodes = new Set(['invalid_request', 'forbidden', 'insufficient_funds', 'insufficient_credits', 'not_found', 'unsupported_plan_change', 'subscription_required', 'payment_not_configured']);
+// UniHub emits operation_pending from its pre-admission commercial check
+// before a checkout record or provider session exists. A failed create leaves
+// no resource to reconcile, so holding the account open forever cannot
+// protect a payment that was never admitted. Limit that hold to a short
+// safety window for a late duplicate of an already admitted request.
+const preAdmissionHoldMs = 60_000;
+const releasablePreAdmissionIntent = (intent, at = Date.now()) => intent.kind === 'checkout' && !intent.resourceId && intent.status === 'UNKNOWN' && intent.errorCode === 'operation_pending' && at - Date.parse(intent.updatedAt) >= preAdmissionHoldMs;
 
 /** UniHub remains the authority for balances and fulfillment. Only recovery intent is local. */
 export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = Date.now }) => {
@@ -182,6 +189,16 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     const journal = await store();
     const storageId = intentId(ctx.session, body.accountId, body.idempotencyKey);
     return exclusive(storageId, async () => {
+        const heal = async () => journal.mutate((intents) => {
+          let changed = false;
+          for (const [storedId, saved] of Object.entries(intents)) {
+            if (saved.serviceId !== ctx.session.serviceId || saved.actorId !== ctx.session.actingUserId || saved.accountId !== body.accountId || !releasablePreAdmissionIntent(saved, now())) continue;
+            intents[storedId] = { ...saved, status: 'FAILED', errorCode: 'operation_pending', updatedAt: new Date(now()).toISOString() };
+            changed = true;
+          }
+          return changed;
+        });
+        await heal();
       if (!journal.read()[storageId] && quote && Date.parse(quote.expiresAt) <= now()) fail('platform_quote_expired', 409);
       if (!journal.read()[storageId] && kind === 'purchase' && offer?.kind === 'membership') {
         requireFinance(ctx, ['subscriptions:read']);
@@ -203,7 +220,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
           if (existing.kind !== intent.kind || existing.productId !== intent.productId || existing.amount !== intent.amount || existing.offerId !== intent.offerId || existing.quoteId !== intent.quoteId || existing.provider !== intent.provider) fail('platform_idempotency_conflict', 409);
           return { value: structuredClone(existing), created: false };
         }
-        const unresolved = Object.values(intents).find((item) => item.kind !== 'recharge' && item.serviceId === intent.serviceId && item.actorId === intent.actorId && item.accountId === intent.accountId && (['PREPARED', 'UNKNOWN'].includes(item.status) || item.kind === 'checkout' && item.status === 'PENDING'));
+        const unresolved = Object.values(intents).find((item) => item.kind !== 'recharge' && item.serviceId === intent.serviceId && item.actorId === intent.actorId && item.accountId === intent.accountId && (['PREPARED', 'UNKNOWN'].includes(item.status) || item.kind === 'checkout' && item.status === 'PENDING') && !releasablePreAdmissionIntent(item, now()));
         if (unresolved) {
           if (!hasScopes(ctx.capabilities, ['orders:read'])) fail('platform_scope_required', 403);
           fail('platform_operation_pending', 409);
@@ -234,6 +251,15 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       ]);
       if (resources && (resources.account_id !== ctx.account.id || !resources.wallets)) fail('platform_response_invalid', 502);
       const journal = finance ? await store() : null;
+      if (journal && finance && hasScopes(ctx.capabilities, ['orders:read'])) await journal.mutate((intents) => {
+        let changed = false;
+        for (const [storageId, intent] of Object.entries(intents)) {
+          if (intent.serviceId !== ctx.session.serviceId || intent.actorId !== ctx.session.actingUserId || intent.accountId !== ctx.account.id || !releasablePreAdmissionIntent(intent, now())) continue;
+          intents[storageId] = { ...intent, status: 'FAILED', errorCode: 'operation_pending', updatedAt: new Date(now()).toISOString() };
+          changed = true;
+        }
+        return changed;
+      });
       const beforeCheckoutRead = journal?.read() ?? {};
       const checkouts = finance && hasScopes(ctx.capabilities, ['orders:read']) && ctx.capabilities.payment_providers !== undefined
         ? parse(z.array(checkoutSchema), await ctx.session.request(pathFor(ctx.account.id, 'checkouts'))) : [];
