@@ -10,7 +10,8 @@
     "src/project/markdown-link.ts and its two call sites preserve URL-encoded local Markdown links.",
     "tests/markdown-link.test.ts uses the upstream node:test runner; fast-planning selector assertion expects a file URL.",
     "Machine-specific RELEASE-INSTALL.json is omitted.",
-    "Managed launchers invoke the captured server executable without system Node/npm. Compiled offline boundary is explicit in instructions."
+    "Managed launchers invoke the captured server executable without system Node/npm. Compiled offline boundary is explicit in instructions.",
+    "Plan-review now emits an openui-lang image-choice block so chat style images can be clicked to reply with the selected style; SKILL.md, src/workflow/planning.ts and tests/plan-review.test.ts carry the adaptation."
   ],
   "files": [
     {
@@ -111,7 +112,7 @@
     },
     {
       "path": "skills/superppt/SKILL.md",
-      "shippedSha256": "982129cdf3d673ed7f212592bf5e3c542f73c21a99e17f8a141396bdfa994425",
+      "shippedSha256": "0aaee38036580c7f8fc34696c0dda762de20a31a6d8f429ce149efa6514fd71d",
       "sourcePath": "skills/superppt/SKILL.md",
       "upstreamSha256": "04709c1432e0f6f7c991cc7b8972277f848ba84ffd0034300f585ac7b3b1d1af"
     },
@@ -147,7 +148,7 @@
     },
     {
       "path": "skills/superppt/references/\u4f9d\u8d56\u8bf4\u660e.md",
-      "shippedSha256": "15535549c69ca5d85736c5ae539682466b1f40eee1d7e9c80e64bc44e9616009",
+      "shippedSha256": "313a5647f172d73bb363da01761caa1c859b21d53dad3e571db707b916d56f50",
       "sourcePath": "skills/superppt/references/\u4f9d\u8d56\u8bf4\u660e.md",
       "upstreamSha256": "5786fac7b5a3ece292894d227120d94b6176a07275bab51deb2cef37d9568bfd"
     },
@@ -434,7 +435,7 @@
     },
     {
       "path": "src/workflow/planning.ts",
-      "shippedSha256": "1a488c758fb7f55c0b98d82345f2a3c0c947cb92f49e9b3e4e137c44da99d6f7",
+      "shippedSha256": "a6f1c7d554c273258c568fddac2f113b84e0b7dfa7aec94b83469e263b84c326",
       "sourcePath": "src/workflow/planning.ts",
       "upstreamSha256": "9996f6b9145fc2fa3209349afaebb68f11172e688436f725e78e3dab0174b5b6"
     },
@@ -637,7 +638,7 @@
     },
     {
       "path": "tests/plan-review.test.ts",
-      "shippedSha256": "db28f756a93f936e34a1896c7f29cc0379eae1028a9d53f74d50479a095d49b8",
+      "shippedSha256": "bcf2a4b0b37ad7d25da78dcbb6cd2d492d3a4d6eb435e64a1636e763c08bc26f",
       "sourcePath": "tests/plan-review.test.ts",
       "upstreamSha256": "db28f756a93f936e34a1896c7f29cc0379eae1028a9d53f74d50479a095d49b8"
     },
