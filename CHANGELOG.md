@@ -2,6 +2,12 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.115] - 2026-11-17
+
+### Fixes
+
+- **Workbench:** Text you type in the task box now carries into the task when you create it, even if the task list refreshes in the background while you type.
+
 ## [2.7.114] - 2026-11-17
 
 ### Fixes
