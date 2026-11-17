@@ -2,6 +2,13 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.114] - 2026-11-17
+
+### Fixes
+
+- **Experiences:** The conversation-memory status panel no longer stays loading when a shared ledger write or startup recovery stalls. Status reads finish within a bounded window and the panel shows a timeout message instead of an endless spinner.
+- **Experiences:** A crashed extraction with no receipt no longer leaves a permanent visible error. It is excluded from the visible error while remaining in the unknown/failed counts.
+
 ## [2.7.113] - 2026-11-17
 
 ### Fixes

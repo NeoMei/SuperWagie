@@ -1,5 +1,26 @@
 [
   {
+    "version": "2.7.114",
+    "date": "2026-11-17",
+    "title": "Stable conversation-memory status",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "**Experiences:** The conversation-memory status panel no longer stays loading when a shared ledger write or startup recovery stalls. Status reads finish within a bounded window and the panel shows a timeout message instead of an endless spinner.",
+        "**Experiences:** A crashed extraction with no receipt no longer leaves a permanent visible error. It is excluded from the visible error while remaining in the unknown/failed counts."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.113",
     "date": "2026-11-17",
     "title": "Clickable SuperPPT styles in chat",
