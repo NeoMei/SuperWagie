@@ -1,7 +1,16 @@
 <section class="section-tight">
   <div class="wrap prose">
     <h1>Release notes</h1>
-    <p class="lead">Current version 2.7.113 · 17 November 2026</p>
+    <p class="lead">Current version 2.7.114 · 18 November 2026</p>
+    <h2>2.7.114 · Stable experiences panel</h2>
+    <ul>
+      <li>The conversation-memory status panel no longer stays loading when a shared ledger write or startup recovery stalls. Status reads finish within a bounded window and show a timeout message instead of an endless spinner.</li>
+      <li>A crashed extraction without a receipt no longer shows a permanent visible error, while the state remains in the unknown/failed counts.</li>
+      <li>Keeps the clickable SuperPPT chat styles from 2.7.113.</li>
+    </ul>
+    <p>Apple silicon Mac and Windows x64 installers are available from the <a href="/en/download/">download page</a>, along with checksums.</p>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.114">View the full 2.7.114 release information</a></p>
+
     <h2>2.7.113 · Clickable SuperPPT styles in chat</h2>
     <ul>
       <li>Fixed SuperPPT style selection. Style showcase images in a chat message are now selectable.</li>
