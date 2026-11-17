@@ -6,16 +6,15 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.116 for macOS Apple silicon and
+The website targets release 2.7.117 for macOS Apple silicon and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
 Windows installer is unsigned. Precise installer sizes are added to the public
 site after the final artifacts are verified.
 
-Version 2.7.116 fixes expired payment codes. An expired QR-code checkout no longer
-blocks switching to another payment method; a late payment on the expired code still
-stays under review.
+Version 2.7.117 fixes refunded orders holding the purchase panel open. A fully
+refunded order no longer greys out membership and credit purchase plans.
 
 Version 2.7.113 fixes SuperPPT style selection. Style showcase images in the chat
 are now selectable: clicking a style image sends that choice back to the agent, so
