@@ -13,6 +13,8 @@ import { taskPath } from '../project/task-store.js';
 import { readPlanningContext } from '../planning/context.js';
 import { buildReviewModel } from '../planning/review-model.js';
 import { markdownFileLink } from '../project/markdown-link.js';
+import { loadRemoteStyleAssets, type RemoteStyleAssets } from '../styles/remote-assets.js';
+import { styleSelection, type StyleSelection } from '../styles/selection.js';
 
 export const variantKey = (style: Pick<ResolvedStyle, 'id' | 'level' | 'paletteId'>) => `${style.id}/${style.level}/${style.paletteId}`;
 export const samplePrompts = (plan: PlanBundle) => Object.fromEntries(plan.styles.flatMap(style =>
@@ -53,6 +55,42 @@ export function renderPlanReview(plan: PlanBundle, selectionAbsolutePath?: strin
     '图片可能需要联网加载。选款顺序：风格 → 档位 → 配色；普通选款不等于授权生成。回复明确元组后，在现有 plan-review 边界披露确切样页 prompt、预算 1 和输出位置，并确认生成样页。',
   ].join('\n');
 }
+
+// One image per style, so the first round fits a chat reply. The exact
+// style/level/palette round stays in the HTML page and the text tuples.
+export function renderStyleImageChoice(selection: StyleSelection, remote: RemoteStyleAssets): string | null {
+  const options: string[] = [];
+  for (const style of selection.styles) {
+    const path = style.card.imagePath;
+    const image = path && Object.hasOwn(remote, path) ? remote[path]!.url : null;
+    if (!image) continue;
+    const label = `选择${style.name}`;
+    const caption = style.name;
+    options.push(`  {label: ${JSON.stringify(label)}, caption: ${JSON.stringify(caption)}, image: ${JSON.stringify(image)}}`);
+  }
+  if (!options.length) return null;
+  return [
+    '```openui-lang',
+    'root = Stack([styles])',
+    'styles = ImageChoice("style", [',
+    options.join(',\n'),
+    '], "点击图片选择风格；此为风格单选，后续档位与配色仍按文本元组确认")',
+    '```',
+  ].join('\n');
+}
+
+async function planReviewView(plan: PlanBundle, absolutePath?: string): Promise<string> {
+  const rendered = renderPlanReview(plan, absolutePath);
+  let remote: RemoteStyleAssets;
+  try {
+    remote = await loadRemoteStyleAssets(builtInStyleAssetsRoot());
+  } catch {
+    return rendered;
+  }
+  const block = renderStyleImageChoice(styleSelection(plan.styles), remote);
+  return block ? `${rendered}\n\n${block}` : rendered;
+}
+
 export async function planReviewReply(root: string, plan: PlanBundle, revision: string, decisionId: string): Promise<WorkflowReply> {
   const path = selectionPath(revision);
   let absolutePath: string | undefined;
@@ -72,7 +110,8 @@ export async function planReviewReply(root: string, plan: PlanBundle, revision: 
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  return { kind: 'decision', id: decisionId, stage: 'plan-review', view: renderPlanReview(plan, absolutePath), details: planDetails(plan, revision, absolutePath ? path : undefined, publishedReviewModelPath) };
+  const view = await planReviewView(plan, absolutePath);
+  return { kind: 'decision', id: decisionId, stage: 'plan-review', view, details: planDetails(plan, revision, absolutePath ? path : undefined, publishedReviewModelPath) };
 }
 export async function publishPlan(root: string, raw: unknown): Promise<WorkflowReply> {
   return withTaskLock(root, async () => {

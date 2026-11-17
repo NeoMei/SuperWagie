@@ -18,7 +18,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { axisTicks } from './axisTicks';
 import { dispatchTabStep } from '../lib/scroll/timelineScrollIntent';
 import {
-  blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, tones,
+  blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, type ImageChoiceOption, tones,
 } from './catalog';
 import {
   describeUiBlockAnswer,
@@ -1432,14 +1432,54 @@ function Button({ props }: NodeProps) {
   );
 }
 
-// Tab and Series draw inside their parents.
+/** Image options in a reply: pressing one chooses it with a single click. */
+function ImageChoice({ props }: NodeProps) {
+  const value = useBlockProps(blockProps.ImageChoice, props);
+  const form = React.useContext(FormContext);
+  if (!value) return null;
+  const chosen = form.chosen.get(value.name);
+  return (
+    <div className="flex flex-col gap-2">
+      {value.label && <span className="typography-meta font-medium text-foreground">{value.label}</span>}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {value.options.map((option: ImageChoiceOption, index: number) => {
+          const answer = option.label;
+          const active = chosen === answer;
+          return (
+            <button
+              key={`${answer}-${index}`}
+              type="button"
+              aria-pressed={active}
+              title={option.caption || option.label}
+              disabled={form.disabled}
+              onClick={() => form.press(answer, value.name)}
+              className={cn(
+                "flex min-w-0 flex-col overflow-hidden rounded-md border text-start transition-colors",
+                active ? "border-primary ring-2 ring-primary/40" : "border-border hover:border-primary/60",
+                form.disabled && "cursor-not-allowed opacity-60",
+              )}
+            >
+              {option.image ? (
+                <img src={option.image} alt={option.caption || option.label} loading="lazy" referrerPolicy="no-referrer" className="aspect-video w-full bg-muted object-cover" />
+              ) : (
+                <span className="flex aspect-video w-full items-center justify-center bg-muted text-xs text-muted-foreground">?</span>
+              )}
+              <span className="truncate px-2 py-1 text-xs font-medium">{option.caption || option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const renderers = {
-  Stack, Row, Card, Tabs, Details, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Choice, Input,
+  Stack, Row, Card, Tabs, Details, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Choice, ImageChoice, Input,
   DateInput, Slider, Button,
 } satisfies Partial<Record<BlockName, React.FC<NodeProps>>>;
 const drawn = blockName.extract([
   'Stack', 'Row', 'Card', 'Tabs', 'Details', 'Text', 'Badge', 'Callout', 'KeyValue', 'Table', 'Stat', 'Progress', 'Steps', 'BarChart',
-  'LineChart', 'Choice', 'Input', 'DateInput', 'Slider', 'Button',
+  'LineChart', 'Choice', 'ImageChoice', 'Input', 'DateInput', 'Slider', 'Button',
 ]);
 
 function Node({ value }: { value: BlockValue }) {
