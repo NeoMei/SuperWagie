@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.7.117",
+    "date": "2026-11-17",
+    "title": "Refunded orders release the purchase panel",
+    "intro": null,
+    "app": {
+      "new": [],
+      "improvements": [],
+      "fixes": [
+        "Payments: a fully refunded order no longer greys out membership and credit purchase plans."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.116",
     "date": "2026-11-17",
     "title": "Expired payment codes release their hold",

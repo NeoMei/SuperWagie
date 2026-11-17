@@ -2,6 +2,12 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.117] - 2026-11-17
+
+### Fixes
+
+- Payments: a fully refunded order no longer greys out membership and credit purchase plans.
+
 ## [2.7.116] - 2026-11-17
 
 ### Fixes
