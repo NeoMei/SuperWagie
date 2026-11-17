@@ -24,6 +24,22 @@ export const choiceOption = z.union([
   choiceOptionObject,
 ]);
 
+const choiceImage = z.string().url().refine((value) => {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}, 'Choice images require HTTPS URLs');
+
+/** An image the user can press in a reply: caption shows, label is the answer. */
+const imageChoiceOption = z.object({
+  label: z.string(),
+  caption: z.string().optional(),
+  image: choiceImage.optional(),
+});
+export type ImageChoiceOption = z.infer<typeof imageChoiceOption>;
+
 export const blockProps = {
   Stack: z.object({ children: nodes }),
   Row: z.object({ children: nodes }),
@@ -62,6 +78,11 @@ export const blockProps = {
     options: z.array(z.union([z.string(), choiceOptionObject])),
     label: z.string().optional(),
     multiple: z.boolean().optional(),
+  }),
+  ImageChoice: z.object({
+    name: z.string(),
+    options: z.array(imageChoiceOption),
+    label: z.string().optional(),
   }),
   Input: z.object({
     name: z.string(),
@@ -135,6 +156,12 @@ const Choice = defineComponent({
   props: blockProps.Choice,
   component: null,
 });
+const ImageChoice = defineComponent({
+  name: 'ImageChoice',
+  description: 'name keys the answer; one option per image, label is what the press sends, caption is what shows',
+  props: blockProps.ImageChoice,
+  component: null,
+});
 const Input = defineComponent({
   name: 'Input',
   description: 'name keys the answer',
@@ -162,7 +189,7 @@ const Button = defineComponent({
 
 const leaf = z.union([
   Text.ref, Badge.ref, Callout.ref, KeyValue.ref, Table.ref, Steps.ref, BarChart.ref, LineChart.ref,
-  Stat.ref, Progress.ref, Choice.ref, Input.ref, DateInput.ref, Slider.ref, Button.ref,
+  Stat.ref, Progress.ref, Choice.ref, ImageChoice.ref, Input.ref, DateInput.ref, Slider.ref, Button.ref,
 ]);
 
 // The guidance names what nests where (guidance.ts); these unions only feed
@@ -206,7 +233,7 @@ const Stack = defineComponent({
 
 const components = [
   Stack, Row, Card, Tabs, Tab, Details, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Series,
-  Choice, Input, DateInput, Slider, Button,
+  Choice, ImageChoice, Input, DateInput, Slider, Button,
 ];
 
 const uiBlockLibrary = createLibrary({ components, root: 'Stack' });
@@ -274,7 +301,7 @@ export type UiBlockParse =
 
 // Read off the source: the parser's tree has already lost whatever sat under a
 // broken parent. The word in a string only costs that block its salvage.
-const asksSomething = /\b(?:Choice|Input|DateInput|Slider|Button)\s*\(/;
+const asksSomething = /\b(?:Choice|ImageChoice|Input|DateInput|Slider|Button)\s*\(/;
 
 /**
  * Whether a block may draw without its broken parts: it shows something and
@@ -572,6 +599,11 @@ const decisionsIn = (root: BlockValue, titles: ReadonlySet<string>) => {
     const button = node.typeName === 'Button' ? blockProps.Button.safeParse(node.props) : null;
     const decision = button?.success ? decisionOf(titles, cardTitle, button.data.value) : null;
     if (decision !== null && !decisions.includes(decision)) decisions.push(decision);
+    // Every image option shares the component's name, so one press answers it.
+    const imageChoice = node.typeName === 'ImageChoice' ? blockProps.ImageChoice.safeParse(node.props) : null;
+    if (imageChoice?.success && imageChoice.data.options.length && !decisions.includes(imageChoice.data.name)) {
+      decisions.push(imageChoice.data.name);
+    }
   });
   return { decisions, fields };
 };

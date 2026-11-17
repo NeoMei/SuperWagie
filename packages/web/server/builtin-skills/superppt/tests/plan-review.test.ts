@@ -115,6 +115,21 @@ test('review reply authorizes only a valid complete variant and binds its revisi
     `确认当前内容方案并生成样页。\n方案版本：${revision}\n决定编号：${decisionId}\n${model.variants[variantKey]!.choice}\n授权新增生图调用：1 次。`);
 });
 
+test('published review view offers clickable in-chat style images backed by the remote index', async () => {
+  const { root } = await fixtureTask();
+  const plan = await fixturePlan();
+  const reply = await publishPlan(root, plan);
+  assert.equal(reply.kind, 'decision');
+  if (reply.kind !== 'decision') throw new Error('plan review expected');
+  assert.match(reply.view, /```openui-lang/);
+  assert.ok(reply.view.includes('ImageChoice("style"'));
+  assert.ok(reply.view.includes('https://g.imgtg.com/uploads/'));
+  assert.ok(reply.view.includes('.png'));
+  assert.match(reply.view, /点击图片选择风格/);
+  // The exact round and authorization boundary stay in the text.
+  assert.match(reply.view, /普通选款不等于授权生成/);
+});
+
 test('published review details and compact fallback share the current decision identity and planning context', async () => {
   const { root } = await fixtureTask();
   const plan = await fixturePlan();

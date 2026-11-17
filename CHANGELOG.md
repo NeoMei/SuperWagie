@@ -2,6 +2,12 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.113] - 2026-11-17
+
+### Fixes
+
+- **SuperPPT:** Style showcase images in the chat are now selectable. Click a style image to send that choice back to the agent, so you can switch style directly in the conversation instead of only viewing the images.
+
 ## [2.7.99] - 2026-11-14
 
 ### Improvements
