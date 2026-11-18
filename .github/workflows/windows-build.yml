@@ -1,529 +1,137 @@
-name: Build Windows installers
+name: Validate the existing Windows x64 installer
 
 on:
   workflow_dispatch:
-    inputs:
-      ref:
-        description: Git ref to build
-        required: true
-        default: v2.7.1
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
-  build-windows:
+  validate-existing-windows:
     runs-on: windows-2022
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            target: x86_64-pc-windows-msvc
-            platform: win32-x64
+    timeout-minutes: 20
+    env:
+      APPLICATION_COMMIT: 106683b884902fbee1eb994791fdeb541ae47925
+      APPLICATION_TREE: 93616ee6aa480a8b6993606736dbc3b8ea94ee86
+      APPLICATION_ASAR: 6cb1f587cb922b548b8040625de37aa12e13b942b5d078d15fa37772425bcfac
+      BUILD_RUN: '44385541364'
+      ARTIFACT_ID: '14467342425'
+      ARTIFACT_SHA256: 42ed84eae92110da161109451463498d55d67c794797b2e1c68cb7f489dfca57
+      RUNTIME_PROBE_SHA256: 5030f804954a6594c80bb2df2452d9dcbea7d2d812d1bed52766a0b4902ea943
     steps:
-      - name: Checkout
+      - name: Checkout immutable application source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
-
-      - name: Checkout diagnostics tests from the workflow revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: .release-tests
-          sparse-checkout: |
-            packages/electron/scripts/collect-windows-diagnostics.test.mjs
-            packages/electron/scripts/collect-windows-diagnostics-evidence.test.ps1
-            packages/electron/scripts/smoke-packaged-runtime.mjs
-          sparse-checkout-cone-mode: false
+          ref: ${{ env.APPLICATION_COMMIT }}
           persist-credentials: false
-
-      - name: Use current diagnostics tests with the frozen collector
-        shell: powershell
-        env:
-          DIAGNOSTICS_TEST_REVISION: ${{ github.workflow_sha }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $candidateRevision = git rev-parse HEAD
-          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the app candidate' }
-          $collector = 'packages/electron/scripts/collect-windows-diagnostics.ps1'
-          $collectorHash = (Get-FileHash $collector -Algorithm SHA256).Hash
-          $testFiles = @(
-            'packages/electron/scripts/collect-windows-diagnostics.test.mjs',
-            'packages/electron/scripts/collect-windows-diagnostics-evidence.test.ps1'
-          )
-          "Diagnostics collector source: $candidateRevision; SHA-256: $collectorHash" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "Diagnostics tests source: $env:DIAGNOSTICS_TEST_REVISION" | Add-Content $env:GITHUB_STEP_SUMMARY
-          foreach ($file in $testFiles) {
-            $source = Join-Path '.release-tests' $file
-            $expectedHash = (Get-FileHash $source -Algorithm SHA256).Hash
-            Copy-Item $source $file -Force
-            if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $expectedHash) { throw "Test copy differs: $file" }
-            "Test $file; SHA-256: $expectedHash" | Add-Content $env:GITHUB_STEP_SUMMARY
-          }
-          if ((Get-FileHash $collector -Algorithm SHA256).Hash -ne $collectorHash) { throw 'The frozen collector changed' }
-          $changedFiles = @(git diff --name-only)
-          if ($LASTEXITCODE -ne 0) { throw 'Could not verify the candidate diff' }
-          foreach ($file in $changedFiles) {
-            if ($testFiles -notcontains $file) { throw "Unexpected candidate change: $file" }
-          }
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
 
-      - name: Install dependencies
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.4'
+
+      - name: Install dependencies for the frozen runtime probe
         run: bun install --frozen-lockfile
 
-      - name: Check SuperWagie customizations
-        run: bun run test:customizations
-
-      - name: Exercise platform journal crash recovery
-        working-directory: packages/web
-        shell: pwsh
-        run: |
-          bunx vitest run server/lib/platform-model/store.test.js server/lib/platform-model/runtime.test.js server/lib/platform-model/routes.test.js server/lib/opencode/managed-config-file.test.js
-          if ($LASTEXITCODE -ne 0) { throw 'Platform journal recovery and provider isolation failed' }
-          bunx vitest run server/lib/platform-account/usage-activity-journal.test.js server/lib/platform-account/usage-activity.test.js
-          if ($LASTEXITCODE -ne 0) { throw 'Daily usage persistence and collection failed' }
-
-      - name: Test diagnostics with Windows PowerShell 5.1
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
-            throw 'Diagnostics compatibility tests require Windows PowerShell 5.1'
-          }
-          # Child powershell.exe must load its own modules, not ones inherited from pwsh.
-          $env:SUPERWAGIE_TEST_POWERSHELL = Join-Path $PSHOME 'powershell.exe'
-          $env:PSModulePath = Join-Path $PSHOME 'Modules'
-          $env:TEMP = $env:RUNNER_TEMP
-          $env:TMP = $env:RUNNER_TEMP
-          $env:TMPDIR = $env:RUNNER_TEMP
-          Import-Module Microsoft.PowerShell.Archive
-          $archiveModule = (Get-Module Microsoft.PowerShell.Archive).Path
-          if (-not $archiveModule.StartsWith($env:PSModulePath, [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Diagnostics tests loaded an Archive module from another PowerShell installation'
-          }
-          Write-Host "PowerShell $($PSVersionTable.PSVersion); Archive $archiveModule; Temp $env:TEMP"
-          node --test packages/electron/scripts/collect-windows-diagnostics.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Diagnostics compatibility tests failed' }
-
-      - name: Get bundled OpenCode CLI version
-        id: opencode_cli_version
-        shell: bash
-        run: |
-          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Cache bundled OpenCode CLI artifact
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
-          restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
-
-      - name: Prepare bundled OpenCode CLI
-        working-directory: packages/electron
+      - name: Download and verify the original artifact archive
         shell: bash
         env:
-          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
-        run: |
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
-          bun run prepare:ripgrep
-
-      - name: Prepare SuperWeb for the target architecture
-        shell: pwsh
-        env:
-          npm_config_cpu: ${{ matrix.arch }}
-          npm_config_os: win32
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Push-Location packages/web/server/builtin-skills/skills/superweb
-          try {
-            npm ci --omit=dev --ignore-scripts
-            if ($LASTEXITCODE -ne 0) { throw 'SuperWeb dependency installation failed' }
-          } finally { Pop-Location }
-          Push-Location packages/electron
-          try {
-            bun run prepare:superweb
-            if ($LASTEXITCODE -ne 0) { throw 'SuperWeb staging failed' }
-          } finally { Pop-Location }
-
-      - name: Setup the pinned Go toolchain
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: '1.26.5'
-          cache: false
-
-      - name: Resolve the knowledge backend source pin
-        id: knowledge_source
-        shell: bash
-        run: |
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import { createHash } from 'node:crypto';
-          import knowledgePins from './packages/electron/scripts/embedded-knowledge-pin.cjs';
-          const pin = knowledgePins.knowledgeSourcePin(process.env);
-          const tags = process.env.OPENCHAMBER_EMBEDDED_KNOWLEDGE_TAGS || 'sqlite_fts5,anydoc';
-          for (const field of ['repository', 'ref', 'commit']) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${field}=${pin[field]}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `tags=${tags}\nsha256=${createHash('sha256').update(JSON.stringify({ ...pin, tags })).digest('hex')}\n`);
-          NODE
-
-      - name: Identify the memory backend overlay
-        id: memory_overlay
-        shell: bash
-        run: |
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import { memoryIndexOverlayDigest } from './packages/electron/scripts/embedded-knowledge-memory/apply.mjs';
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha256=${memoryIndexOverlayDigest()}\n`);
-          NODE
-
-      - name: Cache the pinned GNU toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/superwagie-winlibs
-          key: superwagie-winlibs-x64-gcc16.2.0-ucrt-r2-d5dbafc4
-
-      - name: Configure native Windows knowledge tools
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $toolRoot = Join-Path $env:RUNNER_TEMP 'superwagie-winlibs'
-          $archive = Join-Path $toolRoot 'winlibs.zip'
-          New-Item -ItemType Directory -Path $toolRoot -Force | Out-Null
-          if (!(Test-Path $archive)) {
-            Invoke-WebRequest 'https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-14.0.0-ucrt-r2/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r2.zip' -OutFile $archive
-          }
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd5dbafc4a170e762ca6143151ec918fb9e2c72736fb14cd704abebc6bdd5276a') {
-            throw 'The pinned GNU toolchain checksum does not match'
-          }
-          & 7z x $archive "-o$toolRoot" -y | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw 'GNU toolchain extraction failed' }
-          $compiler = Join-Path $toolRoot 'mingw64/bin'
-          $cc = (Join-Path $compiler 'x86_64-w64-mingw32-gcc.exe').Replace('\', '/')
-          $cxx = (Join-Path $compiler 'x86_64-w64-mingw32-g++.exe').Replace('\', '/')
-          if (!(Test-Path $cc) -or !(Test-Path $cxx)) { throw 'Pinned GNU compilers are missing' }
-          $compiler | Add-Content $env:GITHUB_PATH
-          "CC=$cc" | Add-Content $env:GITHUB_ENV
-          "CXX=$cxx" | Add-Content $env:GITHUB_ENV
-          "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=$cc" | Add-Content $env:GITHUB_ENV
-          'CGO_ENABLED=1' | Add-Content $env:GITHUB_ENV
-          'GOFLAGS=-p=2' | Add-Content $env:GITHUB_ENV
-          'CARGO_BUILD_JOBS=2' | Add-Content $env:GITHUB_ENV
-          'RUSTUP_TOOLCHAIN=1.97.1' | Add-Content $env:GITHUB_ENV
-          rustup toolchain install 1.97.1 --profile minimal --target x86_64-pc-windows-gnu
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned Rust GNU toolchain installation failed' }
-          go mod download github.com/mattn/go-sqlite3@v1.14.24
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned SQLite headers download failed' }
-          $moduleCache = (go env GOMODCACHE).Trim()
-          if ($LASTEXITCODE -ne 0) { throw 'Go module cache lookup failed' }
-          $sqliteSource = Join-Path $moduleCache 'github.com/mattn/go-sqlite3@v1.14.24'
-          $include = Join-Path $env:RUNNER_TEMP 'superwagie-sqlite-include'
-          New-Item -ItemType Directory -Path $include -Force | Out-Null
-          Copy-Item (Join-Path $sqliteSource 'sqlite3-binding.h') (Join-Path $include 'sqlite3.h') -Force
-          Copy-Item (Join-Path $sqliteSource 'sqlite3ext.h') (Join-Path $include 'sqlite3ext.h') -Force
-          ('CGO_CFLAGS=-I' + $include.Replace('\', '/')) | Add-Content $env:GITHUB_ENV
-
-      - name: Cache source-built knowledge backend
-        id: memory_backend_cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            packages/electron/.cache/embedded-knowledge
-            packages/electron/resources/embedded-knowledge
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/go/pkg/mod
-          key: memory-backend-windows-x64-${{ steps.knowledge_source.outputs.sha256 }}-go1.26.5-rust1.97.1-${{ steps.memory_overlay.outputs.sha256 }}-${{ hashFiles('packages/electron/scripts/embedded-knowledge-windows-gnu.patch') }}
-
-      - name: Prepare the current Windows knowledge backend
-        working-directory: packages/electron
-        shell: pwsh
-        env:
-          OPENCHAMBER_TARGET_ARCH: x64
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_REPO: ${{ steps.knowledge_source.outputs.repository }}
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_REF: ${{ steps.knowledge_source.outputs.ref }}
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: ${{ steps.knowledge_source.outputs.commit }}
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_TAGS: ${{ steps.knowledge_source.outputs.tags }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $source = Join-Path $PWD '.cache/embedded-knowledge/src'
-          if (!(Test-Path (Join-Path $source '.git'))) {
-            New-Item -ItemType Directory -Path $source -Force | Out-Null
-            git init --quiet $source
-            if ($LASTEXITCODE -ne 0) { throw 'Backend source initialization failed' }
-            git -C $source config core.autocrlf false
-            git -C $source fetch --depth=1 $env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_REPO $env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT
-            if ($LASTEXITCODE -ne 0) { throw 'Pinned backend source fetch failed' }
-            git -C $source checkout --detach FETCH_HEAD
-            if ($LASTEXITCODE -ne 0) { throw 'Pinned backend checkout failed' }
-          }
-          $sourceCommit = (git -C $source rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $sourceCommit -ne $env:OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT) {
-            throw 'Cached backend source does not match the pinned commit'
-          }
-          bun run prepare:embedded-knowledge
-          if ($LASTEXITCODE -ne 0) { throw 'Current memory backend preparation failed' }
-
-      - name: Save the validated knowledge backend
-        if: steps.memory_backend_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            packages/electron/.cache/embedded-knowledge
-            packages/electron/resources/embedded-knowledge
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/go/pkg/mod
-          key: ${{ steps.memory_backend_cache.outputs.cache-primary-key }}
-
-      - name: Cache locked Hy runtime archives
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: packages/electron/.cache/hy-memory
-          key: hy-memory-windows-x64-${{ hashFiles('packages/electron/scripts/hy-memory-runtime.lock.json') }}
-
-      - name: Prepare the native Hy runtime
-        working-directory: packages/electron
-        shell: pwsh
-        env:
-          OPENCHAMBER_TARGET_ARCH: x64
-        run: |
-          $ErrorActionPreference = 'Stop'
-          bun run prepare:hy-memory
-          if ($LASTEXITCODE -ne 0) { throw 'Native Hy runtime preparation failed' }
-
-      - name: Exercise native Hy memory with the shared backend
-        timeout-minutes: 3
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          node --test scripts/release-workflow.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Windows memory workflow contract failed' }
-          $backend = (Resolve-Path 'packages/electron/resources/embedded-knowledge/embedded-knowledge-server.exe').Path
-          $backendRoot = (Resolve-Path 'packages/electron/resources/embedded-knowledge').Path
-          $python = (Resolve-Path 'packages/electron/resources/hy-memory/runtime/python.exe').Path
-          $env:PYTHONDONTWRITEBYTECODE = '1'
-          $env:OPENCHAMBER_HY_MEMORY_WORKER_SCRIPT = (Resolve-Path 'packages/electron/resources/hy-memory/python/worker.py').Path
-          $dateProbe = @'
-          import json
-          from datetime import datetime, timezone
-          def probe(value, aware=False):
-              try:
-                  instant = datetime.fromtimestamp(value, timezone.utc) if aware else datetime.fromtimestamp(value)
-                  return abs(instant.timestamp() - value) < 0.001, None
-              except Exception as error:
-                  return False, type(error).__name__
-          first_day, first_error = probe(0.1)
-          first_utc, utc_error = probe(0.1, True)
-          modern, modern_error = probe(1768478400)
-          print(json.dumps({'firstDayRoundTrip': first_day, 'firstDayErrorClass': first_error, 'firstDayUtcRoundTrip': first_utc, 'firstDayUtcErrorClass': utc_error, 'modernRoundTrip': modern, 'modernErrorClass': modern_error}))
-          '@
-          & $python -I -B -c $dateProbe
-          if ($LASTEXITCODE -ne 0) { throw 'Native Python datetime probe failed' }
-          & $python -B -m unittest discover -s packages/web/server/lib/hy-memory/python/tests
-          if ($LASTEXITCODE -ne 0) { throw 'Native Hy algorithm and protocol tests failed' }
-          node packages/web/scripts/hy-memory-smoke.mjs "--backend=$backend" "--backend-root=$backendRoot" "--python=$python"
-          if ($LASTEXITCODE -ne 0) { throw 'Native Hy capture/migration/withdrawal smoke failed' }
-          node packages/web/scripts/hy-memory-s2-smoke.mjs "--backend=$backend" "--backend-root=$backendRoot" "--python=$python"
-          if ($LASTEXITCODE -ne 0) { throw 'Native Hy automatic S2/recovery smoke failed' }
-
-      - name: Build web assets
-        working-directory: packages/electron
-        run: bun run build:web-assets
-
-      - name: Bundle main process
-        working-directory: packages/electron
-        run: bun run bundle:main
-
-      - name: Rebuild native modules
-        working-directory: packages/electron
-        shell: bash
-        env:
-          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
-        run: node ./scripts/rebuild-native.mjs
-
-      - name: Build Windows app
-        working-directory: packages/electron
-        shell: bash
-        env:
-          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
-          OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL: ${{ vars.OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL }}
-        run: |
-          bun run prepare:presentation
-          node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
-          node ./scripts/windows-update-feeds.mjs ./dist
-
-      - name: Verify packaged resources against staged files
-        id: packaged_resources
-        shell: bash
-        env:
-          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_REPO: ${{ steps.knowledge_source.outputs.repository }}
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_REF: ${{ steps.knowledge_source.outputs.ref }}
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_COMMIT: ${{ steps.knowledge_source.outputs.commit }}
-          OPENCHAMBER_EMBEDDED_KNOWLEDGE_TAGS: ${{ steps.knowledge_source.outputs.tags }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import { createHash } from 'node:crypto';
-          import fs from 'node:fs';
-          import path from 'node:path';
-          import { matchesWindowsKnowledgePatch } from './packages/electron/scripts/embedded-knowledge-windows.mjs';
-          import { matchesMemoryIndexOverlay } from './packages/electron/scripts/embedded-knowledge-memory/apply.mjs';
-          import { verifyHyMemoryResources } from './packages/electron/scripts/prepare-hy-memory.mjs';
-          import knowledgePins from './packages/electron/scripts/embedded-knowledge-pin.cjs';
-
-          const { knowledgeSourcePin } = knowledgePins;
-
-          const arch = process.env.OPENCHAMBER_TARGET_ARCH;
-          const electronRoot = path.resolve('packages/electron');
-          assert.equal(arch, 'x64', 'Windows desktop packages support x64 only');
-          const resources = path.join(electronRoot, 'dist', 'win-unpacked', 'resources');
-          const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
-          const hash = async (file) => {
-            const digest = createHash('sha256');
-            for await (const chunk of fs.createReadStream(file)) digest.update(chunk);
-            return digest.digest('hex');
-          };
-          const knowledgePath = path.join(resources, 'embedded-knowledge');
-          const manifest = readJson(path.join(knowledgePath, 'manifest.json'));
-          const stagedManifest = readJson(path.join(electronRoot, 'resources/embedded-knowledge/manifest.json'));
-          assert.deepEqual(manifest, stagedManifest, 'Packaged knowledge manifest differs from the staged manifest');
-          const sourcePin = knowledgeSourcePin(process.env);
-          for (const field of ['repository', 'ref', 'commit']) assert.equal(manifest[field], sourcePin[field], `The source knowledge ${field} changed; rebuild the backend`);
-          assert.equal(manifest.tags, process.env.OPENCHAMBER_EMBEDDED_KNOWLEDGE_TAGS || 'sqlite_fts5,anydoc');
-          assert.equal(manifest.binary, 'embedded-knowledge-server.exe');
-          assert.ok(matchesMemoryIndexOverlay(manifest), 'Packaged backend lacks the current memory-index routes');
-          assert.equal(await hash(path.join(knowledgePath, manifest.binary)), manifest.binarySha256);
-          assert.ok(matchesWindowsKnowledgePatch(manifest, 'win32'), 'The source Windows patch changed; rebuild the backend');
-          for (const file of ['SKILL.md', 'package.json', 'bin/superweb.mjs', 'src/cli.ts', 'vendor/node_modules/tsx/package.json', 'vendor/node_modules/playwright-core/package.json', `vendor/node_modules/@esbuild/win32-${arch}/esbuild.exe`]) {
-            assert.ok(fs.statSync(path.join(resources, 'superweb', file)).isFile(), `Missing SuperWeb resource: ${file}`);
-          }
-          const esbuild = fs.readFileSync(path.join(resources, 'superweb/vendor/node_modules/@esbuild', `win32-${arch}`, 'esbuild.exe'));
-          assert.equal(esbuild.readUInt16LE(esbuild.readUInt32LE(0x3c) + 4), 0x8664, 'SuperWeb esbuild has the wrong architecture');
-
-          const verified = [];
-          const compareFiles = async (source, destination, label) => {
-            for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
-              const staged = path.join(source, entry.name);
-              const packaged = path.join(destination, entry.name);
-              const name = `${label}/${entry.name}`;
-              if (entry.isDirectory()) await compareFiles(staged, packaged, name);
-              else {
-                const sha256 = await hash(staged);
-                assert.equal(await hash(packaged), sha256, `Packaged resource differs: ${name}`);
-                verified.push({ path: name, sha256 });
-              }
-            }
-          };
-          const hyPath = path.join(resources, 'hy-memory');
-          const hyManifest = verifyHyMemoryResources(hyPath, { target: 'win32-x64' });
-          assert.equal(hyManifest.runtimeVerified, true, 'Hy must complete a native Windows handshake');
-          assert.deepEqual(hyManifest, readJson(path.join(electronRoot, 'resources/hy-memory/manifest.json')));
-          for (const name of ['embedded-knowledge', 'superweb', 'hy-memory']) {
-            await compareFiles(path.join(electronRoot, 'resources', name), path.join(resources, name), name);
-          }
-          for (const name of ['collect-windows-diagnostics.ps1', 'collect-windows-diagnostics.cmd']) {
-            const sha256 = await hash(path.join(electronRoot, 'scripts', name));
-            assert.equal(await hash(path.join(resources, 'windows-diagnostics', name)), sha256, `Packaged diagnostics differ: ${name}`);
-            verified.push({ path: `windows-diagnostics/${name}`, sha256 });
-          }
-          const receipt = {
-            appVersion: readJson(path.join(electronRoot, 'package.json')).version,
-            appArchitecture: arch,
-            knowledge: manifest,
-            knowledgeArchitecture: 'x64',
-            knowledgeCompatibility: 'Native x64',
-            hy: { target: hyManifest.target, sourceSha256: hyManifest.sourceSha256, runtimeVerified: hyManifest.runtimeVerified },
-            verifiedFiles: verified,
-          };
-          fs.writeFileSync(path.join(electronRoot, 'dist', `windows-${arch}-resources.json`), `${JSON.stringify(receipt, null, 2)}\n`);
-          console.log(`Verified ${verified.length} packaged resource files for ${arch}`);
+          import { createReadStream, createWriteStream } from 'node:fs';
+          import { mkdir, stat, writeFile } from 'node:fs/promises';
+          import { pipeline } from 'node:stream/promises';
+          const { GITHUB_REPOSITORY, GITHUB_API_URL, APPLICATION_COMMIT, BUILD_RUN, ARTIFACT_ID, ARTIFACT_SHA256, GH_TOKEN } = process.env;
+          const artifactUrl = GITHUB_API_URL + '/repos/' + GITHUB_REPOSITORY + '/actions/artifacts/' + ARTIFACT_ID;
+          const headers = { Authorization: 'Bearer ' + GH_TOKEN, Accept: 'application/vnd.github+json' };
+          const metadataResponse = await fetch(artifactUrl, { headers });
+          assert.equal(metadataResponse.status, 200, 'Artifact metadata is unavailable');
+          const metadata = await metadataResponse.json();
+          assert.equal(String(metadata.id), ARTIFACT_ID);
+          assert.equal(metadata.name, 'windows-x64');
+          assert.equal(metadata.expired, false);
+          assert.equal(String(metadata.workflow_run.id), BUILD_RUN);
+          assert.equal(metadata.workflow_run.head_sha, APPLICATION_COMMIT);
+          assert.equal(metadata.digest, 'sha256:' + ARTIFACT_SHA256);
+          assert.ok(metadata.size_in_bytes > 0 && metadata.size_in_bytes < 600_000_000);
+          const redirect = await fetch(artifactUrl + '/zip', { headers, redirect: 'manual' });
+          assert.equal(redirect.status, 302, 'Artifact archive redirect is unavailable');
+          const downloadUrl = new URL(redirect.headers.get('location'));
+          assert.equal(downloadUrl.protocol, 'https:');
+          const download = await fetch(downloadUrl, { redirect: 'error', signal: AbortSignal.timeout(300_000) }).catch(() => null);
+          assert.equal(download?.status, 200, 'Artifact archive download failed');
+          await mkdir('.qa/receipts', { recursive: true });
+          const archive = '.qa/installer.zip';
+          await pipeline(download.body, createWriteStream(archive));
+          assert.equal((await stat(archive)).size, metadata.size_in_bytes);
+          const hash = createHash('sha256');
+          for await (const chunk of createReadStream(archive)) hash.update(chunk);
+          assert.equal(hash.digest('hex'), ARTIFACT_SHA256);
+          await writeFile('.qa/receipts/archive.json', JSON.stringify({
+            sourceRun: Number(BUILD_RUN), artifactId: Number(ARTIFACT_ID),
+            artifactSha256: ARTIFACT_SHA256, archiveBytes: metadata.size_in_bytes
+          }) + '\n');
           NODE
 
-      - name: Use the runtime probe from the workflow revision
+      - name: Install the exact NSIS package and verify its runtime bytes
         shell: pwsh
-        env:
-          RUNTIME_PROBE_REVISION: ${{ github.workflow_sha }}
-          RUNTIME_APPLICATION_REF: ${{ inputs.ref }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $applicationCommit = (git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the application commit' }
-          $applicationTree = (git rev-parse 'HEAD^{tree}').Trim()
-          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the application tree' }
+          if ((git rev-parse HEAD).Trim() -ne $env:APPLICATION_COMMIT) { throw 'Application checkout differs' }
+          if ((git rev-parse 'HEAD^{tree}').Trim() -ne $env:APPLICATION_TREE) { throw 'Application tree differs' }
           $probe = 'packages/electron/scripts/smoke-packaged-runtime.mjs'
-          $probeSource = Join-Path '.release-tests' $probe
-          $probeHash = (Get-FileHash $probeSource -Algorithm SHA256).Hash.ToLowerInvariant()
-          $asar = 'packages/electron/dist/win-unpacked/resources/app.asar'
-          $asarHash = (Get-FileHash $asar -Algorithm SHA256).Hash.ToLowerInvariant()
-          Copy-Item $probeSource $probe -Force
-          if ((Get-FileHash $probe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $probeHash) { throw 'Runtime probe copy differs' }
-          if ((Get-FileHash $asar -Algorithm SHA256).Hash.ToLowerInvariant() -ne $asarHash) { throw 'Packaged application changed during probe preparation' }
-          $allowedChanges = @(
-            'packages/electron/scripts/collect-windows-diagnostics.test.mjs',
-            'packages/electron/scripts/collect-windows-diagnostics-evidence.test.ps1',
-            $probe
-          )
-          $changedFiles = @(git diff --name-only)
-          if ($LASTEXITCODE -ne 0) { throw 'Could not verify probe-only source changes' }
-          foreach ($file in $changedFiles) {
-            if ($allowedChanges -notcontains $file) { throw "Unexpected application source change: $file" }
-          }
-          $sourceReceipt = [ordered]@{
-            schemaVersion = 1
-            applicationRef = $env:RUNTIME_APPLICATION_REF
-            applicationCommit = $applicationCommit
-            applicationTree = $applicationTree
-            workflowRevision = $env:RUNTIME_PROBE_REVISION
-            probeSha256 = $probeHash
-            packagedAsarSha256 = $asarHash
-            overlayAfterPackagingAndResourceVerification = $true
-            changedTrackedFiles = $changedFiles
-          }
-          $sourceReceipt | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM 'packages/electron/dist/windows-x64-probe-source.json'
-          "Application: $applicationCommit; tree: $applicationTree; runtime probe: $env:RUNTIME_PROBE_REVISION; SHA-256: $probeHash" | Add-Content $env:GITHUB_STEP_SUMMARY
+          if ((Get-FileHash -LiteralPath $probe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:RUNTIME_PROBE_SHA256) { throw 'Source probe differs' }
+          Expand-Archive -LiteralPath .qa/installer.zip -DestinationPath .qa/payload
+          $installer = Get-Item -LiteralPath .qa/payload/SuperWagie-2.7.121-win-x64.exe
+          $installRoot = [System.IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE '.qa/install'))
+          $installed = Start-Process -FilePath $installer.FullName -ArgumentList "/S /D=$installRoot" -Wait -PassThru
+          if ($installed.ExitCode -ne 0) { throw "Installer exit code $($installed.ExitCode)" }
+          $asar = Join-Path $installRoot 'resources/app.asar'
+          if ((Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:APPLICATION_ASAR) { throw 'Installed asar differs from build receipt' }
+          $product = (Get-Content -LiteralPath packages/electron/package.json -Raw | ConvertFrom-Json).build.productName
+          $application = Join-Path $installRoot ($product + '.exe')
+          if (!(Test-Path -LiteralPath $application -PathType Leaf)) { throw 'Installed executable missing' }
+          $stream = [System.IO.File]::OpenRead($application)
+          try {
+            $reader = [System.IO.BinaryReader]::new($stream)
+            $stream.Position = 0x3c
+            $stream.Position = $reader.ReadUInt32()
+            if ($reader.ReadUInt32() -ne 0x4550 -or $reader.ReadUInt16() -ne 0x8664) { throw 'Installed executable is not Windows x64' }
+          } finally { $stream.Dispose() }
+          $origin = Join-Path $installRoot 'resources/product-model-origin.json'
+          [ordered]@{
+            applicationCommit = $env:APPLICATION_COMMIT
+            applicationTree = $env:APPLICATION_TREE
+            probeSha256 = $env:RUNTIME_PROBE_SHA256
+            installerSha256 = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            installerExit = $installed.ExitCode
+            applicationAsarSha256 = $env:APPLICATION_ASAR
+            productProxyOriginPresent = (Test-Path -LiteralPath $origin -PathType Leaf)
+            architecture = 'x64'
+          } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM .qa/receipts/installation.json
+          "QA_APPLICATION=$application" | Add-Content -Encoding utf8 $env:GITHUB_ENV
 
-      - name: Exercise the packaged runtime and multiline PowerShell
-        timeout-minutes: 6
+      - name: Run the original native smoke against the installed product
         shell: pwsh
+        timeout-minutes: 6
         run: |
-          $ErrorActionPreference = 'Stop'
-          $product = (Get-Content packages/electron/package.json -Raw | ConvertFrom-Json).build.productName
-          $application = Join-Path (Resolve-Path packages/electron/dist/win-unpacked).Path ($product + '.exe')
-          node packages/electron/scripts/smoke-packaged-runtime.mjs --app $application --receipt packages/electron/dist/windows-x64-runtime.json
-          if ($LASTEXITCODE -ne 0) { throw 'Packaged cold startup, history readback or multiline PowerShell failed' }
+          node packages/electron/scripts/smoke-packaged-runtime.mjs --app $env:QA_APPLICATION --receipt .qa/receipts/runtime.json
+          if ($LASTEXITCODE -ne 0) { throw 'Installed runtime smoke failed' }
 
-      - name: Upload packaged runtime receipt
-        if: always()
+      - name: Upload immutable artifact and native smoke receipts
+        if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-${{ matrix.arch }}-runtime
-          path: |
-            packages/electron/dist/windows-x64-runtime.json
-            packages/electron/dist/windows-x64-probe-source.json
+          name: windows-x64-installed-qa
+          path: .qa/receipts/*.json
+          include-hidden-files: true
           if-no-files-found: warn
-
-      - name: Upload installer artifact
-        if: ${{ always() && steps.packaged_resources.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-${{ matrix.arch }}
-          path: |
-            packages/electron/dist/*.exe
-            packages/electron/dist/*.blockmap
-            packages/electron/dist/windows-*-resources.json
-            packages/electron/dist/latest-x64.yml
-            packages/electron/dist/latest.yml
