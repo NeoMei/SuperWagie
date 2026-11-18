@@ -100,7 +100,8 @@ test('a failed follow-up read after a channel switch disables purchase entries u
   const purchase = [...(host?.querySelectorAll('button') ?? [])].find((item) => item.textContent?.includes('Buy SuperWagie Plus'));
   await act(async () => purchase?.click());
   expect(mutations.filter((item) => item.path.endsWith('/api/platform-account/commerce/checkouts'))).toHaveLength(1);
-  commerce.intents[0].status = 'FAILED';
+  commerce.intents[0].status = 'PENDING';
+  commerce.intents[0].resourceId = 'waiting-checkout';
   commerce.checkouts = [{ ...baseCheckout, id: 'waiting-checkout', provider: 'alipay' }];
   await act(async () => button('Refresh wallets and orders').click());
   const channelSwitch = [...(host?.querySelectorAll('button') ?? [])].filter((item) => item.textContent === 'WeChat Pay').at(0);

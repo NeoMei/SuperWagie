@@ -115,7 +115,7 @@ the suspended factory until that option is present.
 - Gateway receipt and video status metadata are read from bounded streams;
   oversized, interrupted, malformed or refused responses leave the original
   call's accounting state unresolved and never trigger another dispatch.
-- GET `/api/platform-model/sessions/:sessionID` returns payer/model and call states to the bound runtime identity. POST `/reconcile` additionally requires a trusted request origin. An unresolved status is visible to the UI; no response claims a successful refund or free generation without a gateway receipt.
+- GET `/api/platform-model/sessions/:sessionID` returns payer/model and call states to the bound runtime identity. POST `/reconcile` additionally requires a trusted request origin. An unresolved status is visible to the UI; no response claims a successful refund or free generation without a gateway receipt. Terminal receipts persist the optional original charge asset without reinterpreting legacy amounts. After an interrupted stream the runtime checks the original receipt once so a confirmed release or settlement can unblock the conversation without submitting another call.
 - GET `/api/platform-model/media-tasks` lists independently admitted media tasks
   with calls for the currently authenticated device, actor and selected payer.
   Its bounded, session-ID-ordered pages do not contain content, credentials or

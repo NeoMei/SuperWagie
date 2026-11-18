@@ -80,8 +80,7 @@ test('rejected manual refunds cross the journal, HTTP parser and rendered UI wit
     const until = async expression => { const deadline = Date.now() + 25000; while (Date.now() < deadline) { if (await evaluate(expression)) return; await wait(50); } assert.fail(`Timed out: ${expression}; ${await evaluate('window.loadError || document.body.innerText')}`); };
     await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] });
     await until('document.body.innerText.includes("This payment needs review")');
-    await evaluate('[...document.querySelectorAll("button")].find(button => button.textContent === "Request original-channel refund").click()');
-    await until('document.body.innerText.includes("Confirm refund")');
+    assert.equal(await evaluate('document.body.innerText.includes("Request original-channel refund")'), false);
     checkout.refund_status = 'REJECTED';
     await evaluate('window.load()');
     await until('document.body.innerText.includes("Refund request declined") && document.body.innerText.includes("Your purchase is active")');

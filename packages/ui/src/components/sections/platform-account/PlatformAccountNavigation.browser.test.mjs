@@ -17,7 +17,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
     import '@/index.css';
     const user = { id: 'fixture-user', name: 'Fixture reviewer', email: 'reviewer@example.test' };
     const scenario = new URLSearchParams(location.search).get('scenario');
-    let keyState = { accountId: 'fixture-team', enterpriseMode: false, activation: null };
+    let keyState = { accountId: 'fixture-team', enterpriseMode: false, fundingMode: 'credits', nativeCredits: { ready: true }, activation: null };
     let runNumber = 0;
     const modelRows = [
       ['agent', 'SuperWagie Chat'], ['auxiliary', 'SuperWagie Fast'],
@@ -30,7 +30,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
       testedAt: '2026-11-06T00:01:00Z', errorCode: verified || purpose !== 'image-generation' ? null : 'account_key_test_failed',
       ...(!verified && scenario === 'retry' && purpose === 'embedding' ? { applicationError: { status: 'failed', errorCode: 'model_configuration_embedding_rebuild_required' } } : {}),
     }));
-    const keyResult = (verified) => ({ accountId: 'fixture-team', enterpriseMode: false, activation: {
+    const keyResult = (verified) => ({ accountId: 'fixture-team', enterpriseMode: false, fundingMode: 'credits', nativeCredits: { ready: true }, activation: {
       operationId: 'fixture-key-operation', status: verified ? 'ready' : 'failed', stage: 'test',
       key: { id: 'fixture-key-record', last4: 'K7m2', createdAt: '2026-11-06T00:00:00Z', expiresAt: null },
       modelId: 'SuperWagie Chat', connectionId: 'fixture-connection', providerId: 'superwagie',
@@ -85,7 +85,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
       if (url.pathname.endsWith('/api/platform-account/session')) return Response.json({ status: 'signed-in', user, expiresAt: '2027-01-01T12:00:00Z' });
       if (url.pathname.endsWith('/api/platform-account/profile')) return Response.json({ id: user.id, username: 'fixture-reviewer', displayName: user.name, email: user.email, avatarAvailable: false, version: '1' });
       if (url.pathname.endsWith('/api/platform-account')) return Response.json({ status: 'signed-in', user, accounts: [{ id: 'fixture-team', name: 'Fixture team', kind: 'team', role: 'owner' }], accountId: 'fixture-team', expiresAt: '2027-01-01T12:00:00Z', membership: [{ id: 'fixture-membership', product_id: 'superwagie', status: 'active', paid_through: '2027-01-01T00:00:00Z', offer: { name: 'Fixture membership' } }], credits: { available: '240000000', reserved: '8000000' }, consoleUrl: 'https://unihub.example.test/console', modelService: 'available' });
-      if (url.pathname.endsWith('/api/platform-account/commerce')) return Response.json({ accountId: 'fixture-team', role: 'owner', financialAccess: true, missingScopes: [], payments: { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] }, wallets: [{ productId: '', asset: 'CNY/6', amount: '120000000' }, { productId: 'superwagie', asset: 'CNY/6', amount: '30000000' }, { productId: 'llmrouter', asset: 'CNY/6', amount: '86400000' }], offers: [], orders: [], intents: [] });
+      if (url.pathname.endsWith('/api/platform-account/commerce')) return Response.json({ accountId: 'fixture-team', role: 'owner', financialAccess: true, missingScopes: [], payments: { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] }, wallets: [{ productId: '', asset: 'CNY/6', amount: '120000000' }, { productId: 'superwagie', asset: 'CNY/6', amount: '30000000' }, { productId: 'llmrouter', asset: 'CNY/6', amount: '86400000' }], offers: [{ id: 'fixture-addon', productId: 'superwagie', kind: 'addon', name: 'Fixture credit pack', accountKind: 'both', period: 'once', price: '9800000', monthlyCredit: '200000000', validityMonths: 12, rank: 1, sandbox: false }], orders: [], intents: [] });
       if (url.pathname.endsWith('/summary')) return Response.json({ visibility: 'account', calls_total: '47', settled_calls: '46', pending_calls: '1', unknown_calls: '0', missing_usage_calls: '0', unknown_time: '0', usage: {}, usage_complete: false, usage_coverage: { legacy_token_calls: '0', native_metered_calls: '0' }, charges_by_asset: { 'CREDIT/6': '32400000' }, refunds_by_asset: {} });
       if (url.pathname.endsWith('/calls')) return Response.json({ items: [], has_more: false });
       if (url.pathname.endsWith('/api/model-configuration')) return Response.json({ version: 1, revision: 1, enterpriseMode: false, credentialSources: { status: 'available', sources: [] }, purposes: [], presets: [], connections: [], bindings: [] });
@@ -193,10 +193,9 @@ test('user center opens outside Settings, navigation stays read-only and explici
       assert.equal(await evaluate(`document.querySelectorAll('[role="dialog"]').length`), 1, 'Each entry must open one independent account dialog');
       assert.equal(await evaluate(`document.querySelector('[data-platform-account-tab="billing"]').getAttribute('aria-current')`), 'page');
       if (entry === 'funding') {
-        await until(`!!document.querySelector('#unihub-recharge-amount')`, 'Funding must prepare the model recharge task');
-        assert.equal(await evaluate(`[...document.querySelectorAll('summary')].some(item => /^(Existing cash balances|原有人民币余额)$/.test(item.textContent))`), false, 'An explicit cash target must remain reachable without restoring the legacy balance disclosure');
-        assert.equal(await evaluate(`document.querySelector('[data-settings-item="platform-account.model-recharge"] [role="combobox"]').textContent.trim()`), 'Model balance', 'Funding must retain the model wallet target');
-        await until(`(() => { const dialog = document.querySelector('[role="dialog"]').getBoundingClientRect(); const targets = [document.querySelector('[data-settings-item="platform-account.model-recharge"] [role="combobox"]'), document.querySelector('#unihub-recharge-amount')]; return targets.every(target => { const rect = target.getBoundingClientRect(); return rect.top >= dialog.top && rect.bottom <= dialog.bottom && rect.left >= dialog.left && rect.right <= dialog.right; }); })()`, 'Funding must reveal the wallet selector and amount inside the account dialog');
+        await until(`!!document.querySelector('[role="radio"][aria-label="Fixture credit pack"]')`, 'Funding must open the credit add-on plans');
+        assert.equal(await evaluate(`document.querySelector('[role="radio"][aria-label="Fixture credit pack"]').getAttribute('aria-checked')`), 'false', 'Funding must not select a plan');
+        assert.deepEqual(await evaluate('window.mutations'), [], 'Opening the credit purchase plans must remain read-only');
         if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
           await wait(250);
           const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
@@ -267,7 +266,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
       await until(`document.body.innerText.includes('•••• K7m2')`, 'Issued key suffix did not render');
       await until(`window.reads.filter(path => path === '/api/model-configuration').length > ${priorConfigurationReads}`, 'Saved configuration did not refresh the mounted model settings consumer');
       assert.equal(await evaluate(`/fixture-key-record|fixture-key-operation|UniHub|LLMRouter/.test(document.body.innerText)`), false, 'Internal key identifiers and backend services must stay hidden');
-      assert.deepEqual(await evaluate('window.mutations'), [{ path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', action: 'activate' } }]);
+      assert.deepEqual(await evaluate('window.mutations'), [{ path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', fundingMode: 'credits', action: 'activate' } }]);
       if (scenario === 'retry') {
         await until(`document.body.innerText.includes('A connection test failed or a feature could not be applied')`, 'Failed probe did not remain visible');
         assert.equal(await evaluate(`document.body.innerText.includes('Connection test passed')`), false);
@@ -295,8 +294,8 @@ test('user center opens outside Settings, navigation stays read-only and explici
         }
         await click('[data-fixture-retest]');
         assert.deepEqual(await evaluate('window.mutations'), [
-          { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', action: 'activate' } },
-          { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', action: 'retest' } },
+          { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', fundingMode: 'credits', action: 'activate' } },
+          { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', fundingMode: 'credits', action: 'retest' } },
         ]);
       }
       await until(`document.body.innerText.includes('Connection test passed')`, 'Verified probe did not report success');
@@ -424,9 +423,9 @@ test('user center opens outside Settings, navigation stays read-only and explici
     await assertSteps(['Completed', 'Completed', 'Completed']);
     await until(`(${panelText}).includes('Connection test passed')`, 'An explicitly retried test did not replace the failed result');
     assert.deepEqual(await evaluate('window.mutations'), [
-      { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', action: 'activate' } },
-      { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', action: 'retest' } },
-      { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', action: 'retest' } },
+      { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', fundingMode: 'credits', action: 'activate' } },
+      { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', fundingMode: 'credits', action: 'retest' } },
+      { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', fundingMode: 'credits', action: 'retest' } },
     ], 'Polling and process transitions must not issue another key or automatically retry a test');
     assert.deepEqual(browserErrors, [], 'Account navigation and key activation must not throw browser exceptions');
   } finally {

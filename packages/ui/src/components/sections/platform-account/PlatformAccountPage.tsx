@@ -24,8 +24,9 @@ import { PlatformAccountApiKeys } from './PlatformAccountApiKeys';
 import { useModelConfigurationTabStore } from '../model-configuration/modelConfigurationTabs';
 import { usePlatformAccountTabStore } from './platformAccountTabs';
 import { platformAccountErrorKey } from './platformAccountErrors';
+import { formatPlatformMoney, formatPlatformPoints } from '@/lib/platformCommerce';
 import type { I18nKey } from '@/lib/i18n';
-import { PlatformAccountError, readPlatformAccount, readPlatformIdentitySession, selectPlatformAccount, logoutPlatformAccount, readPlatformModelTask, readPlatformMediaHistory, reconcilePlatformModelTask, formatPlatformCredits, type PlatformModelTask, type PlatformMediaHistory, type PlatformAccountState, type PlatformIdentitySession } from '@/lib/platformAccount';
+import { PlatformAccountError, readPlatformAccount, readPlatformIdentitySession, selectPlatformAccount, logoutPlatformAccount, readPlatformModelTask, readPlatformMediaHistory, reconcilePlatformModelTask, type PlatformModelTask, type PlatformMediaHistory, type PlatformAccountState, type PlatformIdentitySession } from '@/lib/platformAccount';
 
 const recoverableSessionError = (error: PlatformAccountError | null): error is PlatformAccountError => error instanceof PlatformAccountError
   && ['platform_session_changed', 'platform_session_expired', 'unauthenticated'].includes(error.code);
@@ -58,7 +59,15 @@ const PlatformTaskStatus: React.FC<{ sessionID: string; accounts: Extract<Platfo
       <SettingsFieldRow label={t('platformAccount.taskAccount')}><span>{payer ? t('platformAccount.accountName', { name: payer.name, kind: t(payer.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') }) : t('platformAccount.taskAccountUnavailable')}</span></SettingsFieldRow>
       <SettingsFieldRow label={t('platformAccount.taskModel')}><span>{task.model}</span></SettingsFieldRow>
       {task.blocked && <p className={SETTINGS_HELPER_CLASS} role="status">{t(task.calls.some((call) => call.status === 'UNKNOWN') ? 'platformAccount.taskUnknown' : 'platformAccount.taskBlocked')}</p>}
-      {task.calls.map((call) => <SettingsFieldRow key={call.callID} label={t(`platformAccount.call.${call.status}`)}>{call.charged !== undefined && <span>{t('platformAccount.charged', { credits: formatPlatformCredits(call.charged) })}</span>}</SettingsFieldRow>)}
+      {task.calls.map((call) => {
+        const amount = call.charged;
+        const charge = amount === undefined ? null
+          : call.asset === 'CREDIT/6' ? t('platformAccount.usageCreditAmount', { amount: formatPlatformPoints(amount) })
+            : call.asset === 'CNY/6' ? t('platformAccount.cny', { amount: formatPlatformMoney(amount) })
+              : call.asset === 'LR_QUOTA/0' ? t('platformAccount.usageQuotaAmount', { amount })
+                : t('platformAccount.taskChargeUnitUnavailable');
+        return <SettingsFieldRow key={call.callID} label={t(`platformAccount.call.${call.status}`)}>{charge && <span>{charge}</span>}</SettingsFieldRow>;
+      })}
     </>}
     {failed && <p className="text-[var(--status-error-text)]" role="alert">{t(failed === 'platform_model_scope_restart_required' ? 'platformAccount.modelRestartRequired' : 'platformAccount.taskFailed')}</p>}
     <Button variant="outline" disabled={busy} onClick={() => void refresh(true)}>{t('platformAccount.taskReconcile')}</Button>
@@ -202,6 +211,7 @@ export const PlatformAccountPage: React.FC = () => {
       </aside>}
       <SettingsPageLayout outerClassName="min-h-0 min-w-0 flex-1" className="max-w-none px-5 py-5 @3xl:px-6 @3xl:py-5" title={signedInIdentity ? tab === 'profile' ? t('platformAccount.profile') : undefined : t('settings.page.platform-account.title')} showSaveStatus={tab === 'profile'}>
     {!signedInIdentity && <SettingsSection title={t('platformAccount.identity')} divider={false}><SettingsFieldRow label={statusText} settingsItem="platform-account.login">{refreshAction}</SettingsFieldRow></SettingsSection>}
+    {signedInIdentity && !signedIn && busy && tab !== 'profile' && <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.loading')}</p>}
     {error && <p className="pb-4 text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
     {modelLockError && <p className={`pb-4 ${SETTINGS_HELPER_CLASS}`} role="alert">{t(modelLockError === 'platform_store_busy' ? 'platformAccount.modelLockBusy' : 'platformAccount.modelLockUnavailable')}</p>}
     {!signedInIdentity && !unsupported && identity && identity.status !== 'unconfigured' && identity.status !== 'unsupported' && <SettingsSection title={t('platformAccount.authentication')} contentClassName="space-y-4">

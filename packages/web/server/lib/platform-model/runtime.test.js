@@ -1232,14 +1232,14 @@ describe('UniHub model transport', () => {
     const pending = f.completion('funding-race');
     await started.promise;
     receiptFields.status = 'SETTLED'; receiptFields.charged = '123';
-    expect(await f.runtime().reconcile(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ status: 'SETTLED', charged: '123' }] });
+    expect(await f.runtime().reconcile(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ status: 'SETTLED', asset: 'CNY/6', charged: '123' }] });
     release.resolve();
     const response = await pending;
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: { code: 'platform_gateway_call_incomplete' } });
-    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ status: 'SETTLED', charged: '123' }] });
+    expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ status: 'SETTLED', asset: 'CNY/6', charged: '123' }] });
     const call = JSON.parse(await fs.readFile(path.join(f.dir, 'unihub-model', 'state.json'), 'utf8')).calls['funding-race'];
-    expect(call).toMatchObject({ status: 'SETTLED', charged: '123' });
+    expect(call).toMatchObject({ status: 'SETTLED', asset: 'CNY/6', charged: '123' });
     expect(f.receiptRequests()).toBe(2);
     expect(f.requests()).toBe(1);
   });

@@ -119,14 +119,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
   };
   const checkoutValues = (intent, checkout) => {
     if (checkout.account_id !== intent.accountId || checkout.product_id !== intent.productId || checkout.provider !== intent.provider || checkout.amount !== intent.amount) fail('platform_response_invalid', 502);
-    // UniHub keeps an expired QR/PENDING checkout authoritative until the
-    // provider confirms a terminal state. A code cannot be paid after its
-    // session deadline, so the local recovery intent no longer blocks a new
-    // payment once that deadline passes. Any payment observed after expiry is
-    // flagged REVIEW upstream, which keeps this intent pending instead. This
-    // changes only local admission control, not the upstream checkout state.
-    const expired = checkout.payment_status !== 'PAID' && checkout.payment_status !== 'REVIEW' && !checkout.refund_status && now() > Date.parse(checkout.session?.expires_at ?? checkout.expires_at);
-    return { resourceId: checkout.id, status: checkout.refund_status === 'SUCCEEDED' || checkout.payment_status === 'CLOSED' || expired ? 'FAILED' : checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'FULFILLED' && ['', 'REJECTED'].includes(checkout.refund_status) ? 'APPLIED' : 'PENDING', errorCode: checkout.error_code };
+    return { resourceId: checkout.id, status: checkout.refund_status === 'SUCCEEDED' || checkout.payment_status === 'CLOSED' ? 'FAILED' : checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'FULFILLED' && ['', 'REJECTED'].includes(checkout.refund_status) ? 'APPLIED' : 'PENDING', errorCode: checkout.error_code };
   };
   const mutateIntent = async (journal, storageId, values) => journal.mutate((intents) => {
     const intent = intents[storageId];
@@ -240,29 +233,35 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     return { journal, storageId };
   };
   return {
-    overview: async (identity) => {
+    orders: async (identity, accountId) => {
+      const body = parse(accountInput, { accountId }, 'platform_request_invalid');
+      const ctx = await context(identity, body.accountId);
+      requireFinance(ctx, ['orders:read']);
+      return (await readOrders(ctx)).map(publicOrder);
+    },
+    overview: async (identity, { includeOrders = true } = {}) => {
       const ctx = await context(identity);
       const finance = financialRole(ctx.account.role);
+      const canReadOrders = finance && hasScopes(ctx.capabilities, ['orders:read']);
       const canReadWallets = finance && hasScopes(ctx.capabilities, ['wallets:read', 'subscriptions:read']);
-      const [offers, resources, orders] = await Promise.all([
+      const journal = finance ? await store() : null;
+      const beforeCheckoutRead = journal?.read() ?? {};
+      const [offers, resources, orders, checkouts] = await Promise.all([
         hasScopes(ctx.capabilities, ['catalog:read']) ? catalog(ctx) : null,
         canReadWallets ? ctx.session.request(pathFor(ctx.account.id, 'resources')).then((value) => parse(resourcesSchema, value)) : null,
-        finance && hasScopes(ctx.capabilities, ['orders:read']) ? readOrders(ctx) : null,
+        includeOrders && canReadOrders ? readOrders(ctx) : null,
+        canReadOrders && ctx.capabilities.payment_providers !== undefined
+          ? ctx.session.request(pathFor(ctx.account.id, 'checkouts')).then((value) => parse(z.array(checkoutSchema), value)) : [],
       ]);
       if (resources && (resources.account_id !== ctx.account.id || !resources.wallets)) fail('platform_response_invalid', 502);
-      const journal = finance ? await store() : null;
-      if (journal && finance && hasScopes(ctx.capabilities, ['orders:read'])) await journal.mutate((intents) => {
-        let changed = false;
-        for (const [storageId, intent] of Object.entries(intents)) {
-          if (intent.serviceId !== ctx.session.serviceId || intent.actorId !== ctx.session.actingUserId || intent.accountId !== ctx.account.id || !releasablePreAdmissionIntent(intent, now())) continue;
-          intents[storageId] = { ...intent, status: 'FAILED', errorCode: 'operation_pending', updatedAt: new Date(now()).toISOString() };
-          changed = true;
-        }
-        return changed;
-      });
-      const beforeCheckoutRead = journal?.read() ?? {};
-      const checkouts = finance && hasScopes(ctx.capabilities, ['orders:read']) && ctx.capabilities.payment_providers !== undefined
-        ? parse(z.array(checkoutSchema), await ctx.session.request(pathFor(ctx.account.id, 'checkouts'))) : [];
+      if (journal && canReadOrders && Object.values(journal.read()).some((intent) => intent.serviceId === ctx.session.serviceId && intent.actorId === ctx.session.actingUserId && intent.accountId === ctx.account.id && releasablePreAdmissionIntent(intent, now()))) {
+        await journal.mutate((intents) => {
+          for (const [storageId, intent] of Object.entries(intents)) {
+            if (active.has(storageId) || intent.serviceId !== ctx.session.serviceId || intent.actorId !== ctx.session.actingUserId || intent.accountId !== ctx.account.id || !releasablePreAdmissionIntent(intent, now())) continue;
+            intents[storageId] = { ...intent, status: 'FAILED', errorCode: 'operation_pending', updatedAt: new Date(now()).toISOString() };
+          }
+        });
+      }
       if (checkouts.some((item) => item.account_id !== ctx.account.id)) fail('platform_response_invalid', 502);
       const updates = Object.entries(beforeCheckoutRead).flatMap(([storageId, intent]) => {
         if (intent.kind !== 'checkout' || !intent.resourceId || intent.serviceId !== ctx.session.serviceId || intent.actorId !== ctx.session.actingUserId || intent.accountId !== ctx.account.id) return [];

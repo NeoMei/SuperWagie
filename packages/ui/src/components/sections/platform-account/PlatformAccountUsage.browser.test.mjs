@@ -284,7 +284,8 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
       for (const appearance of appearances) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width: appearance.width, height: 1000, deviceScaleFactor: 1, mobile: false });
         await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario + '&locale=' + appearance.locale + '&theme=' + appearance.theme });
-        await until(`!!document.querySelector('dl') && document.body.innerText.includes('Current account model')`, 'Credit usage did not load');
+        const headlineLabel = appearance.locale === 'en' ? 'Credits used' : '积分消耗';
+        await until(`document.querySelector('dl dt')?.textContent === ${JSON.stringify(headlineLabel)} && document.body.innerText.includes('Current account model')`, 'Credit usage and its locale did not load');
         const amount = ['credits-unavailable', 'actor-hidden'].includes(scenario) ? null : ['credit-zero', 'empty-assets'].includes(scenario) ? '0' : scenario === 'credit-whole' ? '42' : '9007199254740993.1234';
         await assertHeadline(appearance.locale, amount);
         const billingLabel = appearance.locale === 'en' ? 'Billing details' : '费用明细';

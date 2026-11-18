@@ -50,6 +50,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   if (init?.method && init.method !== 'GET') { writes++; mutations.push({ path, body: String(init.body) }); }
   const pathname = new URL(path, 'http://localhost').pathname;
   const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+  if (pathname === '/api/platform-account/commerce/orders' && method === 'GET') return Response.json(commerce.orders ?? []);
   if (pathname === '/api/platform-account/commerce' && method === 'GET') {
     commerceReads++;
     if (commerceReadFailures > 0 || purchaseFailure === 'read' && paymentMutations().length > paymentMutationsBeforePurchase || checkoutActionFailure === 'read' && mutations.some((item) => item.path.endsWith('/waiting-checkout/reconcile'))) {
@@ -62,7 +63,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   if (checkoutActionFailure === 'operation' && path.includes('/waiting-checkout/')) return Response.json({ error: 'platform_unavailable' }, { status: 503 });
   const waitingCheckout = commerce.checkouts?.find((item) => item.id === 'waiting-checkout');
   if (waitingCheckout && path.includes('/waiting-checkout/') && path.endsWith('/reconcile')) return Response.json(waitingCheckout);
-  if (waitingCheckout && path.includes('/waiting-checkout/') && path.endsWith('/close')) return Response.json({ ...waitingCheckout, payment_status: checkoutCloseStatus });
+  if (waitingCheckout && path.includes('/waiting-checkout/') && path.endsWith('/close')) return Response.json({ ...waitingCheckout, payment_status: checkoutCloseStatus, fulfillment_status: checkoutCloseStatus === 'PAID' ? 'FULFILLED' : waitingCheckout.fulfillment_status });
   if (method === 'GET' && (path.includes('/usage/') || path.includes('/activity'))) return Response.json({ error: 'not_found' }, { status: 404 });
   if (path.endsWith('/checkouts')) {
     const body = JSON.parse(String(init?.body));
@@ -289,33 +290,31 @@ test('model funding navigation opens add-on plans without creating a payment', a
   expect(writes).toBe(0);
 });
 
-test('older unresolved requests are confirmed automatically without exposing another service', async () => {
+test('older unresolved requests wait for explicit recovery without exposing another service', async () => {
   commerce.intents = [
     { idempotencyKey: 'older-command', kind: 'purchase', accountId: 'team-a', productId: 'other-service', amount: '4321000', status: 'UNKNOWN', createdAt: '2026-11-06T00:00:00Z' },
     { idempotencyKey: 'completed-other', kind: 'purchase', accountId: 'team-a', productId: 'other-service', amount: '999999000000', status: 'APPLIED', createdAt: '2026-11-06T00:00:00Z' },
   ];
   await render('overview');
   await act(async () => {});
-  expect(host?.textContent).toContain('being confirmed automatically');
-  // No control asks the customer to interpret an internal request record.
-  expect([...(host?.querySelectorAll('button') ?? [])].some((item) => /original request|check again/i.test(item.textContent ?? ''))).toBe(false);
+  expect(button('Submit this payment again').disabled).toBe(false);
   expect(/other-service|999999/i.test(host?.textContent ?? '')).toBe(false);
-  expect(mutations.filter((item) => /intents\/older-command\/reconcile$/.test(item.path))).toHaveLength(1);
+  expect(writes).toBe(0);
 });
 
-test('an unconfirmed intent settles itself and keeps its record out of the buying view', async () => {
+test('an unconfirmed intent retries the original request only on explicit action', async () => {
   commerce.intents = [{ idempotencyKey: 'original-command', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '5000000', provider: 'wechat', status: 'UNKNOWN', createdAt: '2026-11-06T00:00:00Z' }];
   await render('overview');
   await act(async () => {});
-  expect(mutations.some((item) => /intents\/original-command\/reconcile$/.test(item.path))).toBe(true);
-  expect([...(host?.querySelectorAll('button') ?? [])].some((item) => /original request/i.test(item.textContent ?? ''))).toBe(false);
+  expect(writes).toBe(0);
+  await act(async () => button('Submit this payment again').click());
+  expect(mutations.filter((item) => /intents\/original-command\/reconcile$/.test(item.path))).toHaveLength(1);
   await render('orders');
-  expect(button('Check again').disabled).toBe(false);
   expect(host?.textContent).toContain('Previous membership');
 });
 
 test('a saved provider query error describes the old payment without claiming a failed commerce read', async () => {
-  commerce.intents = [{ idempotencyKey: 'old-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '9800000', provider: 'wechat', status: 'PENDING', errorCode: 'provider_query_unknown', createdAt: '2026-11-10T00:00:00Z' }];
+  commerce.intents = [{ idempotencyKey: 'old-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '9800000', provider: 'wechat', status: 'PENDING', resourceId: 'old-checkout-resource', errorCode: 'provider_query_unknown', createdAt: '2026-11-10T00:00:00Z' }];
   await render('orders');
   expect(host?.textContent).toContain('Awaiting settlement or fulfillment');
   expect(host?.textContent).toContain('This payment has no confirmed result yet');
@@ -541,7 +540,7 @@ test('external channel selection stays read-only until explicit confirmation and
   expect(paymentMutations()[0].path.endsWith('/checkouts')).toBe(true);
   expect(JSON.parse(paymentMutations()[0].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
   await act(async () => {});
-  expect(host?.textContent).toContain('being confirmed automatically');
+  expect(button('Submit this payment again').disabled).toBe(false);
   expect(button('WeChat Pay').disabled).toBe(true);
   await render('orders');
   await render('overview');
@@ -585,11 +584,11 @@ test('an unresolved checkout close keeps the original channel and shows the pend
   expect(channelGroup?.querySelector('[aria-pressed="true"]')?.textContent).toBe('WeChat Pay');
 });
 
-test('switching from an expired waiting checkout creates the payment on the other channel', async () => {
+for (const status of ['PENDING', 'PAID']) test(`switching from an expired checkout whose close returns ${status} does not create another order`, async () => {
   commerce.payments = { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] };
   commerce.checkouts = [{ id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2020-01-01T00:00:00Z', created_at: '2020-01-01T00:00:00Z', session: { kind: 'qr', url: 'weixin://pay/fixture', expires_at: '2020-01-01T00:00:00Z' } }];
   commerce.intents = [{ idempotencyKey: 'restored-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '10000000', offerId: 'membership-a', resourceId: 'waiting-checkout', provider: 'wechat', status: 'PENDING', createdAt: '2020-01-01T00:00:00Z' }];
-  checkoutCloseStatus = 'PENDING';
+  checkoutCloseStatus = status;
   await render('orders');
   expect(host?.textContent).toContain('WeChat Pay');
   const channelGroup = [...(host?.querySelectorAll('[role="group"]') ?? [])].find((item) => item.getAttribute('aria-label') === 'Payment method');
@@ -598,14 +597,17 @@ test('switching from an expired waiting checkout creates the payment on the othe
   await act(async () => alipay?.click());
   expect(paymentMutations().map((item) => item.path)).toEqual([
     '/api/platform-account/commerce/checkouts/waiting-checkout/close',
-    '/api/platform-account/commerce/checkouts',
   ]);
-  expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
-  expect(host?.textContent).not.toContain('An earlier request is unresolved. Check its original status before starting another purchase or recharge.');
+  if (status === 'PAID') {
+    expect(host?.textContent).toContain('Your purchase is active');
+    expect(accountRefreshes).toBe(1);
+  } else {
+    expect(host?.textContent).toContain('An earlier request is unresolved.');
+  }
 });
 
 test('reopening retains paid activation and refund states without presenting another payment link', async () => {
-  commerce.checkouts = [{ id: 'paid-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'alipay', offer_name: 'Paid membership', amount: '10000000', currency: 'CNY', payment_status: 'PAID', fulfillment_status: 'PENDING', refund_status: 'PENDING', expires_at: '2027-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z', session: { kind: 'redirect', url: 'https://openapi.alipay.com/gateway.do?sign=fixture', expires_at: '2027-01-01T00:00:00Z' } }];
+  commerce.checkouts = [{ id: 'paid-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'alipay', offer_name: 'Paid membership', amount: '10000000', currency: 'CNY', payment_status: 'PAID', fulfillment_status: 'FULFILLED', refund_status: 'PENDING', expires_at: '2027-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z', session: { kind: 'redirect', url: 'https://openapi.alipay.com/gateway.do?sign=fixture', expires_at: '2027-01-01T00:00:00Z' } }];
   await render('orders');
   expect(host?.textContent).toContain('Refund processing');
   expect(host?.textContent).not.toContain('Open Alipay checkout');
@@ -613,9 +615,9 @@ test('reopening retains paid activation and refund states without presenting ano
   await render('overview');
   expect(host?.textContent).toContain('Refund processing');
   expect(writes).toBe(0);
-  await act(async () => button('Request original-channel refund').click());
-  expect(writes).toBe(0);
-  expect(host?.textContent).toContain('Confirm refund');
+  expect(host?.textContent).not.toContain('Request original-channel refund');
+  await act(async () => button('Subscribe').click());
+  expect(host?.querySelector<HTMLButtonElement>('[role=radio]')?.disabled).toBe(true);
 });
 
 

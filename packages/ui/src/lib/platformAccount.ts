@@ -178,7 +178,7 @@ export const readPlatformUsageCalls = (accountId: string, product: UsageProduct)
 
 const modelTaskSchema = z.object({
   sessionID: z.string(), taskID: z.string(), actorID: z.string(), accountID: z.string(), model: z.string(), blocked: z.boolean(),
-  calls: z.array(z.object({ callID: z.string(), status: z.enum(['PREPARED', 'DISPATCHED', 'DELIVERED', 'UNKNOWN', 'SETTLED', 'RELEASED', 'REJECTED']), charged: z.string().regex(/^\d+$/).optional() })),
+  calls: z.array(z.object({ callID: z.string(), status: z.enum(['PREPARED', 'DISPATCHED', 'DELIVERED', 'UNKNOWN', 'SETTLED', 'RELEASED', 'REJECTED']), asset: z.enum(['CREDIT/6', 'CNY/6', 'LR_QUOTA/0']).optional(), charged: z.string().regex(/^\d+$/).optional() })),
 });
 export type PlatformModelTask = z.infer<typeof modelTaskSchema>;
 const mediaHistorySchema = z.object({ tasks: z.array(z.object({ sessionID: z.string().regex(/^media_[a-f0-9]{32}$/), model: z.string().min(1) })), nextCursor: z.string().regex(/^media_[a-f0-9]{32}$/).nullable() });
@@ -189,11 +189,6 @@ export const readPlatformModelTask = async (sessionID: string): Promise<Platform
   catch (error) { if (error instanceof PlatformAccountError && error.code === 'platform_task_unbound') return null; throw error; }
 };
 export const reconcilePlatformModelTask = (sessionID: string) => requestPlatformAccount(`/api/platform-model/sessions/${encodeURIComponent(sessionID)}/reconcile`, modelTaskSchema, 'POST');
-export const formatPlatformCredits = (units: string): string => {
-  const value = BigInt(units);
-  return `${value / 1_000_000n}.${String(value % 1_000_000n).padStart(6, '0')}`;
-};
-
 /** Exact scaled decimal display; only the scale is a JavaScript number. */
 export const formatPlatformQuantity = (quantity: { value: string; scale: number }): string => {
   if (quantity.scale === 0) return quantity.value;

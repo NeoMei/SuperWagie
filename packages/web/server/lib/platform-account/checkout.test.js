@@ -82,27 +82,32 @@ it('keeps an uncertain close pending until the original checkout confirms closur
     '/v1/accounts/acct/checkouts', '/v1/accounts/acct/checkouts/check1/close', '/v1/accounts/acct/checkouts/check1/reconcile',
   ]);
 });
-it('releases an expired local checkout intent so a new payment can be created', async () => {
+it('retains the original payment guard until UniHub confirms an expired checkout is closed', async () => {
   const f = await setup(); f.state.lose = false;
   await f.runtime.createCheckout({}, f.body);
   f.state.checkout.payment_status = 'UNKNOWN';
   f.state.checkout.expires_at = new Date(Date.now() - 60000).toISOString();
-  f.state.checkout.session.expires_at = new Date(Date.now() - 60000).toISOString();
-  expect((await f.runtime.overview({})).intents[0].status).toBe('FAILED');
-  const created = await f.runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID() });
-  expect(created).toMatchObject({ status: 'PENDING', resourceId: 'check2' });
-});
-
-it('frees the local guard when closing an expired checkout still returns a pending provider state', async () => {
-  const f = await setup(); f.state.lose = false;
-  await f.runtime.createCheckout({}, f.body);
-  f.state.checkout.payment_status = 'UNKNOWN';
-  f.state.checkout.expires_at = new Date(Date.now() - 60000).toISOString();
-  f.state.checkout.session.expires_at = new Date(Date.now() - 60000).toISOString();
+  f.state.checkout.session.expires_at = f.state.checkout.expires_at;
   const closed = await f.runtime.checkoutAction({}, 'check1', 'close', { accountId: 'acct' });
   expect(closed.payment_status).toBe('UNKNOWN');
+  expect((await f.runtime.overview({})).intents[0].status).toBe('PENDING');
+  await expect(f.runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID() })).rejects.toMatchObject({ code: 'platform_operation_pending' });
+  f.state.checkout.payment_status = 'CLOSED';
   expect((await f.runtime.overview({})).intents[0].status).toBe('FAILED');
   await expect(f.runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID() })).resolves.toMatchObject({ status: 'PENDING', resourceId: 'check2' });
+});
+
+it('serves the purchase summary without an order-history dependency', async () => {
+  const f = await setup();
+  const app = express();
+  registerPlatformCommerceRoutes(app, { runtime: f.runtime, resolveIdentity: () => ({}), isRequestOriginAllowed: () => true });
+  const state = await request(app).get('/api/platform-account/commerce?summary=1').expect(200);
+  expect(state.body.offers).toHaveLength(1);
+  expect(state.body.orders).toBeNull();
+  expect(f.state.calls.map(call => call.route)).toContain('/v1/accounts/acct/checkouts');
+  expect(f.state.calls.some(call => call.route.endsWith('/orders'))).toBe(false);
+  await request(app).get('/api/platform-account/commerce/orders?accountId=acct').expect(200, []);
+  await request(app).get('/api/platform-account/commerce/orders?accountId=wrong').expect(409);
 });
 
 it('keeps payment, fulfillment and refund state separate and rejects unsafe redirect URLs', async () => {

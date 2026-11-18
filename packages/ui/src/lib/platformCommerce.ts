@@ -58,7 +58,8 @@ const upgradeQuoteSchema = z.object({
 export type PlatformUpgradeQuote = z.infer<typeof upgradeQuoteSchema>;
 export const createPlatformCheckout = (input: { accountId: string; offerId?: string; quoteId?: string; provider: 'wechat' | 'alipay'; idempotencyKey: string }) => requestPlatformAccount('/api/platform-account/commerce/checkouts', intentSchema, 'POST', JSON.stringify(input));
 export const updatePlatformCheckout = (accountId: string, id: string, action: 'reconcile' | 'close' | 'refund') => requestPlatformAccount(`/api/platform-account/commerce/checkouts/${encodeURIComponent(id)}/${action}`, checkoutSchema, 'POST', JSON.stringify({ accountId }));
-export const readPlatformCommerce = () => requestPlatformAccount('/api/platform-account/commerce', commerceSchema);
+export const readPlatformCommerce = (summary = false) => requestPlatformAccount(summary ? '/api/platform-account/commerce?summary=1' : '/api/platform-account/commerce', commerceSchema);
+export const readPlatformOrders = (accountId: string) => requestPlatformAccount(`/api/platform-account/commerce/orders?accountId=${encodeURIComponent(accountId)}`, z.array(orderSchema));
 export const purchasePlatformOffer = (input: { accountId: string; offerId: string; idempotencyKey: string }) => requestPlatformAccount('/api/platform-account/commerce/purchases', intentSchema, 'POST', JSON.stringify(input));
 export const createPlatformUpgradeQuote = (input: { accountId: string; subscriptionId: string; offerId: string; paymentSource?: 'wallet' | 'external' }) => requestPlatformAccount('/api/platform-account/commerce/upgrade-quotes', upgradeQuoteSchema, 'POST', JSON.stringify(input));
 export const acceptPlatformUpgradeQuote = (input: { accountId: string; quoteId: string; idempotencyKey: string }) => requestPlatformAccount('/api/platform-account/commerce/upgrade-purchases', intentSchema, 'POST', JSON.stringify(input));

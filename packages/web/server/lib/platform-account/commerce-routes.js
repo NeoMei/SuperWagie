@@ -21,7 +21,8 @@ export const registerPlatformCommerceRoutes = (app, { runtime, resolveIdentity, 
       res.status(known ? error.status : 503).json({ error: known ? error.code : 'platform_commerce_unavailable' });
     }
   };
-  app.get('/api/platform-account/commerce', route((who) => runtime.overview(who)));
+  app.get('/api/platform-account/commerce', route((who, req) => runtime.overview(who, { includeOrders: req.query.summary !== '1' })));
+  app.get('/api/platform-account/commerce/orders', route((who, req) => runtime.orders(who, req.query.accountId)));
   app.post('/api/platform-account/commerce/checkouts', route((who, req) => runtime.createCheckout(who, req.body), true));
   app.get('/api/platform-account/commerce/checkouts/:id', route((who, req) => runtime.checkoutAction(who, req.params.id, 'read', { accountId: req.query.accountId })));
   for (const action of ['reconcile', 'close', 'refund']) app.post(`/api/platform-account/commerce/checkouts/:id/${action}`, route((who, req) => runtime.checkoutAction(who, req.params.id, action, req.body), true));

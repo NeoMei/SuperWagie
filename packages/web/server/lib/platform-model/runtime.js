@@ -5,7 +5,7 @@ import path from 'node:path';
 import { once } from 'node:events';
 import { z } from 'zod';
 import { isEnterpriseMode } from '../enterprise-mode.js';
-import { openModelStore, PlatformStoreLockError } from './store.js';
+import { openModelStore, modelChargeAssetSchema, PlatformStoreLockError } from './store.js';
 import { createPluginSource } from './plugin.js';
 import { createPlatformIpcSession, platformRequestSignature, secureEqual } from './ipc.js';
 import { decodeInlineImage, createNativeMediaTransport, readBoundedResponse } from './native-media.js';
@@ -59,7 +59,7 @@ const readGatewayRefusal = async (response) => {
 };
 const receiptSchema = z.object({
   call_id: identifier,
-  asset: z.enum(['CREDIT/6', 'CNY/6', 'LR_QUOTA/0']).optional(),
+  asset: modelChargeAssetSchema.optional(),
   status: z.enum(['RESERVED', 'RESERVING', 'RESERVE_UNKNOWN', 'UNKNOWN', 'SETTLE_PENDING', 'RELEASE_PENDING', 'SETTLED', 'RELEASED', 'REJECTED']),
   charged: z.union([z.string().regex(/^\d+$/), z.literal('')]).optional(),
 }).refine((value) => value.charged !== '' || value.status === 'REJECTED')
@@ -427,6 +427,9 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       const saved = state.calls[call.id];
       if (terminal.has(saved.status) && saved.status !== value.status) refuse('platform_reconciliation_required');
       saved.status = value.status;
+      if (saved.asset && value.asset && saved.asset !== value.asset) refuse('platform_reconciliation_required');
+      if (saved.charged !== undefined && value.charged !== undefined && saved.charged !== value.charged) refuse('platform_reconciliation_required');
+      if (value.asset !== undefined) saved.asset = value.asset;
       if (value.charged !== undefined) saved.charged = value.charged;
     });
     scopeFor(identity);
@@ -506,7 +509,12 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   const status = (identity, sessionID) => {
     const task = taskFor(identity, sessionID);
     const calls = Object.values(store.read().calls).filter((call) => call.sessionID === sessionID);
-    return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model, blocked: calls.some(blocksSession), calls: calls.map(({ id, status, charged }) => ({ callID: id, status: status === 'ASYNC_PENDING' ? 'DELIVERED' : status, ...(charged !== undefined ? { charged } : {}) })) };
+    return { sessionID, taskID: task.id, actorID: task.actorID, accountID: task.accountID, model: task.model, blocked: calls.some(blocksSession), calls: calls.map(({ id, status, charged, asset }) => {
+      const call = { callID: id, status: status === 'ASYNC_PENDING' ? 'DELIVERED' : status };
+      if (charged !== undefined) call.charged = charged;
+      if (asset !== undefined) call.asset = asset;
+      return call;
+    }) };
   };
   // Discover only durable, independently admitted media tasks. The ID is
   // recomputed from the authenticated owner and model; a prefix alone is not
@@ -743,7 +751,10 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       await receipt(task, store.read().calls[callID], identity).catch(() => {});
       res.end();
     } catch (error) {
-      if (upstreamStarted) await markUnknown();
+      if (upstreamStarted) {
+        await markUnknown();
+        if (res.headersSent) void receipt(task, store.read().calls[callID], identity).catch(() => {});
+      }
       else await store.mutate((state) => { if (!terminal.has(state.calls[callID].status)) state.calls[callID].status = 'REJECTED'; });
       if (res.headersSent) { res.destroy(); return; }
       if (error instanceof PlatformModelError) throw error;

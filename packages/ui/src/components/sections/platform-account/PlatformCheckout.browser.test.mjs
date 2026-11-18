@@ -62,6 +62,9 @@ test('direct checkout renders QR, preserves original recovery, and opens only th
     await evaluate('window.setState("PAID","FULFILLED","PENDING")');await until('document.body.innerText.includes("Refund processing")');
     await evaluate('window.remount()');await until('document.body.innerText.includes("Refund processing")');
     assert.equal(await evaluate('window.paymentWrites().length'),0);
+    assert.equal(await evaluate('document.body.innerText.includes("Request original-channel refund")'),false);
+    await evaluate('window.setState("PAID","FULFILLED","")');
+    await until('document.body.innerText.includes("Request original-channel refund")');
     await click('Request original-channel refund');assert.equal(await evaluate('window.paymentWrites().length'),0);
     await click('Close');assert.equal(await evaluate('window.paymentWrites().length'),0);
     assert.equal(await evaluate('document.body.innerText.includes("Confirm refund")'),false);

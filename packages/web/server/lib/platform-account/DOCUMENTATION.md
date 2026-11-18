@@ -335,13 +335,16 @@ A checkout uses exactly one offer or external upgrade quote and an explicit
 WeChat or Alipay provider. The backend persists the original idempotency key,
 actor, service, account, product, amount and provider before dispatch. An unknown
 create is recovered with that same key. A known checkout reconciles its original
-record. An unresolved local checkout intent blocks a new payment attempt while its
-code can still be paid. Once the code's session deadline passes, the local
-checkout recovery intent is released so another payment can be created; a
-payment observed after the deadline keeps the intent pending through UniHub's
-REVIEW path. This release changes only local admission control. UniHub owns
-cross-instance commercial exclusion, verified payment, refund and fulfillment,
-and its checkout state is unchanged by local expiration.
+record. An unresolved local checkout intent blocks a new payment until UniHub
+reports a terminal outcome. An expired artifact cannot determine whether an
+earlier payment succeeded. Unknown intents with no resource can be explicitly
+retried with their original key; opening or refreshing the account does not
+dispatch those commands.
+
+The purchase summary omits purchase-order history and reads checkout state in
+parallel with catalog and wallets after the account and scopes are verified.
+Order history uses the separate authenticated commerce orders read. Its failure
+has its own state and never becomes an empty history or a purchase failure.
 
 A pre-admission operation_pending response is different: UniHub returns it
 from its commercial check before any checkout record exists, so there is no

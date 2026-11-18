@@ -71,7 +71,7 @@ const commerce: PlatformCommerceState = {
 const bodySchema = z.object({ username: z.string().optional(), password: z.string().optional(), idempotencyKey: z.string().optional(), productId: z.string().optional(), amount: z.string().optional(), accountId: z.string().optional(), offerId: z.string().optional() });
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   const path = String(input instanceof Request ? input.url : input);
-  if (path.includes('/api/model-configuration/bootstrap/account-key?')) return Response.json({ accountId: 'team-a', enterpriseMode: false, activation: null });
+  if (path.includes('/api/model-configuration/bootstrap/account-key?')) return Response.json({ accountId: 'team-a', enterpriseMode: false, fundingMode: 'credits', nativeCredits: { ready: true }, activation: null });
   if (path.endsWith('/api/platform-account/profile')) {
     if (profileFail) return Response.json({ error: 'platform_unavailable' }, { status: 503 });
     if (init?.method === 'PATCH') {
@@ -130,7 +130,8 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     const intent: PlatformCommerceIntent = { idempotencyKey: body.idempotencyKey ?? '', kind: 'purchase', accountId: 'team-a', productId: 'llmrouter', amount: '10000000', status: purchaseFailure === 'intent' ? 'FAILED' : 'APPLIED', errorCode: purchaseFailure === 'intent' ? 'credit_rates_unavailable' : undefined, createdAt: '2026-10-25T00:00:00Z' };
     commerce.intents.push(intent); return Response.json(intent);
   }
-  if (path.endsWith('/api/platform-account/commerce')) { if (failCommerceAfterPurchase && purchaseRequests) return Response.json({ error: 'service_unavailable' }, { status: 503 }); return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'unconfigured', canPurchase: false } }); }
+  if (path.includes('/api/platform-account/commerce/orders?')) return Response.json(commerce.orders ?? []);
+  if (path.endsWith('/api/platform-account/commerce?summary=1')) { if (failCommerceAfterPurchase && purchaseRequests) return Response.json({ error: 'service_unavailable' }, { status: 503 }); return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'unconfigured', canPurchase: false } }); }
   if (path.endsWith('/api/platform-account/usage/team-a/summary')) return usageStatus === 200
     ? Response.json(nativeOverride ?? (nativeScenario ? { ...nativeRequestSummary, visibility: 'account' } : { ...usageSummary, usage_coverage: legacyCoverageUnknown ? undefined : usageSummary.usage_coverage })) : Response.json({ error: 'forbidden' }, { status: usageStatus });
   if (path.endsWith('/api/platform-account/usage/team-a/activity')) return usageStatus === 200 ? Response.json({
@@ -154,7 +155,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   }
   if (path.includes('/api/platform-model/sessions/')) {
     if (scopeRestart) return Response.json({error:'platform_model_scope_restart_required'}, {status:403});
-    if (path.endsWith('/reconcile')) { reconcileCount += 1; expect(init?.method).toBe('POST'); return Response.json({ ...taskState, blocked: false, calls: [{ callID: 'call-a', status: 'SETTLED', charged: '80' }] }); }
+    if (path.endsWith('/reconcile')) { reconcileCount += 1; expect(init?.method).toBe('POST'); return Response.json({ ...taskState, blocked: false, calls: [{ callID: 'call-a', status: 'SETTLED', asset: 'CREDIT/6', charged: '80000' }, { callID: 'cash', status: 'SETTLED', asset: 'CNY/6', charged: '1250000' }, { callID: 'quota', status: 'SETTLED', asset: 'LR_QUOTA/0', charged: '33' }, { callID: 'legacy', status: 'SETTLED', charged: '80' }] }); }
     return unboundTask ? Response.json({ error: 'platform_task_unbound' }, { status: 403 }) : Response.json(taskState);
   }
   if (path.includes('/api/platform-account/logout')) { if (lostLogoutResponse) { lostLogoutResponse = false; throw new TypeError('network'); } authSignedOut = true; logoutCount += 1; expect(init?.method).toBe('POST'); return Response.json({ status: 'signed-out' }); }
@@ -795,6 +796,11 @@ describe('PlatformAccountPage', () => {
     const reconcile = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Check settlement status');
     expect(reconcile).toBeDefined(); await act(async () => reconcile?.click());
     expect(reconcileCount).toBe(1); expect(host.textContent).toContain('Settled'); expect(host.textContent).not.toContain('Outcome unknown');
+    expect(host.textContent).toContain('0.08 credits');
+    expect(host.textContent).toContain('CNY 1.25');
+    expect(host.textContent).toContain('33 quota units');
+    expect(host.textContent).toContain('See consumption records for the billing amount.');
+    expect(host.textContent).not.toContain('{points}');
   });
   test('keeps an existing task visible and reconcilable while new model calls are unavailable', async () => {
     useI18nStore.getState().setLocale('en'); modelEnabled = false; modelRecoveryAvailable = true;
