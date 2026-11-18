@@ -22,7 +22,7 @@ const OPENAI_COMPATIBLE_SAMPLE_RATE = 16000;
 
 export class OpenAICompatibleTranscriptionSession extends EventEmitter {
   /**
-   * @param {{ baseURL: string, model: string, apiKey?: string, configured?: boolean }} config
+   * @param {{ baseURL?: string, model: string, apiKey?: string, configured?: boolean, transcribe?: (audio: Buffer, segmentId: string) => Promise<string> }} config
    */
   constructor(config) {
     super();
@@ -35,6 +35,10 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
   }
 
   async connect() {
+    if (this.config.transcribe) {
+      this.connected = true;
+      return;
+    }
     if (!this.config.baseURL) {
       throw new Error('Custom STT server URL is not configured');
     }
@@ -75,7 +79,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
     void (async () => {
       try {
         const wav = pcm16ToWav(committedPcm16, OPENAI_COMPATIBLE_SAMPLE_RATE);
-        const text = await transcribeAudio({
+        const text = this.config.transcribe ? await this.config.transcribe(wav, committedId) : await transcribeAudio({
           audioBuffer: wav,
           mimeType: 'audio/wav',
           model: this.config.model,
@@ -89,7 +93,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
           isFinal: true,
         });
       } catch (err) {
-        this.emit('error', this.config.configured ? configuredProviderError('transcription') : err instanceof Error ? err : new Error(String(err)));
+        this.emit('error', !this.config.transcribe && this.config.configured ? configuredProviderError('transcription') : err instanceof Error ? err : new Error(String(err)));
       }
     })();
   }

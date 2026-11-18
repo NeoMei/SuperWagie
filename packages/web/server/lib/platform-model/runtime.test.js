@@ -128,10 +128,10 @@ const fixture = async (options = {}) => {
   const account = {
     actor: () => { if (!enabled) throw new Error('expired'); return { actingUserId: currentActor, billingAccountId: selected, authSession };  },
     usesProductCreditWallet: async () => options.productCredit ?? false,
-    proxyProductModel: async (_identity, { callId, body, signal }) => fetch(env.OPENCHAMBER_UNIHUB_GATEWAY_URL + (body === undefined ? '/calls/' + encodeURIComponent(callId) : '/chat/completions'), {
+    proxyProductModel: options.productModelProxy ?? (async (_identity, { callId, body, signal }) => fetch(env.OPENCHAMBER_UNIHUB_GATEWAY_URL + (body === undefined ? '/calls/' + encodeURIComponent(callId) : '/chat/completions'), {
       method: body === undefined ? 'GET' : 'POST', body, signal,
       headers: { Authorization: 'Bearer uh_key_fixture', 'X-UniHub-Product-Authorization': 'proof-' + productRequests.length, 'X-UniHub-Task-ID': 'uh_task_fixture', 'Idempotency-Key': callId },
-    }),
+    })),
     request: async (_identity, target, init) => {
       const body = JSON.parse(init.body); grants.push({ target, body });
       await waitForGrant?.();
@@ -140,7 +140,7 @@ const fixture = async (options = {}) => {
     },
   };
   const create = async () => {
-    const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env, getAccountRuntime: () => account, readExecution: options.readExecution ?? (async () => ({ promptID, idle, model: session().model })), isManaged: () => true, enterprise: () => enterprise, trustedBoundary: options.trustedBoundary === true });
+    const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env, getAccountRuntime: () => account, isProductModelConfigured: () => options.productCredit === true, readExecution: options.readExecution ?? (async () => ({ promptID, idle, model: session().model })), isManaged: () => true, enterprise: () => enterprise, trustedBoundary: options.trustedBoundary === true });
     cleanups.push(() => runtime.close());
     await runtime.materializePlugin();
     return runtime;
@@ -189,6 +189,41 @@ it('uses the server-only product key and proof for a product credit call and ori
   expect(f.productRequests.some(({ method, path }) => method === 'GET' && path === '/platform/v1/calls/call_product')).toBe(true);
   expect(f.grants).toHaveLength(0);
   expect(f.runtime().status(alice, 'ses_one').calls[0]).toMatchObject({ status: 'SETTLED', asset: 'CREDIT/6' });
+});
+
+it.each([
+  { operation: 'chat', status: 402, code: 'platform_model_credits_required' },
+  { operation: 'image-generation', status: 402, code: 'platform_model_credits_required' },
+  { operation: 'chat', status: 403, code: 'product_membership_expired' },
+  { operation: 'image-generation', status: 403, code: 'product_membership_expired' },
+])('returns the product $code pre-admission refusal for $operation without receipt lookups', async ({ operation, status, code }) => {
+  const operations = [];
+  const f = await fixture({ productCredit: true, productModelProxy: async (_identity, { operation, body }) => {
+    operations.push(body === undefined ? 'receipt' : operation ?? 'chat');
+    if (body === undefined) return new Response(null, { status: 404 });
+    return Response.json({ error: { code, stage: 'pre_admission' } }, { status });
+  } });
+  await f.runtime().admit(alice, session(), 'msg_test');
+  if (operation === 'chat') expect((await f.prepare('refused-call')).status).toBe(200);
+  const response = operation === 'chat' ? await f.completion('refused-call')
+    : await f.internal('/media/image', { sessionID: 'ses_one', callID: 'refused-call', model: 'qwen-image-2.0', prompt: 'A paper boat' });
+  expect(response.status).toBe(status);
+  expect(await response.json()).toEqual({ error: { code } });
+  expect(operations).toEqual([operation]);
+  expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ callID: 'refused-call', status: 'REJECTED' }] });
+});
+
+it('keeps an unconfirmed product 402 blocked on its original receipt', async () => {
+  const f = await fixture({ productCredit: true, gatewayRejection: {
+    status: 402, body: '{"error":{"code":"platform_model_credits_required"}}',
+  } });
+  await f.runtime().admit(alice, session(), 'msg_test');
+  expect((await f.prepare('uncertain-credit-call')).status).toBe(200);
+  const response = await f.completion('uncertain-credit-call');
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({ error: { code: 'platform_gateway_call_incomplete' } });
+  expect(f.receiptRequests()).toBe(1);
+  expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: true, calls: [{ callID: 'uncertain-credit-call', status: 'UNKNOWN' }] });
 });
 
 const managedIpcFixture = async (options = {}) => {
@@ -354,6 +389,70 @@ describe('UniHub model transport', () => {
     expect(response.status).toBe(200);
     expect((await response.json()).callID).toBe('ipc-prepared');
     expect(await f.runtime().handleManagedOpenCodeMessage({ type: 'unihub-platform-handshake', bootstrap, nonce, secret }, childProcess)).toBe(false);
+  });
+
+  it('runs built-in signed media tools against the active task and recovers the original artifact', async () => {
+    const audio = Buffer.from('ID3-test-audio');
+    const calls = [];
+    let workspace;
+    const f = await fixture({
+      trustedBoundary: true,
+      productCredit: true,
+      readExecution: async () => ({ directory: workspace, promptID: 'msg_test', idle: null, model: session().model }),
+      productModelProxy: async (_identity, { operation, callId, body }) => {
+        calls.push({ operation, callId });
+        if (operation === 'speech') {
+          expect(JSON.parse(body)).toMatchObject({ input: { text: 'a narrated line', voice: 'Cherry' } });
+          return new Response(audio, { headers: { 'content-type': 'audio/mpeg' } });
+        }
+        if (operation === 'receipt') return Response.json({ call_id: 'pc_speech', idempotency_key: callId, status: 'SETTLED', credit_scope: 'product_v1',
+          funding_product_id: 'superwagie', asset: 'CREDIT/6', charged: '17' });
+        expect(operation).toBe('media-result');
+        return new Response(audio, { headers: { 'content-type': 'audio/mpeg', 'x-unihub-call-id': 'pc_speech',
+          'x-unihub-idempotency-key': callId, 'x-content-sha256': crypto.createHash('sha256').update(audio).digest('hex') } });
+      },
+    });
+    workspace = path.join(f.dir, 'workspace');
+    await fs.mkdir(workspace);
+    await f.runtime().admit(alice, session(), 'msg_test');
+    const pluginUrl = pathToFileURL(path.join(await f.runtime().materializePlugin(), 'index.js')).href;
+    const source = `
+      const tools = new Map();
+      const plugin = (await import(${JSON.stringify(pluginUrl)})).default;
+      const run = async () => {
+        await plugin.setup({ session: { hook: async () => {} }, tool: { transform: async (fn) => fn({ add: (tool) => tools.set(tool.name, tool) }) } });
+        const tool = tools.get('superwagie_managed_media');
+        const context = { sessionID: 'ses_one', id: 'tool-fixture', signal: new AbortController().signal };
+        const denied = JSON.parse((await tool.execute({ operation: 'speech', model: 'qwen3-tts-flash', text: 'a narrated line', outputPath: '/outside.wav' }, context)).content);
+        const result = JSON.parse((await tool.execute({ operation: 'speech', model: 'qwen3-tts-flash', text: 'a narrated line' }, context)).content);
+        const recovered = JSON.parse((await tool.execute({ operation: 'recover', callID: result.callID }, context)).content);
+        return { denied, result, recovered, inheritedToken: process.env.OPENCHAMBER_UNIHUB_PROXY_TOKEN ?? null };
+      };
+      try { process.send({ type: 'plugin-probe-result', result: await run() }, () => process.exit(0)); }
+      catch (error) { process.send({ type: 'plugin-probe-result', code: error.message }, () => process.exit(0)); }
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], {
+      env: { PATH: process.env.PATH, ...f.runtime().createChildEnv() }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    const resultMessage = Promise.withResolvers();
+    child.on('error', resultMessage.reject);
+    child.on('message', (message) => {
+      if (message.type === 'plugin-probe-result') resultMessage.resolve(message);
+      else void f.runtime().handleManagedOpenCodeMessage(message, child).catch(resultMessage.reject);
+    });
+    const exited = once(child, 'exit');
+    cleanups.push(async () => { if (child.exitCode === null) child.kill(); await exited; });
+    const message = await resultMessage.promise;
+    expect(message.code).toBeUndefined();
+    const { result, denied, recovered, inheritedToken } = message.result;
+    expect(denied).toMatchObject({ status: 'refused' });
+    expect(result.status).toBe('succeeded');
+    expect(inheritedToken).toBeNull();
+    expect(path.dirname(result.artifact.path)).toBe(await fs.realpath(workspace));
+    expect(await fs.readFile(result.artifact.path)).toEqual(audio);
+    expect(recovered).toEqual(result);
+    expect(calls).toEqual(['speech', 'receipt', 'media-result'].map((operation) => ({ operation, callId: result.callID })));
+    expect(f.grants).toEqual([]);
   });
 
   it('prepares calls from separately imported plugin locations in the same managed child', async () => {

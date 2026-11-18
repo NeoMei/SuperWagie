@@ -25,7 +25,7 @@ describe('bundled SuperVideo narration configuration', () => {
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
-    const binding = { protocol: 'openai-compatible', model: 'narration-model', apiKey: 'narration-key', baseUrl: `http://127.0.0.1:${server.address().port}/v1` };
+    const binding = { protocol: 'openai-compatible', model: 'narration-model', apiKey: 'narration-key', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, parameters: {} };
     const voice = { provider: 'openai-compatible', model: 'narration-model', voice: 'alloy' };
     expect(validateVoice(voice)).toBe(voice);
     const result = await requestConfiguredSpeech('Narration', voice, { resolveBinding: async () => binding });

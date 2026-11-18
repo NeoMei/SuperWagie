@@ -2,12 +2,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 
 import { createModelConfigurationRuntime } from './runtime.js';
 import { resolveSpeechBinding, configuredDefaultVoice, requestConfiguredSpeech } from '../../builtin-skills/supervideo-engine/src/providers/model-configuration.mjs';
+import { canonicalHash } from '../../builtin-skills/supervideo-engine/src/core/model.mjs';
 import { createProject } from '../../builtin-skills/supervideo-engine/src/core/store.mjs';
 import { synthesize } from '../../builtin-skills/supervideo-engine/src/providers/tts.mjs';
 
@@ -15,7 +17,7 @@ const directories = [];
 const hasAudioTools = ['ffmpeg', 'ffprobe'].every((command) => spawnSync(command, ['-version'], { stdio: 'ignore' }).status === 0);
 const previous = { ...process.env };
 afterEach(async () => {
-  for (const key of ['OPENCHAMBER_DATA_DIR', 'SUPERWAGIE_MODEL_RESOLVER', 'SUPERWAGIE_MODEL_NODE', 'OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN']) {
+  for (const key of ['OPENCHAMBER_DATA_DIR', 'SUPERWAGIE_MODEL_RESOLVER', 'SUPERWAGIE_MODEL_NODE', 'OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN', 'OPENCHAMBER_PRODUCT_MANAGED_MEDIA']) {
     if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
   }
   await Promise.all(directories.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
@@ -59,6 +61,28 @@ it.skipIf(!hasAudioTools).each([
   } finally {
     await new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); });
   }
+});
+
+it.skipIf(!hasAudioTools)('imports scoped narration through the real engine and refuses mismatched receipts', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'supervideo-product-narration-'));
+  directories.push(dataDir);
+  const projectDir = path.join(dataDir, 'project');
+  await createProject(projectDir, { mode: 'book', output: { width: 1280, height: 720, fps: 30 } });
+  const voice = { provider: 'managed-media', model: 'qwen3-tts-flash', voice: 'Cherry' };
+  const sentence = { id: 'approved-line', text: 'One approved line' };
+  const artifact = path.join(dataDir, 'artifact.wav');
+  const bytes = execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=1000:duration=0.2', '-f', 'wav', '-']);
+  await fs.writeFile(artifact, bytes);
+  const hostReceipt = { status: 'succeeded', path: artifact, sentenceId: sentence.id, textHash: canonicalHash(sentence.text),
+    sha256: createHash('sha256').update(bytes).digest('hex'), callID: 'media_certified', model: voice.model, voice: voice.voice,
+    origin: { kind: 'provider', reference: 'SuperWagie managed speech', version: voice.model } };
+  const runtime = { ffprobe: 'ffprobe', ffmpeg: 'ffmpeg' };
+  process.env.OPENCHAMBER_PRODUCT_MANAGED_MEDIA = '1';
+  await expect(synthesize(projectDir, sentence, { voice, runtime })).rejects.toMatchObject({ code: 'HOST_AUDIO_REQUIRED' });
+  await expect(synthesize(projectDir, sentence, { voice, runtime, hostReceipt: { ...hostReceipt, voice: 'wrong' } })).rejects.toMatchObject({ code: 'HOST_RECEIPT_MISMATCH' });
+  const imported = await synthesize(projectDir, sentence, { voice, runtime, hostReceipt });
+  expect(imported.sha256).toBe(hostReceipt.sha256);
+  expect(await fs.readFile(path.join(projectDir, imported.path))).toEqual(bytes);
 });
 
 // The audio-probe fixtures below are POSIX shell executables.

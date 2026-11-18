@@ -9,65 +9,79 @@ const requireUI = createRequire(new URL('../packages/ui/package.json', import.me
 const packageDirectory = dirname(requireUI.resolve('@legendapp/list/react'));
 const bundles = ['react.js', 'react.mjs', 'react-native.web.js', 'react-native.web.mjs'];
 
-// Exercise the installed dependency's actual private ScrollAdjust controller.
-// Only its external hooks, DOM geometry and frame scheduler are supplied here.
-// Keeping the controller in the package (rather than copying it into a test)
-// makes a regressed or changed upstream implementation fail this check.
+// Exercise the installed ScrollAdjust controller with browser-like geometry
+// and a frame scheduler. The controller owns its temporary spacer node.
 function controller(bundle, { horizontal = false, baseline = '' } = {}) {
     const source = readFileSync(join(packageDirectory, bundle), 'utf8');
-    const start = source.indexOf('function ScrollAdjust() {');
+    const start = source.indexOf('function getScrollAdjustAxis(');
     const end = source.indexOf('var SnapWrapper', start);
     assert.ok(start >= 0 && end > start, "Find the pinned package version's ScrollAdjust implementation");
 
-    const hooks = { useRef: (value) => ({ current: value }), useCallback: (callback) => callback };
+    const hooks = {
+        useRef: (value) => ({ current: value }),
+        useCallback: (callback) => callback,
+        useLayoutEffect: (effect) => effect(),
+    };
     const signals = new Map([['scrollAdjust', 0], ['scrollAdjustUserOffset', 0]]);
     const listeners = new Map();
     const frames = new Map();
     let frameId = 0;
     const paddingKey = horizontal ? 'paddingRight' : 'paddingBottom';
-    let padding = baseline;
-    const style = {};
-    Object.defineProperty(style, paddingKey, {
-        get: () => padding,
-        set(value) {
-            // Observed in Chromium: assigning 2123.1875px reads back as
-            // 2123.19px. This normalization is what a plain JS style mock misses.
-            padding = value.endsWith('px') ? `${Number(Number.parseFloat(value).toPrecision(6))}px` : value;
-        },
-    });
+    const pixels = (value) => Number.parseFloat(value) || 0;
     const contentNode = {
-        style,
-        get scrollHeight() { return 300 + (Number.parseFloat(padding) || 0); },
-        get scrollWidth() { return 300 + (Number.parseFloat(padding) || 0); },
-        get offsetHeight() { return this.scrollHeight; },
+        style: { [paddingKey]: baseline },
+        children: [],
+        ownerDocument: {
+            createElement() {
+                return {
+                    style: new Proxy({}, {
+                        set(style, key, value) {
+                            // Chromium normalizes 2123.1875px to 2123.19px.
+                            style[key] = value.endsWith('px') ? `${Number(pixels(value).toPrecision(6))}px` : value;
+                            return true;
+                        },
+                    }),
+                    setAttribute() {},
+                    get offsetHeight() { return pixels(this.style.height); },
+                    remove() {
+                        const parent = this.parentElement;
+                        parent.children.splice(parent.children.indexOf(this), 1);
+                        this.parentElement = null;
+                    },
+                };
+            },
+        },
+        appendChild(child) {
+            child.parentElement = this;
+            this.children.push(child);
+        },
+        get scrollHeight() { return 300 + pixels(this.style.paddingBottom) + this.children.reduce((size, child) => size + pixels(child.style.height), 0); },
+        get scrollWidth() { return 300 + pixels(this.style.paddingRight) + this.children.reduce((size, child) => size + pixels(child.style.width), 0); },
     };
     const scrollElement = {
         scrollTop: 0, scrollLeft: 0, clientHeight: 300, clientWidth: 300,
-        scrollBy({ left, top }) { this.scrollLeft += left; this.scrollTop += top; },
+        scrollBy({ left, top }) {
+            this.scrollLeft = Math.min(this.scrollLeft + left, contentNode.scrollWidth - this.clientWidth);
+            this.scrollTop = Math.min(this.scrollTop + top, contentNode.scrollHeight - this.clientHeight);
+        },
     };
-    const ctx = { state: { props: { horizontal }, scroll: 0, adjustingFromInitialMount: false, refScroller: { current: null } } };
-    const ScrollAdjust = runInNewContext(`(${source.slice(start, end).trim()})`, {
+    const scroller = { getScrollableNode: () => scrollElement, getContentNode: () => contentNode };
+    const ctx = { state: { props: { horizontal }, scroll: 0, adjustingFromInitialMount: false, refScroller: { current: scroller } } };
+    const ScrollAdjust = runInNewContext(`(() => { ${source.slice(start, end)}; return ScrollAdjust; })()`, {
         React3: hooks,
         React3__namespace: hooks,
         useStateContext: () => ctx,
         peek$: (_ctx, key) => signals.get(key),
         useValueListener$: (key, callback) => listeners.set(key, callback),
-        getScrollAdjustTarget: () => ({ contentNode, scrollElement }),
-        getScrollAdjustAxis: () => ({
-            x: horizontal ? 1 : 0, y: horizontal ? 0 : 1,
-            contentSizeKey: horizontal ? 'scrollWidth' : 'scrollHeight',
-            viewportSizeKey: horizontal ? 'clientWidth' : 'clientHeight',
-            paddingEndProp: paddingKey,
-        }),
-        scrollAdjustBy: (element, left, top) => element.scrollBy({ left, top }),
-        window: { getComputedStyle: () => style },
         requestAnimationFrame: (callback) => { frames.set(++frameId, callback); return frameId; },
         cancelAnimationFrame: (id) => frames.delete(id),
     });
     ScrollAdjust();
     return {
-        get padding() { return padding; },
-        set padding(value) { style[paddingKey] = value; },
+        get padding() { return contentNode.style[paddingKey]; },
+        set padding(value) { contentNode.style[paddingKey] = value; },
+        get spacer() { return contentNode.children[0]; },
+        get scrollOffset() { return horizontal ? scrollElement.scrollLeft : scrollElement.scrollTop; },
         adjust(offset) {
             signals.set('scrollAdjustUserOffset', offset);
             listeners.get('scrollAdjustUserOffset')();
@@ -82,26 +96,37 @@ function controller(bundle, { horizontal = false, baseline = '' } = {}) {
 
 for (const bundle of bundles) {
     describe(`LegendList temporary padding: ${bundle}`, () => {
-        it('removes browser-rounded fractional padding on the next frame', () => {
+        it('removes the browser-rounded fractional spacer on the next frame', () => {
             const view = controller(bundle);
             view.adjust(1061.59375);
-            assert.equal(view.padding, '2123.19px');
+            assert.equal(view.spacer?.style.height, '2123.19px');
+            assert.equal(view.scrollOffset, 1061.59375);
+            assert.equal(view.padding, '');
             view.finishFrame();
+            assert.equal(view.spacer, undefined);
             assert.equal(view.padding, '');
         });
 
         it('preserves the original baseline across overlapping adjustments', () => {
             const view = controller(bundle, { baseline: '12px' });
             view.adjust(1061.59375);
+            const spacer = view.spacer;
+            assert.ok(spacer);
             view.adjust(5000.25);
+            assert.equal(view.spacer, spacer);
+            assert.equal(view.scrollOffset, 5000.25);
             view.finishFrame();
+            assert.equal(view.spacer, undefined);
             assert.equal(view.padding, '12px');
         });
 
         it('cleans up the horizontal web entry point too', () => {
             const view = controller(bundle, { horizontal: true });
             view.adjust(1061.59375);
+            assert.equal(view.spacer?.style.width, '2123.19px');
+            assert.equal(view.scrollOffset, 1061.59375);
             view.finishFrame();
+            assert.equal(view.spacer, undefined);
             assert.equal(view.padding, '');
         });
 
@@ -110,6 +135,7 @@ for (const bundle of bundles) {
             view.adjust(1061.59375);
             view.padding = '28px';
             view.finishFrame();
+            assert.equal(view.spacer, undefined);
             assert.equal(view.padding, '28px');
         });
     });

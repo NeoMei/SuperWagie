@@ -23,6 +23,9 @@ const ProductRenewals = ({ product, disabled, save }: {
 }) => {
   const { t } = useI18n();
   const subscription = product.subscription_renewal;
+  const renewalDescription = subscription.offer_name && subscription.price !== undefined
+    ? t('platformAccount.productWallet.subscriptionRenewalPrice', { name: subscription.offer_name, price: t('platformAccount.cny', { amount: formatPlatformMoney(subscription.price) }) })
+    : null;
   const addon = product.addon_renewal;
   const [offerId, setOfferId] = React.useState(addon.offer_id ?? '');
   const [trigger, setTrigger] = React.useState<'exhausted' | 'threshold'>(addon.trigger ?? 'exhausted');
@@ -30,10 +33,8 @@ const ProductRenewals = ({ product, disabled, save }: {
   const selected = product.addon_offers.find((offer) => offer.id === offerId);
   const limit = trigger === 'threshold' ? creditUnits(threshold) : null;
   return <>
-    <SettingsFieldRow label={t('platformAccount.productWallet.subscriptionRenewal')} description={subscription.offer_name && subscription.price !== undefined
-      ? t('platformAccount.productWallet.subscriptionRenewalPrice', { name: subscription.offer_name, price: t('platformAccount.cny', { amount: formatPlatformMoney(subscription.price) }) })
-      : t('platformAccount.productWallet.subscriptionRenewalConsent')}>
-      <Button size="sm" variant="outline" disabled={disabled} onClick={() => save({ kind: 'subscription', enabled: !subscription.enabled, expectedVersion: subscription.version })}>
+    <SettingsFieldRow label={t('platformAccount.productWallet.subscriptionRenewal')} description={renewalDescription ?? t('platformAccount.productWallet.subscriptionRenewalRequiresPlan')}>
+      <Button size="sm" variant="outline" disabled={disabled || (!subscription.enabled && renewalDescription === null)} onClick={() => save({ kind: 'subscription', enabled: !subscription.enabled, expectedVersion: subscription.version })}>
         {t(subscription.enabled ? 'platformAccount.productWallet.disableSubscription' : 'platformAccount.productWallet.enableSubscription')}
       </Button>
     </SettingsFieldRow>
@@ -107,7 +108,7 @@ export const PlatformProductWallet = ({ accountId, wallet, disabled, orderStatus
       <ProductRenewals key={JSON.stringify([product.subscription_renewal.version, product.addon_renewal.version])} product={product} disabled={disabled || !wallet.can_manage || status === 'saving'} save={(input) => void save(product.product_id, input)} />
       <SettingsControlGroup title={t('platformAccount.productWallet.purchaseHistory')}>
         {product.orders.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noOrders')}</p> : product.orders.map((order) => <SettingsFieldRow key={order.id} label={order.offer_name}
-          description={t('platformAccount.orderStates', { payment: orderStatus(order.payment_status), fulfillment: orderStatus(order.fulfillment_status), refund: order.refund_status ? orderStatus(order.refund_status) : t('platformAccount.noRefund') })}>
+          description={t('platformAccount.orderStates', { payment: orderStatus(order.payment_status), fulfillment: orderStatus(order.fulfillment_status), refund: order.refund_status ? orderStatus(order.refund_status) : t('platformAccount.noRefund') }) + (order.upgrade_refund_amount === undefined ? '' : ' · ' + t('platformAccount.productWallet.refundAmount', { amount: t('platformAccount.cny', { amount: formatPlatformMoney(order.upgrade_refund_amount) }) }))}>
           <span dir="auto" className="tabular-nums">{t('platformAccount.cny', { amount: formatPlatformMoney(order.amount) })} · {new Date(order.created_at).toLocaleDateString()}</span>
         </SettingsFieldRow>)}
       </SettingsControlGroup>

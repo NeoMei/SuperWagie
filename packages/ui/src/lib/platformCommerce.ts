@@ -31,15 +31,18 @@ const checkoutSchema = z.object({
   id: z.string().min(1), account_id: z.string().min(1), product_id: z.enum(['superwagie', 'llmrouter']), provider: z.enum(['wechat', 'alipay']), offer_name: z.string(), walletTopUp: z.literal(true).optional(), amount: units, currency: z.literal('CNY'),
   payment_status: z.enum(['CREATED', 'PENDING', 'UNKNOWN', 'PAID', 'CLOSED', 'REVIEW']), fulfillment_status: z.enum(['NOT_STARTED', 'PENDING', 'FULFILLED', 'REVIEW']), refund_status: z.enum(['', 'PENDING', 'SUCCEEDED', 'REVIEW', 'REJECTED']),
   expires_at: z.iso.datetime(), created_at: z.iso.datetime(), order_id: z.string().optional(), error_code: z.string().optional(),
+  upgrade_return_status: z.enum(['UPGRADE_PENDING', 'UPGRADE_RELEASING', 'UPGRADE_RETURNED', 'UPGRADE_REVIEW']).optional(),
+  upgrade_refund_amount: units.optional(),
+  product_credit_upgrade: z.object({ previous_subscription_id: z.string(), previous_order_id: z.string(), estimated_refund_amount: units, refund_payment_source: z.enum(['wallet', 'external']) }).optional(),
   session: z.object({ kind: z.enum(['qr', 'redirect']), url: z.string().min(1).max(16000), expires_at: z.iso.datetime() }).optional(),
-}).refine((checkout) => {
-  if (!checkout.session) return true;
+}).refine(({ provider: paymentProvider, session }) => {
+  if (!session) return true;
   try {
-    const url = new URL(checkout.session.url);
-    return checkout.provider === 'wechat' ? checkout.session.kind === 'qr' && url.protocol === 'weixin:'
+    const url = new URL(session.url);
+    return paymentProvider === 'wechat' ? session.kind === 'qr' && url.protocol === 'weixin:'
       : url.protocol === 'https:' && !url.port && !url.username && !url.password && !url.hash
-        && (checkout.session.kind === 'qr'
-          ? url.hostname === 'qr.alipay.com' && url.pathname !== '/' && checkout.session.url.length <= 1024
+        && (session.kind === 'qr'
+          ? url.hostname === 'qr.alipay.com' && url.pathname !== '/' && session.url.length <= 1024
           : url.hostname === 'openapi.alipay.com' && url.pathname === '/gateway.do');
   } catch { return false; }
 });
@@ -51,7 +54,7 @@ const productWalletSchema = z.object({
     product_id: z.string(), name: z.string(), subscription_renewal: renewal.extend({ offer_name: z.string().optional(), price: units.optional() }),
     addon_renewal: renewal.extend({ offer_id: z.string().optional(), trigger: z.enum(['exhausted', 'threshold']).optional(), threshold: units.optional() }),
     addon_offers: z.array(z.object({ id: z.string(), name: z.string(), price: units })),
-    orders: z.array(z.object({ id: z.string(), offer_name: z.string(), amount: units, payment_status: z.string(), fulfillment_status: z.string(), refund_status: z.string(), created_at: z.string().datetime({ offset: true }) })),
+    orders: z.array(z.object({ id: z.string(), offer_name: z.string(), amount: units, payment_status: z.string(), fulfillment_status: z.string(), refund_status: z.string(), upgrade_refund_amount: units.optional(), created_at: z.string().datetime({ offset: true }) })),
   })),
 });
 export type PlatformProductWalletState = z.infer<typeof productWalletSchema>;
@@ -78,6 +81,7 @@ const upgradeQuoteSchema = z.object({
   paymentSource: z.enum(['wallet', 'external']).optional(), roundingRule: z.literal('cny_cent_ceil_v1').optional(), originalAmount: units.optional(),
   id: z.string().min(1), accountId: z.string().min(1), subscriptionId: z.string().min(1),
   subscriptionVersion: z.number().int().nonnegative(), offer: offerSchema, amount: units, additionalCredits: units,
+  productCreditUpgrade: z.object({ previousOrderId: z.string().min(1), estimatedRefundAmount: units, refundPaymentSource: z.enum(['wallet', 'external']) }).optional(),
   periodStart: z.iso.datetime(), expiresAt: z.iso.datetime(), createdAt: z.iso.datetime(),
 });
 export type PlatformUpgradeQuote = z.infer<typeof upgradeQuoteSchema>;
@@ -89,6 +93,10 @@ export const purchasePlatformOffer = (input: { accountId: string; offerId: strin
 export const createPlatformUpgradeQuote = (input: { accountId: string; subscriptionId: string; offerId: string; paymentSource?: 'wallet' | 'external' }) => requestPlatformAccount('/api/platform-account/commerce/upgrade-quotes', upgradeQuoteSchema, 'POST', JSON.stringify(input));
 export const acceptPlatformUpgradeQuote = (input: { accountId: string; quoteId: string; idempotencyKey: string }) => requestPlatformAccount('/api/platform-account/commerce/upgrade-purchases', intentSchema, 'POST', JSON.stringify(input));
 export const reconcilePlatformIntent = (accountId: string, key: string) => requestPlatformAccount(`/api/platform-account/commerce/intents/${encodeURIComponent(key)}/reconcile`, intentSchema, 'POST', JSON.stringify({ accountId }));
+
+/** Product credit expiry dates use the same calendar as UniHub fulfillment. */
+export const formatProductBillingDate = (value: string, locale: string): string =>
+  new Date(value).toLocaleDateString(locale, { timeZone: 'Asia/Shanghai' });
 
 /** Cash uses CNY/6; retain ledger precision while always showing whole cents. */
 export const formatPlatformMoney = (value: string): string => {

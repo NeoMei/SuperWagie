@@ -96,6 +96,7 @@ export function createIngestQueue({
     } catch (error) {
       if (error?.code === 'not_found') {
         document.knowledgeId = null;
+        delete document.productOcrCall;
         document.state = 'queued';
         await commit(documents, document);
         return 'requeued';
@@ -175,7 +176,8 @@ export function createIngestQueue({
     const callBackend = async () => {
       if (document.knowledgeId) {
         // Changed content: reparse in place, keeping the knowledge id.
-        await client.reparseKnowledge(document.knowledgeId);
+        await client.reparseKnowledge(document.knowledgeId, document.productOcrCall ? {} : undefined);
+        delete document.productOcrCall;
         return;
       }
       const created = await client.registerReference({
@@ -194,6 +196,7 @@ export function createIngestQueue({
         throw Object.assign(new Error('The backend created no knowledge record'), { code: 'register_no_id' });
       }
       document.knowledgeId = created.id;
+      delete document.productOcrCall;
     };
 
     try {

@@ -34,7 +34,14 @@ const clock = (ms: number) => {
   return hours ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`;
 };
 
+const upgradeReturnKeys = {
+  UPGRADE_PENDING: 'platformAccount.productWallet.upgradeRefundPending',
+  UPGRADE_RELEASING: 'platformAccount.productWallet.upgradeRefundReleasing',
+  UPGRADE_RETURNED: 'platformAccount.productWallet.upgradeRefundReturned',
+  UPGRADE_REVIEW: 'platformAccount.productWallet.upgradeRefundReview',
+} as const;
 const statusKey = (checkout: PlatformCheckout): I18nKey => {
+  if (checkout.upgrade_return_status) return upgradeReturnKeys[checkout.upgrade_return_status];
   if (checkout.refund_status === 'SUCCEEDED') return 'platformAccount.checkoutRefunded';
   if (checkout.refund_status === 'PENDING') return 'platformAccount.checkoutRefunding';
   if (checkout.refund_status === 'REVIEW' || checkout.payment_status === 'REVIEW' || checkout.fulfillment_status === 'REVIEW') return 'platformAccount.checkoutReview';
@@ -55,6 +62,7 @@ const StatusDot: React.FC<{ tone: 'waiting' | 'progress' | 'done' | 'idle' }> = 
 
 /** History rows carry a state word, not a sentence. */
 const shortStateKey = (checkout: PlatformCheckout): I18nKey => {
+  if (checkout.upgrade_return_status) return upgradeReturnKeys[checkout.upgrade_return_status];
   if (checkout.refund_status === 'SUCCEEDED') return 'platformAccount.shortState.refunded';
   if (checkout.refund_status === 'PENDING') return 'platformAccount.shortState.refunding';
   if (checkout.refund_status === 'REVIEW' || checkout.payment_status === 'REVIEW' || checkout.fulfillment_status === 'REVIEW') return 'platformAccount.shortState.review';
@@ -100,17 +108,20 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const [codeImage, setCodeImage] = React.useState<{ source: string; image: string } | null>(null);
   const [refundConfirmation, setRefundConfirmation] = React.useState(false);
   const waiting = WAITING.includes(checkout.payment_status) && !checkout.refund_status;
-  const refundable = !checkout.walletTopUp && checkout.payment_status === 'PAID' && !checkout.refund_status;
-  const checkable = waiting || checkout.refund_status === 'PENDING' || (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'PENDING');
+  const refundable = !checkout.upgrade_return_status && !checkout.walletTopUp && checkout.payment_status === 'PAID' && !checkout.refund_status;
+  const checkable = checkout.upgrade_return_status === 'UPGRADE_PENDING' || checkout.upgrade_return_status === 'UPGRADE_RELEASING' || waiting || checkout.refund_status === 'PENDING' || (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'PENDING');
   const session = waiting ? checkout.session : undefined;
   const remaining = useCountdown(waiting ? session?.expires_at ?? checkout.expires_at : undefined);
   const expired = waiting && remaining === 0;
   const codeUrl = session?.kind === 'qr' && !expired && !compact ? session.url : null;
   const qr = codeUrl && codeImage?.source === codeUrl ? codeImage : null;
-  const provider = checkout.provider;
+  const paymentProvider = checkout.provider;
+  const upgrade = checkout.product_credit_upgrade;
+  const returned = checkout.upgrade_refund_amount;
+  const returnAmount = returned === undefined ? null : t('platformAccount.productWallet.refundAmount', { amount: t('platformAccount.cny', { amount: formatPlatformMoney(returned) }) });
   const offerName = checkout.walletTopUp ? t('platformAccount.productWallet.topUp') : checkout.offer_name;
-  const scanHint = t(provider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.scanWithAlipay');
-  const providerName = t(provider === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay');
+  const scanHint = t(paymentProvider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.scanWithAlipay');
+  const providerName = t(paymentProvider === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay');
 
   React.useEffect(() => {
     if (!codeUrl) return undefined;
@@ -139,6 +150,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
         <span className={`${SETTINGS_HELPER_CLASS} shrink-0`}>{t(shortStateKey(checkout))}</span>
         {(refundable || checkable) && <div className="flex items-center gap-1">{actions}</div>}
       </div>
+      {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
       {refundConfirmation && refundable && <div className="mt-2 space-y-2">
         <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.refundConfirmation')}</p>
         <div className="flex flex-wrap gap-2">
@@ -161,6 +173,8 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
       </span>
     </div>
 
+    {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
+    {upgrade && waiting && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.estimatedRefund')} {t('platformAccount.cny', { amount: formatPlatformMoney(upgrade.estimated_refund_amount) })} · {t(upgrade.refund_payment_source === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}</p>}
     <div className="mt-3 flex flex-col gap-4 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6">
       <div className="min-w-0 space-y-3">
         <div className="space-y-1">
@@ -172,7 +186,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
         </div>
         {channels.length > 1 && onSwitchChannel && waiting && <div className="space-y-1">
           <p className="typography-micro text-muted-foreground">{t('platformAccount.paymentChannel')}</p>
-          <SettingsChipGroup value={provider} onChange={(next) => { if (next !== provider && !busy) onSwitchChannel(next); }} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy }))} />
+          <SettingsChipGroup value={paymentProvider} onChange={(next) => { if (next !== paymentProvider && !busy) onSwitchChannel(next); }} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy }))} />
         </div>}
         {codeUrl && <p className={`${SETTINGS_HELPER_CLASS} max-w-[22rem]`}>{scanHint}</p>}
         {session?.kind === 'redirect' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.legacyCheckoutHint')}</p>}

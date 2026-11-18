@@ -22,12 +22,13 @@ const fixture = async () => {
   cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
   const state = { actor: 'actor-a', account: 'personal-a', service: 'service-a', role: 'owner', scopes: [...scopes], sandbox: true, creditsReady: true, failRead: false, loseResponse: false, blockPost: null, rejectOrder: '', calls: [], wallet: 10_000_000n, credits: 0n, now: Date.now(), offers: [membership, addon], activeMembership: false, pendingFulfillment: false, quoteAccount: undefined };
   const cashCheckouts = new Map();
+  const checkoutRecords = new Map();
   const orders = new Map(); const quotes = new Map(); const byKey = new Map();
   const upstream = async (route, init = {}) => {
     state.calls.push({ walletVersion: init.headers?.['X-UniHub-Product-Credit-Wallet'], route, method: init.method ?? 'GET', body: init.body, key: init.headers?.['Idempotency-Key'] });
     if (route === '/v1/accounts') return [{ id: state.account, kind: 'personal', role: state.role }];
     if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: state.scopes, product_credit_wallet: state.productCreditWallet, sandbox: state.sandbox, product_wallet_recharge: state.sandbox, real_payments_configured: state.cashPayments ?? false, payment_providers: state.cashPayments ? ['wechat'] : [], native_credits: { ready: state.creditsReady } };
-    if (route.endsWith('/product-wallet') || route.endsWith('/product-wallet/superwagie/renewal')) return { version: 'product_v1', account_id: state.account, cash: { asset: 'CNY/6', available: String(state.wallet) }, can_manage: true, products: [{ product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 0 }, addon_renewal: { enabled: false, version: 1 }, orders: [], addon_offers: [] }] };
+    if (route.endsWith('/product-wallet') || route.endsWith('/product-wallet/superwagie/renewal')) return { version: 'product_v1', account_id: state.account, cash: { asset: 'CNY/6', available: String(state.wallet) }, can_manage: true, products: [{ product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 0 }, addon_renewal: { enabled: false, version: 1 }, orders: [], addon_offers: [] }, ...(state.otherWalletProducts ?? [])] };
     if (route === '/v1/catalog') return [...state.offers, sandboxOffer].map((item) => ({ ...item, sales_readiness: item.sandbox ? undefined : { ready: true } }));
     if (route.endsWith('/resources')) {
       if (state.failRead) throw new PlatformAccountError('service_unavailable', 503);
@@ -50,11 +51,32 @@ const fixture = async () => {
       return paid;
     }
     if (route.endsWith('/orders') && !init.method) return [...orders.values()];
-    if (route.endsWith('/checkouts') && !init.method) return [];
+    if (route.endsWith('/checkouts') && !init.method) return [...checkoutRecords.values()];
+    if (route.endsWith('/checkouts/co-old') && !init.method) {
+      return { id: 'co-old', account_id: state.account, product_id: 'superwagie', provider: 'wechat', offer_name: 'Previous plan',
+        amount: membership.price, currency: 'CNY', payment_status: 'PAID', fulfillment_status: 'FULFILLED', refund_status: '',
+        expires_at: new Date(state.now + 60_000).toISOString(), created_at: new Date(state.now).toISOString(),
+        upgrade_return_status: 'UPGRADE_RETURNED', upgrade_refund_amount: '200000' };
+    }
+    if (route.endsWith('/checkouts/co-upgrade/reconcile')) {
+      const pending = checkoutRecords.get('co-upgrade');
+      const paid = { ...pending, payment_status: 'PAID', fulfillment_status: 'FULFILLED' };
+      checkoutRecords.set(paid.id, paid);
+      return paid;
+    }
     if (route.endsWith('/quotes') && init.method === 'POST') {
       const body = JSON.parse(init.body);
       const selected = state.offers.find((item) => item.id === body.offer_id);
       const result = { id: `quote-${quotes.size}`, account_id: state.quoteAccount ?? state.account, subscription_id: body.subscription_id, subscription_version: 1, offer: selected, amount: '500000', grant_amount: '1000000', period_start: new Date(state.now - 1000).toISOString(), expires_at: new Date(state.now + 60_000).toISOString(), created_at: new Date(state.now).toISOString() };
+      if (state.productCreditWallet && selected.credit_scope === 'product_v1') {
+        result.amount = selected.price;
+        result.grant_amount = selected.monthly_credit;
+        result.product_credit_upgrade = { previous_subscription_id: body.subscription_id, previous_order_id: 'order-old',
+          previous_version: 1, estimated_refund_amount: '200000', refund_payment_source: 'wallet' };
+        if (body.payment_source === 'external') Object.assign(result, {
+          payment_source: 'external', original_amount: selected.price, rounding_rule: 'cny_cent_ceil_v1',
+        });
+      }
       quotes.set(result.id, result); return result;
     }
     if (init.method === 'POST') {
@@ -64,6 +86,17 @@ const fixture = async () => {
       if (state.blockPost) await state.blockPost;
       const old = byKey.get(init.headers['Idempotency-Key']);
       if (old) return structuredClone(old);
+      if (route.endsWith('/checkouts')) {
+        const { quote_id, provider } = JSON.parse(init.body);
+        const quote = quotes.get(quote_id);
+        const checkout = { id: 'co-upgrade', account_id: state.account, product_id: 'superwagie', provider,
+          offer_name: quote.offer.name, subscription_id: 'sub-new', amount: quote.amount, currency: 'CNY',
+          payment_status: 'CREATED', fulfillment_status: 'NOT_STARTED', refund_status: '',
+          expires_at: quote.expires_at, created_at: quote.created_at, product_credit_upgrade: quote.product_credit_upgrade };
+        checkoutRecords.set(checkout.id, checkout);
+        byKey.set(init.headers['Idempotency-Key'], checkout);
+        return checkout;
+      }
       if (!route.endsWith('/orders') && !route.endsWith('/accept')) throw new Error(`Unexpected POST ${route}`);
       if (state.rejectOrder) throw new PlatformAccountError(state.rejectOrder, state.rejectOrder === 'insufficient_funds' ? 402 : 409);
       const quote = route.endsWith('/accept') ? quotes.get(route.split('/').at(-2)) : null;
@@ -72,7 +105,11 @@ const fixture = async () => {
       if (state.wallet < BigInt(amount)) throw new PlatformAccountError('insufficient_funds', 402);
       state.wallet -= BigInt(amount); state.credits += BigInt(quote?.grant_amount ?? selected.monthly_credit);
       const result = { id: `order-${orders.size}`, account_id: state.account, actor_id: state.actor, product_id: selected.product_id, offer: selected, amount, payment_status: 'PAID', fulfillment_status: state.pendingFulfillment ? 'PENDING' : 'FULFILLED' };
-      if (quote) { result.kind = 'upgrade'; result.subscription_id = quote.subscription_id; }
+      if (quote) {
+        result.kind = 'upgrade';
+        result.subscription_id = quote.product_credit_upgrade && !state.wrongSubscription ? 'sub-new' : quote.subscription_id;
+        result.product_credit_upgrade = quote.product_credit_upgrade;
+      }
       orders.set(result.id, result); byKey.set(init.headers['Idempotency-Key'], result);
       if (state.loseResponse) { state.loseResponse = false; throw new PlatformAccountError('platform_unavailable', 502); }
       return structuredClone(result);
@@ -94,7 +131,7 @@ const fixture = async () => {
     cleanups.push(() => runtime.close());
     return runtime;
   };
-  return { directory, state, orders, quotes, runtime: create(), create };
+  return { directory, state, orders, quotes, cashCheckouts, checkoutRecords, runtime: create(), create };
 };
 
 const purchaseBody = (f, offerId = membership.id) => ({ accountId: f.state.account, offerId, idempotencyKey: crypto.randomUUID() });
@@ -138,6 +175,31 @@ describe('UniHub commerce without sandbox funding', () => {
     const state = await f.runtime.overview(identity);
     expect(state.intents).toContainEqual(expect.objectContaining({ resourceId: 'ct_one', status: 'APPLIED' }));
     expect(f.state.calls.filter((call) => call.method === 'POST' && call.route.endsWith('/cash-checkouts'))).toHaveLength(1);
+  });
+
+  it('keeps reported wallet orders and renewal settings available with other products in checkout history', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.cashPayments = true;
+    f.state.scopes.push('recharges:read');
+    const common = { account_id: f.state.account, provider: 'wechat', amount: '10000000', currency: 'CNY',
+      created_at: new Date(f.state.now).toISOString(), expires_at: new Date(f.state.now + 60_000).toISOString() };
+    f.cashCheckouts.set('ct_other', { ...common, id: 'ct_other', product_id: 'agentwiki', wallet_target: 'unified', payment_status: 'PENDING' });
+    f.cashCheckouts.set('ct_own', { ...common, id: 'ct_own', product_id: 'superwagie', wallet_target: 'unified', payment_status: 'PAID', credit_status: 'APPLIED' });
+    f.checkoutRecords.set('co-other', { ...common, id: 'co-other', product_id: 'agentwiki', offer_name: 'AgentWiki Monthly', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED' });
+    f.checkoutRecords.set('co-own', { ...common, id: 'co-own', product_id: 'superwagie', offer_name: 'SuperWagie Monthly', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED' });
+    f.checkoutRecords.set('co-legacy', { ...common, id: 'co-legacy', product_id: 'llmrouter', offer_name: 'LLMRouter Add-on', payment_status: 'PAID', fulfillment_status: 'FULFILLED' });
+    const subscriptionRenewal = { enabled: true, version: 2, price: common.amount };
+    const orders = [{ id: 'order-other', offer_name: 'AgentWiki Monthly', amount: common.amount,
+      payment_status: 'PAID', fulfillment_status: 'FULFILLED', refund_status: '', created_at: common.created_at }];
+    f.state.otherWalletProducts = [{ product_id: 'agentwiki', name: 'AgentWiki', subscription_renewal: subscriptionRenewal,
+      addon_renewal: { enabled: false, version: 0 }, orders, addon_offers: [] }];
+
+    const overview = await f.runtime.overview(identity);
+    expect(overview.checkouts.map(({ id }) => id)).toEqual(['co-own', 'co-legacy', 'ct_own']);
+    expect(overview.productWallet.products.find((product) => product.product_id === 'agentwiki')).toMatchObject({
+      subscription_renewal: subscriptionRenewal, orders,
+    });
   });
 
   it('writes renewal settings with the authorized selected account and expected version', async () => {
@@ -270,6 +332,60 @@ describe('UniHub commerce without sandbox funding', () => {
     const result = await f.runtime.acceptUpgrade(identity, { accountId: f.state.account, quoteId: quote.id, idempotencyKey: crypto.randomUUID() });
     expect(result).toMatchObject({ kind: 'upgrade', status: 'APPLIED' });
     expect(f.state.wallet).toBe(9_500_000n); expect(f.state.credits).toBe(1_000_000n);
+  });
+
+  it('accepts and replays a reset upgrade against the new subscription and original order', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.offers = [{ ...membership, credit_scope: 'product_v1' }];
+    const quote = await f.runtime.quoteUpgrade(identity, { accountId: f.state.account, subscriptionId: 'sub-a', offerId: membership.id });
+    expect(quote).toMatchObject({ amount: membership.price, additionalCredits: membership.monthly_credit,
+      productCreditUpgrade: { previousOrderId: 'order-old', estimatedRefundAmount: '200000', refundPaymentSource: 'wallet' } });
+    const body = { accountId: f.state.account, quoteId: quote.id, idempotencyKey: crypto.randomUUID() };
+    f.state.loseResponse = true;
+    const unknown = await f.runtime.acceptUpgrade(identity, body);
+    expect(unknown.status).toBe('UNKNOWN');
+    const applied = await f.runtime.reconcile(identity, body.idempotencyKey, { accountId: f.state.account });
+    expect(applied).toMatchObject({ status: 'APPLIED', resourceId: 'order-0' });
+    expect(f.orders.get(applied.resourceId).subscription_id).toBe('sub-new');
+    expect(f.state.wallet).toBe(9_000_000n);
+  });
+
+  it('keeps one original external checkout for a reset upgrade and reconciles its new subscription', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.cashPayments = true;
+    f.state.offers = [{ ...membership, credit_scope: 'product_v1' }];
+    const accountId = f.state.account;
+    const quote = await f.runtime.quoteUpgrade(identity, { accountId, subscriptionId: 'sub-a', offerId: membership.id, paymentSource: 'external' });
+    expect(quote).toMatchObject({ amount: membership.price, originalAmount: membership.price, paymentSource: 'external' });
+    const body = { accountId, quoteId: quote.id, provider: 'wechat', idempotencyKey: crypto.randomUUID() };
+    const first = await f.runtime.createCheckout(identity, body);
+    expect(first).toMatchObject({ status: 'PENDING', resourceId: 'co-upgrade', checkout: { subscription_id: 'sub-new' } });
+    expect((await f.runtime.createCheckout(identity, body)).resourceId).toBe(first.resourceId);
+    const after = await f.runtime.checkoutAction(identity, first.resourceId, 'reconcile', { accountId });
+    expect(after).toMatchObject({ payment_status: 'PAID', product_credit_upgrade: { previous_subscription_id: 'sub-a', previous_order_id: 'order-old' } });
+    expect(f.state.calls.filter((call) => call.method === 'POST' && call.route.endsWith('/checkouts'))).toHaveLength(1);
+  });
+
+  it('refuses a second refund when the old payment already has an upgrade return', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    const accountId = f.state.account;
+    const existing = await f.runtime.checkoutAction(identity, 'co-old', 'read', { accountId });
+    expect(existing).toMatchObject({ upgrade_return_status: 'UPGRADE_RETURNED', upgrade_refund_amount: '200000' });
+    await expect(f.runtime.checkoutAction(identity, 'co-old', 'refund', { accountId })).rejects.toMatchObject({ code: 'platform_upgrade_return_managed', status: 409 });
+    expect(f.state.calls.filter((call) => call.method === 'POST' && call.route.endsWith('/refund'))).toHaveLength(0);
+  });
+
+  it('rejects a fulfilled reset order that points at the original subscription', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.wrongSubscription = true;
+    f.state.offers = [{ ...membership, credit_scope: 'product_v1' }];
+    const quote = await f.runtime.quoteUpgrade(identity, { accountId: f.state.account, subscriptionId: 'sub-a', offerId: membership.id });
+    const result = await f.runtime.acceptUpgrade(identity, { accountId: f.state.account, quoteId: quote.id, idempotencyKey: crypto.randomUUID() });
+    expect(result).toMatchObject({ status: 'UNKNOWN', errorCode: 'platform_response_invalid' });
   });
 
   it('removes recharge and sandbox settlement routes', async () => {

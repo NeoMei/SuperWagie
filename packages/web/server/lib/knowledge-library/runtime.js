@@ -31,6 +31,9 @@ import { createSearch } from './search.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 
 import { z } from 'zod';
+import { createProductOcrWorkflow } from './product-ocr.js';
+import { createProductOcrReader } from '../embedded-knowledge/product-ocr-reader.js';
+import { PRODUCT_OCR_MAX_FILE_BYTES } from '../embedded-knowledge/ocr-contract.js';
 import { createKnowledgeAuthorizationServer } from './managed-work.js';
 import { managedEmbeddingCatalogEntry } from './managed-embedding-catalog.js';
 
@@ -85,6 +88,7 @@ export function createKnowledgeLibraryRuntime({
   resolveBinaryPath,
   resolveModelBinding = async () => null,
   captureAccountKeyOwner,
+  productOcrEnabled = () => false,
   defaultPort = DEFAULT_BACKEND_PORT,
   fetchImpl = fetch,
   spawnImpl,
@@ -130,6 +134,8 @@ export function createKnowledgeLibraryRuntime({
   let managedContext = null;
   let managedCallback = null;
   let managedLane = false;
+  let productOcrReader = null;
+  const productOcrAvailable = () => productOcrEnabled() && !isEnterpriseMode() && !managedLane && enabled && supervisor?.getState() === 'running' && supervisor.ownsProcess() && provisioned();
   const previews = new Map();
 
   const notify = (event) => {
@@ -269,6 +275,7 @@ export function createKnowledgeLibraryRuntime({
       return { ...dictionaryEnvironment, GIN_MODE: 'release', LOG_LEVEL: 'warn', SERVER_HOST: '127.0.0.1', SERVER_PORT: String(port), DB_DRIVER: 'sqlite', DB_PATH: path.join(backendDir, 'embedded-knowledge.db'), RETRIEVE_DRIVER: 'sqlite', STORAGE_TYPE: 'local', LOCAL_STORAGE_BASE_DIR: path.join(backendDir, 'files'), LOG_PATH: path.join(backendDir, 'app.log'), SYSTEM_AES_KEY: secrets.systemAesKey, JWT_SECRET: secrets.jwtSecret, NEO4J_ENABLE: 'false', ENABLE_GRAPH_RAG: 'false', CONCURRENCY_POOL_SIZE: '1', AUTO_RECOVER_DIRTY: 'false', SSRF_WHITELIST_EXTRA: '', HOME: backendDir, ...config };
     }
     const modelHosts = new Set([
+      ...(productOcrEnabled() && !isEnterpriseMode() ? ['127.0.0.1'] : []),
       'dashscope.aliyuncs.com',
       'paddleocr.aistudio-app.com',
       'paddleocr-store.bj.bcebos.com',
@@ -610,6 +617,8 @@ export function createKnowledgeLibraryRuntime({
     supervisorEnv = null;
     await managedCallback?.close();
     managedCallback = null;
+    await productOcrReader?.close();
+    productOcrReader = null;
     await accountKeyOcr?.close();
     accountKeyOcr = null;
   };
@@ -1100,6 +1109,8 @@ export function createKnowledgeLibraryRuntime({
         state: document.state,
         parseStatus: document.parseStatus ?? null,
         lastError: document.lastError ?? null,
+        ...(productOcrAvailable() && !document.managedBilling && !isManaged(document) && path.extname(document.relPath).toLowerCase() === '.pdf'
+          && document.size <= PRODUCT_OCR_MAX_FILE_BYTES && (['ready', 'failed'].includes(document.state) || document.state === 'parsing' && document.productOcrCall) && { productOcr: true }),
       })),
     };
   };
@@ -1124,6 +1135,7 @@ export function createKnowledgeLibraryRuntime({
       await client.deleteKnowledge(document.knowledgeId).catch(() => {});
     }
     document.knowledgeId = null;
+    delete document.productOcrCall;
     document.sha256 = null;
     document.parseStatus = undefined;
     document.state = 'queued';
@@ -1177,6 +1189,7 @@ export function createKnowledgeLibraryRuntime({
         await client.deleteKnowledge(document.knowledgeId).catch(() => {});
       }
       document.knowledgeId = null;
+      delete document.productOcrCall;
       document.sha256 = null;
       document.parseStatus = undefined;
       document.state = 'queued';
@@ -1694,7 +1707,70 @@ export function createKnowledgeLibraryRuntime({
     if (!library) return null;
     const tenantId = Number(settings.embeddedKnowledgeTenantId);
     if (!Number.isSafeInteger(tenantId) || tenantId < 1 || !z.string().safeParse(settings.embeddedKnowledgeBaseId).success || !settings.embeddedKnowledgeBaseId) return null;
-    return { id: document.id, libraryId: library.id, relPath: document.relPath, root: library.root, tenantId, knowledgeBaseId: settings.embeddedKnowledgeBaseId, knowledgeId: document.knowledgeId ?? null };
+    return { id: document.id, libraryId: library.id, relPath: document.relPath, root: library.root, slug: library.slug, tenantId, knowledgeBaseId: settings.embeddedKnowledgeBaseId, knowledgeId: document.knowledgeId ?? null };
+  };
+
+  const getOcrDocument = async (id) => {
+    if (!productOcrAvailable() || !managedWork) throw new ProvisionError('knowledge_work_ocr_unavailable', 'Product OCR needs the owned local knowledge library');
+    const current = (await store.readDocuments())[id];
+    const document = await managedWorkDocument(id);
+    if (!document || !current || current.managedBilling || isManaged(current)) throw Object.assign(new Error('knowledge_work_document_invalid'), { code: 'knowledge_work_document_invalid', status: 404 });
+    return { ...document, state: current.state, productOcrCall: current.productOcrCall };
+  };
+  const workflow = createProductOcrWorkflow({
+    authorize: (document, execution) => managedWork.authorizeProductOcr(document, execution),
+    applyResult: ({ document, result, original, sourceHash, sourceBytes, assertCurrent }) => withConfiguredModels(async () => {
+      const valid = await getOcrDocument(document.id);
+      const current = (await store.readDocuments())[document.id];
+      if (!current || valid.libraryId !== document.libraryId || valid.relPath !== document.relPath || valid.root !== document.root) throw new ProvisionError('knowledge_work_document_changed', 'The selected document changed');
+      await assertCurrent();
+      if ((current.state === 'ready' && current.productOcrCall === original) || (current.state === 'parsing' && await productOcrReader?.has(original))) return;
+      productOcrReader ??= createProductOcrReader({ available: productOcrAvailable, now });
+      const remote = current.knowledgeId ? await client.getKnowledge(current.knowledgeId).catch((error) => {
+        if (error?.code !== 'not_found') throw error;
+        return null;
+      }) : null;
+      const job = await productOcrReader.open({
+        original, document: result, fileName: path.basename(remote?.file_name ?? current.relPath), sourceHash, bytes: sourceBytes, assertCurrent,
+      });
+      try {
+        let knowledgeId = current.knowledgeId;
+        if (remote) {
+          await client.reparseKnowledge(current.knowledgeId, job.processConfig);
+        } else {
+          const reference = await client.registerReference({ knowledgeBaseId: valid.knowledgeBaseId, path: current.absPath,
+            title: path.basename(current.relPath), processConfig: job.processConfig,
+            folderPath: [valid.slug, path.posix.dirname(current.relPath)].filter((segment) => segment && segment !== '.').join('/'),
+            metadata: { sw_document_id: current.id, sw_library_id: current.libraryId, sw_rel_path: current.relPath, sw_sha256: sourceHash },
+          });
+          if (!reference?.id) throw new ProvisionError('knowledge_work_ocr_unavailable', 'The local parser did not register the document');
+          knowledgeId = reference.id;
+        }
+        await assertCurrent();
+        const documents = await store.readDocuments();
+        const latest = documents[document.id];
+        if (!latest || latest.libraryId !== current.libraryId || latest.relPath !== current.relPath || latest.knowledgeId !== current.knowledgeId) {
+          throw new ProvisionError('knowledge_work_document_changed', 'The selected document changed');
+        }
+        Object.assign(latest, { knowledgeId, productOcrCall: original, sha256: sourceHash, state: 'parsing', parseStatus: 'pending', uploadedAt: now() });
+        delete latest.lastError;
+        await store.writeDocuments(documents);
+        startIngestLoop();
+        notify({ type: 'documents' });
+      } catch (error) {
+        productOcrReader.closeJob(job.id);
+        throw error;
+      }
+    }),
+  });
+  const runProductOcr = async (id, execution, command) => {
+    const document = await getOcrDocument(id);
+    if (!['ready', 'failed'].includes(document.state) && !(document.state === 'parsing' && document.productOcrCall)) {
+      throw Object.assign(new Error('knowledge_work_ocr_unavailable'), { code: 'knowledge_work_ocr_unavailable', status: 409 });
+    }
+    if (command.action === 'preview') return workflow.preview(document, execution);
+    if (command.action === 'confirm') return workflow.confirm(document, execution, command.approvalId);
+    return workflow.resume(document, execution);
   };
 
   return {
@@ -1717,6 +1793,7 @@ export function createKnowledgeLibraryRuntime({
     rescan: (id, execution) => consumeBackend(() => rescan(id, execution)),
     listDocuments: (input) => consumeBackend(() => listDocuments(input)),
     managedWorkDocument,
+    runProductOcr,
     retryDocument: (id, execution) => consumeBackend(() => retryDocument(id, execution)),
     removeDocument: (id, execution) => consumeBackend(() => removeDocument(id, execution)),
     retryFailed: () => consumeBackend(retryFailed),

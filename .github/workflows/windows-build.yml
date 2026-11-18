@@ -358,6 +358,7 @@ jobs:
         shell: bash
         env:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+          OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL: ${{ vars.OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL }}
         run: |
           bun run prepare:presentation
           node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never

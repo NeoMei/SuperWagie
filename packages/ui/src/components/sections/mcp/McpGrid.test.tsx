@@ -74,7 +74,7 @@ const cardFor = (name: string) => {
 test('runtime-added rows join configured servers once and preserve configured open/delete actions', async () => {
   await renderGrid();
   expect(document.body.querySelectorAll('[title="context7"]')).toHaveLength(1);
-  expect(cardFor('console').textContent).toContain('Provided by OpenCode');
+  expect(cardFor('console').textContent).toContain('Provided by Kernel');
   expect(cardFor('context7').textContent).toContain('Project');
   expect(document.body.querySelector('[aria-label="Actions for context7"]')).not.toBeNull();
   await act(async () => { cardFor('context7').dispatchEvent(new browser.MouseEvent('click', { bubbles: true })); });
@@ -130,7 +130,7 @@ test('runtime rows remain hidden while the real config read is pending and appea
   await renderGrid({ response: () => response });
   expect(document.body.querySelector('[title="console"]')).toBeNull();
   await act(async () => { finish(Response.json([])); });
-  expect(cardFor('console').textContent).toContain('Provided by OpenCode');
+  expect(cardFor('console').textContent).toContain('Provided by Kernel');
 });
 for (const response of [() => Promise.resolve(new Response(null, { status: 503 })), () => Promise.resolve(new Response('{bad json'))]) {
   test('an unsuccessful initial config read cannot classify runtime servers as unconfigured', async () => {
@@ -164,7 +164,7 @@ test('search includes runtime names and configured URLs, with a merged no-match 
 test('the runtime source label changes language without adding an action', async () => {
   await renderGrid({ catalog: [] });
   await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); }); await settle();
-  expect(cardFor('console').textContent).toContain('由 OpenCode 提供');
+  expect(cardFor('console').textContent).toContain('由内核提供');
   expect(cardFor('console').tagName).toBe('DIV');
 });
 
@@ -182,7 +182,7 @@ test('a late directory A catalog cannot expose its rows in selected directory B'
     useUIStore.setState({ settingsProjectPath: '/b' });
   });
   await settle();
-  expect(cardFor('current').textContent).toContain('Provided by OpenCode');
+  expect(cardFor('current').textContent).toContain('Provided by Kernel');
   await act(async () => { finishA(Response.json([configured])); });
   expect(document.body.querySelector('[title="retired"]') === null).toBe(true);
   expect(document.body.querySelector('[title="context7"]') === null).toBe(true);

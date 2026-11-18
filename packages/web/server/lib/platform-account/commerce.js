@@ -33,15 +33,20 @@ const offerSchema = z.object({
   validity_months: z.number().int().nonnegative(), rank: z.number().int().nonnegative(), sandbox: z.boolean(), status: z.string(),
   entitlements: z.object({ pricing_program: z.string().optional() }).nullish().transform((value) => value ?? undefined),
 });
+const upgradeSourceSchema = z.object({
+  previous_subscription_id: id, previous_order_id: id, previous_version: z.number().int().nonnegative().optional(),
+  estimated_refund_amount: units, refund_payment_source: z.enum(['wallet', 'external']),
+});
 const orderSchema = z.object({
   id, account_id: id, actor_id: id, product_id: z.string(), offer: offerSchema, amount: units,
   payment_status: z.string(), fulfillment_status: z.string(), refund_status: z.string().optional(),
-  kind: z.string().optional(), subscription_id: id.optional(),
+  kind: z.string().optional(), subscription_id: id.optional(), product_credit_upgrade: upgradeSourceSchema.optional(),
 });
 const quoteSchema = z.object({
   payment_source: z.enum(['wallet', 'external']).optional(), rounding_rule: z.literal('cny_cent_ceil_v1').optional(), original_amount: units.optional(),
   id, account_id: id, subscription_id: id, subscription_version: z.number().int().nonnegative(),
   offer: offerSchema, amount: units, grant_amount: units,
+  product_credit_upgrade: upgradeSourceSchema.optional(),
   period_start: z.string().datetime(), expires_at: z.string().datetime(), created_at: z.string().datetime(),
 });
 const checkoutSession = z.object({ kind: z.enum(['qr', 'redirect']), url: z.string().min(1).max(16000), expires_at: z.string().datetime() });
@@ -49,6 +54,8 @@ const checkoutSchema = z.object({
   id, account_id: id, product_id: product, provider: z.enum(['wechat', 'alipay']), offer_name: z.string(), walletTopUp: z.literal(true).optional(), amount: units, currency: z.literal('CNY'),
   payment_status: z.enum(['CREATED', 'PENDING', 'UNKNOWN', 'PAID', 'CLOSED', 'REVIEW']), fulfillment_status: z.enum(['NOT_STARTED', 'PENDING', 'FULFILLED', 'REVIEW']), refund_status: z.enum(['', 'PENDING', 'SUCCEEDED', 'REVIEW', 'REJECTED']).default(''),
   expires_at: z.string().datetime(), created_at: z.string().datetime(), order_id: id.optional(), error_code: z.string().optional(),
+  subscription_id: id.optional(), product_credit_upgrade: upgradeSourceSchema.optional(),
+  upgrade_return_status: z.enum(['UPGRADE_PENDING', 'UPGRADE_RELEASING', 'UPGRADE_RETURNED', 'UPGRADE_REVIEW']).optional(), upgrade_refund_amount: units.optional(),
   session: checkoutSession.optional(),
 }).superRefine((value, ctx) => {
   if (!value.session) return;
@@ -68,6 +75,7 @@ const cashCheckoutSchema = z.object({
   expires_at: z.string().datetime(), created_at: z.string().datetime(), session: checkoutSession.optional(),
   credit_status: z.string().optional(), error_code: z.string().optional(),
 });
+const checkoutListSchema = z.array(z.object({ account_id: id, product_id: walletProductId }).passthrough());
 const cashToCheckout = (record) => ({
   ...record, walletTopUp: true, offer_name: '', refund_status: '',
   fulfillment_status: record.credit_status === 'APPLIED' ? 'FULFILLED' : record.payment_status === 'PAID' ? 'PENDING' : 'NOT_STARTED',
@@ -78,6 +86,11 @@ const parse = (schema, value, code = 'platform_response_invalid') => {
   const result = schema.safeParse(value);
   if (!result.success) fail(code, code === 'platform_request_invalid' ? 400 : 502);
   return result.data;
+};
+const parseListedCheckouts = (raw, schema, accountId) => {
+  const rows = parse(checkoutListSchema, raw);
+  if (rows.some((row) => row.account_id !== accountId)) fail('platform_response_invalid', 502);
+  return rows.filter((row) => schema.shape.product_id.safeParse(row.product_id).success).map((row) => parse(schema, row));
 };
 const segment = (value) => encodeURIComponent(value);
 const pathFor = (accountId, suffix) => `/v1/accounts/${segment(accountId)}/${suffix}`;
@@ -157,8 +170,12 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     if (checkout.account_id !== ctx.account.id || checkout.id !== checkoutId) fail('platform_response_invalid', 502);
     return checkout;
   };
+  const resetUpgradeMatches = (intent, result) => Boolean(result.subscription_id && result.subscription_id !== intent.subscriptionId &&
+    result.product_credit_upgrade?.previous_subscription_id === intent.subscriptionId &&
+    result.product_credit_upgrade.previous_order_id === intent.previousOrderId);
   const checkoutValues = (intent, checkout) => {
     if (checkout.account_id !== intent.accountId || checkout.product_id !== intent.productId || checkout.provider !== intent.provider || checkout.amount !== intent.amount || Boolean(checkout.walletTopUp) !== Boolean(intent.walletTopUp)) fail('platform_response_invalid', 502);
+    if (intent.previousOrderId && !resetUpgradeMatches(intent, checkout)) fail('platform_response_invalid', 502);
     return { resourceId: checkout.id, status: checkout.refund_status === 'SUCCEEDED' || checkout.payment_status === 'CLOSED' ? 'FAILED' : checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'FULFILLED' && ['', 'REJECTED'].includes(checkout.refund_status) ? 'APPLIED' : 'PENDING', errorCode: checkout.error_code };
   };
   const mutateIntent = async (journal, storageId, values) => journal.mutate((intents) => {
@@ -169,7 +186,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
   });
   const orderValues = (intent, order) => {
     if (order.account_id !== intent.accountId || order.actor_id !== intent.actorId || order.product_id !== intent.productId || order.offer.id !== intent.offerId || order.amount !== intent.amount) fail('platform_response_invalid', 502);
-    if (intent.kind === 'upgrade' && (order.kind !== 'upgrade' || order.subscription_id !== intent.subscriptionId)) fail('platform_response_invalid', 502);
+    if (intent.kind === 'upgrade' && (order.kind !== 'upgrade' || (intent.previousOrderId ? !resetUpgradeMatches(intent, order) : order.subscription_id !== intent.subscriptionId))) fail('platform_response_invalid', 502);
     return { resourceId: order.id, status: order.payment_status === 'PAID' && order.fulfillment_status === 'FULFILLED' ? 'APPLIED' : 'PENDING', errorCode: undefined };
   };
   const reconcileRead = async (ctx, journal, storageId, intent) => {
@@ -260,11 +277,11 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
         intent.paymentSource = 'external';
       }
       if (offer) intent.offerId = offer.id;
-      if (quote) { intent.offerId = quote.offerId; intent.quoteId = quote.id; intent.subscriptionId = quote.subscriptionId; }
+      if (quote) { intent.offerId = quote.offerId; intent.quoteId = quote.id; intent.subscriptionId = quote.subscriptionId; intent.previousOrderId = quote.previousOrderId; }
       const { value, created } = await journal.mutate((intents) => {
         const existing = intents[storageId];
         if (existing) {
-          if (existing.kind !== intent.kind || existing.productId !== intent.productId || existing.amount !== intent.amount || existing.offerId !== intent.offerId || existing.quoteId !== intent.quoteId || existing.provider !== intent.provider || existing.walletVersion !== intent.walletVersion || existing.walletTopUp !== intent.walletTopUp) fail('platform_idempotency_conflict', 409);
+          if (existing.kind !== intent.kind || existing.productId !== intent.productId || existing.amount !== intent.amount || existing.offerId !== intent.offerId || existing.quoteId !== intent.quoteId || existing.provider !== intent.provider || existing.walletVersion !== intent.walletVersion || existing.previousOrderId !== intent.previousOrderId || existing.walletTopUp !== intent.walletTopUp) fail('platform_idempotency_conflict', 409);
           return { value: structuredClone(existing), created: false };
         }
         const unresolved = Object.values(intents).find((item) => item.kind !== 'recharge' && item.serviceId === intent.serviceId && item.actorId === intent.actorId && item.accountId === intent.accountId && (['PREPARED', 'UNKNOWN'].includes(item.status) || item.kind === 'checkout' && item.status === 'PENDING') && !releasablePreAdmissionIntent(item, now()));
@@ -318,9 +335,9 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
         canReadWallets && !versioned(ctx) ? ctx.session.request(pathFor(ctx.account.id, 'resources')).then((value) => parse(resourcesSchema, value)) : null,
         includeOrders && canReadOrders ? readOrders(ctx) : null,
         canReadOrders && ctx.capabilities.payment_providers !== undefined
-          ? requestCheckout(ctx, 'checkouts', undefined, false).then((value) => parse(z.array(checkoutSchema), value)) : [],
+          ? requestCheckout(ctx, 'checkouts', undefined, false).then((value) => parseListedCheckouts(value, checkoutSchema, ctx.account.id)) : [],
         canReadWallets && versioned(ctx) ? wallet(ctx) : null,
-        recoverCash ? requestCheckout(ctx, 'cash-checkouts', undefined, true).then((value) => parse(z.array(cashCheckoutSchema), value)) : [],
+        recoverCash ? requestCheckout(ctx, 'cash-checkouts', undefined, true).then((value) => parseListedCheckouts(value, cashCheckoutSchema, ctx.account.id)) : [],
       ]);
       const cashCheckouts = cashRecords.filter((item) => item.wallet_target === 'unified').map((item) => parse(checkoutSchema, cashToCheckout(item)));
       const pendingCash = cashCheckouts.findIndex((item) => ['CREATED', 'PENDING', 'UNKNOWN'].includes(item.payment_status) && Date.parse(item.expires_at) > now());
@@ -335,7 +352,6 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
           }
         });
       }
-      if (checkouts.some((item) => item.account_id !== ctx.account.id)) fail('platform_response_invalid', 502);
       const updates = Object.entries(beforeCheckoutRead).flatMap(([storageId, intent]) => {
         if (intent.kind !== 'checkout' || !intent.resourceId || intent.serviceId !== ctx.session.serviceId || intent.actorId !== ctx.session.actingUserId || intent.accountId !== ctx.account.id) return [];
         const checkout = checkouts.find((item) => item.id === intent.resourceId);
@@ -407,8 +423,9 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
           // A legacy invalid reason may already have been dispatched. No local
           // evidence proves whether upstream admitted it, so preserve its key.
           if (intent?.refundKey && !refundReasonSchema.safeParse(intent.refundReason).success) fail('platform_refund_repair_required', 409);
+          const original = !intent?.refundKey || intent.walletVersion ? await readCheckout(ctx, checkoutId, 'read', undefined, false) : undefined;
+          if (original?.upgrade_return_status) fail('platform_upgrade_return_managed', 409);
           if (!intent?.refundKey) {
-            const original = await readCheckout(ctx, checkoutId, 'read', undefined, false);
             // A refund rejected on another instance has no local replay key.
             // Return its authoritative receipt instead of inventing a new request.
             if (original.refund_status === 'REJECTED') {
@@ -459,16 +476,18 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       if (quote.account_id !== body.accountId || quote.subscription_id !== body.subscriptionId || quote.offer.id !== body.offerId || quote.offer.product_id !== 'superwagie' || quote.offer.kind !== 'membership' || quote.offer.sandbox !== offer.sandbox || quote.offer.credit_scope !== offer.credit_scope || quote.offer.entitlements?.pricing_program !== offer.entitlements?.pricing_program || Date.parse(quote.expires_at) <= now()) fail('platform_response_invalid', 502);
       if (pointsRuntimeUnavailable(quote.offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       if (body.paymentSource === 'external' && (quote.payment_source !== 'external' || quote.rounding_rule !== 'cny_cent_ceil_v1' || !quote.original_amount || BigInt(quote.amount) !== ((BigInt(quote.original_amount) + 9999n) / 10000n) * 10000n)) fail('platform_response_invalid', 502);
+      const reset = quote.product_credit_upgrade;
+      if (Boolean(reset) !== versioned(ctx) || (reset && (reset.previous_subscription_id !== quote.subscription_id || quote.amount !== offer.price || quote.grant_amount !== offer.monthly_credit || (body.paymentSource === 'external' && quote.original_amount !== offer.price)))) fail('platform_response_invalid', 502);
       const journal = await store();
       const quoteStorageId = intentId(ctx.session, body.accountId, quote.id);
-      const binding = { paymentSource: body.paymentSource, walletVersion: versioned(ctx) ? PRODUCT_WALLET_VERSION : undefined, id: quote.id, serviceId: ctx.session.serviceId, actorId: ctx.session.actingUserId, accountId: body.accountId, subscriptionId: body.subscriptionId, offerId: quote.offer.id, amount: quote.amount, expiresAt: quote.expires_at, sandbox: quote.offer.sandbox, pricingProgram: quote.offer.entitlements?.pricing_program };
+      const binding = { paymentSource: body.paymentSource, walletVersion: versioned(ctx) ? PRODUCT_WALLET_VERSION : undefined, previousOrderId: reset?.previous_order_id, id: quote.id, serviceId: ctx.session.serviceId, actorId: ctx.session.actingUserId, accountId: body.accountId, subscriptionId: body.subscriptionId, offerId: quote.offer.id, amount: quote.amount, expiresAt: quote.expires_at, sandbox: quote.offer.sandbox, pricingProgram: quote.offer.entitlements?.pricing_program };
       await journal.mutate((_intents, quotes) => {
         const previous = quotes[quoteStorageId];
-        if (previous && (previous.subscriptionId !== binding.subscriptionId || previous.offerId !== binding.offerId || previous.amount !== binding.amount || previous.expiresAt !== binding.expiresAt || previous.sandbox !== binding.sandbox || previous.pricingProgram !== binding.pricingProgram || previous.paymentSource !== binding.paymentSource || previous.walletVersion !== binding.walletVersion)) fail('platform_response_invalid', 502);
+        if (previous && (previous.subscriptionId !== binding.subscriptionId || previous.offerId !== binding.offerId || previous.amount !== binding.amount || previous.expiresAt !== binding.expiresAt || previous.sandbox !== binding.sandbox || previous.pricingProgram !== binding.pricingProgram || previous.paymentSource !== binding.paymentSource || previous.walletVersion !== binding.walletVersion || previous.previousOrderId !== binding.previousOrderId)) fail('platform_response_invalid', 502);
         for (const [storedId, saved] of Object.entries(quotes)) if (Date.parse(saved.expiresAt) <= now()) delete quotes[storedId];
         quotes[quoteStorageId] = binding;
       });
-      return { paymentSource: body.paymentSource, roundingRule: quote.rounding_rule, originalAmount: quote.original_amount, id: quote.id, accountId: quote.account_id, subscriptionId: quote.subscription_id, subscriptionVersion: quote.subscription_version, offer: publicOffer(quote.offer, ctx.capabilities), amount: quote.amount, additionalCredits: quote.grant_amount, periodStart: quote.period_start, expiresAt: quote.expires_at, createdAt: quote.created_at };
+      return { paymentSource: body.paymentSource, roundingRule: quote.rounding_rule, originalAmount: quote.original_amount, id: quote.id, accountId: quote.account_id, subscriptionId: quote.subscription_id, subscriptionVersion: quote.subscription_version, offer: publicOffer(quote.offer, ctx.capabilities), amount: quote.amount, additionalCredits: quote.grant_amount, periodStart: quote.period_start, expiresAt: quote.expires_at, createdAt: quote.created_at, ...(reset && { productCreditUpgrade: { previousOrderId: reset.previous_order_id, estimatedRefundAmount: reset.estimated_refund_amount, refundPaymentSource: reset.refund_payment_source } }) };
     },
     acceptUpgrade: async (identity, rawBody) => {
       const body = parse(upgradeInput, rawBody, 'platform_request_invalid');

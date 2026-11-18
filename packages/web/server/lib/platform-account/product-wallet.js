@@ -10,7 +10,7 @@ const renewalKind = z.enum(['subscription', 'addon']);
 const renewal = z.object({ enabled: z.boolean(), version });
 const subscriptionRenewal = renewal.extend({ offer_name: id.optional(), price: units.optional() });
 const addonRenewal = renewal.extend({ offer_id: id.optional(), trigger: trigger.optional(), threshold: units.optional() });
-const order = z.object({ id, offer_name: id, amount: units, payment_status: id, fulfillment_status: id, refund_status: z.string(), created_at: date });
+const order = z.object({ id, offer_name: id, amount: units, payment_status: id, fulfillment_status: id, refund_status: z.string(), upgrade_refund_amount: units.optional(), created_at: date });
 const addonOffer = z.object({ id, name: id, price: units });
 
 export const PRODUCT_WALLET_VERSION = 'product_v1';

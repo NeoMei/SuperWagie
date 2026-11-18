@@ -1467,17 +1467,27 @@ let modelBootstrapRuntime = null;
 const modelConfigurationRuntime = createModelConfigurationRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   readOpenCodeCredentials,
-  readModelBootstrapCredential: (ref, connectionId) => productModelProxy && connectionId?.startsWith('account-key-') ? null : modelBootstrapStore.getSecret(ref),
+  useProductManagedMedia: () => Boolean(productModelProxy),
+  isProductMediaOperationConfigured: (model, operation) => platformModelRuntime?.isMediaOperationConfigured(model, operation) === true,
+  readModelBootstrapCredential: (ref) => productModelProxy ? null : modelBootstrapStore.getSecret(ref),
   deleteModelBootstrapCredential: (ref) => modelBootstrapStore.deleteSecret(ref),
   prepareBindingChange: (...args) => knowledgeLibraryRuntime.prepareModelBindingChange(...args),
 });
+const productOcrEnabled = () => Boolean(productModelProxy) && platformModelRuntime?.enabled() === true && !isEnterpriseMode();
 const knowledgeLibraryRuntime = createKnowledgeLibraryRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   readSettings: () => readSettingsFromDisk(),
   saveSettings: (changes) => persistSettings(changes, { knowledgeProvisioning: true }),
-  resolveModelBinding: (...args) => modelConfigurationRuntime.resolveBinding(...args),
+  productOcrEnabled,
+  resolveModelBinding: async (purpose, options) => {
+    try { return await modelConfigurationRuntime.resolveBinding(purpose, options); }
+    catch (error) {
+      if (purpose === 'ocr' && productModelProxy && error?.code === 'model_configuration_managed_unavailable') return null;
+      throw error;
+    }
+  },
   captureAccountKeyOwner: (binding) => {
-    if (!modelBootstrapRuntime) throw new ModelConfigurationError('account_key_consumer_owner_unavailable', 409);
+    if (!modelBootstrapRuntime || productModelProxy) throw new ModelConfigurationError('account_key_consumer_owner_unavailable', 409);
     return modelBootstrapRuntime.accountKey.captureConsumerOwner(binding);
   },
   resolveBinaryPath: ({ settingsPath }) => resolveEmbeddedKnowledgeBinaryPath({ settingsPath, env: process.env }),
@@ -1818,6 +1828,7 @@ const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createDictationRuntime: (options) => createDictationRuntime({
     ...options,
+    getPlatformModelRuntime: () => platformModelRuntime,
     resolveModelBinding: (...args) => modelConfigurationRuntime.resolveBinding(...args),
   }),
   createMessageStreamWsRuntime,
@@ -2503,6 +2514,7 @@ async function main(options = {}) {
     dataDir: OPENCHAMBER_DATA_DIR,
     instanceDir,
     getAccountRuntime: () => platformAccountRuntime,
+    isProductModelConfigured: () => Boolean(productModelProxy),
     readExecution: (sessionID) => readPlatformExecution(openCodeSessionClient(), sessionID),
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     trustedBoundary: true,
@@ -2999,6 +3011,12 @@ async function main(options = {}) {
       && principal.issuer === process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER
       && principal.userId === process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID),
     getAccountRuntime: () => platformAccountRuntime,
+    productOcrEnabled,
+    authorizeOcrOwner: (principal) => {
+      const issuer = process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER;
+      const actor = process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID;
+      return !issuer && !actor || principal.issuer === issuer && principal.userId === actor;
+    },
     resolveDocument: (id) => knowledgeLibraryRuntime.managedWorkDocument(id),
     resolveModelBinding: (purpose) => modelConfigurationRuntime.resolveBinding(purpose),
     resolveNamespace: (identity, context) => knowledgeContext.resolve(identity, context),
@@ -3014,6 +3032,7 @@ async function main(options = {}) {
   });
   knowledgeLibraryRuntime.configureManaged(knowledgeWork, knowledgeContext);
   app.use(createManagedKnowledgeMiddleware({
+    productOcrEnabled,
     enabled: () => process.env.OPENCHAMBER_KNOWLEDGE_WORK_PREPARE === 'true',
     resolveModelBinding: (purpose) => modelConfigurationRuntime.resolveBinding(purpose),
     resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),

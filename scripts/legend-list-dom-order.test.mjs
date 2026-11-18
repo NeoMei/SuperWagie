@@ -9,58 +9,51 @@ const requireUI = createRequire(new URL('../packages/ui/package.json', import.me
 const packageDirectory = dirname(requireUI.resolve('@legendapp/list/react'));
 const bundles = ['react.js', 'react.mjs', 'react-native.web.js', 'react-native.web.mjs'];
 
-// Runs the installed dependency's own DOM-order hook (the Bun patch lives in
-// it) with a fake clock, timers and list context. The hook moves rows so the
-// DOM order matches the item order, and moving a row restyles its subtree.
-function domOrderHook(bundle) {
+// Run the installed coordinator's layout effect against DOM-like rows.
+function domOrderLayout(bundle, itemIndices, focusedIndex) {
     const source = readFileSync(join(packageDirectory, bundle), 'utf8');
-    const start = source.indexOf('function useDOMOrder(ref) {');
-    const end = source.indexOf('function useFreshDataTransitionVisibility', start);
-    assert.ok(start >= 0 && end > start, "Find the pinned package version's useDOMOrder implementation");
+    const start = source.indexOf('function sortContainerElements(');
+    const end = source.indexOf('\nvar getComponent =', start);
+    assert.ok(start >= 0 && end > start, "Find the pinned package version's layout coordinator");
 
-    let now = 10_000;
-    const timers = [];
-    const listeners = new Map();
-    const sorts = [];
-    const ctx = { state: { scrollTime: 0 }, viewRefs: new Map() };
-    const container = { isConnected: true, moveBefore() {}, children: [] };
+    const focused = focusedIndex === undefined ? null : { isConnected: true };
+    const root = { activeElement: focused };
+    const moved = [];
+    const container = {
+        isConnected: true,
+        children: [],
+        ownerDocument: { body: {} },
+        getRootNode: () => root,
+        moveBefore(row, next) {
+            moved.push(row.itemIndex);
+            this.children.splice(this.children.indexOf(row), 1);
+            this.children.splice(next === null ? this.children.length : this.children.indexOf(next), 0, row);
+        },
+    };
+    container.children = itemIndices.map((itemIndex) => ({
+        itemIndex,
+        parentElement: container,
+        contains: (element) => element === focused && focused !== null && itemIndex === focusedIndex,
+    }));
+    const ctx = { viewRefs: new Map(container.children.map((row, id) => [id, { current: row }])) };
+    const signals = new Map(itemIndices.map((itemIndex, id) => [`containerItemIndex${id}`, itemIndex]));
     const effects = [];
-    const hooks = { useEffect: (effect) => effects.push(effect) };
-    const useDOMOrder = runInNewContext(`(${source.slice(start, end).trim()})`, {
+    const hooks = { useLayoutEffect: (effect) => effects.push(effect) };
+    const Coordinator = runInNewContext(`(() => { ${source.slice(start, end)}; return ContainerLayoutCoordinator; })()`, {
         React3: hooks,
         React3__namespace: hooks,
-        useEffect: hooks.useEffect,
+        typedMemo: (component) => component,
         useStateContext: () => ctx,
-        listen$: (_ctx, key, callback) => {
-            listeners.set(key, callback);
-            return () => listeners.delete(key);
-        },
-        peek$: () => undefined,
-        sortDOMElements: () => sorts.push(now),
-        Date: { now: () => now },
-        setTimeout: (callback, delay) => {
-            timers.push({ at: now + delay, callback });
-            return timers.length;
-        },
-        clearTimeout: (id) => {
-            if (id !== undefined) timers[id - 1] = null;
-        },
+        useArr$: () => [1],
+        peek$: (_ctx, key) => signals.get(key),
+        getContainerLayoutEffectScope: () => undefined,
     });
-    useDOMOrder({ current: container });
-    for (const effect of effects) effect();
+    Coordinator({ children: null });
     return {
-        sorts,
-        positionsChanged() {
-            listeners.get('lastPositionUpdate')();
-        },
-        advance(ms) {
-            now += ms;
-            for (const timer of timers) {
-                if (timer && timer.at <= now) {
-                    timers[timers.indexOf(timer)] = null;
-                    timer.callback();
-                }
-            }
+        moved,
+        get itemIndices() { return container.children.map((row) => row.itemIndex); },
+        commitLayout() {
+            for (const effect of effects) effect();
         },
     };
 }
@@ -96,6 +89,7 @@ function initialAllocation(bundle) {
     const numContainers = 6;
     const values = new Map([['numContainers', numContainers]]);
     const ctx = {
+        viewRefs: new Map(),
         state: {
             containerItemMetadata: new Map(),
             stickyContainerPool: new Set(),
@@ -120,22 +114,19 @@ for (const bundle of bundles) {
             assert.deepEqual(byContainer.map(({ itemIndex }) => itemIndex), [6, 7, 8, 9]);
         });
 
-        it('waits for a freshly mounted list to settle before moving rows', () => {
-            const list = domOrderHook(bundle);
-            list.advance(200);
-            list.positionsChanged();
-            list.advance(100);
-            assert.deepEqual(list.sorts, []);
-            list.advance(400);
-            assert.equal(list.sorts.length, 1);
+        it('leaves rows already in reading order in place during layout', () => {
+            const list = domOrderLayout(bundle, [6, 7, 8, 9]);
+            list.commitLayout();
+            assert.deepEqual(list.itemIndices, [6, 7, 8, 9]);
+            assert.deepEqual(list.moved, []);
         });
 
-        it('still orders a list that has been quiet for a second at once', () => {
-            const list = domOrderHook(bundle);
-            list.advance(1_500);
-            list.positionsChanged();
-            list.advance(0);
-            assert.equal(list.sorts.length, 1);
+        it('restores reading order in layout with one move and preserves the focused row', () => {
+            const list = domOrderLayout(bundle, [6, 8, 7, 9], 8);
+            assert.deepEqual(list.itemIndices, [6, 8, 7, 9]);
+            list.commitLayout();
+            assert.deepEqual(list.itemIndices, [6, 7, 8, 9]);
+            assert.deepEqual(list.moved, [7]);
         });
     });
 }

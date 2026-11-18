@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -134,27 +134,32 @@ describe('WorkingPlaceholder', () => {
   });
 
   test('holds a status phrase for 1200 ms and keeps the gray row still', async () => {
-    await withPlaceholder(async (render, container) => {
-      const reading: AgentStatus = { key: 'chat.agentStatus.read' };
-      const command: AgentStatus = { key: 'chat.agentStatus.command' };
-      const firstLabel = englishLabel(command);
-      const secondLabel = englishLabel(reading);
+    jest.useFakeTimers();
+    try {
+      await withPlaceholder(async (render, container) => {
+        const reading: AgentStatus = { key: 'chat.agentStatus.read' };
+        const command: AgentStatus = { key: 'chat.agentStatus.command' };
+        const firstLabel = englishLabel(command);
+        const secondLabel = englishLabel(reading);
 
-      await render({ status: command });
-      expect(container.textContent).toBe(firstLabel);
-      const row = container.querySelector('[role="status"]');
-      expect(row?.className).toContain('text-muted-foreground');
-      expect(/oc-breath|fx-shimmer|animate-|data-breath|data-shimmer/.test(container.innerHTML)).toBe(false);
-      expect(row?.getAttribute('aria-label')).toBe(firstLabel);
+        await render({ status: command });
+        expect(container.textContent).toBe(firstLabel);
+        const row = container.querySelector('[role="status"]');
+        expect(row?.className).toContain('text-muted-foreground');
+        expect(/oc-breath|fx-shimmer|animate-|data-breath|data-shimmer/.test(container.innerHTML)).toBe(false);
+        expect(row?.getAttribute('aria-label')).toBe(firstLabel);
 
-      await render({ status: reading });
-      expect(container.textContent).toBe(firstLabel);
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1190)); });
-      expect(container.textContent).toBe(firstLabel);
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
-      expect(container.textContent).toBe(secondLabel);
-      expect(/oc-breath|fx-shimmer|animate-|data-breath|data-shimmer/.test(container.innerHTML)).toBe(false);
-    });
+        await render({ status: reading });
+        expect(container.textContent).toBe(firstLabel);
+        await act(async () => { jest.advanceTimersByTime(1199); });
+        expect(container.textContent).toBe(firstLabel);
+        await act(async () => { jest.advanceTimersByTime(1); });
+        expect(container.textContent).toBe(secondLabel);
+        expect(/oc-breath|fx-shimmer|animate-|data-breath|data-shimmer/.test(container.innerHTML)).toBe(false);
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('permission respects the held label while retry replaces it immediately and follows locale changes', async () => {

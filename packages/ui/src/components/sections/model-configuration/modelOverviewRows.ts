@@ -71,7 +71,8 @@ function configuredRow(row: ModelOverviewRow, configuration: ModelConfiguration,
   const configured: ModelOverviewRow = { ...row, model: binding.model, configuration: 'configured', reason: undefined };
   if (!connection) return { ...configured, test: 'unknown', reason: 'runtime' };
   configured.connectionName = connection.name;
-  if (connection.protocol === 'managed-media' && ['tts', 'stt-short', 'image-generation'].includes(row.purpose)) {
+  if (binding.managedMediaReady === true) return { ...configured, test: 'component', reason: 'component' };
+  if (binding.managedMediaReady === false || (connection.protocol === 'managed-media' && ['tts', 'stt-short', 'stt-realtime', 'image-generation'].includes(row.purpose))) {
     return { ...configured, test: 'unsupported', reason: 'managedUnavailable' };
   }
   const local = isLocalModelEndpoint(connection.baseUrl);

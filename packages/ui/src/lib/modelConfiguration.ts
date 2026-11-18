@@ -24,6 +24,7 @@ const connectionSchema = z.object({
 }).strict();
 const bindingSchema = z.object({
   purpose: modelPurposeIdSchema, connectionId: z.string(), presetId: z.string().optional(), model: z.string(), parameters: parametersSchema,
+  managedMediaReady: z.boolean().optional(),
   verification: z.object({ status: z.enum(['untested', 'verified', 'failed']), testedAt: z.string().optional(), errorCode: z.string().optional() }),
 });
 const credentialSourceListSchema = z.union([
@@ -38,7 +39,7 @@ export type ModelConnection = z.infer<typeof connectionSchema>;
 export type ModelBinding = z.infer<typeof bindingSchema>;
 export type ModelConfiguration = z.infer<typeof modelConfigurationSchema>;
 export type ModelConnectionInput = Omit<ModelConnection, 'id' | 'hasApiKey' | 'credentialSource'> & { id?: string } & ({ credentialSource: z.infer<typeof credentialSourceSchema>; apiKey?: never } | { credentialSource?: never; apiKey?: string });
-export type ModelBindingInput = Omit<ModelBinding, 'purpose' | 'verification'>;
+export type ModelBindingInput = Omit<ModelBinding, 'purpose' | 'verification' | 'managedMediaReady'>;
 export type ModelConnectionTestInput = Omit<ModelBindingInput, 'connectionId'> & { purpose: ModelPurposeId };
 const connectionTestSchema = z.object({ status: z.enum(['verified', 'failed']), testedAt: z.string(), errorCode: z.string().optional() }).strict();
 export type ModelConnectionTestResult = z.infer<typeof connectionTestSchema>;

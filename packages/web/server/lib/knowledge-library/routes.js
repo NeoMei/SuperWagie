@@ -14,6 +14,11 @@ import path from 'node:path';
 import { z } from 'zod';
 
 const addLibrarySchema = z.object({ path: z.string().trim().min(1), previewId: z.string().uuid().optional(), confirmed: z.boolean().optional() });
+const productOcrCommand = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('preview') }).strict(),
+  z.object({ action: z.literal('confirm'), approvalId: z.string().uuid() }).strict(),
+  z.object({ action: z.literal('resume') }).strict(),
+]);
 const updateLibrarySchema = z.object({ enabled: z.boolean() });
 const searchSchema = z.object({
   query: z.string().trim().min(1),
@@ -69,6 +74,9 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
       if (error?.code === 'not_provisioned') {
         return res.status(503).json({ error: 'not_provisioned' });
       }
+      if (error?.code === 'product_membership_expired') return res.status(403).json({ error: error.code });
+      if (error?.code === 'platform_model_credits_required') return res.status(402).json({ error: error.code });
+      if (error?.code === 'invalid_ocr_document') return res.status(400).json({ error: error.code });
       if (/^knowledge_work_/.test(error?.code ?? '')) return res.status(error.status >= 400 && error.status < 600 ? error.status : 503).json({ error: error.code });
       res.status(500).json({ error: 'internal_error' });
     }
@@ -141,6 +149,14 @@ export const registerKnowledgeLibraryRoutes = (app, { runtime }) => {
     const result = await runtime.removeDocument(req.params.id, req.knowledgeExecution);
     if (result?.error) return sendError(res, result.error);
     res.json(result);
+  }));
+
+  app.post('/api/knowledge-library/documents/:id/ocr', json, guarded(async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (!req.knowledgeExecution?.identity) return sendError(res, 'knowledge_work_auth_required', 401);
+    const command = productOcrCommand.safeParse(req.body);
+    if (!command.success) return sendError(res, 'knowledge_work_request_invalid', 400);
+    res.json(await runtime.runProductOcr(req.params.id, req.knowledgeExecution, command.data));
   }));
 
   app.post('/api/knowledge-library/documents/:id/retry', guarded(async (req, res) => {

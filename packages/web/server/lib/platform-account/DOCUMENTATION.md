@@ -480,15 +480,36 @@ permissions; adding a pilot cookie neither creates nor removes those permissions
   payment. Cash top-ups use their own upstream checkout and appear settled
   after the cash credit commits. One journal records the original payment
   version and idempotency key so retries keep the first request's semantics.
+- UniHub can list payment sessions for several authorized products. The app
+  validates the account on every checkout in the list, then reads SuperWagie
+  checkouts and legacy LLMRouter order checkouts using their payment contracts.
+  Cross-product order history and renewal settings come from the wallet view.
 - The managed SuperWagie runtime sends its captured user's access token to
   the configured HTTPS model proxy. The isolated proxy validates the
   product actor with UniHub and owns the permanent product key and fresh
   origin proof. The checkout, model journal, and renderer hold no product Key
   or deployment credential. A receipt read uses the original key and call ID.
-- This product runtime supports Chat Completions streaming and receipt reads.
-  Managed media and knowledge dispatch are unavailable through this mode
-  pending supported product routes and matching recovery contracts. Local
-  OpenCode models and BYOK stay independent.
+- The hosted product runtime supports Chat Completions streaming, image
+  generation, masked editing, video, speech, PCM WAV transcription, and the
+  governed text embedding and rerank routes. A media call keeps its original
+  scope and ID. Synchronous media reads the settled original artifact from
+  LLMRouter and checks its digest before returning it. Asynchronous edits
+  and videos use the original status and result endpoints. Knowledge work
+  persists the authorized product Key ID with the route pin, verifies
+  the same-response result receipt, and never sends a second paid request
+  when the first response is missing. Bundled Knowledge Library PDF OCR uses
+  its confirmed document action and the selected SuperWagie payer. The
+  original call supplies the settled result used to reparse the local PDF.
+  Existing BYOK stays independent.
+- Monthly subscription dates follow the activation day in the China
+  commercial calendar, using the last day in shorter months and restoring
+  the activation day when it exists. Annual plans pay for 12 such periods.
+  A pack is valid for one calendar month from checkout fulfillment. A
+  same-term upgrade uses the full new price and starts a new cycle on
+  confirmed payment. The previous plan's recoverable value goes back to
+  its original payment channel after its current model calls settle. The
+  quote describes the estimate. The purchase journal keeps both the old
+  order binding and the new subscription association through recovery.
 
 ### Running the isolated model proxy
 
@@ -497,7 +518,8 @@ on a dedicated host or service identity with no user-command execution.
 The configuration takes `uniHubOrigin`, `modelGateway`, `allowedModels`,
 `serviceCredentialFile`, `vaultPath`, and optional `instanceId`, `host`,
 `port`, `tlsKeyFile` and `tlsCertificateFile` fields. The gateway URL ends in
-`/platform/v1`. Supply a registered SuperWagie runtime credential with
+`/platform/v1`. Include `PaddleOCR-VL-1.6` in `allowedModels` for confirmed
+Knowledge Library PDF OCR. Supply a registered SuperWagie runtime credential with
 `model:authorize`, a durable private vault, and TLS. If the proxy uses plain
 HTTP on loopback, terminate TLS at the dedicated reverse proxy. Keep the
 service mapping and encrypted vault stable because call receipts remain

@@ -387,6 +387,30 @@ refused; a fresh explicit request can deliver the original cached result without
 repeating paid calls. A transport timeout is reported as pending after current
 owner and worker checks, never as completed or as permission to redispatch.
 
+### PDF OCR with SuperWagie credits
+
+In a SuperWagie product-credit runtime with the owned bundled backend, the
+Knowledge Library offers a document-level OCR action for readable PDFs up to
+20 MiB. Confirmation identifies the file and the initiating user's selected
+payer. After confirmation, the encrypted dispatch record binds the payer,
+actor, project, document, and source digest. Receipt and result recovery use
+the recorded call. An ambiguous submission stays recoverable under that call.
+A verified rejection before provider admission permits a fresh confirmation.
+
+The isolated product runtime keeps the product Key and authorizes the
+PaddleOCR request. It receives the PDF under an opaque filename. SuperWagie
+checks the settled product-credit receipt and document digest, then publishes
+only that verified layout and text to the owned parser over loopback. The
+short-lived parser override applies to the original document and stops working
+if the initiating session or source bytes change. Existing knowledge IDs and
+the local source PDF remain available for preview and citations. A signed-in
+user can check the original OCR request again to resume after a parser restart.
+
+Office documents continue to use bundled AnyDoc for native content and
+embedded assets. A scanned Office document can be exported to PDF before
+requesting this paid OCR action. Standalone images follow the existing
+Knowledge Library import allowlist.
+
 ### Why completion has a private journal
 
 An encrypted work registration proves preparation, which can precede a crash

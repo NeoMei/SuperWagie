@@ -27,6 +27,7 @@ import {
   reconnectKnowledgeLibrary,
   removeKnowledgeDocument,
   removeKnowledgeLibrary,
+  requestProductOcr,
   rescanKnowledgeLibrary,
   searchKnowledgeLibrary,
   setKnowledgeLibraryWatching,
@@ -99,7 +100,13 @@ const statusDotClass = (
 };
 
 const errorKeyOf = (code: string): I18nKey =>
-  code === 'knowledge_work_outcome_pending'
+  code === 'product_membership_expired'
+    ? 'platformAccount.productWallet.modelMembershipExpired'
+    : code === 'platform_model_credits_required'
+    ? 'platformAccount.creditsFundingRequired'
+    : code === 'invalid_ocr_document' || code === 'knowledge_work_ocr_pdf_required'
+    ? 'knowledgeLibrary.panel.ocr.invalidPdf'
+    : code === 'knowledge_work_outcome_pending'
     ? 'knowledgeLibrary.panel.error.searchPending'
     : code === 'not_provisioned' || code.startsWith('provision_')
     ? 'knowledgeLibrary.panel.error.notProvisioned'
@@ -153,6 +160,7 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [ocrStatus, setOcrStatus] = React.useState<{ documentId: string; state: 'pending' | 'processing' | 'failed' } | null>(null);
   const [query, setQuery] = React.useState('');
   const searchAbort = React.useRef<AbortController | null>(null);
   React.useEffect(() => { if (!visible) searchAbort.current?.abort(); return () => searchAbort.current?.abort(); }, [visible]);
@@ -201,6 +209,28 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
     }, 5_000);
     return () => clearInterval(timer);
   }, [visible, refresh, reload]);
+
+  React.useEffect(() => {
+    if (!visible || ocrStatus?.state !== 'pending') return;
+    const { documentId } = ocrStatus;
+    const controller = new AbortController();
+    const deadline = Date.now() + 120_000;
+    let timer: ReturnType<typeof setTimeout>;
+    const check = async () => {
+      try {
+        const result = await requestProductOcr(documentId, { action: 'resume' }, controller.signal);
+        if (controller.signal.aborted) return;
+        if (result.state === 'processing' || result.state === 'failed') {
+          setOcrStatus({ documentId, state: result.state });
+          void refresh().catch(() => {});
+          return;
+        }
+        if (result.state === 'pending' && Date.now() < deadline) timer = setTimeout(() => void check(), 5_000);
+      } catch { /* The operator can check the original request again. */ }
+    };
+    timer = setTimeout(() => void check(), 5_000);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [visible, ocrStatus, refresh]);
 
   // While the backend is starting or something is queued, read again; a settled
   // library is read once.
@@ -330,6 +360,23 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
     } catch (cause) { setError(cause instanceof KnowledgeLibraryError ? cause.code : 'request_failed'); }
   }, [confirm, confirmPreview, libraries, run, t]);
 
+  const scanDocument = React.useCallback(async (document: KnowledgeLibraryDocument) => {
+    await run(async () => {
+      const preview = await requestProductOcr(document.id, { action: 'preview' });
+      if (preview.state === 'confirmation') {
+        const accepted = await confirm({
+          title: t('knowledgeLibrary.panel.ocr.title'),
+          message: t('knowledgeLibrary.panel.ocr.confirmation', { name: document.relPath.split('/').at(-1) ?? document.relPath, payer: preview.payer }),
+          action: t('knowledgeLibrary.panel.ocr.start'),
+        });
+        if (!accepted) return;
+      }
+      const result = await requestProductOcr(document.id, preview.state === 'confirmation'
+        ? { action: 'confirm', approvalId: preview.id } : { action: 'resume' });
+      if (result.state !== 'confirmation') setOcrStatus({ documentId: document.id, state: result.state });
+    });
+  }, [confirm, run, t]);
+
   const removeDocument = React.useCallback(async (document: KnowledgeLibraryDocument) => {
     const name = document.relPath.slice(document.relPath.lastIndexOf('/') + 1);
     const accepted = await confirm({
@@ -398,6 +445,9 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
   return (
     <PauseClock paused={!visible}>
     <div className="flex h-full min-h-0 flex-col">
+      {ocrStatus && <p role="status" className="mx-3 mt-2 typography-meta text-muted-foreground">
+        {t(ocrStatus.state === 'pending' ? 'knowledgeLibrary.panel.ocr.pending' : ocrStatus.state === 'failed' ? 'knowledgeLibrary.panel.ocr.failed' : 'knowledgeLibrary.panel.ocr.processing')}
+      </p>}
       <div
         role="tablist"
         aria-label={t('knowledgeLibrary.panel.tabs.label')}
@@ -619,6 +669,10 @@ export const KnowledgeLibraryPanel: React.FC<{ visible?: boolean }> = ({ visible
                             </span>
                           ) : null}
                         </button>
+                        {document.productOcr && <Button type="button" size="xs" variant="ghost" disabled={busy}
+                          title={t('knowledgeLibrary.panel.ocr.title')} onClick={() => void scanDocument(document)}>
+                          {t(ocrStatus?.documentId === document.id && ocrStatus.state === 'pending' ? 'knowledgeLibrary.panel.ocr.check' : 'knowledgeLibrary.panel.ocr.button')}
+                        </Button>}
                         <button
                           type="button"
                           aria-label={t('knowledgeLibrary.panel.document.remove')}

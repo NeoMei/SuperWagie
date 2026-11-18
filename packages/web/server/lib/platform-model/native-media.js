@@ -112,6 +112,7 @@ export function createNativeMediaTransport({
   fetchImpl,
   grantFor,
   operationAllowlist,
+  requestOperation,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
   // HTTPS always; loopback HTTP mirrors the platform-model development gateway rule.
@@ -133,53 +134,25 @@ export function createNativeMediaTransport({
   const base = gateway.replace(/[/]+$/, '');
   const allowed = (operation, model) => allowlist[operation]?.includes(model);
 
+  async function request(path, body, grant, taskID, idempotencyKey, headers = {}) {
+    const signal = AbortSignal.timeout(timeoutMs);
+    try {
+      if (requestOperation) return await requestOperation({ body, signal });
+      return await fetchImpl(base + path, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + grant.token, 'Idempotency-Key': idempotencyKey, 'X-UniHub-Task-ID': taskID, ...headers },
+        body, redirect: 'error', signal,
+      });
+    } catch (error) {
+      throw new NativeMediaError('native media transport failed before a terminal result', { code: 'native_media_unresolved', upstream: error });
+    }
+  }
+
   async function send(path, body, grant, taskID, idempotencyKey, accept) {
     const payload = JSON.stringify(body);
     if (Buffer.byteLength(payload) > MAX_JSON_BODY_BYTES) {
       throw new NativeMediaError('native media request exceeds local body limit', { code: 'native_media_too_large', status: 400, local: true });
     }
-    let response;
-    try {
-      response = await fetchImpl(base + path, {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer ' + grant.token,
-          'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,
-          'X-UniHub-Task-ID': taskID,
-          ...(accept ? { Accept: accept } : {}),
-        },
-        body: payload,
-        redirect: 'error',
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (error) {
-      throw new NativeMediaError('native media transport failed before a terminal result', {
-        code: 'native_media_unresolved',
-        upstream: error,
-      });
-    }
-    return response;
-  }
-
-  async function sendMultipart(path, form, grant, taskID, idempotencyKey) {
-    let response;
-    try {
-      response = await fetchImpl(base + path, {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer ' + grant.token,
-          'Idempotency-Key': idempotencyKey,
-          'X-UniHub-Task-ID': taskID,
-        },
-        body: form,
-        redirect: 'error',
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (error) {
-      throw new NativeMediaError('native media transport failed before a terminal result', { code: 'native_media_unresolved', upstream: error });
-    }
-    return response;
+    return request(path, payload, grant, taskID, idempotencyKey, { 'Content-Type': 'application/json', ...(accept ? { Accept: accept } : {}) });
   }
 
   async function readError(response) {
@@ -195,6 +168,7 @@ export function createNativeMediaTransport({
   }
 
   async function resolveGrant(operation, model, taskID, idempotencyKey) {
+    if (requestOperation) return null;
     if (!allowed(operation, model)) {
       throw new NativeMediaError('model ' + model + ' is not admitted for ' + operation, { code: 'native_media_model_not_admitted', status: 400, local: true });
     }
@@ -260,7 +234,7 @@ export function createNativeMediaTransport({
         throw new NativeMediaError('image count out of bounds', { code: 'invalid_media_request', status: 400, local: true });
       }
       const resolved = grant ?? (await resolveGrant('image_generation', model, taskID, idempotencyKey));
-      const body = { model, prompt, n, ...(size ? { size } : {}), response_format: 'url' };
+      const body = { model, prompt, n, ...(size ? { size } : {}), response_format: requestOperation ? 'b64_json' : 'url' };
       const response = await send(IMAGE_PATH, body, resolved, taskID, idempotencyKey);
       if (!response.ok) throw await readError(response);
       const parsed = await readJSONResponse(response, MAX_IMAGE_RESPONSE_BYTES, 'image response is not JSON');
@@ -296,10 +270,10 @@ export function createNativeMediaTransport({
         const maskPart = imagePart(mask, 'mask');
         form.set('mask', new Blob([maskPart.bytes], { type: maskPart.mimeType }), 'mask.' + maskPart.mimeType.slice(6));
       }
-      const response = await sendMultipart(IMAGE_EDIT_PATH, form, resolved, taskID, idempotencyKey);
+      const response = await request(IMAGE_EDIT_PATH, form, resolved, taskID, idempotencyKey);
       if (!response.ok) throw await readError(response);
       const parsed = await readJSONResponse(response, MAX_METADATA_RESPONSE_BYTES, 'image edit response is not JSON');
-      if (response.status !== 202 || parsed?.id !== idempotencyKey || parsed?.status !== 'pending') throw new NativeMediaError('image edit submission response is invalid', { code: 'native_media_invalid_response' });
+      if (response.status !== 202 || (requestOperation ? parsed?.idempotency_key ?? parsed?.id : parsed?.id) !== idempotencyKey || parsed?.status !== 'pending') throw new NativeMediaError('image edit submission response is invalid', { code: 'native_media_invalid_response' });
       return { callID: idempotencyKey, status: 'pending' };
     },
 

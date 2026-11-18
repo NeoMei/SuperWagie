@@ -74,6 +74,12 @@ const parseInput = (schema, value) => {
 };
 const emptyState = () => ({ version: 1, revision: 0, connections: [], bindings: [] });
 /** Removed recommendations stay recognizable on disk without reappearing in the public catalog. */
+const PRODUCT_MEDIA_PURPOSES = {
+  tts: { operation: 'speech', models: ['qwen3-tts-flash', 'qwen3-tts-instruct-flash'] },
+  'stt-short': { operation: 'transcription', models: ['qwen3-asr-flash'] },
+  'stt-realtime': { operation: 'transcription', models: ['qwen3-asr-flash'] },
+  'image-generation': { operation: 'image_generation', models: ['qwen-image-2.0', 'qwen-image-2.0-pro'] },
+};
 const LEGACY_MODEL_PRESETS = [{
   id: 'alibaba-qwen3-asr-flash', purposes: ['stt-short'], providerId: 'unihub',
   protocol: 'managed-media', model: 'qwen3-asr-flash', status: 'requires-adapter',
@@ -110,13 +116,22 @@ const isLoopback = (baseUrl) => ['localhost', '127.0.0.1', '[::1]'].includes(new
 const credentialFingerprint = (source, apiKey) => createHash('sha256').update(JSON.stringify({ source, apiKey })).digest('hex');
 
 /** Server-only state. Each operation reads fresh state; callers must not cache resolved keys. */
-export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fetchImpl = fetch, prepareBindingChange, readOpenCodeCredentials, readOpenCodeProviderMetadata, readModelBootstrapCredential, deleteModelBootstrapCredential, env = process.env } = {}) => {
+export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fetchImpl = fetch, prepareBindingChange, readOpenCodeCredentials, readOpenCodeProviderMetadata, readModelBootstrapCredential, deleteModelBootstrapCredential, useProductManagedMedia = () => false, isProductMediaOperationConfigured = () => false, env = process.env } = {}) => {
   if (!dataDir) throw new Error('Model configuration needs a data directory');
   const filePath = path.join(dataDir, 'model-configuration.json');
   let mutationQueue = Promise.resolve();
   const enterpriseMode = () => isEnterpriseMode(enterpriseOptions);
   const guardEntry = () => { if (enterpriseMode()) fail('enterprise_mode', 403); };
   const guardEgress = (binding) => { if (enterpriseMode() && !isLoopback(binding.baseUrl)) fail('enterprise_mode', 403); };
+  const legacyProductOcr = (binding, connection) => useProductManagedMedia() && binding.purpose === 'ocr'
+    && connection.credentialSource?.type === 'model-bootstrap';
+  const managedMediaPurpose = (binding, connection) => {
+    const purpose = PRODUCT_MEDIA_PURPOSES[binding.purpose];
+    if (!useProductManagedMedia() || !purpose) return null;
+    const accountKey = connection.id.startsWith('account-key-') && connection.credentialSource?.type === 'model-bootstrap'
+      && credentialDestinationAllowed(connection, [], env);
+    return purpose.models.includes(binding.model) && (accountKey || connection.protocol === 'managed-media') ? purpose : null;
+  };
   const readCredentials = createCredentialReader({ readOpenCodeCredentials, readOpenCodeProviderMetadata });
   const referenceKey = async (connection, snapshot) => {
     if (connection.credentialSource.type === 'model-bootstrap') {
@@ -168,6 +183,9 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     const bindings = state.bindings.map((binding) => {
       const { credentialFingerprint: fingerprint, ...verification } = binding.verification;
       const connection = state.connections.find((entry) => entry.id === binding.connectionId);
+      const managed = managedMediaPurpose(binding, connection);
+      if (managed || legacyProductOcr(binding, connection)) return { ...binding, verification: { status: 'untested' },
+        managedMediaReady: managed !== null && !enterpriseMode() && isProductMediaOperationConfigured(binding.model, managed.operation) };
       if (!connection.credentialSource || verification.status === 'untested') return { ...binding, verification };
       if (connection.credentialSource.type === 'model-bootstrap') {
         const key = bootstrapKeys.get(connection.id);
@@ -435,8 +453,18 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     if (!binding) return null;
     if (MODEL_PURPOSES.find((entry) => entry.id === purpose).status !== 'available') return fail('model_configuration_not_connected', 501);
     const preset = findPreset(binding.presetId);
+    const selected = resolved(state, purpose);
+    guardEgress(selected);
+    const connection = state.connections.find((entry) => entry.id === binding.connectionId);
+    if (legacyProductOcr(binding, connection)) return fail('model_configuration_managed_unavailable', 409);
+    if (managedMediaPurpose(binding, connection)) {
+      if (enterpriseMode()) return fail('enterprise_mode', 403);
+      if (supportedProtocols && !supportedProtocols.includes('managed-media')) return fail('model_configuration_unsupported_protocol', 501);
+      const productBinding = { ...selected, protocol: 'managed-media' };
+      delete productBinding.apiKey;
+      return productBinding;
+    }
     if (preset && preset.status !== 'compatible') return fail('model_configuration_unsupported_protocol', 501);
-    guardEgress(resolved(state, purpose));
     const value = await resolveStateBinding(state, purpose);
     if (supportedProtocols && !supportedProtocols.includes(value.protocol)) return fail('model_configuration_unsupported_protocol', 501);
     return value;

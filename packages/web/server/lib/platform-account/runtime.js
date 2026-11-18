@@ -601,8 +601,9 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   };
   const knowledgeAdapter = createPlatformKnowledgeAdapter({
     env, fetchImpl, now, enterprise, usePublicDefaults,
+    usesProductCreditWallet: (identity) => usesProductCreditWallet(identity),
+    proxyProductModel: (identity, request) => proxyProductModel(identity, request),
     captureSession: (identity) => {
-      if (productModelProxy) reject('platform_knowledge_request_unavailable', 503);
       const session = getSession(identity);
       return { session, key: namespace(identity), accountVersion: session.accountVersion, accessToken: session.accessToken, user: session.user, accountId: session.accountId };
     },
@@ -622,14 +623,16 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const productWalletEnabled = async (key, session) => productWalletSupported() &&
     productWalletCapability.parse(await sessionRequest(key, session, '/v1/capabilities', productWalletHeaders())).product_credit_wallet === true;
   const usesProductCreditWallet = async (identity) => {
-    if (!productWalletSupported()) return false;
+    if (!productModelProxy) return false;
+    if (!productWalletSupported()) reject('platform_model_access_unavailable', 503);
     const session = await ensureFreshSession(identity);
     const key = namespace(identity);
     const enabled = await productWalletEnabled(key, session);
     assertCurrentSession(key, session, session.accountVersion);
-    return enabled;
+    if (!enabled) reject('platform_model_access_unavailable', 503);
+    return true;
   };
-  const proxyProductModel = async (identity, { accountId, model, callId, body, signal }) => {
+  const proxyProductModel = async (identity, { accountId, model, callId, taskId, policyDigest, body, signal, operation }) => {
     if (!productModelProxy || !isManaged() || enterprise() || body !== undefined && !productWalletSupported()) reject('platform_model_access_unavailable', 503);
     const session = await ensureFreshSession(identity);
     const key = namespace(identity);
@@ -638,7 +641,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       assertCurrentSession(key, session, session.accountVersion);
     };
     assertCurrent();
-    const response = await productModelProxy({ actorToken: session.accessToken, accountId, model, callId, body, signal });
+    const response = await productModelProxy({ actorToken: session.accessToken, accountId, model, callId, taskId, policyDigest, body, signal, operation });
     try { assertCurrent(); } catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
     return response;
   };

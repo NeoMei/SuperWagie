@@ -306,7 +306,7 @@ export function createEmbeddedKnowledgeClient({
     // Reference ingest (SuperWagie fork): the backend indexes a file where it
     // lives. No bytes cross the socket, and the call is idempotent per
     // (knowledge base, path).
-    async registerReference({ knowledgeBaseId, path: filePath, title, folderPath, metadata }) {
+    async registerReference({ knowledgeBaseId, path: filePath, title, folderPath, metadata, processConfig }) {
       return unwrap(
         await request(`/api/v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/knowledge/ref`, {
           method: 'POST',
@@ -315,6 +315,7 @@ export function createEmbeddedKnowledgeClient({
             title,
             folder_path: folderPath,
             metadata,
+            ...(processConfig && { process_config: processConfig }),
             tag_ids: [],
             channel: 'api',
           },
@@ -335,8 +336,8 @@ export function createEmbeddedKnowledgeClient({
 
     // Re-reads a record's file in place. The knowledge id is unchanged, so a
     // content change keeps its citations.
-    async reparseKnowledge(id) {
-      return request(`/api/v1/knowledge/${encodeURIComponent(id)}/reparse`, { method: 'POST', body: {} });
+    async reparseKnowledge(id, processConfig) {
+      return request(`/api/v1/knowledge/${encodeURIComponent(id)}/reparse`, { method: 'POST', body: processConfig ? { process_config: processConfig } : {} });
     },
 
     async getKnowledge(id) {

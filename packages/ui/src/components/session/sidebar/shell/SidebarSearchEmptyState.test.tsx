@@ -48,7 +48,7 @@ test('hands the query to the Archive page and clears the sidebar search', async 
       <SidebarSearchEmptyState query="relay" showArchive resetSessionSearch={() => { resets += 1; }} />
     </I18nProvider>,
   ));
-  expect(document.body.textContent).toContain('No matching sessions');
+  expect(document.body.textContent).toContain('No matching titles');
   const button = archiveButton();
   if (!button) throw new Error('Archive button missing');
   await act(async () => button.click());
@@ -63,6 +63,6 @@ test('offers no Archive page where there is none', async () => {
       <SidebarSearchEmptyState query="relay" showArchive={false} resetSessionSearch={() => undefined} />
     </I18nProvider>,
   ));
-  expect(document.body.textContent).toContain('No matching sessions');
+  expect(document.body.textContent).toContain('No matching titles');
   expect(archiveButton()).toBeNull();
 });

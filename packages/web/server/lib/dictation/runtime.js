@@ -47,9 +47,10 @@ export function createDictationRuntime({
   rejectWebSocketUpgrade,
   modelsDir,
   resolveModelBinding,
+  getPlatformModelRuntime,
   platformAccessGate = null,
 }) {
-  const service = createDictationService({ modelsDir, resolveModelBinding });
+  const service = createDictationService({ modelsDir, resolveModelBinding, getPlatformModelRuntime });
 
   // Local text-to-speech (Kokoro in the dictation worker). Returns WAV bytes;
   // 503 with a reason code while the model is still downloading.
@@ -125,7 +126,7 @@ export function createDictationRuntime({
     maxPayload: DICTATION_WS_MAX_PAYLOAD_BYTES,
   });
 
-  wsServer.on('connection', (socket) => {
+  wsServer.on('connection', (socket, _req, identity) => {
     const send = (msg) => {
       if (socket.readyState !== 1) {
         return;
@@ -139,7 +140,7 @@ export function createDictationRuntime({
 
     const manager = new DictationStreamManager({
       emit: ({ type, payload }) => send({ type, ...payload }),
-      createSttSession: () => service.createSttSession(),
+      createSttSession: () => service.createSttSession(identity),
     });
 
     send({ type: 'ready' });
@@ -232,7 +233,8 @@ export function createDictationRuntime({
 
     const handleUpgrade = async () => {
       try {
-        if (platformAccessGate && !await platformAccessGate.guardUpgrade(req, socket, rejectWebSocketUpgrade)) return;
+        let identity = null;
+        if (platformAccessGate && !await platformAccessGate.guardUpgrade(req, socket, rejectWebSocketUpgrade, (authorization) => { identity = authorization.identity; })) return;
         if (isOpaqueOriginRequest(req)) {
           rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
           return;
@@ -256,7 +258,7 @@ export function createDictationRuntime({
         }
 
         wsServer.handleUpgrade(req, socket, head, (ws) => {
-          wsServer.emit('connection', ws, req);
+          wsServer.emit('connection', ws, req, identity);
         });
       } catch {
         rejectWebSocketUpgrade(socket, 500, 'Upgrade failed');

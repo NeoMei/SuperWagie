@@ -25,4 +25,8 @@ description: Use when creating, revising, previewing, or delivering narrated vid
 
 需要工程字段、字体/授权、录制恢复或高级 API 时再读 [工程参考](references/project.md)。机器操作字段始终以 `video.mjs --help` 为准。
 
-使用已配置的视频生成模型时，通过 `video-submit` 提交并保存返回的 callID 和 sessionID；用 `video-status` 查询，状态成功且结算完成后用 `video-import` 导入已验证的视频素材，并在场景中使用 `visual.kind=video`。提交结果不确定时继续查询原 callID，不要重复提交。具体字段以 `--help` 为准。
+当前对话提供 `superwagie_managed_media` 时，产品积分生成视频使用 `operation: video`、`model: wan2.6-t2v`、`prompt`、`seconds`、`size`。保存返回的 callID，用 `operation: recover` 查询原调用，拿到已结算 MP4 及校验值后，通过本地 `asset` 导入并设为 `visual.kind=video`。请求不确定时只恢复原任务。
+
+工程使用 `managed-media` 配音时，先按原工作流完成讲稿授权并确定待生成的句子。缓存已有的语音可直接复用。未生成的句子用同一个工具的 `operation: speech`，传工程中选定的模型和声音及准确的句子文本。保存 callID 和已结算音频的路径、SHA-256，按 `--help` 描述的 `HostAudioReceipt` 传给 `produce.hostReceipts`。内容哈希使用同一工程模型的 `canonicalHash(sentence.text)`；收到不确定结果时用原 callID 恢复。继续由引擎校验审批、句子、声音和实际音频。
+
+未提供产品积分工具且使用已配置的视频生成模型时，通过 `video-submit` 提交并保存返回的 callID 和 sessionID；用 `video-status` 查询，状态成功且结算完成后用 `video-import` 导入已验证的视频素材，并在场景中使用 `visual.kind=video`。提交结果不确定时继续查询原 callID，不要重复提交。具体字段以 `--help` 为准。

@@ -249,7 +249,8 @@ export class DictationStreamManager {
 
     stt.on('error', (err) => {
       const message = err?.message || String(err);
-      this.failAndCleanupStream(dictationId, message, true);
+      const reason = err?.dictationReasonCode;
+      this.failAndCleanupStream(dictationId, message, !['product_membership_expired', 'platform_model_credits_required', 'platform_model_scope_restart_required'].includes(reason), reason);
     });
 
     this.streams.set(dictationId, {
@@ -410,8 +411,8 @@ export class DictationStreamManager {
     });
   }
 
-  failAndCleanupStream(dictationId, error, retryable) {
-    this.failStream(dictationId, error, retryable);
+  failAndCleanupStream(dictationId, error, retryable, reasonCode) {
+    this.failStream(dictationId, error, retryable, reasonCode);
     this.cleanupStream(dictationId);
   }
 

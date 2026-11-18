@@ -15,7 +15,7 @@ const intentSchema = z.object({
   productId: z.enum(['superwagie', 'llmrouter']), amount: z.string().regex(/^(0|[1-9]\d*)$/),
   offerId: identifier.optional(), resourceId: identifier.optional(), operationId: identifier.optional(),
   provider: z.enum(['wechat', 'alipay']).optional(), paymentSource: z.literal('external').optional(), refundKey: z.string().uuid().optional(), refundReason: z.string().max(200).optional(),
-  walletTopUp: z.literal(true).optional(), walletVersion: z.literal('product_v1').optional(), quoteId: identifier.optional(), subscriptionId: identifier.optional(),
+  walletTopUp: z.literal(true).optional(), walletVersion: z.literal('product_v1').optional(), previousOrderId: identifier.optional(), quoteId: identifier.optional(), subscriptionId: identifier.optional(),
   status: z.enum(['PREPARED', 'UNKNOWN', 'PENDING', 'APPLIED', 'FAILED']),
   errorCode: z.string().regex(/^[a-z][a-z0-9_]{0,100}$/).optional(),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
@@ -27,7 +27,7 @@ const intentSchema = z.object({
 const quoteSchema = z.object({
   id: identifier, serviceId: identifier, actorId: identifier, accountId: identifier,
   subscriptionId: identifier, offerId: identifier, amount: z.string().regex(/^(0|[1-9]\d*)$/),
-  walletVersion: z.literal('product_v1').optional(), paymentSource: z.enum(['wallet', 'external']).optional(), expiresAt: z.string().datetime(), sandbox: z.boolean(), pricingProgram: z.string().optional(),
+  walletVersion: z.literal('product_v1').optional(), previousOrderId: identifier.optional(), paymentSource: z.enum(['wallet', 'external']).optional(), expiresAt: z.string().datetime(), sandbox: z.boolean(), pricingProgram: z.string().optional(),
 }).strict();
 const documentSchema = z.object({ version: z.union([z.literal(1), z.literal(2)]), intents: z.record(z.string(), intentSchema), quotes: z.record(z.string(), quoteSchema).default({}) }).strict();
 const sizeLimit = 8 * 1024 * 1024;

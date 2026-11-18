@@ -223,7 +223,7 @@ describe('a tracker no UI code names', () => {
     const { TrackerSettings } = await import('@/components/sections/integrations/TrackerSettings');
     await render(<TrackerSettings descriptor={plane} />);
     expect(statusReads).toEqual(['plane']);
-    expect(container.textContent).toContain('Connect Plane on this OpenChamber server.');
+    expect(container.textContent).toContain('Connect Plane on this SuperWagie server.');
     expect(container.innerHTML).not.toContain('Linear');
     expect(container.querySelector('[data-settings-item="integrations.plane"]')).not.toBeNull();
     expect(container.querySelector(GENERIC_MARK)).not.toBeNull();

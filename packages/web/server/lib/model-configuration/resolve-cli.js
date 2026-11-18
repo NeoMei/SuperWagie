@@ -36,7 +36,12 @@ const privateCredentialReader = (environment) => {
 export const resolveModelBindingFromDisk = (purpose, { dataDir, supportedProtocols, environment = process.env } = {}) => {
   const directory = dataDir ?? (environment.OPENCHAMBER_DATA_DIR ? path.resolve(environment.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'));
   const store = createModelBootstrapStore({ dataDir: directory });
-  return createModelConfigurationRuntime({ dataDir: directory, env: environment, readOpenCodeCredentials: privateCredentialReader(environment), readModelBootstrapCredential: store.getSecret }).resolveBinding(purpose, { supportedProtocols });
+  const productManaged = environment.OPENCHAMBER_PRODUCT_MANAGED_MEDIA === '1';
+  return createModelConfigurationRuntime({
+    dataDir: directory, env: environment, readOpenCodeCredentials: privateCredentialReader(environment),
+    useProductManagedMedia: () => productManaged,
+    readModelBootstrapCredential: (ref) => productManaged ? null : store.getSecret(ref),
+  }).resolveBinding(purpose, { supportedProtocols });
 };
 const speechInput = z.object({ sessionID: z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).optional(),
   text: z.string().trim().min(1).max(9999), speed: z.number().finite().min(0.5).max(2).optional(),

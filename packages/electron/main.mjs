@@ -26,6 +26,7 @@ import { attachDevWindowTape } from './dev-window-tape.mjs';
 import { APP_NAME, APP_NAME_EN, UPDATES_ENABLED } from './branding.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { createOfficialSelectionIpc } from './official-selection-ipc.mjs';
+import { loadPackagedProductModelOrigin } from './product-model-distribution.mjs';
 import { createEventNotificationRegistry } from './event-notifications.mjs';
 import { z } from 'zod';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
@@ -1649,6 +1650,7 @@ const spawnLocalServer = async () => {
     nativeOfficialSelections: true,
     exitOnShutdown: false,
     apiOnly: false,
+    productModelProxyOrigin: loadPackagedProductModelOrigin(app.isPackaged, resourceRoot()),
     builtInExtensionsDir: app.isPackaged
       ? path.join(app.getAppPath().endsWith('.asar') ? `${app.getAppPath()}.unpacked` : app.getAppPath(), 'node_modules/@openchamber/web/server/built-in-extensions')
       : undefined,

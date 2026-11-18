@@ -68,13 +68,14 @@ export function createManagedKnowledgeContext({ readSettings, resolveProjectId, 
 
 // The ordinary authenticated UI prompt is the only source of agent ownership.
 // Browser directory headers remain address hints resolved by the runtime.
-export function createManagedKnowledgeMiddleware({ enabled, resolveModelBinding, resolveIdentity, isRequestOriginAllowed, readSettings, getAccountRuntime, context }) {
+export function createManagedKnowledgeMiddleware({ enabled, productOcrEnabled = () => false, resolveModelBinding, resolveIdentity, isRequestOriginAllowed, readSettings, getAccountRuntime, context }) {
   return async (req, res, next) => {
     const prompt = req.method === 'POST' && /^\/api\/session\/([^/]+)\/prompt$/.exec(req.path);
     const knowledge = req.path.startsWith('/api/knowledge-library/');
     if (!prompt && !knowledge) return next();
     try {
-      if (!enabled() || (await resolveModelBinding('embedding'))?.protocol !== 'managed-media') return next();
+      const productOcr = req.method === 'POST' && /^\/api\/knowledge-library\/documents\/[^/]+\/ocr$/.test(req.path) && productOcrEnabled();
+      if (!productOcr && (!enabled() || (await resolveModelBinding('embedding'))?.protocol !== 'managed-media')) return next();
       const identity = await resolveIdentity(req, res);
       if (!identity) return next();
       if (req.method !== 'GET' && !await isRequestOriginAllowed(req)) return res.status(403).json({ error: 'knowledge_work_origin_forbidden' });

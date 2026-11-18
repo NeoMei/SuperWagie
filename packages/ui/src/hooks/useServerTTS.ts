@@ -44,6 +44,12 @@ let serverTTSStatusRequest: { runtimeKey: string; generation: number; promise: P
 let serverTTSStatusGeneration = 0;
 const serverTTSStatusListeners = new Set<() => void>();
 const serverTTSStatusSchema = z.object({ available: z.boolean(), configuredBinding: z.boolean().default(false) });
+const speechErrorSchema = z.object({ code: z.string().optional(), error: z.string().optional() });
+const speechBillingRefusalStatuses = new Map([
+  ['platform_model_credits_required', 402],
+  ['product_membership_expired', 403],
+]);
+const stopsSpeechPlayback = (code: string) => code === 'platform_model_scope_restart_required' || speechBillingRefusalStatuses.has(code);
 
 /** A saved shared binding changes server readiness without changing legacy key fields. */
 export function invalidateServerTTSStatus(): void {
@@ -267,10 +273,9 @@ async function fetchTTSAudioChunk(
   });
 
   if (!response.ok) {
-    const errorData = await response
-      .json()
-      .catch(() => ({ error: 'Unknown error' }));
-    throw new Error(errorData.error || `HTTP ${response.status}`);
+    const errorData = speechErrorSchema.safeParse(await response.json().catch(() => null)).data;
+    if (errorData?.code && speechBillingRefusalStatuses.get(errorData.code) === response.status) throw new Error(errorData.code);
+    throw new Error(errorData?.error || `HTTP ${response.status}`);
   }
 
   const audioBlob = await response.blob();
@@ -374,7 +379,7 @@ export async function runChunkedTTSPlayback<TBuffer, TSource>(
       if (err instanceof Error && err.name === 'AbortError') {
         break;
       }
-      if (err instanceof Error && err.message === 'platform_model_scope_restart_required') throw err;
+      if (err instanceof Error && stopsSpeechPlayback(err.message)) throw err;
       // One failed sentence must not break the queue: skip it and continue.
       console.warn(
         '[useServerTTS] Skipping failed sentence chunk:',
@@ -680,7 +685,7 @@ export function useServerTTS(
       console.error('[useServerTTS] Error:', errorMsg);
       setError(errorMsg);
       options?.onError?.(errorMsg);
-      if (errorMsg === 'platform_model_scope_restart_required') stop();
+      if (stopsSpeechPlayback(errorMsg)) stop();
       setIsPlaying(false);
     }
     },

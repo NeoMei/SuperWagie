@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +18,13 @@ async function fixture(t, scenario, env = {}) {
   fs.copyFileSync(path.join(scripts, 'electron-dev.mjs'), path.join(root, 'packages/electron/scripts/electron-dev.mjs'));
   fs.copyFileSync(path.join(scripts, '../electron-dev-mode.mjs'), path.join(root, 'packages/electron/electron-dev-mode.mjs'));
   fs.writeFileSync(path.join(root, 'packages/electron/scripts/ensure-electron.mjs'), '');
+  const runtimeDir = 'packages/web/server/lib/opencode';
+  const runtimeModule = path.join(runtimeDir, 'desktop-private-runtime.js');
+  fs.mkdirSync(path.join(root, runtimeDir), { recursive: true });
+  fs.symlinkSync(path.resolve(scripts, '../../..', runtimeModule), path.join(root, runtimeModule));
+  const bundledCli = path.join(root, 'packages/electron/resources/opencode-cli');
+  fs.mkdirSync(bundledCli, { recursive: true });
+  fs.writeFileSync(path.join(bundledCli, 'opencode'), 'test engine');
   const eventsFile = path.join(root, 'events.jsonl');
   // Only Bun/Electron and the expensive web backend are stand-ins. The launcher,
   // HTTP probes, OS child processes, signal handling and teardown run unchanged.
@@ -54,6 +62,7 @@ global.setTimeout = (fn, delay, ...args) => original(fn, delay === 120000 && ${B
   const child = spawn(process.execPath, ['--require', path.join(root, 'deadline.cjs'), 'packages/electron/scripts/electron-dev.mjs'], {
     cwd: root, env: { ...process.env, PATH: `${root}${path.delimiter}${process.env.PATH}`, EVENTS: eventsFile,
       OPENCHAMBER_ELECTRON_AUTO_START_HMR: '1', OPENCHAMBER_ELECTRON_USE_BUNDLED_UI: '',
+      OPENCHAMBER_DATA_DIR: path.join(root, 'data'),
       OPENCHAMBER_HMR_API_PORT: '0', OPENCHAMBER_HMR_UI_PORT: '0', SCENARIO: JSON.stringify(scenario), ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -119,7 +128,11 @@ for (const [name, scenario] of [['child exit', { api: null, ui: null, exit: 7 }]
 for (const [signal, expected] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   test(`${signal} cancels readiness and cleans the owned tree`, options, async (t) => {
     const run = await fixture(t, { api: null, ui: null });
-    while (!run.events().some((entry) => entry.event === 'dev')) await new Promise((resolve) => setTimeout(resolve, 5));
+    while (!run.events().some((entry) => entry.event === 'dev')) {
+      assert.equal(run.child.exitCode, null, run.output());
+      assert.equal(run.child.signalCode, null, run.output());
+      await delay(5, undefined, { signal: t.signal });
+    }
     run.child.kill(signal);
     run.child.kill(signal);
     const [code] = await run.completion;
@@ -173,7 +186,7 @@ test('dev-server spawn error cancels readiness before Electron starts', async ()
     AbortController,
     console: { log() {}, warn() {}, error() {} },
     ensureElectronInstalled() {},
-    resolveBundledOpenCodeCliEnv: () => ({}),
+    resolveElectronDevEnvironment: () => ({}),
     findAvailablePort: async (port) => port,
     preferredHmrApiPort: 3901, preferredHmrUiPort: 5173, electronDir: '/fixture/electron',
     spawnProcess() {
@@ -205,7 +218,7 @@ test('bundled asset build retains its existing launcher signal ownership', async
     resolveElectronDevMode: () => ({ startHmr: false, useBundledUi: true }),
     process: { env: {}, on(signal) { signals.push(signal); }, exit() {} },
     AbortController, console,
-    ensureElectronInstalled() {}, resolveBundledOpenCodeCliEnv: () => ({}),
+    ensureElectronInstalled() {}, resolveElectronDevEnvironment: () => ({}),
     runProcess: () => build,
     spawnProcess() { spawns++; return new EventEmitter(); }, electronDir: '/fixture/electron',
     stopChildTree: async () => {},

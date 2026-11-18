@@ -1,5 +1,5 @@
 /** No imports in the generated plugin. OpenCode loads it from its private directory. */
-export const createPluginSource = (bootstrap = '') => `
+export const createPluginSource = (bootstrap = '', productMedia = false) => `
 export default {
   id: 'superwagie-unihub-model',
   setup: async (ctx) => {
@@ -45,8 +45,51 @@ export default {
     const call = async (pathname, options = {}) => {
       const body = options.body === undefined ? '' : String(options.body);
       const headers = await signedHeaders(options.method || 'POST', pathname, body, options.headers || {});
-      return fetch(base + pathname, { ...options, headers, body, redirect: 'error', signal: AbortSignal.timeout(15000) });
+      return fetch(base + pathname, { ...options, headers, body, redirect: 'error', signal: options.signal ?? AbortSignal.timeout(15000) });
     };
+    if (${JSON.stringify(productMedia)} && ctx.tool?.transform) await ctx.tool.transform((tools) => {
+      tools.add({
+        name: 'superwagie_managed_media',
+        description: 'Use the authenticated SuperWagie product media lane. Specify a certified operation and model. Saves results in the current workspace. For pending or interrupted work, recover using the original callID.',
+        options: { codemode: false },
+        input: {
+          type: 'object',
+          properties: {
+            operation: { type: 'string', enum: ['image_generation', 'image_edit', 'video', 'speech', 'recover'] },
+            callID: { type: 'string', description: 'Original call ID when recovering a pending result' },
+            model: { type: 'string', description: 'qwen-image-2.0, qwen-image-2.0-pro, wanx2.1-imageedit, wan2.6-t2v, qwen3-tts-flash or qwen3-tts-instruct-flash' },
+            prompt: { type: 'string' }, imagePath: { type: 'string', description: 'Source image inside the workspace' },
+            maskPath: { type: 'string', description: 'PNG mask inside the workspace' },
+            seconds: { type: 'integer', description: 'Video duration in seconds' }, size: { type: 'string', description: 'Provider size such as 1280*720' },
+            text: { type: 'string', description: 'Text to narrate' }, voice: { type: 'string', description: 'Bailian voice name, default Cherry' },
+          },
+          required: ['operation'],
+          additionalProperties: false,
+        },
+        async execute(input, context) {
+          const callID = input.callID ?? ('media_' + (await digest(JSON.stringify([context.sessionID, context.id]))).slice(0, 48));
+          const recover = input.operation === 'recover' && input.callID;
+          const result = (payload) => ({ content: JSON.stringify(payload) });
+          if (!base || !context.sessionID || !context.id || input.operation === 'recover' && !recover) {
+            return result({ callID, status: 'refused', code: 'platform_media_request_invalid' });
+          }
+          try {
+            const response = await call('/media/tool', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ ...input, callID, sessionID: context.sessionID }),
+              signal: context.signal ? AbortSignal.any([context.signal, AbortSignal.timeout(170000)]) : AbortSignal.timeout(170000),
+            });
+            const payload = await response.json();
+            if (response.ok && payload.callID === callID) return result(payload);
+            const code = typeof payload?.error?.code === 'string' ? payload.error.code : 'platform_reconciliation_required';
+            const refused = response.status === 400 || response.status === 402 || code === 'product_membership_expired' || code === 'platform_media_call_not_found';
+            return result({ callID, status: refused ? 'refused' : 'pending', code });
+          } catch {
+            return result({ callID, status: 'pending', code: 'platform_reconciliation_required' });
+          }
+        },
+      });
+    });
     const normalizeChatBody = (raw) => {
       let input;
       try { input = JSON.parse(raw); } catch { return raw; }

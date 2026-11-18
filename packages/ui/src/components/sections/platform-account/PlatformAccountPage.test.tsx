@@ -42,7 +42,10 @@ const expiredPaidThrough = '2026-09-01T00:00:00Z';
 const packExpiry = '2070-01-09T07:13:21Z';
 const productWallet = {
   version: 'product_v1', account_id: 'team-a', cash: { asset: 'CNY/6', available: '13200000' }, can_manage: true,
-  products: [{ product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 6 }, addon_renewal: { enabled: false, version: 0 }, orders: [], addon_offers: [{ id: 'sw-pack', name: 'Fixture pack', price: '8000000' }] }],
+  products: [
+    { product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 6, offer_name: 'Fixture plan', price: '99000000' }, addon_renewal: { enabled: false, version: 0 }, orders: [], addon_offers: [{ id: 'sw-pack', name: 'Fixture pack', price: '8000000' }] },
+    { product_id: 'agentwiki', name: 'AgentWiki', subscription_renewal: { enabled: false, version: 0 }, addon_renewal: { enabled: false, version: 2 }, orders: [], addon_offers: [] },
+  ],
 };
 const renewalWrites: string[] = [];
 let lostRechargeResponse = false;
@@ -141,10 +144,10 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
   if (path.includes('/api/platform-account/commerce/orders?')) return Response.json(commerce.orders ?? []);
   if (path.endsWith('/api/platform-account/commerce/product-wallet/superwagie/renewal')) {
     renewalWrites.push(String(init?.body));
-    const [product] = productWallet.products;
-    return Response.json({ ...productWallet, products: [{ ...product, subscription_renewal: { enabled: true, version: 7 } }] });
+    const [product, ...others] = productWallet.products;
+    return Response.json({ ...productWallet, products: [{ ...product, subscription_renewal: { ...product.subscription_renewal, enabled: true, version: 7 } }, ...others] });
   }
-  if (path.endsWith('/api/platform-account/commerce?summary=1') && useProductWallet) return Response.json({ ...commerce, productCreditWallet: true, productWallet, wallets: [{ productId: '', asset: 'CNY/6', amount: '13200000' }], offers: [] });
+  if (path.endsWith('/api/platform-account/commerce?summary=1') && useProductWallet) return Response.json({ ...commerce, productCreditWallet: true, productWallet, wallets: [{ productId: '', asset: 'CNY/6', amount: '13200000' }] });
   if (path.endsWith('/api/platform-account/commerce?summary=1')) { if (failCommerceAfterPurchase && purchaseRequests) return Response.json({ error: 'service_unavailable' }, { status: 503 }); return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'unconfigured', canPurchase: false } }); }
   if (path.endsWith('/api/platform-account/usage/team-a/summary')) return usageStatus === 200
     ? Response.json(nativeOverride ?? (nativeScenario ? { ...nativeRequestSummary, visibility: 'account' } : { ...usageSummary, usage_coverage: legacyCoverageUnknown ? undefined : usageSummary.usage_coverage })) : Response.json({ error: 'forbidden' }, { status: usageStatus });
@@ -173,7 +176,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     return unboundTask ? Response.json({ error: 'platform_task_unbound' }, { status: 403 }) : Response.json(taskState);
   }
   if (path.includes('/api/platform-account/logout')) { if (lostLogoutResponse) { lostLogoutResponse = false; throw new TypeError('network'); } authSignedOut = true; logoutCount += 1; expect(init?.method).toBe('POST'); return Response.json({ status: 'signed-out' }); }
-  if (path.endsWith('/api/platform-account') && useProductWallet) return Response.json({
+  if (path.endsWith('/api/platform-account') && useProductWallet && !nextAccountResponse) return Response.json({
     ...signedIn, consoleUrl: null, productCreditWallet: true, membership: [{ ...signedIn.membership[0], status: 'expired', paid_through: expiredPaidThrough }], credits: {
       available: '0', reserved: '0', activeMembership: false, membershipPaidThrough: expiredPaidThrough,
       batches: [{ id: 'sw-pack', kind: 'addon', sourceScope: 'product', productId: 'superwagie', available: '8000000', reserved: '0', frozen: true, startsAt: '2026-08-01T00:00:00Z', expiresAt: packExpiry }],
@@ -234,6 +237,24 @@ const chooseOffer = async (name = 'Buy extra credits') => {
   await act(async () => option.click());
 };
 describe('PlatformAccountPage', () => {
+  test('lets a new customer reopen the subscription catalog after closing it', async () => {
+    useI18nStore.getState().setLocale('en');
+    useProductWallet = true;
+    nextAccountResponse = Promise.resolve(Response.json({
+      ...signedIn, productCreditWallet: true, consoleUrl: null, membership: [],
+      credits: { available: '0', reserved: '0', activeMembership: false, batches: [] },
+    }));
+    commerce.offers?.push({ id: 'new-monthly-plan', productId: 'superwagie', name: 'Standard', accountKind: 'both', kind: 'membership', period: 'month', price: '99000000', monthlyCredit: '4000000000', validityMonths: 1, rank: 1, sandbox: false });
+    await render();
+    const offer = () => host.querySelector('[role="radio"][aria-label="Standard"]');
+    expect(offer()).not.toBeNull();
+    await act(async () => button('Close').click());
+    expect(offer()).toBeNull();
+    await act(async () => button('Subscribe').click());
+    expect(offer()).not.toBeNull();
+    expect(purchaseRequests).toBe(0);
+  });
+
   test('shows the original expiry for retained credits while their membership is expired', async () => {
     useI18nStore.getState().setLocale('en'); useProductWallet = true;
     await render();
@@ -251,6 +272,18 @@ describe('PlatformAccountPage', () => {
     await act(async () => button('Enable subscription renewal').click());
     expect(renewalWrites).toEqual([JSON.stringify({ accountId: 'team-a', kind: 'subscription', enabled: true, expectedVersion: 6 })]);
     expect(button('Disable subscription renewal')).toBeDefined();
+  });
+
+  test('requires an existing subscription before enabling automatic renewal for a wallet product', async () => {
+    useI18nStore.getState().setLocale('en'); useProductWallet = true;
+    await render();
+    await tab('Wallet');
+    const agentWiki = [...host.querySelectorAll('section span')].find((label) => label.textContent === 'AgentWiki')?.closest('section');
+    const enable = [...(agentWiki?.querySelectorAll('button') ?? [])].find((control) => control.textContent === 'Enable subscription renewal');
+    expect(enable?.disabled).toBe(true);
+    expect(agentWiki?.textContent).toContain('Subscribe to this product before enabling automatic renewal.');
+    await act(async () => enable?.click());
+    expect(renewalWrites).toHaveLength(0);
   });
 
   test('keeps account refresh reachable on the key page after an account read fails', async () => {
@@ -1102,7 +1135,8 @@ describe('PlatformAccountPage', () => {
     commerce.orders?.push({ id: 'order-a', productId: 'superwagie', offerName: 'Annual membership', amount: '100000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' });
     await render();
     await act(async () => button('Manage membership').click());
-    await act(async () => button('Annual').click()); await chooseOffer('Annual membership');
+    expect(host.querySelector('[role="radiogroup"][aria-label="Subscribe"]')?.textContent).toContain('CNY 100.00 / year, paid in full');
+    await chooseOffer('Annual membership');
     expect(host.textContent).toContain('Billing period'); expect(host.textContent).toContain('Monthly credits');
     expect(host.textContent).not.toContain('0 months'); expect(host.textContent).not.toContain('Account balance');
     expect(button('Check upgrade price').disabled).toBe(false);

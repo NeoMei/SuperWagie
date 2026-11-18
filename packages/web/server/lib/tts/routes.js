@@ -12,6 +12,7 @@ import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './la
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { describeVoiceKeys, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
 import { configuredProviderError } from './provider-errors.js';
+import { managedAudioCallID, managedAudioFailure, transcribeManagedAudio } from './managed-audio.js';
 import { ConfiguredSpeechError, generateConfiguredSpeech, isBailianSpeechBinding } from '../model-configuration/speech.js';
 
 // HTTP header values must be printable latin1; macOS voice names can be localized
@@ -99,23 +100,25 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
           return res.status(503).json({ code: 'platform_media_recovery_unavailable', error: 'Managed speech is temporarily unavailable until interrupted requests can be recovered safely.' });
         }
         try {
+          const callID = managedAudioCallID(req.get('Idempotency-Key'), 'tts');
+          res.setHeader('X-UniHub-Idempotency-Key', callID);
           const identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false });
           const admitted = await runtime.admitMediaTask(identity, { model: { providerID: 'unihub', id: binding.model } });
           const result = await runtime.mediaDispatch({
             identity,
             sessionID: admitted.sessionID,
-            callID: 'tts_' + globalThis.crypto.randomUUID(),
+            callID,
             model: binding.model,
             operation: 'speech',
-            inputs: { text: text.trim(), voice: binding?.parameters?.voice || req.body?.voice || 'Cherry' },
+            inputs: { text: text.trim(), voice: binding?.parameters?.voice || 'Cherry' },
           });
           res.setHeader('Content-Type', result.contentType);
           res.setHeader('Cache-Control', 'no-cache');
           res.setHeader('Content-Length', result.buffer.length);
           return res.send(result.buffer);
         } catch (error) {
-          console.error('[TTS] Managed media dispatch failed:', error.code ?? error.message);
-          return res.status(error.status ?? 502).json({ error: error.code === 'platform_model_scope_restart_required' ? error.code : 'Managed media transport failed' });
+          const failure = managedAudioFailure(error);
+          return res.status(failure.status).json(error.code === 'platform_model_scope_restart_required' ? { error: error.code } : failure.body);
         }
       }
       if (binding?.protocol === 'minimax' || isBailianSpeechBinding(binding)) {
@@ -337,7 +340,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
     async (req, res) => {
       try {
         const mimeType = (req.headers['content-type'] || 'audio/webm').split(',')[0].trim();
-        const binding = await resolveModelBinding('stt-short', { supportedProtocols: ['openai-compatible'] });
+        const binding = await resolveModelBinding('stt-short', { supportedProtocols: ['openai-compatible', 'managed-media'] });
         if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
           return res.status(400).json({ error: 'Audio data is required' });
         }
@@ -346,6 +349,21 @@ export function registerTtsRoutes(app, { sayTTSCapability, resolveModelBinding =
             return res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' });
           }
           return res.status(503).json({ error: 'Speech-to-text is not configured. Connect the LLMRouter ASR model in Model configuration.', code: 'stt_not_configured' });
+        }
+        if (binding.protocol === 'managed-media') {
+          const runtime = getPlatformModelRuntime();
+          if (runtime?.isMediaOperationConfigured?.(binding.model, 'transcription') === true && typeof resolvePlatformIdentity === 'function') {
+            try {
+              const callID = managedAudioCallID(req.get('Idempotency-Key'), 'stt');
+              res.setHeader('X-UniHub-Idempotency-Key', callID);
+              const identity = await resolvePlatformIdentity(req, res, { allowUrlToken: false });
+              const transcript = await transcribeManagedAudio({ runtime, identity, model: binding.model, callID, audio: req.body, mimeType });
+              return res.json({ transcript });
+            } catch (error) {
+              const failure = managedAudioFailure(error);
+              return res.status(failure.status).json(failure.body);
+            }
+          }
         }
         // Only the LLMRouter ASR binding may receive conversation audio. The
         // model configuration egress guard already enforces this; keep it

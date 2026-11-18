@@ -54,6 +54,14 @@ required bilingual notes format are in
 
 Desktop starts the OpenChamber web server in the same Electron main process. There is no separate sidecar subprocess for the OpenChamber server.
 
+Full installers can embed the product model proxy's public HTTPS origin. Set
+`OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL` when packaging locally or as the
+release workflow repository variable. Packaged startup passes the embedded
+origin to the in-process server. The file contains only the origin and takes
+priority over an inherited value. Development and packages without the file
+use the server environment. UniHub still controls product-wallet availability.
+Remote-client distributions use the selected server's configuration.
+
 Desktop's local OpenCode has private storage under
 `<OPENCHAMBER_DATA_DIR>/opencode-private`, with the app data directory defaulting
 to `~/.config/openchamber`. Config, database, cache, state and child home stay

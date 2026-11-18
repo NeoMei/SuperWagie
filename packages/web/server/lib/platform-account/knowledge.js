@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { readBoundedResponse } from '../platform-model/native-media.js';
 
 const identifier = /^[A-Za-z0-9._:-]{1,200}$/;
 const opaque = /^[a-f0-9]{64}$/;
@@ -34,14 +35,18 @@ const receiptBindingFields = {
 };
 const embeddingReceiptSchema = z.object({ ...receiptBindingFields, embedding_space: embeddingSpaceSchema, content_sha256: z.string().regex(opaque), issued_at: z.number().int().nonnegative(), expires_at: z.number().int().positive() }).strict();
 const rerankReceiptSchema = z.object({ ...receiptBindingFields, content_sha256: z.string().regex(opaque), issued_at: z.number().int().nonnegative(), expires_at: z.number().int().positive() }).strict();
-const embeddingBodySchema = z.object({ model: z.literal('text-embedding-v4'), input: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]), dimensions: z.literal(1024), encoding_format: z.literal('float').optional(), user: z.string().max(256).optional() }).strict();
-const rerankBodySchema = z.object({
+export const embeddingBodySchema = z.object({ model: z.literal('text-embedding-v4'), input: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]), dimensions: z.literal(1024), encoding_format: z.literal('float').optional(), user: z.string().max(256).optional() }).strict();
+export const rerankBodySchema = z.object({
   model: z.literal('qwen3-rerank'),
   input: z.object({ query: z.string().min(1), documents: z.array(z.string().min(1)).min(1).max(100) }).strict(),
   parameters: z.object({ top_n: z.literal(1), return_documents: z.literal(false) }).strict(),
 }).strict();
+export const knowledgeWireForModel = (model) => Object.values(allowedPairs).find((pair) => pair.model === model)?.wire;
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
+const productBillingSchema = z.object({ creditScope: z.literal('product_v1'), authorizedCredentialId: z.string().min(1).max(200) }).strict();
+const requestKeys = (request, expected) => exactKeys(request, request?.billing === undefined ? expected : [...expected, 'billing'])
+  && (request.billing === undefined || productBillingSchema.safeParse(request.billing).success);
 const reject = (code, status = 503) => { const error = new Error(code); error.code = code; error.status = status; throw error; };
 const exactKeys = (value, expected) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join(',') === [...expected].sort().join(',');
 const fixedPair = (model, wire) => allowedPairs[`${model}:${wire}`] || reject('platform_knowledge_request_invalid', 400);
@@ -98,6 +103,12 @@ const readJsonResponse = async (response, code, maxBytes) => {
   } catch (error) { if (error?.code) throw error; reject(code); }
   try { return parseUniqueJson(utf8.decode(Buffer.concat(chunks))); } catch { reject(code); }
 };
+const rejectProductRefusal = async (response, fallback) => {
+  const value = await readBoundedResponse(response, 1024).then((bytes) => parseUniqueJson(utf8.decode(bytes))).catch(() => null);
+  if (response.status === 403 && value?.error?.code === 'product_membership_expired' && value.error.stage === 'pre_admission') reject('product_membership_expired', 403);
+  if (response.status === 402 && value?.error?.code === 'platform_model_credits_required') reject('platform_model_credits_required', 402);
+  reject(fallback, response.status === 401 ? 401 : 503);
+};
 const canonicalReceipt = (receipt) => {
   const fields = ['version', 'issuer', 'audience', 'origin_product_id', 'instance_id', 'actor_id', 'account_id', 'task_id', 'call_id', 'attempt_id', 'status', 'producer_credential_id', 'authorized_credential_id', 'model', 'wire_operation', 'policy_digest', 'route_generation'];
   const ordered = Object.fromEntries(fields.map((field) => [field, receipt[field]]));
@@ -106,7 +117,7 @@ const canonicalReceipt = (receipt) => {
   return JSON.stringify(ordered);
 };
 
-export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise, usePublicDefaults, captureSession, assertCurrentSession, requestOriginal }) => {
+export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise, usePublicDefaults, captureSession, assertCurrentSession, requestOriginal, usesProductCreditWallet, proxyProductModel }) => {
   const gateway = () => {
     const value = env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (usePublicDefaults ? 'https://llmrouter.quukk.com/platform/v1' : '');
     let url;
@@ -119,6 +130,7 @@ export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise
     let response;
     try { response = await fetchImpl(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000) }); }
     catch { reject(code); }
+    if (!response.ok) await rejectProductRefusal(response, 'platform_knowledge_request_unavailable');
     if (!/(?:^|,)\s*no-store\s*(?:,|$)/i.test(response.headers.get('cache-control') ?? '')) { await response.body?.cancel(); reject(code); }
     return readJsonResponse(response, code, 1024);
   };
@@ -138,11 +150,11 @@ export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise
     if (!grant.success || grant.data.actor_id !== session.user.id || grant.data.account_id !== session.accountId || grant.data.origin_product_id !== 'superwagie' || grant.data.task_id !== taskId || grant.data.audience !== 'llmrouter' || grant.data.models.length !== 1 || grant.data.models[0] !== pair.model || !Number.isFinite(expiresAt) || expiresAt <= now()) reject('platform_knowledge_request_unavailable', 403);
     return grant.data;
   };
-  const validateRoute = (raw, session, taskId, grant, pair) => {
+  const validateRoute = (raw, session, taskId, authorizedCredentialId, pair) => {
     const route = dispatchRouteSchema.safeParse(raw);
     const value = route.success ? route.data : null;
     const seconds = Math.floor(now() / 1000);
-    if (!value || value.actor_id !== session.user.id || value.account_id !== session.accountId || value.task_id !== taskId || value.authorized_credential_id !== grant.id || value.model !== pair.model || value.wire_operation !== pair.wire || value.instance_id !== (env.OPENCHAMBER_UNIHUB_INSTANCE_ID || 'default') || value.issued_at > seconds || value.expires_at <= seconds || value.expires_at - value.issued_at > 60) reject('platform_knowledge_request_unavailable', 403);
+    if (!value || value.actor_id !== session.user.id || value.account_id !== session.accountId || value.task_id !== taskId || (authorizedCredentialId && value.authorized_credential_id !== authorizedCredentialId) || value.model !== pair.model || value.wire_operation !== pair.wire || value.instance_id !== (env.OPENCHAMBER_UNIHUB_INSTANCE_ID || 'default') || value.issued_at > seconds || value.expires_at <= seconds || value.expires_at - value.issued_at > 60) reject('platform_knowledge_request_unavailable', 403);
     if (pair.operation === 'embedding' && !value.embedding_space) reject('platform_knowledge_request_unavailable', 403);
     return value;
   };
@@ -154,8 +166,23 @@ export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise
         Authorization: `Bearer ${grant.token}`, 'X-UniHub-Actor-Authorization': `Bearer ${session.accessToken}`,
         'X-UniHub-Task-ID': taskId, 'Content-Type': 'application/json',
       }, body: JSON.stringify({ model: pair.model, wire_operation: pair.wire }),
-    }, 'platform_knowledge_request_unavailable'), session, taskId, grant, pair);
+    }, 'platform_knowledge_request_unavailable'), session, taskId, grant.id, pair);
     assertCurrentSession(key, session, version); assertGateway(configuredGateway.value);
+    return route;
+  };
+  const proxyKnowledge = (session, identity, details) => {
+    assertCurrentSession(session.key, session, session.accountVersion);
+    return proxyProductModel(identity, { accountId: session.accountId, signal: AbortSignal.timeout(15_000), ...details });
+  };
+  const productRoute = async (session, identity, taskId, pair, authorizedCredentialId) => {
+    const response = await proxyKnowledge(session, identity, {
+      operation: 'knowledge-route', model: pair.model, taskId, body: JSON.stringify({ model: pair.model, wire_operation: pair.wire }),
+    });
+    if (!/(?:^|,)\s*no-store\s*(?:,|$)/i.test(response.headers.get('cache-control') ?? '')) {
+      await response.body?.cancel(); reject('platform_knowledge_request_unavailable');
+    }
+    const route = validateRoute(await readJsonResponse(response, 'platform_knowledge_request_unavailable', 1024), session, taskId, authorizedCredentialId, pair);
+    assertCurrentSession(session.key, session, session.accountVersion);
     return route;
   };
   const publicRoute = (route) => ({ instanceId: route.instance_id, actorId: route.actor_id, accountId: route.account_id, taskId: route.task_id, authorizedCredentialId: route.authorized_credential_id, model: route.model, wireOperation: route.wire_operation, policyDigest: route.policy_digest, routeGeneration: route.route_generation, embeddingSpace: route.embedding_space });
@@ -166,6 +193,10 @@ export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise
     const pair = fixedPair(model, wireOperation); const configuredGateway = gateway();
     const session = captureSession(identity); const key = session.key; const accountVersion = session.accountVersion;
     if (!session.accountId) reject('platform_account_required', 409);
+    if (await usesProductCreditWallet(identity)) {
+      const route = await productRoute(session, identity, taskId, pair);
+      return { ...publicRoute(route), billing: { creditScope: 'product_v1', authorizedCredentialId: route.authorized_credential_id } };
+    }
     const grant = await issueGrant(session, key, accountVersion, taskId, pair, configuredGateway);
     const route = await routePaid(session, grant, taskId, pair, key, accountVersion, configuredGateway);
     return publicRoute(route);
@@ -188,8 +219,8 @@ export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise
     return { purpose: 'index_read', instanceId: value.instance_id, actorId: value.actor_id, accountId: value.account_id, accessVersion: value.access_version, model: value.model, wireOperation: value.wire_operation, policyDigest: value.policy_digest, routeGeneration: value.route_generation, embeddingSpace: value.embedding_space, issuedAt: value.issued_at, expiresAt: value.expires_at };
   };
   const dispatchPinned = async (identity, request, wireOperation) => {
-    if (!exactKeys(request, ['taskId', 'callId', 'model', 'policyDigest', 'body'])) reject('platform_knowledge_request_invalid', 400);
-    const { taskId, callId, model, policyDigest, body: sourceBody } = request;
+    if (!requestKeys(request, ['taskId', 'callId', 'model', 'policyDigest', 'body'])) reject('platform_knowledge_request_invalid', 400);
+    const { taskId, callId, model, policyDigest, body: sourceBody, billing } = request;
     const pair = fixedPair(model, wireOperation);
     if (!identifier.test(taskId ?? '') || !/^wk_[a-f0-9]{60}$/.test(callId ?? '') || !opaque.test(policyDigest ?? '') || !Buffer.isBuffer(sourceBody) || sourceBody.length < 1 || sourceBody.length > 1024 * 1024) reject('platform_knowledge_request_invalid', 400);
     const body = Buffer.from(sourceBody);
@@ -199,6 +230,23 @@ export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise
     if (!bodySchema.safeParse(input).success) reject('platform_knowledge_request_invalid', 400);
     const configuredGateway = gateway(); const session = captureSession(identity); const key = session.key; const accountVersion = session.accountVersion;
     if (!session.accountId) reject('platform_account_required', 409);
+    const productCredit = await usesProductCreditWallet(identity);
+    if (productCredit !== Boolean(billing)) reject('platform_knowledge_request_unavailable', 409);
+    if (billing) {
+      const pinned = await productRoute(session, identity, taskId, pair, billing.authorizedCredentialId);
+      if (pinned.policy_digest !== policyDigest) reject('platform_knowledge_request_unavailable', 409);
+      let response;
+      try {
+        response = await proxyKnowledge(session, identity, {
+          operation: pair.operation === 'embedding' ? 'knowledge-embedding' : 'knowledge-rerank',
+          taskId, callId, model, policyDigest, body, signal: AbortSignal.timeout(120_000),
+        });
+      } catch { reject('platform_knowledge_outcome_unknown', 503); }
+      assertCurrentSession(key, session, accountVersion);
+      if (!response.ok) await rejectProductRefusal(response, 'platform_knowledge_outcome_unknown');
+      await response.body?.cancel();
+      return;
+    }
     const grant = await issueGrant(session, key, accountVersion, taskId, pair, configuredGateway);
     const route = await routePaid(session, grant, taskId, pair, key, accountVersion, configuredGateway);
     if (policyDigest !== route.policy_digest) reject('platform_knowledge_request_unavailable', 409);
@@ -213,18 +261,24 @@ export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise
   const dispatchKnowledgeEmbeddingPinned = (identity, request) => dispatchPinned(identity, request, 'embeddings.create');
   const dispatchKnowledgeRerankPinned = (identity, request) => dispatchPinned(identity, request, 'rerank.create');
   const readKnowledgeResultWithEvidence = async (identity, request) => {
-    if (!exactKeys(request, ['taskId', 'callId', 'model', 'wireOperation'])) reject('platform_knowledge_result_invalid', 400);
-    const { taskId, callId, model, wireOperation } = request;
+    if (!requestKeys(request, ['taskId', 'callId', 'model', 'wireOperation'])) reject('platform_knowledge_result_invalid', 400);
+    const { taskId, callId, model, wireOperation, billing } = request;
     if (!identifier.test(taskId ?? '') || !/^wk_[a-f0-9]{60}$/.test(callId ?? '')) reject('platform_knowledge_result_invalid', 400);
     const pair = fixedPair(model, wireOperation); const configuredGateway = gateway();
     const session = captureSession(identity); const key = session.key; const accountVersion = session.accountVersion;
     if (!session.accountId) reject('platform_account_required', 409);
-    const grant = await issueGrant(session, key, accountVersion, taskId, pair, configuredGateway);
-    const responseUrl = gatewayPath(configuredGateway, `/knowledge/results/${encodeURIComponent(callId)}`);
+    const grant = billing ? null : await issueGrant(session, key, accountVersion, taskId, pair, configuredGateway);
+    const authorizedCredentialId = billing?.authorizedCredentialId ?? grant.id;
     assertCurrentSession(key, session, accountVersion); assertGateway(configuredGateway.value);
     let response;
-    try { response = await fetchImpl(responseUrl, { method: 'POST', headers: { Authorization: `Bearer ${grant.token}`, 'X-UniHub-Actor-Authorization': `Bearer ${session.accessToken}`, 'X-UniHub-Task-ID': taskId }, redirect: 'error', signal: AbortSignal.timeout(15_000) }); }
-    catch { reject('platform_knowledge_result_unavailable', 503); }
+    try {
+      response = billing
+        ? await proxyKnowledge(session, identity, { operation: 'knowledge-result', callId, taskId, model })
+        : await fetchImpl(gatewayPath(configuredGateway, `/knowledge/results/${encodeURIComponent(callId)}`), {
+          method: 'POST', headers: { Authorization: `Bearer ${grant.token}`, 'X-UniHub-Actor-Authorization': `Bearer ${session.accessToken}`, 'X-UniHub-Task-ID': taskId },
+          redirect: 'error', signal: AbortSignal.timeout(15_000),
+        });
+    } catch { reject('platform_knowledge_result_unavailable', 503); }
     if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '') || !/(?:^|,)\s*no-store\s*(?:,|$)/i.test(response.headers.get('cache-control') ?? '')) { await response.body?.cancel(); reject('platform_knowledge_result_unavailable', 404); }
     const receiptHeader = response.headers.get('x-unihub-knowledge-receipt');
     if (!receiptHeader || receiptHeader.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(receiptHeader)) { await response.body?.cancel(); reject('platform_knowledge_result_unavailable', 503); }
@@ -242,7 +296,7 @@ export const createPlatformKnowledgeAdapter = ({ env, fetchImpl, now, enterprise
     } catch { reject('platform_knowledge_result_unavailable', 503); }
     const schema = pair.operation === 'embedding' ? embeddingReceiptSchema : rerankReceiptSchema;
     const parsed = schema.safeParse(receipt); const seconds = Math.floor(now() / 1000);
-    if (!parsed.success || receipt.actor_id !== session.user.id || receipt.account_id !== session.accountId || receipt.instance_id !== (env.OPENCHAMBER_UNIHUB_INSTANCE_ID || 'default') || receipt.task_id !== taskId || receipt.call_id !== callId || receipt.model !== pair.model || receipt.wire_operation !== pair.wire || receipt.authorized_credential_id !== grant.id || receipt.expires_at <= seconds || receipt.issued_at > seconds || receipt.expires_at - receipt.issued_at > 30 || receipt.content_sha256 !== sha256(rawBytes) || canonicalReceipt(receipt) !== Buffer.from(receiptHeader, 'base64url').toString('utf8')) reject('platform_knowledge_result_unavailable', 403);
+    if (!parsed.success || receipt.actor_id !== session.user.id || receipt.account_id !== session.accountId || receipt.instance_id !== (env.OPENCHAMBER_UNIHUB_INSTANCE_ID || 'default') || receipt.task_id !== taskId || receipt.call_id !== callId || receipt.model !== pair.model || receipt.wire_operation !== pair.wire || receipt.authorized_credential_id !== authorizedCredentialId || (billing && receipt.producer_credential_id !== authorizedCredentialId) || receipt.expires_at <= seconds || receipt.issued_at > seconds || receipt.expires_at - receipt.issued_at > 30 || receipt.content_sha256 !== sha256(rawBytes) || canonicalReceipt(receipt) !== Buffer.from(receiptHeader, 'base64url').toString('utf8')) reject('platform_knowledge_result_unavailable', 403);
     try { parseUniqueJson(utf8.decode(rawBytes)); } catch { reject('platform_knowledge_result_unavailable', 503); }
     assertCurrentSession(key, session, accountVersion);
     return { rawBytes, receipt: { version: receipt.version, issuer: receipt.issuer, audience: receipt.audience, originProductId: receipt.origin_product_id, instanceId: receipt.instance_id, actorId: receipt.actor_id, accountId: receipt.account_id, taskId: receipt.task_id, callId: receipt.call_id, attemptId: receipt.attempt_id, status: receipt.status, producerCredentialId: receipt.producer_credential_id, authorizedCredentialId: receipt.authorized_credential_id, model: receipt.model, wireOperation: receipt.wire_operation, policyDigest: receipt.policy_digest, routeGeneration: receipt.route_generation, embeddingSpace: receipt.embedding_space, contentSha256: receipt.content_sha256, issuedAt: receipt.issued_at, expiresAt: receipt.expires_at } };
