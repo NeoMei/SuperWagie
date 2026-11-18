@@ -79,7 +79,7 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
         request('/v1/capabilities', productWalletHeaders()).then((payload) => capability.parse(payload)),
       ]);
       if (!recovery && flags.product_credit_wallet !== true) { res.status(403).json({ error: { code: 'platform_model_access_unavailable', stage: 'pre_admission' } }); return; }
-      const grant = await broker.authorize({ actorId: user.id, actorToken, accountId, model, apiOrigin: apiUrl.origin, clientId: flags.client_id, recovery, request });
+      const grant = await broker.authorize({ actorId: user.id, actorToken, accountId, model, apiOrigin: apiUrl.origin, recovery, request });
       const path = recovery ? `calls/${encodeURIComponent(callId)}` : 'chat/completions';
       gatewayStarted = true;
       const response = await fetchImpl(`${gatewayUrl.href}/${path}`, {

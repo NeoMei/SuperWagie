@@ -27,11 +27,15 @@ export const createProductModelBroker = ({ api, serviceCredential, vault, instan
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/' ||
       !/^[A-Za-z0-9._~-]{1,4096}$/.test(serviceCredential ?? '') || !vault?.getSecret || !vault?.putSecret || !/^[a-z][a-z0-9_-]{0,63}$/.test(instanceId)) throw unavailable();
   const pending = new Map();
-  const keyFor = async ({ actorId, accountId, model, apiOrigin, clientId, request, recovery }) => {
-    const ref = 'product-model-' + createHash('sha256').update(JSON.stringify([apiOrigin, clientId, actorId, accountId, instanceId])).digest('hex');
+  const keyFor = async ({ actorId, accountId, model, apiOrigin, request, recovery }) => {
+    const ref = 'product-model-' + createHash('sha256').update(JSON.stringify([apiOrigin, actorId, accountId, instanceId])).digest('hex');
     const load = async () => {
-      const token = accessKey.safeParse(await vault.getSecret(ref));
-      if (token.success) return token.data;
+      const stored = await vault.getSecret(ref, { strict: true });
+      if (stored != null) {
+        const token = accessKey.safeParse(stored);
+        if (!token.success) throw unavailable();
+        return token.data;
+      }
       if (recovery) throw unavailable();
       const created = issuedKey.safeParse(await request(`/v1/accounts/${encodeURIComponent(accountId)}/api-keys`, productWalletHeaders({
         method: 'POST',

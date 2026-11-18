@@ -110,12 +110,21 @@ export const createModelBootstrapStore = ({ dataDir, secretStore, now = () => Da
     });
     return { ref, fingerprint: fingerprint(value), last4: value.slice(-4) };
   };
-  const secretGet = async (reference) => {
+  const secretGet = async (reference, { strict = false } = {}) => {
     if (!reference) return null;
     if (secretStore?.get) return secretStore.get(reference);
     if (secretStore) return null;
     return withSecretLock(async () => {
-      try { return await openSecret((await readSecretRecords())[reference]); } catch { return null; }
+      try {
+        const records = await readSecretRecords();
+        if (!Object.hasOwn(records, reference)) return null;
+        const result = await openSecret(records[reference]);
+        if (result === null && strict) throw new Error('invalid model bootstrap secret');
+        return result;
+      } catch (error) {
+        if (strict) throw error;
+        return null;
+      }
     });
   };
   const secretDelete = async (reference) => {

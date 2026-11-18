@@ -501,7 +501,10 @@ The configuration takes `uniHubOrigin`, `modelGateway`, `allowedModels`,
 `model:authorize`, a durable private vault, and TLS. If the proxy uses plain
 HTTP on loopback, terminate TLS at the dedicated reverse proxy. Keep the
 service mapping and encrypted vault stable because call receipts remain
-bound to the original product Key.
+bound to the original product Key. Run one proxy process on the vault's
+local filesystem. A writer guard refuses concurrent proxy processes sharing
+that vault. Keep one authoritative vault per tenant when replacing a host.
+Unreadable stored Key data suspends access without issuing a replacement.
 
 Set `OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL` to the HTTPS origin of the
 isolated proxy in the SuperWagie app process. This is trusted server

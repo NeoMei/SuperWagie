@@ -22,7 +22,7 @@ describe('trusted SuperWagie product model broker', () => {
         },
       });
       const input = {
-        actorId: 'actor-a', accountId: 'account-a', apiOrigin: api, clientId: 'superwagie', actorToken: 'test-actor', model: 'fixture-model',
+        actorId: 'actor-a', accountId: 'account-a', apiOrigin: api, actorToken: 'test-actor', model: 'fixture-model',
         request: async (route, init) => {
           issued += 1;
           expect(route).toBe('/v1/accounts/account-a/api-keys');
@@ -38,6 +38,9 @@ describe('trusted SuperWagie product model broker', () => {
       expect(issued).toBe(1);
       const stored = await fs.readFile(path.join(dir, 'model-bootstrap/secrets.json'), 'utf8');
       expect(stored).not.toMatch(/uh_key_fixture|test-runtime-credential|fresh-proof-/);
+      await fs.writeFile(path.join(dir, 'model-bootstrap/secrets.json'), '{', 'utf8');
+      await expect(create().authorize(input)).rejects.toThrow();
+      expect(issued).toBe(1);
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });
 });
