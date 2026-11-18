@@ -321,6 +321,14 @@ export const PlatformAccountCommerce: React.FC<{
   const effectiveChannel = paymentChannel === 'alipay' && channels.includes('alipay') ? 'alipay' : channels.includes('wechat') ? 'wechat' : 'alipay';
   const offers = state?.offers?.filter((offer) => offer.productId === 'superwagie' || (offer.productId === 'llmrouter' && offer.kind === 'addon')) ?? [];
   const selectedOffer = offers.find((offer) => offer.id === offerId);
+  const membershipRestriction = (offer: NonNullable<PlatformCommerceState['offers']>[number]): I18nKey | undefined => {
+    if (offer.kind !== 'membership' || !hasActiveMembership || !currentMembership) return;
+    const current = currentMembership.offer;
+    if (offer.id === current.id) return 'platformAccount.currentPlan';
+    if (current.period && offer.period !== current.period) return 'platformAccount.upgradeSamePeriod';
+    if (current.rank !== undefined && offer.rank <= current.rank) return 'platformAccount.upgradeHigherTier';
+  };
+  const selectedOfferRestriction = selectedOffer && membershipRestriction(selectedOffer);
   const memberships = offers.filter((offer) => offer.kind === 'membership' && offer.period === billingPeriod).sort((a, b) => a.rank - b.rank);
   const addons = offers.filter((offer) => offer.kind === 'addon');
   const membershipActive = hasActiveMembership && selectedOffer?.kind === 'membership';
@@ -350,7 +358,7 @@ export const PlatformAccountCommerce: React.FC<{
     disabled: !state || busy || commerceReadFailed,
   });
   const requestUpgrade = async () => {
-    if (!currentMembership || !selectedOffer || busy || unresolved) return;
+    if (!currentMembership || !selectedOffer || selectedOfferRestriction || busy || unresolved) return;
     const version = ++generation.current;
     setBusy(true); setError(null); setQuote(null);
     try {
@@ -365,20 +373,24 @@ export const PlatformAccountCommerce: React.FC<{
     } finally { if (version === generation.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   };
   const confirmUpgrade = () => {
-    if (!validQuote) return;
+    if (!validQuote || selectedOfferRestriction) return;
     if (Date.parse(validQuote.expiresAt) <= Date.now()) { setQuote(null); setError('platformAccount.quoteExpired'); return; }
     void submitCommand({ ...(external ? { kind: 'checkout', provider: effectiveChannel } as const : { kind: 'upgrade' } as const), quoteId: validQuote.id, productId: validQuote.offer.productId, amount: validQuote.amount, idempotencyKey: crypto.randomUUID() });
   };
-  const renderOffer = (offer: NonNullable<PlatformCommerceState['offers']>[number]) => <div key={offer.id} className="space-y-2">
-    <SettingsRadioOption className="oc-tile h-full p-4" selected={offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved || offer.salesReadiness?.ready === false || offer.purchaseReadiness?.ready === false} ariaLabel={offerName(offer)}
-      label={<span dir="auto" className="text-base font-medium">{offerName(offer)}</span>}
-      description={<span className="flex flex-col gap-2 pt-2">
-        <span dir="auto" className="text-2xl font-medium tabular-nums text-foreground">{t(offer.kind === 'addon' ? 'platformAccount.priceOnce' : offer.period === 'year' ? 'platformAccount.priceAnnual' : 'platformAccount.priceMonthly', { price: money(offer.price) })}</span>
-        <span>{t(offer.kind === 'addon' ? 'platformAccount.addonPoints' : 'platformAccount.monthlyPoints', { points: formatPlatformPoints(offer.monthlyCredit), count: offer.validityMonths })}</span>
-      </span>} />
-    {offer.salesReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.creditRatesUnavailable')}</p>}
-    {offer.purchaseReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.pointsRuntimeUnavailable')}</p>}
-  </div>;
+  const renderOffer = (offer: NonNullable<PlatformCommerceState['offers']>[number]) => {
+    const restriction = membershipRestriction(offer);
+    return <div key={offer.id} className="space-y-2">
+      <SettingsRadioOption className="oc-tile h-full p-4" selected={!restriction && offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved || !!restriction || offer.salesReadiness?.ready === false || offer.purchaseReadiness?.ready === false} ariaLabel={offerName(offer)}
+        label={<span dir="auto" className="text-base font-medium">{offerName(offer)}</span>}
+        description={<span className="flex flex-col gap-2 pt-2">
+          <span dir="auto" className="text-2xl font-medium tabular-nums text-foreground">{t(offer.kind === 'addon' ? 'platformAccount.priceOnce' : offer.period === 'year' ? 'platformAccount.priceAnnual' : 'platformAccount.priceMonthly', { price: money(offer.price) })}</span>
+          <span>{t(offer.kind === 'addon' ? 'platformAccount.addonPoints' : 'platformAccount.monthlyPoints', { points: formatPlatformPoints(offer.monthlyCredit), count: offer.validityMonths })}</span>
+        </span>} />
+      {restriction && <p className={SETTINGS_HELPER_CLASS}>{t(restriction)}</p>}
+      {offer.salesReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.creditRatesUnavailable')}</p>}
+      {offer.purchaseReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.pointsRuntimeUnavailable')}</p>}
+    </div>;
+  };
   const collapsedOverview = view === 'overview' && buyingTask === null;
   const commerceTitle = view === 'orders' ? t('platformAccount.history') : undefined;
   const refreshAction = <Button size="sm" variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>;
@@ -396,7 +408,7 @@ export const PlatformAccountCommerce: React.FC<{
   </SettingsSection></>;
 
   const checkouts = state.checkouts ?? [];
-  const inlinePayment = view === 'overview' && buyingTask === selectedOffer?.kind && !commerceReadFailed;
+  const inlinePayment = view === 'overview' && buyingTask === selectedOffer?.kind && !commerceReadFailed && (!selectedOfferRestriction || !!payment);
   const pastPayments = checkouts.filter((item) => item.id !== payment?.id);
   const recoverableIntents = state.intents.filter((intent) => intent.status !== 'APPLIED' && intent.status !== 'FAILED' && (!payment || intent.resourceId !== payment.id));
   const historyIntents = state.intents.filter((intent) => intent.productId === 'superwagie' || intent.productId === 'llmrouter' || (intent.status !== 'APPLIED' && intent.status !== 'FAILED'));
@@ -451,7 +463,10 @@ export const PlatformAccountCommerce: React.FC<{
           : <SettingsRadioGroup className="grid gap-3 @xl:grid-cols-2" aria-label={t('platformAccount.membershipPlans')}>
             {memberships.map(renderOffer)}
           </SettingsRadioGroup>}
-        {hasActiveMembership && <p className={SETTINGS_HELPER_CLASS}>{t(currentMembership ? 'platformAccount.upgradeHint' : 'platformAccount.membershipActive')}</p>}
+        {hasActiveMembership && (currentMembership ? <>
+          <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.currentMembershipTerm', { plan: currentMembership.offer.name, date: new Date(currentMembership.paid_through).toLocaleDateString() })}</p>
+          {memberships.some((offer) => !membershipRestriction(offer) && offer.salesReadiness?.ready !== false && offer.purchaseReadiness?.ready !== false) && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.upgradeHint')}</p>}
+        </> : <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.membershipActive')}</p>)}
       </SettingsControlGroup>}
       {buyingTask === 'addon' && <SettingsControlGroup description={t('platformAccount.addonRules')}>
         {!hasActiveMembership && <p className="text-[var(--status-warning-text)]" role="status">{t('platformAccount.subscriptionRequired')}</p>}
@@ -480,7 +495,7 @@ export const PlatformAccountCommerce: React.FC<{
           <div className="flex flex-wrap gap-2">
             {membershipActive ? validQuote
               ? <><Button disabled={busy || unresolved || !finance || !state.payments.canPurchase || !!insufficient || (!external && state.wallets === null) || Date.parse(validQuote.expiresAt) <= Date.now()} onClick={confirmUpgrade}>{t('platformAccount.confirmUpgrade', { price: money(validQuote.amount) })}</Button><Button variant="outline" disabled={busy || unresolved || !finance || !state.payments.canPurchase} onClick={() => void requestUpgrade()}>{t('platformAccount.getUpgradeQuote')}</Button></>
-              : <Button disabled={busy || unresolved || !finance || !state.payments.canPurchase || !currentMembership || selectedOffer.salesReadiness?.ready === false || selectedOffer.purchaseReadiness?.ready === false || selectedOffer.id === currentMembership.offer.id} onClick={() => void requestUpgrade()}>{t('platformAccount.getUpgradeQuote')}</Button>
+              : <Button disabled={busy || unresolved || !finance || !state.payments.canPurchase || !currentMembership || selectedOffer.salesReadiness?.ready === false || selectedOffer.purchaseReadiness?.ready === false} onClick={() => void requestUpgrade()}>{t('platformAccount.getUpgradeQuote')}</Button>
               : <Button className="max-w-full whitespace-normal text-start" disabled={busy || unresolved || selectedOffer.salesReadiness?.ready === false || selectedOffer.purchaseReadiness?.ready === false || !finance || addonNeedsMembership || !state.payments.canPurchase || !!insufficient || (!external && state.wallets === null)} onClick={() => void submitCommand({ ...(external ? { kind: 'checkout', provider: effectiveChannel } as const : { kind: 'purchase' } as const), offerId: selectedOffer.id, productId: selectedOffer.productId, amount: selectedOffer.price, idempotencyKey: crypto.randomUUID() })}>{t('platformAccount.purchase', { name: offerName(selectedOffer), price: money(selectedOffer.price) })}</Button>}
             {addonNeedsMembership && <Button variant="outline" onClick={() => { setBuyingTask('membership'); selectOffer(null); }}>{t('platformAccount.membershipPlans')}</Button>}
           </div>

@@ -373,6 +373,34 @@ test('existing eligible offers can use a sufficient balance without external pay
   expect(writes).toBe(0);
 });
 
+test('an active Standard member sees their plan as current and can explicitly buy a Professional upgrade', async () => {
+  const standard = commerce.offers?.find((offer) => offer.id === 'membership-a');
+  if (!standard || !commerce.offers) throw new Error('Missing fixture membership');
+  Object.assign(standard, { name: 'Standard', price: '39000000', monthlyCredit: '1000000000' });
+  const professional = { ...standard, id: 'professional-month', name: 'Professional', rank: 2, price: '99000000', monthlyCredit: '3000000000' };
+  commerce.offers.push(professional);
+  currentMembership = { id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-10T12:00:00Z', offer: { id: standard.id, name: standard.name, period: standard.period, rank: standard.rank } };
+  upgradeQuote = { paymentSource: 'external', id: 'quote-pro', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1, offer: professional, amount: '42000000', originalAmount: '41999999', roundingRule: 'cny_cent_ceil_v1', additionalCredits: '2000000000', periodStart: '2099-11-10T12:00:00Z', createdAt: '2099-11-18T12:00:00Z', expiresAt: '2099-11-18T12:15:00Z' };
+
+  await render('overview');
+  await act(async () => button('Subscribe').click());
+  const current = host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Standard"]');
+  expect(current?.disabled).toBe(true);
+  expect(host?.textContent).toContain('Current plan');
+  expect(host?.querySelector('[data-purchase-confirmation]')).toBeNull();
+  expect(writes).toBe(0);
+
+  await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Professional"]')?.click());
+  await act(async () => button('Alipay').click());
+  expect(writes).toBe(0);
+  await act(async () => button('Check upgrade price').click());
+  expect(paymentMutations()).toHaveLength(1);
+  expect(JSON.parse(paymentMutations()[0].body)).toMatchObject({ subscriptionId: 'subscription-a', offerId: professional.id, paymentSource: 'external' });
+  await act(async () => button('Confirm upgrade for CNY 42.00').click());
+  expect(paymentMutations()).toHaveLength(2);
+  expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ quoteId: 'quote-pro', provider: 'alipay' });
+});
+
 for (const lostResponse of [false, true]) test(`upgrade confirms the authoritative difference and preserves its original request when response is ${lostResponse ? 'lost' : 'received'}`, async () => {
   const offer = commerce.offers?.find((item) => item.id === 'membership-a');
   if (!offer) throw new Error('Missing fixture membership');
