@@ -4,11 +4,11 @@ import { createProductModelProxy } from './product-model-proxy.js';
 
 const api = 'https://accounts.test';
 const gateway = 'https://models.test/platform/v1';
-const fixture = (expiredAt) => {
+const fixture = (expiredAt, allowedModels = ['fixture-chat']) => {
   const gatewayCalls = [];
   const saved = new Map();
   const app = createProductModelProxy({
-    api, gateway, allowedModels: ['fixture-chat'], serviceCredential: 'operator-fixture',
+    api, gateway, allowedModels, serviceCredential: 'operator-fixture',
     vault: { getSecret: async (ref) => saved.get(ref), putSecret: async (value, ref) => { saved.set(ref, value); } },
     fetchImpl: async (url, init) => {
       const target = new URL(url);
@@ -18,6 +18,7 @@ const fixture = (expiredAt) => {
             ? Response.json({ id: 'actor-a' })
             : Response.json({ error: 'unauthenticated' }, { status: 401 });
         case api + '/v1/capabilities':
+          if (expiredAt === 'catalog') return Response.json({ error: 'unavailable' }, { status: 503 });
           return Response.json({ client_id: 'superwagie-login', product_id: 'superwagie', product_credit_wallet: true });
         case api + '/v1/accounts/account-a/api-keys':
           expect(init.headers.Authorization).toBe('Bearer actor-fixture');
@@ -47,7 +48,7 @@ const fixture = (expiredAt) => {
   });
   const headers = { Authorization: 'Bearer actor-fixture', 'X-UniHub-Billing-Account': 'account-a', 'X-UniHub-Model': 'fixture-chat', 'Idempotency-Key': 'call-fixture' };
   const body = { model: 'fixture-chat', stream: true, messages: [{ role: 'user', content: 'fixture prompt' }] };
-  return { app, headers, body, gatewayCalls };
+  return { app, headers, body, gatewayCalls, saved };
 };
 
 describe('isolated product model proxy', () => {
@@ -76,5 +77,15 @@ describe('isolated product model proxy', () => {
     await request(f.app).post('/v1/product-model/chat').set(f.headers).set('Authorization', 'Bearer expired-actor').send(f.body).expect(401);
     await request(f.app).post('/v1/product-model/images').set(f.headers).send(f.body).expect(404);
     expect(f.gatewayCalls).toHaveLength(0);
+  });
+
+  it('recovers the original receipt after the admission catalog retires the model', async () => {
+    const active = fixture();
+    await request(active.app).post('/v1/product-model/chat').set(active.headers).send(active.body).expect(200);
+    const retired = fixture('catalog', ['replacement-model']);
+    for (const [ref, value] of active.saved) retired.saved.set(ref, value);
+    await request(retired.app).post('/v1/product-model/chat').set(retired.headers).send(retired.body).expect(400);
+    await request(retired.app).get('/v1/product-model/calls/call-fixture').set(retired.headers).expect(200);
+    expect(retired.gatewayCalls).toEqual([{ method: 'GET' }]);
   });
 });

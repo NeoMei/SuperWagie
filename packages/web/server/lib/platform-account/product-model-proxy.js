@@ -49,7 +49,8 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
     const callId = recovery ? req.params.callId : req.get('Idempotency-Key');
     const actorToken = /^Bearer ([A-Za-z0-9._~-]{1,4096})$/.exec(req.get('Authorization') ?? '')?.[1];
     if (!actorToken) { res.status(401).json({ error: { code: 'platform_session_expired', stage: 'pre_admission' } }); return; }
-    if (!identifier.test(accountId ?? '') || !identifier.test(callId ?? '') || !models.has(model) || req.get('Origin')) {
+    if (!identifier.test(accountId ?? '') || !identifier.test(callId ?? '') ||
+        (recovery ? !modelName.safeParse(model).success : !models.has(model)) || req.get('Origin')) {
       res.status(400).json({ error: { code: 'platform_request_invalid', stage: 'pre_admission' } }); return;
     }
     const body = recovery ? undefined : req.body?.toString('utf8');
@@ -76,9 +77,9 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
     try {
       const [user, flags] = await Promise.all([
         request('/v1/me').then((payload) => principal.parse(payload)),
-        request('/v1/capabilities', productWalletHeaders()).then((payload) => capability.parse(payload)),
+        recovery ? null : request('/v1/capabilities', productWalletHeaders()).then((payload) => capability.parse(payload)),
       ]);
-      if (!recovery && flags.product_credit_wallet !== true) { res.status(403).json({ error: { code: 'platform_model_access_unavailable', stage: 'pre_admission' } }); return; }
+      if (!recovery && flags?.product_credit_wallet !== true) { res.status(403).json({ error: { code: 'platform_model_access_unavailable', stage: 'pre_admission' } }); return; }
       const grant = await broker.authorize({ actorId: user.id, actorToken, accountId, model, apiOrigin: apiUrl.origin, recovery, request });
       const path = recovery ? `calls/${encodeURIComponent(callId)}` : 'chat/completions';
       gatewayStarted = true;
