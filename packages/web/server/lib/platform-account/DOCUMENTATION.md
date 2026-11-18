@@ -364,6 +364,14 @@ carry `cny_cent_ceil_v1`, its original amount, and the exact rounded-up cent tot
 No adapter rounds an ordinary wallet quote for checkout.
 
 Checkout reads preserve separate payment, fulfillment and refund states.
+The backend advertises the Alipay scan contract in `alipay_checkout_qr`.
+The BFF offers Alipay for new purchases only with that capability and uses
+`X-UniHub-Alipay-QR: 1` on checkout requests to opt in to the scan session.
+Replay retains the original order ID, provider and selected session.
+The BFF sends the verified checkout back with a new intent so that the panel
+can show the code immediately. Both client versions read the same intent
+journal, which contains neither QR payloads nor presentation fields.
+
 Closing, reconciliation and refund always target the original checkout.
 A centrally reviewed refund can return `REJECTED`. When payment remains `PAID`
 and fulfillment remains `FULFILLED`, this is an active purchase: its local

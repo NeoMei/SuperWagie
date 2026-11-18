@@ -14,11 +14,11 @@ const setup = async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-checkout-'));
   cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
   const offer = { id: 'points', product_id: 'superwagie', name: 'Points', account_kind: 'both', kind: 'membership', period: 'month', price: '1000000', monthly_credit: '2000000', validity_months: 0, rank: 1, sandbox: false, status: 'published', entitlements: { pricing_program: 'superwagie-ai-points-v1' } };
-  const state = { refundSubmissions: 0, checkoutSequence: 0, checkoutKey: null, quoteNumber: 0, rejectQuote: false, rejectStatus: 409, createErrorCode: null, createStatus: 409, failCheckoutRead: false, ready: true, configured: true, lose: true, refundLoss: false, calls: [], checkout: null, url: 'weixin://wxpay/bizpayurl?pr=test' };
+  const state = { refundSubmissions: 0, checkoutSequence: 0, checkoutKey: null, quoteNumber: 0, rejectQuote: false, rejectStatus: 409, createErrorCode: null, createStatus: 409, failCheckoutRead: false, ready: true, configured: true, qrSupported: true, lose: true, refundLoss: false, calls: [], checkout: null, url: 'weixin://wxpay/bizpayurl?pr=test' };
   const accountRuntime = { captureCommerceSession: () => ({ billingAccountId: 'acct', actingUserId: 'actor', serviceId: 'service', request: async (route, init) => {
     state.calls.push({ route, init });
     if (route === '/v1/accounts') return [{ id: 'acct', kind: 'personal', role: 'owner' }];
-    if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: ['catalog:read','subscriptions:read','orders:read','orders:write'], sandbox: false, product_wallet_recharge: false, real_payments_configured: state.configured, payment_providers: ['wechat','alipay'], native_credits: { ready: state.ready } };
+    if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: ['catalog:read','subscriptions:read','orders:read','orders:write'], sandbox: false, product_wallet_recharge: false, real_payments_configured: state.configured, payment_providers: ['wechat','alipay'], alipay_checkout_qr: state.qrSupported, native_credits: { ready: state.ready } };
     if (route === '/v1/catalog') return [offer];
     if (route.endsWith('/quotes')) {
       const body = JSON.parse(init.body);
@@ -41,7 +41,8 @@ const setup = async () => {
       if (state.rejectQuote) throw new PlatformAccountError('quote_invalidated',state.rejectStatus);
       if (state.checkoutKey !== init.headers['Idempotency-Key']) state.checkout = null;
       state.checkoutKey = init.headers['Idempotency-Key'];
-      state.checkout ??= { id: `check${++state.checkoutSequence}`, account_id: 'acct', product_id: 'superwagie', provider: 'wechat', offer_name: 'Points', amount: '1000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: new Date(Date.now()+60000).toISOString(), created_at: new Date().toISOString(), session: { kind: 'qr', url: state.url, expires_at: new Date(Date.now()+60000).toISOString() } };
+      const provider = JSON.parse(init.body).provider;
+      state.checkout ??= { id: `check${++state.checkoutSequence}`, account_id: 'acct', product_id: 'superwagie', provider, offer_name: 'Points', amount: '1000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: new Date(Date.now()+60000).toISOString(), created_at: new Date().toISOString(), session: { kind: 'qr', url: state.url, expires_at: new Date(Date.now()+60000).toISOString() } };
       if (state.lose) { state.lose = false; throw new PlatformAccountError('platform_unavailable',502); }
       return state.checkout;
     }
@@ -62,6 +63,39 @@ it('persists checkout before dispatch and recovers the original key after respon
   const posts = f.state.calls.filter(c => c.route.endsWith('/checkouts') && c.init?.method === 'POST');
   expect(posts).toHaveLength(2);
   expect(posts.map(c => c.init.headers['Idempotency-Key'])).toEqual([f.body.idempotencyKey,f.body.idempotencyKey]);
+});
+it('replays Alipay scans without persisting presentation and explicitly reads the QR', async () => {
+  const f = await setup();
+  const body = { ...f.body, provider: 'alipay' };
+  f.state.url = 'https://qr.alipay.com/fixture';
+  expect((await f.runtime.createCheckout({}, body)).status).toBe('UNKNOWN');
+  await f.runtime.close();
+  const restarted = f.create();
+  const recovered = await restarted.reconcile({}, body.idempotencyKey, { accountId: 'acct' });
+  expect(recovered.checkout.session).toMatchObject({ kind: 'qr', url: f.state.url });
+  const posts = f.state.calls.filter(({ route, init }) => route.endsWith('/checkouts') && init?.method === 'POST');
+  expect(posts.map(({ init }) => JSON.parse(init.body))).toEqual([
+    { offer_id: 'points', provider: 'alipay', require_qr: true },
+    { offer_id: 'points', provider: 'alipay', require_qr: true },
+  ]);
+  expect(posts.map(({ init }) => init.headers['Idempotency-Key'])).toEqual([body.idempotencyKey, body.idempotencyKey]);
+  const journal = await fs.readFile(path.join(f.dir, 'unihub-commerce/state.json'), 'utf8');
+  expect(journal).not.toContain(f.state.url);
+  expect(journal).not.toContain('requireQR');
+  const readBack = await restarted.checkoutAction({}, 'check1', 'read', { accountId: 'acct' });
+  expect(readBack.session.url).toBe(f.state.url);
+  expect(f.state.calls.find(({ route }) => route.endsWith('/checkouts/check1')).init.headers['X-UniHub-Alipay-QR']).toBe('1');
+  f.state.checkout.session.url = 'https://qr.alipay.com.example/fixture';
+  await expect(restarted.checkoutAction({}, 'check1', 'read', { accountId: 'acct' })).rejects.toMatchObject({ code: 'platform_response_invalid' });
+});
+it('leaves WeChat available and makes no Alipay create request to a backend that lacks the QR contract', async () => {
+  const f = await setup();
+  f.state.qrSupported = false;
+  expect((await f.runtime.overview({})).payments.providers).toEqual(['wechat']);
+  await expect(f.runtime.createCheckout({}, { ...f.body, provider: 'alipay' })).rejects.toMatchObject({ code: 'payment_not_configured' });
+  expect(f.state.calls.some(({ init }) => init?.method === 'POST')).toBe(false);
+  f.state.lose = false;
+  expect((await f.runtime.createCheckout({}, f.body)).checkout.session.kind).toBe('qr');
 });
 it('fails closed when native point readiness is false', async () => {
   const f = await setup(); f.state.ready = false;

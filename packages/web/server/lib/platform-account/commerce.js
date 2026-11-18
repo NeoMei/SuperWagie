@@ -14,7 +14,7 @@ const quoteInput = accountInput.extend({ subscriptionId: id, offerId: id, paymen
 const checkoutInput = accountInput.extend({ offerId: id.optional(), quoteId: id.optional(), provider: z.enum(['wechat', 'alipay']), idempotencyKey: key }).refine((value) => Boolean(value.offerId) !== Boolean(value.quoteId));
 const upgradeInput = accountInput.extend({ quoteId: id, idempotencyKey: key });
 const accountsSchema = z.array(z.object({ id, kind: z.enum(['personal', 'team']), role: z.string() }));
-const capabilitySchema = z.object({ product_id: z.literal('superwagie'), scopes: z.array(z.string()), sandbox: z.boolean(), product_wallet_recharge: z.boolean(), real_payments_configured: z.boolean(), payment_providers: z.array(z.enum(['wechat', 'alipay'])).optional(), native_credits: z.object({ ready: z.boolean() }).optional() });
+const capabilitySchema = z.object({ product_id: z.literal('superwagie'), scopes: z.array(z.string()), sandbox: z.boolean(), product_wallet_recharge: z.boolean(), real_payments_configured: z.boolean(), payment_providers: z.array(z.enum(['wechat', 'alipay'])).optional(), alipay_checkout_qr: z.boolean().optional(), native_credits: z.object({ ready: z.boolean() }).optional() });
 const walletSchema = z.object({ product_id: z.string(), asset: z.literal('CNY/6'), amount: units });
 const subscriptionsSchema = z.array(z.object({ product_id: z.string(), status: z.string(), paid_through: z.string().datetime() }));
 const resourcesSchema = z.object({ account_id: id, wallets: z.array(walletSchema).optional(), as_of: z.string() });
@@ -50,7 +50,10 @@ const checkoutSchema = z.object({
   try {
     const url = new URL(value.session.url);
     const valid = value.provider === 'wechat' ? value.session.kind === 'qr' && url.protocol === 'weixin:'
-      : value.session.kind === 'redirect' && url.protocol === 'https:' && url.hostname === 'openapi.alipay.com' && url.pathname === '/gateway.do' && !url.port && !url.username && !url.password;
+      : url.protocol === 'https:' && !url.port && !url.username && !url.password && !url.hash
+        && (value.session.kind === 'qr'
+          ? url.hostname === 'qr.alipay.com' && url.pathname !== '/' && value.session.url.length <= 1024
+          : url.hostname === 'openapi.alipay.com' && url.pathname === '/gateway.do');
     if (!valid) ctx.addIssue({ code: 'custom', message: 'Invalid provider session' });
   } catch { ctx.addIssue({ code: 'custom', message: 'Invalid provider session' }); }
 });
@@ -63,13 +66,17 @@ const parse = (schema, value, code = 'platform_response_invalid') => {
 };
 const segment = (value) => encodeURIComponent(value);
 const pathFor = (accountId, suffix) => `/v1/accounts/${segment(accountId)}/${suffix}`;
+const checkoutProviders = (capabilities) => (capabilities.payment_providers ?? [])
+  .filter((provider) => provider !== 'alipay' || capabilities.alipay_checkout_qr === true);
+const requestCheckout = (ctx, suffix, init) => ctx.session.request(pathFor(ctx.account.id, suffix),
+  ctx.capabilities.alipay_checkout_qr === true ? { ...init, headers: { ...init?.headers, 'X-UniHub-Alipay-QR': '1' } } : init);
 const hasScopes = (caps, names) => names.every((scope) => caps.scopes.includes(scope));
 const financialRole = (role) => role === 'owner' || role === 'billing_admin';
 const supportedOffer = (offer) => offer.product_id === 'superwagie' || (offer.product_id === 'llmrouter' && offer.kind === 'addon');
 const pointsRuntimeUnavailable = (pricingProgram, capabilities) => pricingProgram === 'superwagie-ai-points-v1' && capabilities?.native_credits?.ready !== true;
 const publicOffer = (offer, capabilities) => ({ id: offer.id, productId: offer.product_id, name: offer.name, accountKind: offer.account_kind, kind: offer.kind, period: offer.period, price: offer.price, monthlyCredit: offer.monthly_credit, validityMonths: offer.validity_months, rank: offer.rank, sandbox: offer.sandbox, salesReadiness: offer.sales_readiness, pricingProgram: offer.entitlements?.pricing_program, purchaseReadiness: pointsRuntimeUnavailable(offer.entitlements?.pricing_program, capabilities) ? { ready: false, reason: 'points_runtime_unavailable' } : { ready: true } });
 const publicOrder = (order) => ({ id: order.id, productId: order.product_id, offerName: order.offer.name, amount: order.amount, paymentStatus: order.payment_status, fulfillmentStatus: order.fulfillment_status, refundStatus: order.refund_status ?? '' });
-const publicIntent = (intent) => ({ idempotencyKey: intent.idempotencyKey, kind: intent.kind, accountId: intent.accountId, productId: intent.productId, amount: intent.amount, offerId: intent.offerId, resourceId: intent.resourceId, quoteId: intent.quoteId, provider: intent.provider, subscriptionId: intent.subscriptionId, status: intent.status, errorCode: intent.errorCode, createdAt: intent.createdAt });
+const publicIntent = (intent) => ({ idempotencyKey: intent.idempotencyKey, kind: intent.kind, accountId: intent.accountId, productId: intent.productId, amount: intent.amount, offerId: intent.offerId, resourceId: intent.resourceId, quoteId: intent.quoteId, provider: intent.provider, subscriptionId: intent.subscriptionId, status: intent.status, errorCode: intent.errorCode, createdAt: intent.createdAt, checkout: intent.checkout });
 const intentId = (session, accountId, idempotencyKey) => crypto.createHash('sha256').update(JSON.stringify([session.serviceId, session.actingUserId, accountId, idempotencyKey])).digest('hex');
 const safeError = (error) => error instanceof PlatformAccountError && /^[a-z][a-z0-9_]{0,100}$/.test(error.code) ? error.code : 'platform_commerce_unavailable';
 const rejectedCodes = new Set(['invalid_request', 'forbidden', 'insufficient_funds', 'insufficient_credits', 'not_found', 'unsupported_plan_change', 'subscription_required', 'payment_not_configured']);
@@ -113,7 +120,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     return orders.filter((order) => supportedOffer(order.offer));
   };
   const readCheckout = async (ctx, checkoutId, action = 'read', init) => {
-    const checkout = parse(checkoutSchema, await ctx.session.request(pathFor(ctx.account.id, `checkouts/${segment(checkoutId)}${action === 'read' ? '' : `/${action}`}`), init));
+    const checkout = parse(checkoutSchema, await requestCheckout(ctx, `checkouts/${segment(checkoutId)}${action === 'read' ? '' : `/${action}`}`, init));
     if (checkout.account_id !== ctx.account.id || checkout.id !== checkoutId) fail('platform_response_invalid', 502);
     return checkout;
   };
@@ -148,9 +155,14 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
     try {
       const init = { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': intent.idempotencyKey } };
       let values;
+      let checkout;
       if (intent.kind === 'checkout') {
-        init.body = JSON.stringify({ ...(intent.quoteId ? { quote_id: intent.quoteId } : { offer_id: intent.offerId }), provider: intent.provider });
-        values = checkoutValues(intent, parse(checkoutSchema, await ctx.session.request(pathFor(intent.accountId, 'checkouts'), init)));
+        const request = intent.quoteId ? { quote_id: intent.quoteId } : { offer_id: intent.offerId };
+        request.provider = intent.provider;
+        if (intent.provider === 'alipay' && ctx.capabilities.alipay_checkout_qr === true) request.require_qr = true;
+        init.body = JSON.stringify(request);
+        checkout = parse(checkoutSchema, await requestCheckout(ctx, 'checkouts', init));
+        values = checkoutValues(intent, checkout);
       } else if (intent.kind === 'upgrade') {
         init.body = JSON.stringify({});
         const order = parse(orderSchema, await ctx.session.request(pathFor(intent.accountId, `quotes/${segment(intent.quoteId)}/accept`), init));
@@ -160,7 +172,9 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
         const order = parse(orderSchema, await ctx.session.request(pathFor(intent.accountId, 'orders'), init));
         values = orderValues(intent, order);
       }
-      return mutateIntent(journal, storageId, values);
+      const saved = await mutateIntent(journal, storageId, values);
+      if (checkout) saved.checkout = checkout;
+      return saved;
     } catch (error) {
       const sourceCode = safeError(error);
       const errorCode = sourceCode === 'insufficient_funds' ? 'payment_not_configured' : sourceCode;
@@ -204,7 +218,10 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
         amount: quote?.amount ?? offer?.price ?? body.amount,
         status: 'PREPARED', createdAt: new Date(now()).toISOString(), updatedAt: new Date(now()).toISOString(),
       };
-      if (kind === 'checkout') { intent.provider = body.provider; intent.paymentSource = 'external'; }
+      if (kind === 'checkout') {
+        intent.provider = body.provider;
+        intent.paymentSource = 'external';
+      }
       if (offer) intent.offerId = offer.id;
       if (quote) { intent.offerId = quote.offerId; intent.quoteId = quote.id; intent.subscriptionId = quote.subscriptionId; }
       const { value, created } = await journal.mutate((intents) => {
@@ -251,7 +268,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
         canReadWallets ? ctx.session.request(pathFor(ctx.account.id, 'resources')).then((value) => parse(resourcesSchema, value)) : null,
         includeOrders && canReadOrders ? readOrders(ctx) : null,
         canReadOrders && ctx.capabilities.payment_providers !== undefined
-          ? ctx.session.request(pathFor(ctx.account.id, 'checkouts')).then((value) => parse(z.array(checkoutSchema), value)) : [],
+          ? requestCheckout(ctx, 'checkouts').then((value) => parse(z.array(checkoutSchema), value)) : [],
       ]);
       if (resources && (resources.account_id !== ctx.account.id || !resources.wallets)) fail('platform_response_invalid', 502);
       if (journal && canReadOrders && Object.values(journal.read()).some((intent) => intent.serviceId === ctx.session.serviceId && intent.actorId === ctx.session.actingUserId && intent.accountId === ctx.account.id && releasablePreAdmissionIntent(intent, now()))) {
@@ -278,10 +295,11 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
         }
       });
       const intents = journal ? Object.values(journal.read()).filter((intent) => intent.kind !== 'recharge' && intent.serviceId === ctx.session.serviceId && intent.actorId === ctx.session.actingUserId && intent.accountId === ctx.account.id && hasScopes(ctx.capabilities, ['orders:read'])).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(publicIntent) : [];
+      const providers = checkoutProviders(ctx.capabilities);
       return {
         accountId: ctx.account.id, role: ctx.account.role, financialAccess: finance,
         missingScopes: requiredScopes.filter((scope) => !ctx.capabilities.scopes.includes(scope)),
-        payments: { mode: ctx.capabilities.real_payments_configured && ctx.capabilities.payment_providers?.length ? 'external' : 'unconfigured', providers: ctx.capabilities.payment_providers ?? [], canPurchase: finance && hasScopes(ctx.capabilities, ['orders:read', 'orders:write', 'catalog:read']) },
+        payments: { mode: ctx.capabilities.real_payments_configured && providers.length ? 'external' : 'unconfigured', providers, canPurchase: finance && hasScopes(ctx.capabilities, ['orders:read', 'orders:write', 'catalog:read']) },
         wallets: resources ? resources.wallets.map((wallet) => ({ productId: wallet.product_id, asset: wallet.asset, amount: wallet.amount })) : null,
         offers: offers?.map((offer) => publicOffer(offer, ctx.capabilities)) ?? null, orders: orders?.map(publicOrder) ?? null, intents,
         checkouts,
@@ -296,7 +314,7 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
         if (previous.kind !== 'checkout' || previous.provider !== body.provider || previous.quoteId !== body.quoteId || (!body.quoteId && previous.offerId !== body.offerId)) fail('platform_idempotency_conflict', 409);
         return publicIntent(previous);
       }
-      if (!ctx.capabilities.real_payments_configured || !ctx.capabilities.payment_providers?.includes(body.provider)) fail('payment_not_configured', 503);
+      if (!ctx.capabilities.real_payments_configured || !checkoutProviders(ctx.capabilities).includes(body.provider)) fail('payment_not_configured', 503);
       let quote; let offer;
       if (body.quoteId) {
         quote = (await store()).readQuotes()[intentId(ctx.session, body.accountId, body.quoteId)];

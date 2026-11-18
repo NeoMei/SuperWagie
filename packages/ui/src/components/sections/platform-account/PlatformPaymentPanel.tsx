@@ -1,6 +1,5 @@
 import React from 'react';
 import QRCode from 'qrcode';
-import { openExternalUrl } from '@/lib/url';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
@@ -81,6 +80,8 @@ type PlatformPaymentPanelProps = {
   onSwitchChannel?: (provider: Provider) => void;
   /** Manual status read; the panel also polls on its own while waiting. */
   onRefresh: () => void;
+  onRenew?: () => void;
+  onDismiss?: () => void;
   onClose: () => void;
   onRefund: () => void;
   /** Compact one-line rendering used by payment history. */
@@ -90,42 +91,38 @@ type PlatformPaymentPanelProps = {
 /**
  * One payment attempt, drawn as a single card: what is being bought, the
  * exact amount and the code sit together, so paying never requires reading a
- * field list or hunting for a QR elsewhere on the page. No reconciliation
- * control is exposed; the commerce owner polls the provider instead.
+ * field list or hunting for a QR elsewhere on the page. The commerce owner polls and reconciles the original order.
  */
 export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
-  checkout, busy, channels = [], onSwitchChannel, onRefresh, onClose, onRefund, compact = false,
+  checkout, busy, channels = [], onSwitchChannel, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false,
 }) => {
   const { t } = useI18n();
-  const [qr, setQR] = React.useState('');
-  const [qrFailed, setQRFailed] = React.useState(false);
-  const [openFailed, setOpenFailed] = React.useState(false);
+  const [codeImage, setCodeImage] = React.useState<{ source: string; image: string } | null>(null);
   const [refundConfirmation, setRefundConfirmation] = React.useState(false);
   const waiting = WAITING.includes(checkout.payment_status) && !checkout.refund_status;
   const refundable = checkout.payment_status === 'PAID' && !checkout.refund_status;
   const checkable = waiting || checkout.refund_status === 'PENDING' || (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'PENDING');
   const session = waiting ? checkout.session : undefined;
-  const codeUrl = session?.url ?? null;
   const remaining = useCountdown(waiting ? session?.expires_at ?? checkout.expires_at : undefined);
   const expired = waiting && remaining === 0;
+  const codeUrl = session?.kind === 'qr' && !expired && !compact ? session.url : null;
+  const qr = codeUrl && codeImage?.source === codeUrl ? codeImage : null;
   const provider = checkout.provider;
+  const scanHint = t(provider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.scanWithAlipay');
   const providerName = t(provider === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay');
 
   React.useEffect(() => {
-    let current = true;
-    setQR(''); setQRFailed(false);
     if (!codeUrl) return undefined;
-    // Alipay hands out a checkout page, and a page encoded as a code cannot be
-    // scanned: that provider gets no code, only the button that opens the page.
-    if (session?.kind !== 'qr') return undefined;
-    void QRCode.toDataURL(codeUrl, { width: 224, margin: 2 })
-      .then((image) => { if (current) setQR(image); })
-      .catch(() => { if (current) setQRFailed(true); });
+    let current = true;
+    void QRCode.toDataURL(codeUrl, { width: 224, margin: 4 })
+      .then((image) => { if (current) setCodeImage({ source: codeUrl, image }); })
+      .catch(() => { if (current) setCodeImage({ source: codeUrl, image: '' }); });
     return () => { current = false; };
-  }, [codeUrl, session?.kind]);
+  }, [codeUrl]);
 
   const actions = <>
-    {session?.kind === 'redirect' && !compact && <Button size="sm" disabled={busy || expired} onClick={() => { setOpenFailed(false); void openExternalUrl(session.url).then((opened) => { if (!opened) setOpenFailed(true); }); }}>{t(provider === 'wechat' ? 'platformAccount.openWechat' : 'platformAccount.openAlipay')}</Button>}
+    {!compact && waiting && onRenew && (expired || session?.kind !== 'qr') && <Button size="sm" disabled={busy} onClick={onRenew}>{t('platformAccount.renewPaymentCode')}</Button>}
+    {onDismiss && <Button size="sm" variant="ghost" disabled={busy} onClick={onDismiss}>{t('platformAccount.returnToPurchase')}</Button>}
     {checkable && <Button size="sm" variant="ghost" disabled={busy} onClick={onRefresh}>{t('platformAccount.refreshPaymentStatus')}</Button>}
     {waiting && <Button size="sm" variant="ghost" disabled={busy} onClick={onClose}>{t('platformAccount.closeCheckout')}</Button>}
     {refundable && <Button size="sm" variant="outline" disabled={busy} onClick={() => setRefundConfirmation(true)}>{t('platformAccount.requestRefund')}</Button>}
@@ -151,7 +148,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
     </div>;
   }
 
-  return <div className="oc-tile rounded-xl p-4">
+  return <div className="oc-tile rounded-xl p-4" data-payment-checkout={checkout.id}>
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
       <div className="min-w-0">
         <p className="typography-micro uppercase tracking-wide text-muted-foreground">{t(waiting ? 'platformAccount.activePayment' : 'platformAccount.recentPayment')}</p>
@@ -159,14 +156,14 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
       </div>
       <span className="flex items-center gap-1.5 text-muted-foreground">
         <StatusDot tone={toneFor(checkout)} />
-        <span className="typography-meta">{t(statusKey(checkout))}</span>
+        <span className="typography-meta" role="status">{t(statusKey(checkout))}</span>
       </span>
     </div>
 
     <div className="mt-3 flex flex-col gap-4 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6">
       <div className="min-w-0 space-y-3">
         <div className="space-y-1">
-          <p className="typography-micro text-muted-foreground">{t(waiting ? 'platformAccount.payAmount' : 'platformAccount.amountPaid')}</p>
+          <p className="typography-micro text-muted-foreground">{t(waiting ? 'platformAccount.payAmount' : checkout.payment_status === 'PAID' ? 'platformAccount.amountPaid' : 'platformAccount.price')}</p>
           <p className="flex items-baseline gap-1.5">
             <span className="text-3xl font-medium leading-none tabular-nums" dir="auto">¥{formatPlatformMoney(checkout.amount)}</span>
             <span className="typography-meta text-muted-foreground">{providerName}</span>
@@ -176,7 +173,8 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
           <p className="typography-micro text-muted-foreground">{t('platformAccount.paymentChannel')}</p>
           <SettingsChipGroup value={provider} onChange={(next) => { if (next !== provider && !busy) onSwitchChannel(next); }} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy }))} />
         </div>}
-        {session && !expired && <p className={`${SETTINGS_HELPER_CLASS} max-w-[22rem]`}>{t(provider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.openAlipayHint')}</p>}
+        {codeUrl && <p className={`${SETTINGS_HELPER_CLASS} max-w-[22rem]`}>{scanHint}</p>}
+        {session?.kind === 'redirect' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.legacyCheckoutHint')}</p>}
         {waiting && remaining !== null && <p className={`${SETTINGS_HELPER_CLASS} flex items-center gap-1.5`}>
           <Icon name="time" className="size-3.5" />
           {expired ? t(session?.kind === 'qr' ? 'platformAccount.qrExpired' : 'platformAccount.checkoutExpired') : remaining > 86_400_000
@@ -184,15 +182,15 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
             : t('platformAccount.qrValidFor', { time: clock(remaining) })}
         </p>}
       </div>
-      {waiting && !expired && (qr || qrFailed) && <div className="flex shrink-0 flex-col items-center gap-2 self-center">
-        {qr && <img src={qr} width={224} height={224} className="rounded-lg bg-white p-2 ring-1 ring-black/5" alt={t('platformAccount.scanWithWechat')} />}
-        {qrFailed && <p role="alert" className="text-[var(--status-error-text)]">{t('platformAccount.commerceFailed')}</p>}
+      {codeUrl && <div className="flex shrink-0 flex-col items-center gap-2 self-center">
+        {qr?.image
+          ? <img src={qr.image} width={224} height={224} className="rounded-lg bg-white" alt={scanHint} />
+          : <p className={SETTINGS_HELPER_CLASS} role={qr ? 'alert' : 'status'}>{t(qr ? 'platformAccount.commerceFailed' : 'platformAccount.loading')}</p>}
       </div>}
     </div>
 
     {checkout.refund_status === 'REJECTED' && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.checkoutRefundRejected')}</p>}
-    {openFailed && <p role="alert" className="mt-3 text-[var(--status-error-text)]">{t('platformAccount.commerceFailed')}</p>}
-    {waiting && !expired && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.paymentAutoConfirm')}</p>}
+    {codeUrl && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.paymentAutoConfirm')}</p>}
     <div className="mt-2 flex flex-wrap items-center gap-2">{actions}</div>
     {refundConfirmation && refundable && <div className="mt-3 space-y-2">
       <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.refundConfirmation')}</p>
