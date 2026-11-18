@@ -4,7 +4,7 @@ import { createProductModelProxy } from './product-model-proxy.js';
 
 const api = 'https://accounts.test';
 const gateway = 'https://models.test/platform/v1';
-const fixture = () => {
+const fixture = (expiredAt) => {
   const gatewayCalls = [];
   const saved = new Map();
   const app = createProductModelProxy({
@@ -22,6 +22,7 @@ const fixture = () => {
         case api + '/v1/accounts/account-a/api-keys':
           expect(init.headers.Authorization).toBe('Bearer actor-fixture');
           expect(JSON.parse(init.body)).toMatchObject({ model_scope: 'llmrouter_available', credit_scope: 'product_v1' });
+          if (expiredAt === 'issuance') return Response.json({ error: 'subscription_required' }, { status: 409 });
           return Response.json({
             token: 'uh_key_fixture', actor_id: 'actor-a', account_id: 'account-a', origin_product_id: 'superwagie',
             credit_scope: 'product_v1', model_scope: 'llmrouter_available', funding_mode: 'credits', asset: 'CREDIT/6',
@@ -29,6 +30,7 @@ const fixture = () => {
         case api + '/internal/v1/product-runtime/model-proofs':
           expect(init.headers.Authorization).toBe('Bearer operator-fixture');
           expect(init.headers['X-UniHub-Actor-Authorization']).toBe('Bearer actor-fixture');
+          if (expiredAt === 'proof') return Response.json({ error: 'product_membership_expired' }, { status: 403 });
           return Response.json({ token: 'proof-fixture', expires_at: Math.floor(Date.now() / 1000) + 90 });
         case gateway + '/chat/completions':
           expect(init.headers).toMatchObject({ Authorization: 'Bearer uh_key_fixture', 'X-UniHub-Product-Authorization': 'proof-fixture', 'Idempotency-Key': 'call-fixture' });
@@ -58,6 +60,13 @@ describe('isolated product model proxy', () => {
     expect(receipt.body).toMatchObject({ idempotency_key: 'call-fixture', credit_scope: 'product_v1' });
     expect(JSON.stringify(receipt.body)).not.toMatch(/uh_key_|proof-fixture|operator-fixture/);
     expect(f.gatewayCalls).toEqual([{ method: 'POST', body: f.body }, { method: 'GET' }]);
+  });
+
+  it.each(['issuance', 'proof'])('reports inactive membership at %s before forwarding a paid model call', async (source) => {
+    const f = fixture(source);
+    await request(f.app).post('/v1/product-model/chat').set(f.headers).send(f.body)
+      .expect(403, { error: { code: 'product_membership_expired', stage: 'pre_admission' } });
+    expect(f.gatewayCalls).toHaveLength(0);
   });
 
   it('rejects a browser origin, another model, or an invalid actor before contacting the gateway', async () => {

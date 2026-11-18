@@ -1,7 +1,7 @@
 export const platformAccountI18n = {
   en: {
     'platformAccount.productWallet.subscriptionRenewalPrice': '{name} renews for {price} from your shared cash balance.',
-    'platformAccount.productWallet.modelMembershipExpired': "Your SuperWagie membership has expired. Renew it to use any remaining credits before they expire.",
+    'platformAccount.productWallet.modelMembershipExpired': "An active SuperWagie membership is required. Subscribe or renew to use any remaining credits before they expire.",
     'platformAccount.productWallet.renewMembership': "Renew membership",
     'platformAccount.productWallet.topUp': "Top up shared cash",
     'platformAccount.productWallet.topUpAmount': "Top-up amount in CNY",
@@ -467,7 +467,7 @@ export const platformAccountI18n = {
   },
   'zh-CN': {
     'platformAccount.productWallet.subscriptionRenewalPrice': '{name} 到期从统一现金余额扣除 {price} 续订。',
-    'platformAccount.productWallet.modelMembershipExpired': "SuperWagie 会员已到期。续订后可在积分原有效期内继续使用。",
+    'platformAccount.productWallet.modelMembershipExpired': "使用积分需要有效的 SuperWagie 会员。订阅或续订后，可在原有效期内使用剩余积分。",
     'platformAccount.productWallet.renewMembership': "续订会员",
     'platformAccount.productWallet.topUp': "统一现金充值",
     'platformAccount.productWallet.topUpAmount': "充值金额（元）",

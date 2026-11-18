@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { readBoundedResponse } from '../platform-model/native-media.js';
 import { productWalletHeaders } from './product-wallet.js';
 
 const modelName = z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/);
@@ -10,6 +11,15 @@ const issuedKey = z.object({
 });
 const proofSchema = z.object({ token: z.string().regex(/^[A-Za-z0-9._~-]{1,4096}$/), expires_at: z.number().int().positive() });
 const unavailable = () => Object.assign(new Error('platform_model_access_unavailable'), { code: 'platform_model_access_unavailable', status: 503 });
+
+const membershipErrorSchema = z.object({ error: z.enum(['subscription_required', 'product_membership_expired']) });
+export const assertProductMembershipRefusal = async (response) => {
+  if (response.status !== 403 && response.status !== 409) return;
+  const value = await readBoundedResponse(response, 4096).then((bytes) => JSON.parse(bytes.toString('utf8'))).catch(() => null);
+  if (membershipErrorSchema.safeParse(value).success) {
+    throw Object.assign(new Error('product_membership_expired'), { code: 'product_membership_expired', status: 403 });
+  }
+};
 
 /** This broker runs in a trusted server. Callers supply a server-only vault and deployment credential. */
 export const createProductModelBroker = ({ api, serviceCredential, vault, instanceId = 'default', fetchImpl = fetch, now = Date.now }) => {
@@ -48,7 +58,11 @@ export const createProductModelBroker = ({ api, serviceCredential, vault, instan
         headers: { Authorization: `Bearer ${serviceCredential}`, 'X-UniHub-Actor-Authorization': `Bearer ${input.actorToken}`, 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ token }),
       });
-      if (!response.ok) { await response.body?.cancel(); throw unavailable(); }
+      if (!response.ok) {
+        await assertProductMembershipRefusal(response);
+        if (!response.bodyUsed) await response.body?.cancel();
+        throw unavailable();
+      }
       const proof = proofSchema.safeParse(await response.json());
       if (!proof.success || proof.data.expires_at * 1000 <= now()) throw unavailable();
       return { token, proof: proof.data.token };

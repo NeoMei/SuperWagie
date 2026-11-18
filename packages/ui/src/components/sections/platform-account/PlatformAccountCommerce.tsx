@@ -19,7 +19,7 @@ const cashTopUpUnits = (input: string): string | null => {
   if (!/^\d{1,10}(?:\.\d{1,2})?$/.test(input.trim())) return null;
   const [whole, fraction = ''] = input.trim().split('.');
   const amount = BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'));
-  return amount > 0n ? amount.toString() : null;
+  return amount > 0n && amount <= 1_000_000_000_000_000n ? amount.toString() : null;
 };
 const WAITING_PAYMENT = ['CREATED', 'PENDING', 'UNKNOWN'];
 const waitingCheckout = (checkout: { payment_status: string; refund_status: string }) => WAITING_PAYMENT.includes(checkout.payment_status) && !checkout.refund_status;

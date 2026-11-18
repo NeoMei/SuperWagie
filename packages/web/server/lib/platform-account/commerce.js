@@ -13,7 +13,7 @@ const accountInput = z.object({ accountId: id }).strict();
 const purchaseInput = accountInput.extend({ offerId: id, idempotencyKey: key });
 const quoteInput = accountInput.extend({ subscriptionId: id, offerId: id, paymentSource: z.enum(['wallet', 'external']).default('wallet') });
 const checkoutInput = accountInput.extend({
-  offerId: id.optional(), quoteId: id.optional(), amount: units.regex(/^[1-9]\d{0,11}0000$/).optional(),
+  offerId: id.optional(), quoteId: id.optional(), amount: units.regex(/^[1-9]\d{0,11}0000$/).refine((value) => BigInt(value) <= 1_000_000_000_000_000n).optional(),
   provider: z.enum(['wechat', 'alipay']), idempotencyKey: key,
 }).refine((value) => [value.offerId, value.quoteId, value.amount].filter(Boolean).length === 1);
 const upgradeInput = accountInput.extend({ quoteId: id, idempotencyKey: key });

@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import express from 'express';
 import { z } from 'zod';
-import { createProductModelBroker } from './product-model-broker.js';
+import { assertProductMembershipRefusal, createProductModelBroker } from './product-model-broker.js';
 import { readBoundedResponse } from '../platform-model/native-media.js';
 import { productWalletHeaders } from './product-wallet.js';
 
@@ -65,7 +65,11 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
         ...init, redirect: 'error', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
         headers: { ...init?.headers, Authorization: `Bearer ${actorToken}`, Accept: 'application/json' },
       });
-      if (!response.ok) { await response.body?.cancel(); throw Object.assign(new Error('identity or capability unavailable'), { status: response.status }); }
+      if (!response.ok) {
+        if (path.endsWith('/api-keys')) await assertProductMembershipRefusal(response);
+        if (!response.bodyUsed) await response.body?.cancel();
+        throw Object.assign(new Error('identity or capability unavailable'), { status: response.status });
+      }
       return response.json();
     };
     let gatewayStarted = false;
@@ -99,6 +103,9 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
     } catch (error) {
       if (res.headersSent) { res.destroy(); return; }
       if (res.destroyed) return;
+      if (!recovery && !gatewayStarted && error?.code === 'product_membership_expired') {
+        res.status(403).json({ error: { code: 'product_membership_expired', stage: 'pre_admission' } }); return;
+      }
       if (error?.status === 401) { res.status(401).json({ error: { code: 'platform_session_expired', stage: 'pre_admission' } }); return; }
       res.status(502).json({ error: { code: 'platform_gateway_call_incomplete', ...(!gatewayStarted && { stage: 'pre_admission' }) } });
     }

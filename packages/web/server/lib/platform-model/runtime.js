@@ -747,7 +747,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
         if (refusal === 'request-too-large') await store.mutate((state) => { state.calls[callID].requestBytes = Buffer.byteLength(payload); });
         const confirmed = await receipt(task, store.read().calls[callID], identity).catch(() => null);
         if (refusal === 'request-too-large') refuse('platform_gateway_request_too_large', 413);
-        if (refusal === 'membership-expired' && confirmed?.status === 'REJECTED') refuse('product_membership_expired', 403);
+        if (permit.productCredit && refusal === 'membership-expired' && confirmed?.status === 'REJECTED') refuse('product_membership_expired', 403);
         if (refusal === 'funding' && confirmed?.status === 'REJECTED') refuse(confirmed.asset === 'CREDIT/6' ? 'platform_model_credits_required' : 'platform_model_funding_required', 402);
         refuse('platform_gateway_call_incomplete', 502);
       }

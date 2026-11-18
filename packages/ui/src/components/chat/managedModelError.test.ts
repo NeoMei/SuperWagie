@@ -50,6 +50,7 @@ test('every managed funding refusal leads to credits', async () => {
 
 test('distinguishes expired membership from insufficient credits', () => {
   expect(isManagedModelMembershipExpired('', '{"error":{"code":"product_membership_expired"}}')).toBe(true);
+  expect(isManagedModelMembershipExpired('Forbidden', '{"error":"product_membership_expired"}')).toBe(true);
   expect(isManagedModelMembershipExpired('session.prompt failed (403): product_membership_expired')).toBe(true);
   expect(isManagedModelMembershipExpired('platform_model_credits_required')).toBe(false);
 });
