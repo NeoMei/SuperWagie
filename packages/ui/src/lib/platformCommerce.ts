@@ -37,7 +37,10 @@ const checkoutSchema = z.object({
   try {
     const url = new URL(checkout.session.url);
     return checkout.provider === 'wechat' ? checkout.session.kind === 'qr' && url.protocol === 'weixin:'
-      : checkout.session.kind === 'redirect' && url.protocol === 'https:' && url.hostname === 'openapi.alipay.com' && url.pathname === '/gateway.do' && !url.port && !url.username && !url.password;
+      : url.protocol === 'https:' && !url.port && !url.username && !url.password && !url.hash
+        && (checkout.session.kind === 'qr'
+          ? url.hostname === 'qr.alipay.com' && url.pathname !== '/' && checkout.session.url.length <= 1024
+          : url.hostname === 'openapi.alipay.com' && url.pathname === '/gateway.do');
   } catch { return false; }
 });
 export type PlatformCheckout = z.infer<typeof checkoutSchema>;
@@ -48,7 +51,11 @@ const commerceSchema = z.object({
   checkouts: z.array(checkoutSchema).optional(), intents: z.array(intentSchema),
 });
 export type PlatformCommerceState = z.infer<typeof commerceSchema>;
-export type PlatformCommerceIntent = z.infer<typeof intentSchema>;
+const checkoutIntentSchema = intentSchema.extend({ checkout: checkoutSchema.optional() }).refine((intent) =>
+  !intent.checkout || (intent.kind === 'checkout' && intent.checkout.id === intent.resourceId
+    && intent.checkout.account_id === intent.accountId && intent.checkout.product_id === intent.productId
+    && intent.checkout.provider === intent.provider && intent.checkout.amount === intent.amount));
+export type PlatformCommerceIntent = z.infer<typeof checkoutIntentSchema>;
 const upgradeQuoteSchema = z.object({
   paymentSource: z.enum(['wallet', 'external']).optional(), roundingRule: z.literal('cny_cent_ceil_v1').optional(), originalAmount: units.optional(),
   id: z.string().min(1), accountId: z.string().min(1), subscriptionId: z.string().min(1),
@@ -56,7 +63,7 @@ const upgradeQuoteSchema = z.object({
   periodStart: z.iso.datetime(), expiresAt: z.iso.datetime(), createdAt: z.iso.datetime(),
 });
 export type PlatformUpgradeQuote = z.infer<typeof upgradeQuoteSchema>;
-export const createPlatformCheckout = (input: { accountId: string; offerId?: string; quoteId?: string; provider: 'wechat' | 'alipay'; idempotencyKey: string }) => requestPlatformAccount('/api/platform-account/commerce/checkouts', intentSchema, 'POST', JSON.stringify(input));
+export const createPlatformCheckout = (input: { accountId: string; offerId?: string; quoteId?: string; provider: 'wechat' | 'alipay'; idempotencyKey: string }) => requestPlatformAccount('/api/platform-account/commerce/checkouts', checkoutIntentSchema, 'POST', JSON.stringify(input));
 export const updatePlatformCheckout = (accountId: string, id: string, action: 'reconcile' | 'close' | 'refund') => requestPlatformAccount(`/api/platform-account/commerce/checkouts/${encodeURIComponent(id)}/${action}`, checkoutSchema, 'POST', JSON.stringify({ accountId }));
 export const readPlatformCommerce = (summary = false) => requestPlatformAccount(summary ? '/api/platform-account/commerce?summary=1' : '/api/platform-account/commerce', commerceSchema);
 export const readPlatformOrders = (accountId: string) => requestPlatformAccount(`/api/platform-account/commerce/orders?accountId=${encodeURIComponent(accountId)}`, z.array(orderSchema));

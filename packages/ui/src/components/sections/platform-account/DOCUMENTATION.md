@@ -141,15 +141,16 @@ cent-rounded external charge before confirmation.
 
 The checkout panel recovers server records after reopening. Waiting, unknown,
 paid-but-activating, completed and original-channel refund states stay distinct.
-One attempt is drawn as a single card: the published offer, the exact amount,
-the payment code and the channel choice sit together, so paying never requires
-reading a field list or finding a code elsewhere on the page. The code is
-generated locally from the validated WeChat session and hidden at expiry. Alipay
-opens the validated official gateway redirect after an explicit click. Switching
-channels submits a replacement only after the original checkout is confirmed
-closed. Returning from the browser cannot prove payment. The panel polls the
-original live checkout and offers explicit status or close actions for an
-unresolved payment. An unconfirmed submission with no known checkout is retried
+The purchase confirmation stays in place when it changes to payment. It
+shows the offer, amount, method, QR and payment status together. Both providers
+supply merchant QR payloads, encoded locally by the panel. Expired codes and
+earlier redirect-only checkouts can be replaced after confirmed closure if the
+original purchase intent can be recovered. Switching methods follows the same
+rule, and a completed original payment is shown in place. The panel keeps
+polling while fulfillment is pending, hides the code after payment and retains
+the final result until the user returns to purchase. Verified fulfillment
+refreshes membership and credits.
+An unconfirmed submission with no known checkout is retried
 only by explicit action with its original key. Closed attempts are in history.
 A pending or reviewed refund blocks new purchases and hides refund submission;
 users can check a pending refund on the same checkout. Read failure preserves
