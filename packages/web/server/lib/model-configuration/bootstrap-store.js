@@ -96,9 +96,10 @@ export const createModelBootstrapStore = ({ dataDir, secretStore, now = () => Da
     decipher.setAuthTag(Buffer.from(record.tag, 'base64url'));
     return Buffer.concat([decipher.update(Buffer.from(record.data, 'base64url')), decipher.final()]).toString('utf8');
   };
-  const secretPut = async (value) => {
+  const secretPut = async (value, reference) => {
     if (!value) return null;
-    const ref = `model-bootstrap-${randomUUID()}`;
+    const ref = reference ?? `model-bootstrap-${randomUUID()}`;
+    if (reference !== undefined && !/^product-model-[a-f0-9]{64}$/.test(ref)) throw new Error('invalid product model reference');
     if (secretStore?.put) await secretStore.put(ref, value);
     else if (secretStore?.set) await secretStore.set(ref, value);
     else if (secretStore) throw new Error('model bootstrap secret store cannot write');

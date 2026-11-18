@@ -21,17 +21,34 @@ const fixture = async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-commerce-test-'));
   cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
   const state = { actor: 'actor-a', account: 'personal-a', service: 'service-a', role: 'owner', scopes: [...scopes], sandbox: true, creditsReady: true, failRead: false, loseResponse: false, blockPost: null, rejectOrder: '', calls: [], wallet: 10_000_000n, credits: 0n, now: Date.now(), offers: [membership, addon], activeMembership: false, pendingFulfillment: false, quoteAccount: undefined };
+  const cashCheckouts = new Map();
   const orders = new Map(); const quotes = new Map(); const byKey = new Map();
   const upstream = async (route, init = {}) => {
-    state.calls.push({ route, method: init.method ?? 'GET', body: init.body, key: init.headers?.['Idempotency-Key'] });
+    state.calls.push({ walletVersion: init.headers?.['X-UniHub-Product-Credit-Wallet'], route, method: init.method ?? 'GET', body: init.body, key: init.headers?.['Idempotency-Key'] });
     if (route === '/v1/accounts') return [{ id: state.account, kind: 'personal', role: state.role }];
-    if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: state.scopes, sandbox: state.sandbox, product_wallet_recharge: state.sandbox, real_payments_configured: false, payment_providers: [], native_credits: { ready: state.creditsReady } };
+    if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: state.scopes, product_credit_wallet: state.productCreditWallet, sandbox: state.sandbox, product_wallet_recharge: state.sandbox, real_payments_configured: state.cashPayments ?? false, payment_providers: state.cashPayments ? ['wechat'] : [], native_credits: { ready: state.creditsReady } };
+    if (route.endsWith('/product-wallet') || route.endsWith('/product-wallet/superwagie/renewal')) return { version: 'product_v1', account_id: state.account, cash: { asset: 'CNY/6', available: String(state.wallet) }, can_manage: true, products: [{ product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 0 }, addon_renewal: { enabled: false, version: 1 }, orders: [], addon_offers: [] }] };
     if (route === '/v1/catalog') return [...state.offers, sandboxOffer].map((item) => ({ ...item, sales_readiness: item.sandbox ? undefined : { ready: true } }));
     if (route.endsWith('/resources')) {
       if (state.failRead) throw new PlatformAccountError('service_unavailable', 503);
       return { account_id: state.account, wallets: [{ product_id: 'superwagie', asset: 'CNY/6', amount: String(state.wallet) }], as_of: new Date().toISOString() };
     }
     if (route.endsWith('/subscriptions')) return state.activeMembership ? [{ product_id: 'superwagie', status: 'active', paid_through: new Date(Date.now() + 3600000).toISOString() }] : [];
+    if (route.endsWith('/cash-checkouts') && !init.method) return [...cashCheckouts.values()];
+    if (route.endsWith('/cash-checkouts') && init.method === 'POST') {
+      const body = JSON.parse(init.body);
+      expect(init.headers['X-UniHub-Product-Credit-Wallet']).toBe('product_v1');
+      expect(body.product_id).toBe('superwagie');
+      const created = { id: 'ct_one', account_id: state.account, product_id: body.product_id, wallet_target: 'unified', provider: body.provider, amount: body.amount, currency: 'CNY', payment_status: 'CREATED', expires_at: new Date(state.now + 60_000).toISOString(), created_at: new Date(state.now).toISOString() };
+      cashCheckouts.set(created.id, created);
+      return created;
+    }
+    if (route.endsWith('/cash-checkouts/ct_one/reconcile')) {
+      const pending = cashCheckouts.get('ct_one');
+      const paid = { ...pending, payment_status: 'PAID', credit_status: 'APPLIED' };
+      cashCheckouts.set(paid.id, paid);
+      return paid;
+    }
     if (route.endsWith('/orders') && !init.method) return [...orders.values()];
     if (route.endsWith('/checkouts') && !init.method) return [];
     if (route.endsWith('/quotes') && init.method === 'POST') {
@@ -91,6 +108,50 @@ describe('UniHub commerce without sandbox funding', () => {
     expect('canRecharge' in view.payments).toBe(false);
     expect(f.runtime.createRecharge).toBeUndefined();
     expect(f.runtime.sandboxSettle).toBeUndefined();
+  });
+
+  it('shows only versioned SuperWagie plans and shared cash when the wallet is enabled', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.failRead = true;
+    f.state.offers.push({ ...addon, id: 'router-addon', product_id: 'llmrouter' }, { ...addon, id: 'own-addon', credit_scope: 'product_v1' });
+    const view = await f.runtime.overview(identity);
+    expect(view.offers.map((item) => item.id)).toEqual(['own-addon']);
+    expect(view.productWallet.cash).toEqual({ asset: 'CNY/6', available: '10000000' });
+    expect(view.wallets).toEqual([{ productId: '', asset: 'CNY/6', amount: '10000000' }]);
+    expect(f.state.calls).toContainEqual(expect.objectContaining({ route: '/v1/capabilities', walletVersion: 'product_v1' }));
+    await expect(f.runtime.purchase(identity, purchaseBody(f, 'router-addon'))).rejects.toMatchObject({ code: 'platform_offer_unavailable' });
+  });
+
+  it('replays one shared cash top-up and reconciles its original payment', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.cashPayments = true;
+    f.state.scopes.push('recharges:read', 'recharges:write');
+    const body = { accountId: f.state.account, provider: 'wechat', amount: '10000000', idempotencyKey: crypto.randomUUID() };
+    const first = await f.runtime.createCheckout(identity, body);
+    expect(first).toMatchObject({ status: 'PENDING', walletTopUp: true, resourceId: 'ct_one', checkout: { walletTopUp: true } });
+    const replayed = await f.runtime.createCheckout(identity, body);
+    expect(replayed.resourceId).toBe(first.resourceId);
+    const paid = await f.runtime.checkoutAction(identity, 'ct_one', 'reconcile', { accountId: f.state.account });
+    expect(paid).toMatchObject({ payment_status: 'PAID', fulfillment_status: 'FULFILLED', walletTopUp: true });
+    const state = await f.runtime.overview(identity);
+    expect(state.intents).toContainEqual(expect.objectContaining({ resourceId: 'ct_one', status: 'APPLIED' }));
+    expect(f.state.calls.filter((call) => call.method === 'POST' && call.route.endsWith('/cash-checkouts'))).toHaveLength(1);
+  });
+
+  it('writes renewal settings with the authorized selected account and expected version', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.scopes.push('settings:write');
+    const app = express();
+    registerPlatformCommerceRoutes(app, { runtime: f.runtime, resolveIdentity: () => identity, isRequestOriginAllowed: (req) => req.get('Origin') === 'https://runtime.test' });
+    const path = '/api/platform-account/commerce/product-wallet/superwagie/renewal';
+    const body = { accountId: 'personal-a', kind: 'addon', enabled: true, expectedVersion: 1, offerId: 'own-addon', trigger: 'threshold', threshold: '250000' };
+    await request(app).put(path).send(body).expect(403);
+    await request(app).put(path).set('Origin', 'https://runtime.test').send(body).expect(200);
+    expect(f.state.calls).toContainEqual(expect.objectContaining({ route: '/v1/accounts/personal-a/product-wallet/superwagie/renewal', method: 'PUT', walletVersion: 'product_v1', body: JSON.stringify({ kind: 'addon', enabled: true, expected_version: 1, offer_id: 'own-addon', trigger: 'threshold', threshold: '250000' }) }));
+    await request(app).put(path).set('Origin', 'https://runtime.test').send({ ...body, accountId: 'team-a' }).expect(409);
   });
 
   it('buys a formal offer from existing cash and reports fulfillment', async () => {

@@ -44,6 +44,8 @@ export interface StartWebUiServerOptions {
   uiPassword?: string | null;
   desktopUpdater?: DesktopUpdater;
   nativeOfficialSelections?: boolean;
+  /** Trusted HTTPS origin of the isolated product model service. */
+  productModelProxyOrigin?: string;
   onDesktopNotificationWithdraw?: (input: { tag: string }) => { status: 'withdrawn' | 'unsupported' | 'unknown'; count?: number };
   /** App-owned built-in resources outside Electron's ASAR archive. */
   builtInExtensionsDir?: string;

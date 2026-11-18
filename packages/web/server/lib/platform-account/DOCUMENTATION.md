@@ -464,3 +464,46 @@ exact selected-material GET routes. Cookie path, viewport, user agent and client
 kind provide no authorization. An explicit invalid bearer is rejected before
 pilot fallback. An independently full-authorized credential keeps its existing
 permissions; adding a pilot cookie neither creates nor removes those permissions.
+
+## Product-credit wallet
+
+- The backend sends `X-UniHub-Product-Credit-Wallet: product_v1` when a
+  managed product model proxy is configured, the managed model runtime is ready,
+  and enterprise mode permits the hosted transport. UniHub decides capability
+  availability, current actor permissions, and the eligible catalog.
+- The account page uses the origin product's authoritative spendable credits.
+  It includes unexpired pack batches and original expiration dates after the
+  membership expires. Legacy clients continue to read legacy balances.
+- The wallet lists shared CNY, allowed product orders, and current renewal
+  settings. Mutations capture the billing account and include the settings
+  version. An active purchase or uncertain local payment blocks a second
+  payment. Cash top-ups use their own upstream checkout and appear settled
+  after the cash credit commits. One journal records the original payment
+  version and idempotency key so retries keep the first request's semantics.
+- The managed SuperWagie runtime sends its captured user's access token to
+  the configured HTTPS model proxy. The isolated proxy validates the
+  product actor with UniHub and owns the permanent product key and fresh
+  origin proof. The checkout, model journal, and renderer hold no product Key
+  or deployment credential. A receipt read uses the original key and call ID.
+- This product runtime supports Chat Completions streaming and receipt reads.
+  Managed media and knowledge dispatch are unavailable through this mode
+  pending supported product routes and matching recovery contracts. Local
+  OpenCode models and BYOK stay independent.
+
+### Running the isolated model proxy
+
+Run `node packages/web/server/product-model-proxy.mjs /path/to/private-config.json`
+on a dedicated host or service identity with no user-command execution.
+The configuration takes `uniHubOrigin`, `modelGateway`, `allowedModels`,
+`serviceCredentialFile`, `vaultPath`, and optional `instanceId`, `host`,
+`port`, `tlsKeyFile` and `tlsCertificateFile` fields. The gateway URL ends in
+`/platform/v1`. Supply a registered SuperWagie runtime credential with
+`model:authorize`, a durable private vault, and TLS. If the proxy uses plain
+HTTP on loopback, terminate TLS at the dedicated reverse proxy. Keep the
+service mapping and encrypted vault stable because call receipts remain
+bound to the original product Key.
+
+Set `OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL` to the HTTPS origin of the
+isolated proxy in the SuperWagie app process. This is trusted server
+configuration because the origin receives the current UniHub user access
+token. Old installs and instances without that origin retain legacy billing.

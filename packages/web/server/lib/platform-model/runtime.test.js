@@ -48,22 +48,28 @@ const fixture = async (options = {}) => {
   cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
   let promptID = 'msg_test'; let idle = null;
   let selected = 'personal'; let currentActor = 'alice'; let authSession = 'login-1'; let enabled = true; let enterprise = false; let mode = 'ok';
+  const productRequests = [];
   let requests = 0; let receiptRequests = 0; const grants = []; const calls = new Map(); const grantModels = new Map(); const callModels = new Map(); let release; let waitForGrant; let waitForReceipt;
   const server = http.createServer(async (req, res) => {
+    const productProof = req.headers['x-unihub-product-authorization'];
+    if (productProof) {
+      expect(req.headers.authorization).toBe('Bearer uh_key_fixture');
+      productRequests.push({ method: req.method, path: req.url, proof: productProof });
+    }
     if (req.method === 'GET') {
       const id = req.url.split('/').pop();
       if (req.url.includes('/calls/')) { receiptRequests++; await waitForReceipt?.(); }
       if (options.gatewayRejection && !calls.has(id)) {
         res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"error":{"code":"platform_receipt_unavailable"}}'); return;
       }
-      if (calls.has(id) && grantModels.get(req.headers.authorization?.slice(7)) !== callModels.get(id)) {
+      if (calls.has(id) && !productProof && grantModels.get(req.headers.authorization?.slice(7)) !== callModels.get(id)) {
         res.writeHead(403, { 'content-type': 'application/json' }); res.end('{"error":"wrong_model"}'); return;
       }
       if (req.url.includes('/videos/') && calls.has(id)) {
         res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({id, task_id: 'provider-task', status: calls.get(id) === 'SETTLED' ? 'SUCCESS' : 'QUEUED'})); return;
       }
       res.writeHead(options.gatewayContract?.receipt.http_status ?? (calls.has(id) ? 200 : 404), { 'content-type': 'application/json' });
-      const receiptBody = options.gatewayContract?.receipt.raw_body ?? JSON.stringify(calls.has(id) ? { call_id: id, status: calls.get(id), ...options.receiptFields } : { error: 'not_found' });
+      const receiptBody = options.gatewayContract?.receipt.raw_body ?? JSON.stringify(calls.has(id) ? { call_id: productProof ? 'pc_scoped' : id, ...(productProof && { idempotency_key: id, credit_scope: 'product_v1', funding_product_id: 'superwagie', asset: 'CREDIT/6' }), status: calls.get(id), ...options.receiptFields } : { error: 'not_found' });
       await options.beforeReceiptSend?.();
       res.end(receiptBody); return;
     }
@@ -93,7 +99,7 @@ const fixture = async (options = {}) => {
       res.writeHead(200, { 'content-type': 'audio/mpeg' });
       res.end(Buffer.from('media-mp3-bytes')); return;
     }
-    expect(grantModels.get(req.headers.authorization?.slice(7))).toBe(body.model);
+    if (!productProof) expect(grantModels.get(req.headers.authorization?.slice(7))).toBe(body.model);
     expect(req.headers['x-unihub-task-id']).toMatch(/^uh_task_/);
     expect(body.stream).toBe(true);
     expect(body.stream_options.include_usage).toBe(true);
@@ -121,6 +127,11 @@ const fixture = async (options = {}) => {
   const env = { OPENCHAMBER_UNIHUB_GATEWAY_URL: `http://127.0.0.1:${server.address().port}/platform/v1`, OPENCHAMBER_UNIHUB_REDIRECT_URI: 'http://localhost:57991/api/platform-account/callback', OPENCHAMBER_UNIHUB_MODELS: JSON.stringify([{ id: 'fixture', name: 'Fixture', context: 8192, maxOutput: 100 }]), OPENCHAMBER_UNIHUB_MEDIA_MODELS: JSON.stringify(['qwen3-tts-flash', 'qwen3-asr-flash', 'qwen-image-2.0', 'wan2.6-t2v']) };
   const account = {
     actor: () => { if (!enabled) throw new Error('expired'); return { actingUserId: currentActor, billingAccountId: selected, authSession };  },
+    usesProductCreditWallet: async () => options.productCredit ?? false,
+    proxyProductModel: async (_identity, { callId, body, signal }) => fetch(env.OPENCHAMBER_UNIHUB_GATEWAY_URL + (body === undefined ? '/calls/' + encodeURIComponent(callId) : '/chat/completions'), {
+      method: body === undefined ? 'GET' : 'POST', body, signal,
+      headers: { Authorization: 'Bearer uh_key_fixture', 'X-UniHub-Product-Authorization': 'proof-' + productRequests.length, 'X-UniHub-Task-ID': 'uh_task_fixture', 'Idempotency-Key': callId },
+    }),
     request: async (_identity, target, init) => {
       const body = JSON.parse(init.body); grants.push({ target, body });
       await waitForGrant?.();
@@ -141,7 +152,7 @@ const fixture = async (options = {}) => {
   };
   const prepare = (callId, sid = 'ses_one') => internal('/prepare', { sessionID: sid, callID: callId, model: 'fixture', kind: 'primary' });
   const completion = (callId, sid = 'ses_one', content = 'hi') => internal('/v1/chat/completions', { model: 'fixture', stream: true, messages: [{ role: 'user', content }] }, { 'x-unihub-session-id': sid, 'idempotency-key': callId });
-  return { runtime: () => runtime, internal, prepare, completion, dir, requests: () => requests, receiptRequests: () => receiptRequests, grants, calls, callModels,
+  return { runtime: () => runtime, productRequests, internal, prepare, completion, dir, requests: () => requests, receiptRequests: () => receiptRequests, grants, calls, callModels,
     select: (value) => { selected = value; }, selectActor: (value) => { currentActor = value; }, relogin: () => { authSession = 'login-2'; }, expire: () => { enabled = false; }, enable: () => { enabled = true; }, enterprise: () => { enterprise = true; }, partial: () => { mode = 'partial'; }, hold: () => { mode = 'held'; }, release: () => release?.(), newUnadmittedPrompt: () => { promptID = 'msg_unadmitted'; }, setPrompt: (value) => { promptID = value; }, finished: () => { idle = Date.now(); },
     gatewayMode: (value) => { mode = value; },
     restart: async () => { await runtime.close(); runtime = await create(); },
@@ -163,6 +174,22 @@ const fixture = async (options = {}) => {
     },
   };
 };
+
+it('uses the server-only product key and proof for a product credit call and original-key receipt', async () => {
+  const f = await fixture({ productCredit: true });
+  await f.runtime().admit(alice, session(), 'msg_test');
+  const prepared = await f.prepare('call_product');
+  expect(prepared.status).toBe(200);
+  expect(await prepared.text()).not.toMatch(/uh_key_|proof-/);
+  const completed = await f.completion('call_product');
+  expect(completed.status).toBe(200);
+  expect(await completed.text()).toContain('[DONE]');
+  await f.runtime().reconcile(alice, 'ses_one');
+  expect(f.productRequests).toContainEqual({ method: 'POST', path: '/platform/v1/chat/completions', proof: 'proof-0' });
+  expect(f.productRequests.some(({ method, path }) => method === 'GET' && path === '/platform/v1/calls/call_product')).toBe(true);
+  expect(f.grants).toHaveLength(0);
+  expect(f.runtime().status(alice, 'ses_one').calls[0]).toMatchObject({ status: 'SETTLED', asset: 'CREDIT/6' });
+});
 
 const managedIpcFixture = async (options = {}) => {
   const f = await fixture({ ...options, trustedBoundary: true });

@@ -173,3 +173,13 @@ actions. Credits readiness comes from the server, and missing readiness keeps
 activation unavailable. A funding refusal opens the existing credits target,
 which chooses membership or add-ons from the read membership state. That
 destination never starts a payment or replays the model request.
+
+## Shared wallet view
+
+When the verified account reports product-credit billing, the Wallet tab
+shows shared cash, top-ups, product orders and versioned renewal settings.
+Changing a selection has no financial effect until the user confirms it.
+Membership and usage shows this product's spendable credit total and original
+batch expiry dates. A membership expiry preserves unexpired pack amounts on
+screen while the spendable total is zero. An expired-membership model response
+opens renewal. An insufficient-credit response opens purchase choices.

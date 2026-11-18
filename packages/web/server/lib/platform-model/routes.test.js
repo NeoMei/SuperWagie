@@ -11,6 +11,20 @@ import { createUnavailablePlatformModelRuntime } from './degraded.js';
 import { createOpenCodeRequestReadiness } from '../opencode/request-readiness.js';
 
 describe('platform prompt admission routes', () => {
+  it('refuses the old managed account provider after product opt-in while allowing BYOK', async () => {
+    const app = express();
+    let providerID = 'superwagie-account-legacy-key';
+    registerPlatformModelRoutes(app, {
+      runtime: { authorizeSession() {} }, resolveIdentity: () => ({ type: 'client', token: 'owner' }),
+      productCreditsEnabled: () => true, isRequestOriginAllowed: () => true,
+      readSession: async () => ({ model: { providerID } }),
+    });
+    app.post('/api/session/ses_one/prompt', (_req, res) => res.json({ forwarded: true }));
+    await request(app).post('/api/session/ses_one/prompt').send({}).expect(403, { error: 'platform_product_managed_provider_required' });
+    providerID = 'user-byok';
+    await request(app).post('/api/session/ses_one/prompt').send({}).expect(200, { forwarded: true });
+  });
+
   it('stops before native session reads when the request readiness gate closes the request', async () => {
     const app = express();
     let read = 0;

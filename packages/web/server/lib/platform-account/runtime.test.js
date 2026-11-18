@@ -51,6 +51,8 @@ const fixture = async (options = {}) => {
   app.use('/v1', (req, res, next) => { expect(req.headers.authorization).toBe(`Bearer ${currentAccess}`); next(); });
   app.get('/v1/me', (_req, res) => res.json({ id: 'actor-a', name: 'Alice', email: 'alice@example.test' }));
   app.get('/v1/accounts', (_req, res) => res.json([{ id: 'personal-a', name: 'Alice', kind: 'personal', role: 'owner' }, { id: 'team-a', name: 'Team A', kind: 'team', role: 'member' }]));
+  app.get('/v1/capabilities', (req, res) => res.json({ product_id: 'superwagie', product_credit_wallet: req.get('X-UniHub-Product-Credit-Wallet') === 'product_v1' && options.productCredits !== undefined }));
+  app.get('/v1/accounts/:account/product-credits', (req, res) => req.get('X-UniHub-Product-Credit-Wallet') === 'product_v1' ? res.json(options.productCredits) : res.sendStatus(403));
   app.get('/v1/accounts/:account/subscriptions', (_req, res) => res.json([{ id: 'sub-a', product_id: 'superwagie', status: 'active', paid_through: new Date(clock + 100000).toISOString(), offer: { name: 'Test plan', ...options.subscriptionOffer } }]));
   app.get('/v1/accounts/:account/credits', (_req, res) => failCredits ? res.status(503).end() : res.json(options.creditBatches ?? [
     { id: 'credit-a', available: '9007199254740993', reserved: '7', starts_at: new Date(clock - 1000).toISOString(), expires_at: new Date(clock + 100000).toISOString(), frozen: false },
@@ -85,6 +87,26 @@ const apiKeyApp = (runtime, who = identity) => {
 };
 
 describe('personal SuperWagie API key metadata', () => {
+  it('keeps product capability closed when no private model broker is available', async () => {
+    const f = await fixture({ productCredits: {} });
+    await f.runtime.callback(await f.begin());
+    const projection = await f.runtime.selectAccount(identity, 'personal-a');
+    expect(projection.productCreditWallet).toBeUndefined();
+    expect(projection.credits.available).toBe('9007199254740993');
+    expect(f.runtime.captureCommerceSession(identity).productWalletSupported).toBe(false);
+  });
+
+  it('keeps unexpired product packs visible on an inactive membership and never sums legacy credits', async () => {
+    const paidThrough = new Date(Date.now() - 10_000).toISOString();
+    const startsAt = new Date(Date.now() - 60_000).toISOString();
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const f = await fixture({ productWalletReady: () => true, productCredits: { product_id: 'superwagie', credit_scope: 'product_v1', available: '0', reserved: '0', active_membership: false, membership_paid_through: paidThrough, batches: [{ id: 'pack', available: '8000000', reserved: '0', starts_at: startsAt, expires_at: expiresAt, frozen: true, kind: 'addon', source_scope: 'product', product_id: 'superwagie' }] } });
+    await f.runtime.callback(await f.begin());
+    const projection = await f.runtime.selectAccount(identity, 'personal-a');
+    expect(projection).toMatchObject({ productCreditWallet: true, consoleUrl: null, credits: { available: '0', reserved: '0', activeMembership: false, membershipPaidThrough: paidThrough, batches: [{ id: 'pack', available: '8000000', expiresAt }] } });
+    expect(projection.credits.batches).toHaveLength(1);
+  });
+
   it('permits only exact quote routes on the captured payer and refuses a replaced session', async () => {
     const f = await fixture(); await f.runtime.callback(await f.begin());
     await f.runtime.selectAccount(identity, 'personal-a');

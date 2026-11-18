@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
+import { ownProductCreditsSchema, productWalletCapability, productWalletHeaders } from './product-wallet.js';
 import { writeFileAtomic } from '../opencode/atomic-write.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { createPlatformKnowledgeAdapter } from './knowledge.js';
@@ -92,12 +93,12 @@ const retryAfterFromHeader = (value) => {
 const registrationResultSchema = z.object({ registration_id: z.string().min(1), status: z.enum(['CREATED', 'UNKNOWN']), retry_after: z.number().int().nonnegative().optional() });
 const passwordIssuesSchema = z.array(z.enum(['too_short', 'too_long', 'too_many_bytes', 'control_character', 'letter_case_and_digit_required', 'special_character_required', 'repeated_character'])).max(7);
 const tokenSchema = z.object({ access_token: z.string().min(1), id_token: z.string().min(1), refresh_token: z.string().min(1).optional(), token_type: z.string(), expires_in: z.number().int().positive() });
-const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'credit_rates_unavailable', 'quote_invalidated', 'subscription_required', 'payment_not_configured']), password_issues: passwordIssuesSchema.optional().catch(undefined), retry_after: retryAfterSchema.optional().catch(undefined), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
+const upstreamErrorSchema = z.object({ error: z.enum(['invalid_request', 'invalid_password', 'invalid_credentials', 'invalid_client', 'invalid_grant', 'client_not_enabled', 'origin_not_allowed', 'authorization_conflict', 'idempotency_conflict', 'registration_conflict', 'interaction_required', 'rate_limited', 'invalid_identity_response', 'identity_policy_unavailable', 'identity_unavailable', 'registration_policy_unavailable', 'service_unavailable', 'forbidden', 'unauthenticated', 'not_found', 'conflict', 'operation_pending', 'insufficient_product_credits', 'product_membership_expired', 'product_membership_required', 'insufficient_credits', 'insufficient_funds', 'unsupported_plan_change', 'refund_requires_review', 'credit_rates_unavailable', 'quote_invalidated', 'subscription_required', 'payment_not_configured']), password_issues: passwordIssuesSchema.optional().catch(undefined), retry_after: retryAfterSchema.optional().catch(undefined), interaction: z.object({ kind: z.enum(['mfa', 'mfa_enrollment', 'password_change', 'consent', 'captcha', 'email_verification', 'provider_policy', 'registration_policy']) }).optional() });
 const allowedApiPaths = new Map([
-  ['GET', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/calls\?limit=1&from=[A-Za-z0-9%.-]+&to=[A-Za-z0-9%.-]+$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-pool\/)?(?:usage\/summary|calls\?limit=20)$/, /^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|checkouts|api-keys)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/checkouts\/[A-Za-z0-9_-]+$/]],
-  ['POST', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/checkouts\/[A-Za-z0-9_-]+\/(?:reconcile|close|refund)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/api-keys\/[A-Za-z0-9_-]+\/(?:models|scope)$/, /^\/v1\/me\/password$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-credentials|model-discovery|api-keys|orders|quotes|checkouts)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/quotes\/[A-Za-z0-9_-]+\/accept$/]],
+  ['GET', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/calls\?limit=1&from=[A-Za-z0-9%.-]+&to=[A-Za-z0-9%.-]+$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-pool\/)?(?:usage\/summary|calls\?limit=20)$/, /^\/v1\/me$/, /^\/v1\/me\/profile$/, /^\/v1\/me\/avatar$/, /^\/v1\/(?:accounts|capabilities|catalog|products)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:subscriptions|credits|resources|wallets|orders|checkouts|cash-checkouts|api-keys|product-wallet|product-credits)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:cash-)?checkouts\/[A-Za-z0-9_-]+$/]],
+  ['POST', [/^\/v1\/accounts\/[A-Za-z0-9_-]+\/checkouts\/[A-Za-z0-9_-]+\/(?:reconcile|close|refund)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/cash-checkouts\/ct_[A-Za-z0-9]{1,32}\/(?:reconcile|close)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/api-keys\/[A-Za-z0-9_-]+\/(?:models|scope)$/, /^\/v1\/me\/password$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/(?:model-credentials|model-discovery|api-keys|orders|quotes|checkouts|cash-checkouts)$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/quotes\/[A-Za-z0-9_-]+\/accept$/]],
   ['PATCH', [/^\/v1\/me\/profile$/]],
-  ['PUT', [/^\/v1\/me\/avatar$/]],
+  ['PUT', [/^\/v1\/me\/avatar$/, /^\/v1\/accounts\/[A-Za-z0-9_-]+\/product-wallet\/[a-z0-9][a-z0-9_-]{0,63}\/renewal$/]],
 ]);
 const random = () => crypto.randomBytes(32).toString('base64url');
 const digest = (value) => crypto.createHash('sha256').update(value).digest('base64url');
@@ -154,7 +155,7 @@ const serviceUrl = (value) => {
 };
 
 /** Identity is a validated runtime auth context. Session credentials stay encrypted in the managed data directory. */
-export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false, isModelHistoryAvailable = () => false, dataDir = null, usePublicDefaults = env === process.env, enterprise = isEnterpriseMode, usageActivityFactory = createUsageActivityRuntime, usageActivityRetryMs = 60_000 } = {}) => {
+export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fetch, now = Date.now, isManaged = () => true, isModelAvailable = () => false, isModelHistoryAvailable = () => false, dataDir = null, usePublicDefaults = env === process.env, enterprise = isEnterpriseMode, usageActivityFactory = createUsageActivityRuntime, usageActivityRetryMs = 60_000, productWalletReady = () => false, productModelProxy } = {}) => {
   if (!Number.isFinite(usageActivityRetryMs) || usageActivityRetryMs < 1) throw new TypeError('Activity retry interval must be positive');
   const salt = random();
   const sessions = new Map();
@@ -601,6 +602,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   const knowledgeAdapter = createPlatformKnowledgeAdapter({
     env, fetchImpl, now, enterprise, usePublicDefaults,
     captureSession: (identity) => {
+      if (productModelProxy) reject('platform_knowledge_request_unavailable', 503);
       const session = getSession(identity);
       return { session, key: namespace(identity), accountVersion: session.accountVersion, accessToken: session.accessToken, user: session.user, accountId: session.accountId };
     },
@@ -616,19 +618,47 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
       });
     },
   });
+  const productWalletSupported = () => isManaged() && productWalletReady() && !enterprise();
+  const productWalletEnabled = async (key, session) => productWalletSupported() &&
+    productWalletCapability.parse(await sessionRequest(key, session, '/v1/capabilities', productWalletHeaders())).product_credit_wallet === true;
+  const usesProductCreditWallet = async (identity) => {
+    if (!productWalletSupported()) return false;
+    const session = await ensureFreshSession(identity);
+    const key = namespace(identity);
+    const enabled = await productWalletEnabled(key, session);
+    assertCurrentSession(key, session, session.accountVersion);
+    return enabled;
+  };
+  const proxyProductModel = async (identity, { accountId, model, callId, body, signal }) => {
+    if (!productModelProxy || !isManaged() || enterprise() || body !== undefined && !productWalletSupported()) reject('platform_model_access_unavailable', 503);
+    const session = await ensureFreshSession(identity);
+    const key = namespace(identity);
+    const assertCurrent = () => {
+      if (accountId !== session.accountId || enterprise() || pendingAccountSelections.has(key)) reject('platform_session_changed', 409);
+      assertCurrentSession(key, session, session.accountVersion);
+    };
+    assertCurrent();
+    const response = await productModelProxy({ actorToken: session.accessToken, accountId, model, callId, body, signal });
+    try { assertCurrent(); } catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
+    return response;
+  };
   const accountProjection = async (key, session, c, accounts, accountId) => {
     const account = accounts.find((item) => item.id === accountId);
+    const productCreditWallet = Boolean(account && await productWalletEnabled(key, session));
+    const versioned = productCreditWallet ? productWalletHeaders() : undefined;
+    let productCredits;
     let membership = [];
     let available = '0';
     let reserved = '0';
     const batches = [];
     if (account) {
       const [subscriptions, credits] = await Promise.all([
-        sessionRequest(key, session, `/v1/accounts/${encodeURIComponent(account.id)}/subscriptions`),
-        sessionRequest(key, session, `/v1/accounts/${encodeURIComponent(account.id)}/credits`),
+        sessionRequest(key, session, `/v1/accounts/${encodeURIComponent(account.id)}/subscriptions`, versioned),
+        sessionRequest(key, session, `/v1/accounts/${encodeURIComponent(account.id)}/${productCreditWallet ? 'product-credits' : 'credits'}`, versioned),
       ]);
       membership = subscriptionsSchema.parse(subscriptions).filter((item) => item.product_id === 'superwagie');
-      for (const batch of creditsSchema.parse(credits)) {
+      productCredits = productCreditWallet ? ownProductCreditsSchema.parse(credits) : undefined;
+      for (const batch of productCredits?.batches ?? creditsSchema.parse(credits)) {
         if (!batch.frozen && Date.parse(batch.starts_at) <= now() && Date.parse(batch.expires_at) > now()) available = String(BigInt(available) + BigInt(batch.available));
         reserved = String(BigInt(reserved) + BigInt(batch.reserved));
         const own = batch.source_scope === 'product' && batch.product_id === 'superwagie' && (batch.kind === 'subscription' || batch.kind === 'addon');
@@ -637,10 +667,14 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
         batches.push(summary);
       }
     }
-    const consoleUrl = c.console ? new URL(c.console) : null;
+    if (productCredits) {
+      available = productCredits.available;
+      reserved = productCredits.reserved;
+    }
+    const consoleUrl = !productCreditWallet && c.console ? new URL(c.console) : null;
     if (account) consoleUrl?.searchParams.set('account', account.id);
     consoleUrl?.searchParams.set('product', 'superwagie');
-    return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, credits: { available, reserved, batches }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable', modelRecoveryAvailable: isModelHistoryAvailable() };
+    return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, ...(productCredits && { productCreditWallet: true }), credits: { available, reserved, batches, ...(productCredits && { activeMembership: productCredits.active_membership, membershipPaidThrough: productCredits.membership_paid_through ?? undefined }) }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable', modelRecoveryAvailable: isModelHistoryAvailable() };
   };
   const readApiKeys = async (identity, accountId) => {
     if (!apiKeysAccountSchema.safeParse(accountId).success) reject('invalid_request', 400);
@@ -1059,7 +1093,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const accountId = session.accountId;
     const accountVersion = session.accountVersion;
     if (!accountId) reject('platform_account_required', 409);
-    return { actingUserId: session.user.id, billingAccountId: accountId, serviceId: crypto.createHash('sha256').update(JSON.stringify([session.api, session.clientId])).digest('hex'), request: async (path, init) => {
+    return { actingUserId: session.user.id, billingAccountId: accountId, productWalletSupported: productWalletSupported(), serviceId: crypto.createHash('sha256').update(JSON.stringify([session.api, session.clientId])).digest('hex'), request: async (path, init) => {
       assertCurrentSession(key, session, accountVersion);
       const targetAccount = /^\/v1\/accounts\/([^/]+)\//.exec(path)?.[1];
       if (targetAccount && targetAccount !== encodeURIComponent(accountId)) reject('platform_account_forbidden', 403);
@@ -1113,6 +1147,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
   // The caller has already persisted the immutable logical call. Every error
   // after this point is an unknown outcome and can only use result recovery.
   const dispatchKnowledge = async (identity, { taskId, callId, model, body }, operation) => {
+    if (productModelProxy) reject('platform_knowledge_request_unavailable', 503);
     if (!/^[A-Za-z0-9._:-]{1,200}$/.test(taskId ?? '') || !/^wk_[a-f0-9]{60}$/.test(callId ?? '') || !/^[A-Za-z0-9._:/-]{1,128}$/.test(model ?? '') || !Buffer.isBuffer(body) || body.length < 1 || body.length > 2 * 1024 * 1024) reject('platform_knowledge_request_invalid', 400);
     const gatewayValue = env.OPENCHAMBER_UNIHUB_GATEWAY_URL || (usePublicDefaults ? 'https://llmrouter.quukk.com/platform/v1' : '');
     let gateway;
@@ -1155,7 +1190,7 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const authSession = crypto.createHash('sha256').update(JSON.stringify([session.generation ?? '', session.accountVersion])).digest('hex');
     return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt, authSession };
   };
-  return { publicSession, identitySession, identityAccounts, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
+  return { publicSession, identitySession, identityAccounts, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, usesProductCreditWallet, proxyProductModel, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
     logout: (identity) => { const session = restoreSession(identity); const key = namespace(identity); revokePlatformSession(session); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: async (identity, path, init) => { const session = await ensureFreshSession(identity); const key = namespace(identity); return sessionRequest(key, session, path, init); },
     readUsage, readApiKeys, startUsageActivity, wakeUsageActivity: () => { if (!activityClosed) void activityRuntimePromise?.then((runtime) => runtime.wake()).catch(() => {}); }, close,

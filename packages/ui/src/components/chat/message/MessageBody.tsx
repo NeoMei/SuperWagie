@@ -1,5 +1,5 @@
 import { ManagedModelFundingNotice } from '@/components/chat/ManagedModelFundingNotice';
-import { isManagedModelFundingRequired, isManagedModelRequestTooLarge } from '@/components/chat/managedModelError';
+import { isManagedModelFundingRequired, isManagedModelMembershipExpired, isManagedModelRequestTooLarge } from '@/components/chat/managedModelError';
 import React from 'react';
 import type { FilePart, Part } from '@/lib/opencode/model';
 
@@ -1652,7 +1652,8 @@ const AssistantMessageBody = React.memo(({
     );
 
     const gatewayRequestTooLarge = isManagedModelRequestTooLarge(errorMessage ?? '', errorResponseBody);
-    const fundingRequired = !gatewayRequestTooLarge && isManagedModelFundingRequired(errorMessage ?? '', errorResponseBody);
+    const membershipExpired = !gatewayRequestTooLarge && isManagedModelMembershipExpired(errorMessage ?? '', errorResponseBody);
+    const fundingRequired = !gatewayRequestTooLarge && (membershipExpired || isManagedModelFundingRequired(errorMessage ?? '', errorResponseBody));
     const visibleErrorMessage = gatewayRequestTooLarge ? t('platformAccount.gatewayRequestTooLarge') : errorMessage ?? '';
     const errorDetails = errorResponseBody || (gatewayRequestTooLarge ? errorMessage : undefined);
     const showErrorMessage = (fundingRequired || gatewayRequestTooLarge || Boolean(errorMessage)) && isSliceEnd;
@@ -2291,7 +2292,7 @@ const AssistantMessageBody = React.memo(({
                     {renderedParts}
                     {showErrorMessage && (
                         <FadeInOnReveal key="assistant-error">
-                            {fundingRequired ? <ManagedModelFundingNotice /> : (
+                            {fundingRequired ? <ManagedModelFundingNotice membershipExpired={membershipExpired} /> : (
                                 <div className="group/assistant-text relative mt-3 max-w-full break-words rounded-2xl bg-[var(--status-info-background)] px-4 py-3 text-base leading-relaxed">
                                     <div className="flex items-center gap-3">
                                         <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />

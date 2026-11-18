@@ -47,6 +47,7 @@ import {
 import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { createPlatformAccountRuntime } from './lib/platform-account/runtime.js';
+import { createProductModelProxyClient } from './lib/platform-account/product-model-proxy.js';
 import { createPlatformAccessGate } from './lib/platform-account/access-gate.js';
 import { registerPlatformAccountRoutes } from './lib/platform-account/routes.js';
 import { createPlatformCommerceRuntime } from './lib/platform-account/commerce.js';
@@ -415,6 +416,7 @@ let agentToolRuntime = null;
 let limitFailoverRuntime = null;
 let managedConfigRuntime = null;
 let platformModelRuntime = null;
+let productModelProxy = null;
 let platformAccountRuntime = null;
 let platformCommerceRuntime = null;
 let platformProfileRuntime = null;
@@ -1465,7 +1467,7 @@ let modelBootstrapRuntime = null;
 const modelConfigurationRuntime = createModelConfigurationRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   readOpenCodeCredentials,
-  readModelBootstrapCredential: (ref) => modelBootstrapStore.getSecret(ref),
+  readModelBootstrapCredential: (ref, connectionId) => productModelProxy && connectionId?.startsWith('account-key-') ? null : modelBootstrapStore.getSecret(ref),
   deleteModelBootstrapCredential: (ref) => modelBootstrapStore.deleteSecret(ref),
   prepareBindingChange: (...args) => knowledgeLibraryRuntime.prepareModelBindingChange(...args),
 });
@@ -2471,11 +2473,16 @@ async function main(options = {}) {
     authorizeRequest: (req) => agentToolRuntime.authorizeRequest(req),
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
   });
+  const productModelOrigin = options.productModelProxyOrigin ?? process.env.OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL;
+  productModelProxy = productModelOrigin && !isExternalOpenCode && !ENV_SKIP_OPENCODE_START
+    ? createProductModelProxyClient(productModelOrigin)
+    : undefined;
   platformAccountRuntime = createPlatformAccountRuntime({
     dataDir: OPENCHAMBER_DATA_DIR,
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     isModelAvailable: () => platformModelRuntime?.enabled() === true,
     isModelHistoryAvailable: () => platformModelRuntime?.historyAvailable?.() === true,
+    productModelProxy, productWalletReady: () => Boolean(productModelProxy) && platformModelRuntime?.enabled() === true,
   });
   const mobileOfficialAccess = createMobileOfficialAccess({
     getAccountRuntime: () => platformAccountRuntime,
@@ -2507,7 +2514,7 @@ async function main(options = {}) {
     platformAccount: platformAccountRuntime,
     uniHubClient: createUniHubBootstrapClient({ platformAccount: platformAccountRuntime }),
     readLegacyModels: () => readAccountKeyLegacyModels(() => knowledgeLibraryRuntime.getStatus({ includeModelConfiguration: true })),
-    accountKeyProvider: !isExternalOpenCode && !ENV_SKIP_OPENCODE_START
+    accountKeyProvider: !productModelProxy && !isExternalOpenCode && !ENV_SKIP_OPENCODE_START
       ? createAccountKeyProvider({
         assertRuntime: () => {
           const desktop = process.env.OPENCHAMBER_RUNTIME === 'desktop';
@@ -2954,7 +2961,7 @@ async function main(options = {}) {
   registerPlatformAccountRoutes(app, {
     runtime: platformAccountRuntime,
     onSessionRead: async (identity) => {
-      await modelBootstrapRuntime.accountKey.read({ identity, owner: identity, accountId: platformAccountRuntime.actor(identity).billingAccountId });
+      if (!productModelProxy) await modelBootstrapRuntime.accountKey.read({ identity, owner: identity, accountId: platformAccountRuntime.actor(identity).billingAccountId });
       const state = knowledgeLibraryRuntime.status();
       if (state.backend.state === 'running' && [state.error, state.backend.error].includes('account_key_consumer_owner_unavailable')) await knowledgeLibraryRuntime.start();
       await conversationMemoryRuntime.start().catch(() => {
@@ -2976,6 +2983,7 @@ async function main(options = {}) {
   });
   registerPlatformModelRoutes(app, {
     runtime: platformModelRuntime,
+    productCreditsEnabled: (identity) => platformAccountRuntime.usesProductCreditWallet(identity),
     isRequestOriginAllowed,
     resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
     waitForOpenCodeRequest: createOpenCodeRequestReadiness({
@@ -3145,7 +3153,7 @@ async function main(options = {}) {
     conversationMemoryRuntime,
     knowledgeLibraryRuntime,
     modelConfigurationRuntime,
-    modelBootstrapRuntime,
+    modelBootstrapRuntime: productModelProxy ? null : modelBootstrapRuntime,
     resolvePlatformIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
     resolveAuthContext: (req, res, options) => uiAuthController.resolveAuthContext(req, res, options),
     sessionWarmingRuntime,

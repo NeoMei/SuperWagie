@@ -26,6 +26,7 @@
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src",
     "test": "vitest run",
     "start": "node bin/cli.js serve",
+    "start:product-model-proxy": "node server/product-model-proxy.mjs",
     "prepare:presentation": "node ./scripts/prepare-presentation-runtimes.mjs"
   },
   "dependencies": {

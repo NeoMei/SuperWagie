@@ -191,3 +191,14 @@ returns `platform_model_credits_required`. The UI opens credit membership or
 add-ons for that exact refusal. Missing asset and cash receipts retain
 `platform_model_funding_required` and its cash destination. Both require the
 original call's REJECTED receipt; neither starts another model call.
+
+## Product-credit chat
+
+An opted-in chat permit binds each new call to the verified product-credit
+mode before dispatch. The journal records that scope with the original call
+ID. The isolated operator proxy obtains proof and sends the request and
+idempotency key to the gateway. Receipt reads verify the original call ID
+or authenticated alias, product scope, SuperWagie funding product and credit
+asset. Existing admitted calls continue using the billing mode recorded when
+they started. A definitive pre-admission failure can release the local call.
+An uncertain result stays subject to reconciliation under its original mode.

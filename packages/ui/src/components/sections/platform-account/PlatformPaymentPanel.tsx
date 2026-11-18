@@ -100,7 +100,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const [codeImage, setCodeImage] = React.useState<{ source: string; image: string } | null>(null);
   const [refundConfirmation, setRefundConfirmation] = React.useState(false);
   const waiting = WAITING.includes(checkout.payment_status) && !checkout.refund_status;
-  const refundable = checkout.payment_status === 'PAID' && !checkout.refund_status;
+  const refundable = !checkout.walletTopUp && checkout.payment_status === 'PAID' && !checkout.refund_status;
   const checkable = waiting || checkout.refund_status === 'PENDING' || (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'PENDING');
   const session = waiting ? checkout.session : undefined;
   const remaining = useCountdown(waiting ? session?.expires_at ?? checkout.expires_at : undefined);
@@ -108,6 +108,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const codeUrl = session?.kind === 'qr' && !expired && !compact ? session.url : null;
   const qr = codeUrl && codeImage?.source === codeUrl ? codeImage : null;
   const provider = checkout.provider;
+  const offerName = checkout.walletTopUp ? t('platformAccount.productWallet.topUp') : checkout.offer_name;
   const scanHint = t(provider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.scanWithAlipay');
   const providerName = t(provider === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay');
 
@@ -132,7 +133,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
     return <div className="oc-tile rounded-lg px-3 py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <StatusDot tone={toneFor(checkout)} />
-        <span className="min-w-0 flex-1 truncate" dir="auto">{checkout.offer_name}</span>
+        <span className="min-w-0 flex-1 truncate" dir="auto">{offerName}</span>
         <span className="shrink-0 tabular-nums text-muted-foreground">¥{formatPlatformMoney(checkout.amount)}</span>
         <span className={`${SETTINGS_HELPER_CLASS} shrink-0`}>{providerName}</span>
         <span className={`${SETTINGS_HELPER_CLASS} shrink-0`}>{t(shortStateKey(checkout))}</span>
@@ -152,7 +153,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
       <div className="min-w-0">
         <p className="typography-micro uppercase tracking-wide text-muted-foreground">{t(waiting ? 'platformAccount.activePayment' : 'platformAccount.recentPayment')}</p>
-        <p className="truncate typography-ui-label font-medium" dir="auto">{checkout.offer_name}</p>
+        <p className="truncate typography-ui-label font-medium" dir="auto">{offerName}</p>
       </div>
       <span className="flex items-center gap-1.5 text-muted-foreground">
         <StatusDot tone={toneFor(checkout)} />

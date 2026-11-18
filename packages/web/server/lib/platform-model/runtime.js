@@ -45,20 +45,23 @@ const handshakeSchema = z.object({
 const identifier = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
 const modelSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/), name: z.string().min(1).max(120), context: z.number().int().positive().max(2_000_000), maxOutput: z.number().int().positive().max(100_000) }).strict();
 const grantSchema = z.object({ token: z.string().min(1), actor_id: z.string(), account_id: z.string(), task_id: z.string(), origin_product_id: z.literal('superwagie'), models: z.array(z.string()), expires_at: z.string() });
-const gatewayRefusalSchema = z.object({ error: z.object({ code: z.enum(['platform_billing_unavailable', 'platform_insufficient_funds', 'request_too_large', 'platform_request_body_too_large']), stage: z.string().optional() }) });
+const gatewayRefusalSchema = z.object({ error: z.object({ code: z.enum(['platform_billing_unavailable', 'platform_insufficient_funds', 'platform_model_credits_required', 'product_membership_expired', 'platform_model_access_unavailable', 'platform_session_expired', 'platform_gateway_call_incomplete', 'platform_request_invalid', 'request_too_large', 'platform_request_body_too_large']), stage: z.string().optional() }) });
 const readGatewayRefusal = async (response) => {
-  if (response.status !== 402 && response.status !== 413) return null;
+  if (![400, 401, 402, 403, 413, 502, 503].includes(response.status)) return null;
   try {
     const parsed = gatewayRefusalSchema.safeParse(JSON.parse((await readBoundedResponse(response, 4096)).toString('utf8')));
     if (!parsed.success) return null;
-    if (response.status === 402 && ['platform_billing_unavailable', 'platform_insufficient_funds'].includes(parsed.data.error.code)) return 'funding';
+    const { code, stage } = parsed.data.error;
+    if (response.status === 403 && code === 'product_membership_expired') return stage === 'pre_admission' ? 'membership-expired-pre-admission' : 'membership-expired';
+    if (response.status === 402 && ['platform_billing_unavailable', 'platform_insufficient_funds', 'platform_model_credits_required'].includes(code)) return 'funding';
+    if (stage === 'pre_admission' && ['platform_model_access_unavailable', 'platform_session_expired', 'platform_gateway_call_incomplete', 'platform_request_invalid'].includes(code)) return 'proxy-pre-admission';
     if (response.status === 413 && parsed.data.error.code === 'platform_request_body_too_large' && parsed.data.error.stage === 'pre_admission') return 'pre-admission-body-limit';
     if (response.status === 413 && ['request_too_large', 'platform_request_body_too_large'].includes(parsed.data.error.code)) return 'request-too-large';
   } catch { /* Malformed or oversized errors do not establish a refusal reason. */ }
   return null;
 };
 const receiptSchema = z.object({
-  call_id: identifier,
+  call_id: identifier, idempotency_key: identifier.optional(), credit_scope: z.literal('product_v1').optional(), funding_product_id: z.string().optional(),
   asset: modelChargeAssetSchema.optional(),
   status: z.enum(['RESERVED', 'RESERVING', 'RESERVE_UNKNOWN', 'UNKNOWN', 'SETTLE_PENDING', 'RELEASE_PENDING', 'SETTLED', 'RELEASED', 'REJECTED']),
   charged: z.union([z.string().regex(/^\d+$/), z.literal('')]).optional(),
@@ -218,6 +221,14 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     scopeFor(identity, true);
     return task;
   };
+  const productMode = (identity) => getAccountRuntime().usesProductCreditWallet?.(identity) ?? false;
+  const legacyHeaders = (grant, taskID) => ({ Authorization: `Bearer ${grant.token}`, 'X-UniHub-Task-ID': taskID });
+  const proxyProductModel = (task, model, identity, request) => {
+    const account = getAccountRuntime();
+    if (!account.proxyProductModel) refuse('platform_model_access_unavailable', 503);
+    scopeFor(identity);
+    return account.proxyProductModel(identity, { accountId: task.accountID, model, ...request });
+  };
   const credential = async (task, identity) => {
     const current = scopeFor(identity);
     if (current.actorID !== task.actorID || current.owner !== task.owner || current.accountID !== task.accountID) refuse('platform_model_scope_restart_required', 403);
@@ -250,7 +261,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   };
   const mediaCall = async ({ identity, sessionID, callID, model, operation, inputs, dispatch, validate }) => {
     checkDispatch();
-    if (MEDIA_RECOVERY_UNAVAILABLE.has(operation)) refuse('platform_media_recovery_unavailable', 503);
+    if (MEDIA_RECOVERY_UNAVAILABLE.has(operation) || await productMode(identity)) refuse('platform_media_recovery_unavailable', 503);
     const task = taskFor(identity, sessionID);
     const idempotencyKey = identifier.parse(callID);
     await mediaCredential(task, identity, model);
@@ -410,9 +421,15 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     return { callID: input.callID, sessionID };
   };
   const receipt = async (task, call, identity) => {
-    const grant = call.model === task.model ? await credential(task, identity) : await mediaCredential(task, identity, call.model);
     let response;
-    try { response = await fetchImpl(`${config.gateway}/calls/${encodeURIComponent(call.id)}`, { headers: { Authorization: `Bearer ${grant.token}`, 'X-UniHub-Task-ID': task.id }, redirect: 'error', signal: AbortSignal.timeout(10_000) }); }
+    try {
+      const signal = AbortSignal.timeout(10_000);
+      if (call.creditScope === 'product_v1') response = await proxyProductModel(task, call.model, identity, { callId: call.id, signal });
+      else {
+        const grant = call.model === task.model ? await credential(task, identity) : await mediaCredential(task, identity, call.model);
+        response = await fetchImpl(`${config.gateway}/calls/${encodeURIComponent(call.id)}`, { headers: legacyHeaders(grant, task.id), redirect: 'error', signal });
+      }
+    }
     catch { refuse('platform_reconciliation_required'); }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
@@ -420,7 +437,9 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     }
     let value;
     try { value = receiptSchema.parse(JSON.parse((await readBoundedResponse(response, MAX_GATEWAY_METADATA_BYTES)).toString('utf8'))); } catch { refuse('platform_reconciliation_required'); }
-    if (value.call_id !== call.id) refuse('platform_reconciliation_required');
+    if (call.creditScope === 'product_v1') {
+      if ((value.idempotency_key ?? value.call_id) !== call.id || value.credit_scope !== 'product_v1' || value.funding_product_id !== 'superwagie' || value.asset !== 'CREDIT/6') refuse('platform_reconciliation_required');
+    } else if (value.call_id !== call.id || value.credit_scope === 'product_v1') refuse('platform_reconciliation_required');
     scopeFor(identity);
     if (terminal.has(value.status)) await store.mutate((state) => {
       scopeFor(identity);
@@ -594,7 +613,8 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     assertGeneration();
     scopeFor(identity);
     const task = existing || { id: `uh_task_${crypto.randomUUID()}`, sessionID: session.id, actorID: scope.actorID, accountID: scope.accountID, owner, model: model.id };
-    await credential(task, identity);
+    const productCredit = await productMode(identity);
+    if (!productCredit) await credential(task, identity);
     assertGeneration();
     checkDispatch();
     if (!existing) await store.mutate((state) => {
@@ -612,7 +632,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     }
     checkDispatch();
     assertGeneration();
-    permits.set(session.id, { id: crypto.randomUUID(), promptID, idle: session.time?.idle ?? null });
+    permits.set(session.id, { id: crypto.randomUUID(), promptID, idle: session.time?.idle ?? null, productCredit });
     return true;
   };
   const validatePromptPermit = async (sessionID, permit, task) => {
@@ -632,7 +652,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     await validatePromptPermit(input.sessionID, permit, task);
     if (inflight.has(input.sessionID)) refuse('platform_call_in_progress');
     if (input.model !== task.model) refuse('platform_task_model_locked');
-    await credential(task, identity);
+    if (!permit.productCredit) await credential(task, identity);
     checkDispatch();
     // A clean response can finish before the gateway's settlement outbox. Query its receipt first.
     for (const call of Object.values(store.read().calls).filter((call) => call.sessionID === input.sessionID && call.status === 'DELIVERED')) await receipt(task, call, identity);
@@ -642,7 +662,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       scopeFor(identity);
       if (state.calls[input.callID]) refuse('platform_call_already_exists');
       if (Object.values(state.calls).some((call) => call.sessionID === input.sessionID && blocksSession(call))) refuse('platform_reconciliation_required');
-      state.calls[input.callID] = { id: input.callID, sessionID: input.sessionID, taskID: task.id, model: task.model, permitID: permit.id, digest: '', status: 'PREPARED', output: false };
+      state.calls[input.callID] = { id: input.callID, sessionID: input.sessionID, taskID: task.id, model: task.model, permitID: permit.id, digest: '', status: 'PREPARED', output: false, ...(permit.productCredit && { creditScope: 'product_v1' }) };
     });
     try { await validatePromptPermit(input.sessionID, permit, task); }
     catch (error) {
@@ -671,7 +691,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     const payload = JSON.stringify(request); const digest = hash(payload);
     const abort = new AbortController();
     res.once('close', () => { if (!res.writableEnded) abort.abort(); });
-    const grant = await credential(task, identity);
+    const headers = permit.productCredit ? null : legacyHeaders(await credential(task, identity), task.id);
     if (closed || res.destroyed || req.aborted) refuse('platform_runtime_unsupported', 409);
     await validatePromptPermit(sessionID, permit, task);
     checkDispatch();
@@ -697,10 +717,22 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       assertPermit();
       if (res.destroyed || req.aborted) refuse('platform_runtime_unsupported', 409);
       upstreamStarted = true;
-      const upstream = await fetchImpl(`${config.gateway}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${grant.token}`, 'Content-Type': 'application/json', 'Idempotency-Key': callID, 'X-UniHub-Task-ID': task.id }, body: payload, redirect: 'error', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(180_000)]) });
+      const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(180_000)]);
+      const upstream = permit.productCredit
+        ? await proxyProductModel(task, task.model, identity, { callId: callID, body: payload, signal })
+        : await fetchImpl(`${config.gateway}/chat/completions`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', 'Idempotency-Key': callID }, body: payload, redirect: 'error', signal });
       if (!upstream.ok || !upstream.headers.get('content-type')?.includes('text/event-stream') || !upstream.body) {
         const refusal = await readGatewayRefusal(upstream);
         if (!upstream.bodyUsed) await upstream.body?.cancel();
+        if (permit.productCredit && ['membership-expired-pre-admission', 'proxy-pre-admission'].includes(refusal)) {
+          await store.mutate((state) => {
+            const saved = state.calls[callID];
+            if (saved.status !== 'DISPATCHED' || saved.output || saved.digest !== digest) refuse('platform_reconciliation_required');
+            saved.status = 'REJECTED';
+          });
+          if (refusal === 'membership-expired-pre-admission') refuse('product_membership_expired', 403);
+          refuse('platform_model_access_unavailable', 503);
+        }
         if (refusal === 'pre-admission-body-limit') {
           await store.mutate((state) => {
             const saved = state.calls[callID];
@@ -715,6 +747,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
         if (refusal === 'request-too-large') await store.mutate((state) => { state.calls[callID].requestBytes = Buffer.byteLength(payload); });
         const confirmed = await receipt(task, store.read().calls[callID], identity).catch(() => null);
         if (refusal === 'request-too-large') refuse('platform_gateway_request_too_large', 413);
+        if (refusal === 'membership-expired' && confirmed?.status === 'REJECTED') refuse('product_membership_expired', 403);
         if (refusal === 'funding' && confirmed?.status === 'REJECTED') refuse(confirmed.asset === 'CREDIT/6' ? 'platform_model_credits_required' : 'platform_model_funding_required', 402);
         refuse('platform_gateway_call_incomplete', 502);
       }

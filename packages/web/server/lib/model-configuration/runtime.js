@@ -121,7 +121,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
   const referenceKey = async (connection, snapshot) => {
     if (connection.credentialSource.type === 'model-bootstrap') {
       if (!credentialDestinationAllowed(connection, [], env)) return fail('model_configuration_credential_destination_denied', 403);
-      const key = await readModelBootstrapCredential?.(connection.credentialSource.ref);
+      const key = await readModelBootstrapCredential?.(connection.credentialSource.ref, connection.id);
       if (!key) return fail('model_configuration_credential_missing', 409);
       return key;
     }
@@ -161,7 +161,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       const source = connection.credentialSource;
       if (source?.type !== 'model-bootstrap' || !credentialDestinationAllowed(connection, [], env)) continue;
       try {
-        const key = await readModelBootstrapCredential?.(source.ref);
+        const key = await readModelBootstrapCredential?.(source.ref, connection.id);
         if (key) bootstrapKeys.set(connection.id, key);
       } catch { /* A missing or unreadable bootstrap secret is unavailable. */ }
     }

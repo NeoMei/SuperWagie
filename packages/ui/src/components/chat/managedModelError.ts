@@ -16,6 +16,13 @@ export const isManagedModelFundingRequired = (message: string, responseBody?: st
   try { return fundingRefusal.safeParse(JSON.parse(responseBody)).success; } catch { return false; }
 };
 
+const membershipRefusal = z.object({ error: z.object({ code: z.literal('product_membership_expired') }) });
+export const isManagedModelMembershipExpired = (message: string, responseBody?: string | null): boolean => {
+  if (/(?:^|[^a-z0-9_])product_membership_expired(?:$|[^a-z0-9_])/i.test(message)) return true;
+  if (!responseBody || responseBody.length > 4096) return false;
+  try { return membershipRefusal.safeParse(JSON.parse(responseBody)).success; } catch { return false; }
+};
+
 /** Model calls are billed in credits only, so every funding refusal leads to credits. */
 export const managedModelFundingMode = (): 'credits' => 'credits';
 

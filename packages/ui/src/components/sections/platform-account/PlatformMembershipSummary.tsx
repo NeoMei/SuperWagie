@@ -20,17 +20,23 @@ export const PlatformMembershipSummary: React.FC<{
   const { t } = useI18n();
   const now = Date.now();
   const memberships = account.membership.filter((membership) => membership.product_id === 'superwagie');
-  const active = memberships.find((membership) => membership.status === 'active' && Date.parse(membership.paid_through) > now);
+  const legacyActive = memberships.find((membership) => membership.status === 'active' && Date.parse(membership.paid_through) > now);
+  const active = account.credits.activeMembership ?? Boolean(legacyActive);
+  const ownedBatches = account.productCreditWallet ? account.credits.batches?.filter((batch) => batch.productId === 'superwagie' && Date.parse(batch.expiresAt) > now) : undefined;
+  const hasRetainedPacks = !active && ownedBatches?.some((batch) => batch.kind === 'addon' && BigInt(batch.available) > 0n);
   const availableBatches = account.credits.batches?.filter((batch) => !batch.frozen && Date.parse(batch.startsAt) <= now && Date.parse(batch.expiresAt) > now);
-  const kinds = ['subscription', 'addon', 'other'] as const;
-  const showPoints = Boolean(active) || BigInt(account.credits.available) !== 0n || BigInt(account.credits.reserved) !== 0n;
+  const kinds = account.productCreditWallet ? ['subscription', 'addon'] as const : ['subscription', 'addon', 'other'] as const;
+  const showPoints = active || hasRetainedPacks || BigInt(account.credits.available) !== 0n || BigInt(account.credits.reserved) !== 0n;
 
   if (memberships.length === 0 && !showPoints) return null;
 
   return <SettingsSection className="min-w-0 space-y-4 py-2 @xl:col-span-2" divider={false} contentClassName="space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 space-y-1">
-        {memberships.length === 0 ? <p className="typography-ui-label">{t('platformAccount.noMembership')}</p> : memberships.map((membership) => <div key={membership.id} className="space-y-1">
+        {memberships.length === 0 ? <div>
+          <p className="typography-ui-label">{t(account.credits.membershipPaidThrough ? 'platformAccount.membershipExpired' : 'platformAccount.noMembership')}</p>
+          {account.credits.membershipPaidThrough && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.paidThrough', { date: new Date(account.credits.membershipPaidThrough).toLocaleDateString() })}</p>}
+        </div> : memberships.map((membership) => <div key={membership.id} className="space-y-1">
           <p dir="auto" className="break-words text-lg font-medium">{membership.offer.name}</p>
           <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.paidThrough', { date: new Date(membership.paid_through).toLocaleDateString() })}{` · ${membership.status === 'refunded' ? t('platformAccount.membershipStatusRefunded') : membership.status === 'active' && Date.parse(membership.paid_through) > now ? t('platformAccount.membershipStatusActive') : Date.parse(membership.paid_through) <= now ? t('platformAccount.membershipExpired') : t('platformAccount.membershipStatusOther', { status: membership.status })}`}</p>
         </div>)}
@@ -59,7 +65,10 @@ export const PlatformMembershipSummary: React.FC<{
       })}
     </dl>
     {availableBatches === undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.batchDetailsUnavailable')}</p>}
-    {!active && BigInt(account.credits.available) > 0n && <p role="status" className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]">{t('platformAccount.pointsNeedSubscription')}</p>}
+    {ownedBatches?.filter((batch) => BigInt(batch.available) > 0n).map((batch) => <p key={batch.id} className={SETTINGS_HELPER_CLASS}>{t(batch.kind === 'addon' ? 'platformAccount.productWallet.packExpiry' : 'platformAccount.productWallet.subscriptionCreditExpiry', {
+      points: formatPlatformPoints(batch.available), date: new Date(batch.expiresAt).toLocaleDateString(),
+    })}</p>)}
+    {!active && (hasRetainedPacks || BigInt(account.credits.available) > 0n) && <p role="status" className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]">{t('platformAccount.pointsNeedSubscription')}</p>}
     </>}
   </SettingsSection>;
 };

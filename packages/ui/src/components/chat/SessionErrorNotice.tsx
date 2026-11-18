@@ -12,7 +12,7 @@ import { responseBodyOf, summarizeOpenCodeError } from '@/sync/session-error-log
 import { useDirectoryStore, useSessionStatus, useSessionStatusSnapshotReady } from '@/sync/sync-context';
 import { refetchSessionMessages } from '@/sync/session-actions';
 import { ManagedModelFundingNotice } from './ManagedModelFundingNotice';
-import { isManagedModelFundingRequired, isManagedModelRequestTooLarge } from './managedModelError';
+import { isManagedModelFundingRequired, isManagedModelMembershipExpired, isManagedModelRequestTooLarge } from './managedModelError';
 import { LongErrorText } from './LongErrorText';
 import { findRecordedTurnError, readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
 
@@ -234,6 +234,8 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
     responseBody ??= detail;
     detail = t('platformAccount.gatewayRequestTooLarge');
     hasDetails = true;
+  } else if (isManagedModelMembershipExpired(detail, responseBody)) {
+    return <div className="chat-message-column"><ManagedModelFundingNotice membershipExpired /></div>;
   } else if (isManagedModelFundingRequired(detail, responseBody)) {
     return <div className="chat-message-column"><ManagedModelFundingNotice /></div>;
   }
