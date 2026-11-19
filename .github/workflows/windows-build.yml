@@ -1,4 +1,4 @@
-name: Diagnose the installed Windows x64 runtime
+name: Verify bundled and managed Windows x64 runtimes
 
 on:
   workflow_dispatch:
@@ -11,7 +11,12 @@ jobs:
   validate-existing-windows:
     runs-on: windows-2022
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [fixed-bundled, managed-update]
     env:
+      QA_ENGINE_LANE: ${{ matrix.lane }}
       APPLICATION_COMMIT: 106683b884902fbee1eb994791fdeb541ae47925
       APPLICATION_TREE: 93616ee6aa480a8b6993606736dbc3b8ea94ee86
       APPLICATION_ASAR: 6cb1f587cb922b548b8040625de37aa12e13b942b5d078d15fa37772425bcfac
@@ -136,21 +141,28 @@ jobs:
             source = source.replace(before, () => after);
           };
           replace("import { spawn } from 'node:child_process';", "import { spawn, execFileSync } from 'node:child_process';");
+          replace('readdirSync, writeFileSync', 'readdirSync, readFileSync, writeFileSync');
+          replace("import { readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';",
+            "import { readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';\nimport { isSupportedOpenCodeVersion } from '../../web/server/lib/opencode/compatibility.js';\nimport { compareOpenCodeVersions } from '../../web/server/lib/opencode/bundled-runtime.js';");
+          replace("  writeFileSync(path.join(data, 'settings.json'), JSON.stringify({ desktopLocalPort:", String.raw`  const lane = process.env.QA_ENGINE_LANE;
+            assert(['fixed-bundled', 'managed-update'].includes(lane));
+            receipt.engineLane = lane;
+            writeFileSync(path.join(data, 'settings.json'), JSON.stringify({ ...(lane === 'fixed-bundled' && { opencodeBinary: engine }), desktopLocalPort:`);
           replace("let seedChild, appChild, cdp, fixture;", String.raw`let seedChild, appChild, cdp, fixture;
           const safeVersion = (value) => typeof value === 'string' && /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]{1,48})?$/.test(value) ? value : null;
           const safeTransport = (error) => typeof error?.reason === 'string' && ['Transport', 'UnexpectedStatus', 'UnsupportedContentType', 'MalformedResponse'].includes(error.reason) ? error.reason : 'other';
-          const installedEngineProcesses = () => {
+          const installedEngineProcesses = (managedBinary = "") => {
             const script = [
               '$ProgressPreference = "SilentlyContinue"',
               '$rows = Get-CimInstance Win32_Process -Filter "Name = \'opencode.exe\'" | Select-Object -First 8 | ForEach-Object {',
               '$ports = @(Get-NetTCPConnection -OwningProcess $_.ProcessId -State Listen -ErrorAction SilentlyContinue | Select-Object -First 8 -ExpandProperty LocalPort)',
-              '[ordered]@{ pid = $_.ProcessId; parentPid = $_.ParentProcessId; parentIsApp = ($_.ParentProcessId -eq [int]$env:QA_APP_PID); installedBinary = ($_.ExecutablePath -eq $env:QA_ENGINE); ports = $ports }',
+              '[ordered]@{ pid = $_.ProcessId; parentPid = $_.ParentProcessId; parentIsApp = ($_.ParentProcessId -eq [int]$env:QA_APP_PID); installedBinary = ($_.ExecutablePath -eq $env:QA_ENGINE); managedBinary = ($_.ExecutablePath -eq $env:QA_MANAGED_ENGINE); ports = $ports }',
               '}',
               'ConvertTo-Json -InputObject @($rows) -Compress -Depth 4',
             ].join('\n');
             try {
               const data = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
-                env: { ...process.env, QA_APP_PID: String(appChild?.pid ?? 0), QA_ENGINE: engine },
+                env: { ...process.env, QA_APP_PID: String(appChild?.pid ?? 0), QA_ENGINE: engine, QA_MANAGED_ENGINE: managedBinary },
                 stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', timeout: 8_000, maxBuffer: 16_384, windowsHide: true,
               });
               return { processes: JSON.parse(data) };
@@ -160,7 +172,8 @@ jobs:
           replace("    return new Response(result.status === 204", String.raw`    if (pathname === '/api/info' && result.status === 200) {
                 const body = JSON.parse(result.text);
                 const keys = ['version', 'status', 'healthy', 'ready', 'error', 'code', 'data', 'message'];
-                (receipt.engineInfoObservations ??= []).push({
+                (receipt.engineInfoObservations ??= []);
+                if (receipt.engineInfoObservations.length < 16) receipt.engineInfoObservations.push({
                   contentType: receipt.lastRendererApi.contentType,
                   version: safeVersion(body?.version),
                   nestedVersion: safeVersion(body?.data?.version),
@@ -170,14 +183,36 @@ jobs:
                 });
               }
               return new Response(result.status === 204`);
-          replace("  assert.equal(info.version, receipt.expectedEngineVersion);", String.raw`  if (!receipt.engineVersionMatches) {
+          replace("  const info = await sdk.server.info();", String.raw`  const info = lane === 'fixed-bundled' ? await sdk.server.info() : await until(async () => {
+              const response = await rendererFetch('/api/opencode/runtime-update');
+              if (!response.ok) return null;
+              const update = (await response.json()).runtimeUpdate;
+              const status = ['idle', 'checking', 'downloading', 'installed', 'activating', 'current', 'failed'].includes(update?.status) ? update.status : 'other';
+              const installedVersion = safeVersion(update?.installedVersion);
+              receipt.managedUpdate = { status, installedVersion, restartRequired: update?.restartRequired === true };
+              if (status !== 'current' || !installedVersion || update.restartRequired !== false) return null;
+              const observed = await sdk.server.info();
+              return observed.version === installedVersion && observed;
+            }, 120_000);`);
+          replace("  assert.equal(info.version, receipt.expectedEngineVersion);", String.raw`  if (lane === 'fixed-bundled') {
+              assert.equal(info.version, receipt.expectedEngineVersion);
               receipt.engineProcessSnapshot = installedEngineProcesses();
-              for (const delay of [250, 1000, 2000]) {
-                await wait(delay);
-                try { await sdk.server.info(); } catch (error) { (receipt.engineInfoRetryFailures ??= []).push(safeTransport(error)); }
-              }
-            }
-            assert.equal(info.version, receipt.expectedEngineVersion);`);
+              assert(receipt.engineProcessSnapshot.processes?.some((process) => process.parentIsApp && process.installedBinary && process.ports.length));
+            } else {
+              assert(isSupportedOpenCodeVersion(info.version));
+              assert(compareOpenCodeVersions(info.version, receipt.expectedEngineVersion) > 0);
+              assert.equal(info.version, receipt.managedUpdate.installedVersion);
+              const managedDirectory = path.join(data, 'opencode-runtime', info.version + '-windows-x64-baseline');
+              const manifest = JSON.parse(readFileSync(path.join(managedDirectory, 'manifest.json'), 'utf8'));
+              assert.equal(manifest.version, info.version);
+              assert.equal(manifest.platform, 'win32');
+              assert.equal(manifest.arch, 'x64');
+              assert.equal(manifest.binary, 'opencode.exe');
+              assert.match(manifest.integrity, /^sha512-[A-Za-z0-9+/]+={0,2}$/);
+              receipt.engineProcessSnapshot = installedEngineProcesses(path.join(managedDirectory, manifest.binary));
+              assert(receipt.engineProcessSnapshot.processes?.some((process) => process.parentIsApp && process.managedBinary && process.ports.length));
+              receipt.managedRuntimeVerified = true;
+            }`);
           replace("    const created = await sdk.shell.create({ command", String.raw`    receipt.shellDiagnostics = { created: false, statusCounts: {}, pollErrors: {}, resultRead: false, cleanupCompleted: false };
               const created = await sdk.shell.create({ command`);
           replace("    try {\n      const shell = await until(async () => { const value = (await sdk.shell.get({ id: created.data.id, location: { directory: project } })).data; return value.status !== 'running' && value; }, 30_000);", String.raw`    receipt.shellDiagnostics.created = true;
@@ -216,7 +251,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-x64-installed-qa
+          name: windows-x64-installed-${{ matrix.lane }}
           path: .qa/receipts/*.json
           include-hidden-files: true
           if-no-files-found: warn
