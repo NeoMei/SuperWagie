@@ -58,7 +58,7 @@ describe('speech-to-text enterprise boundary', () => {
     const { seen, baseUrl } = await asrFixture();
     const app = appWith(async (purpose, options) => {
       expect(purpose).toBe('stt-short');
-      expect(options.supportedProtocols).toEqual(['openai-compatible']);
+      expect(options.supportedProtocols).toEqual(['openai-compatible', 'managed-media']);
       return { protocol: 'openai-compatible', baseUrl, apiKey: 'fixture-key', model: 'qwen3-asr-flash', parameters: {} };
     });
     const result = await request(app).post('/api/stt/transcribe').set('content-type', 'audio/wav').send(Buffer.from('audio'));

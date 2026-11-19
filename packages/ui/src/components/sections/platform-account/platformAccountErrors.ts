@@ -21,6 +21,7 @@ export const platformAccountErrorKey = (error: PlatformAccountError | null, fall
     case 'platform_membership_active': return 'platformAccount.membershipActive';
     case 'subscription_required': return 'platformAccount.subscriptionRequired';
     case 'platform_quote_expired': case 'quote_expired': return 'platformAccount.quoteExpired';
+    case 'platform_upgrade_return_managed': return 'platformAccount.productWallet.upgradeReturnManaged';
     case 'quote_invalidated': return 'platformAccount.quoteInvalidated';
     case 'platform_quote_unavailable': return 'platformAccount.quoteUnavailable';
     case 'points_runtime_unavailable': return 'platformAccount.pointsRuntimeUnavailable';

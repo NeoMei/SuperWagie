@@ -59,11 +59,19 @@ the suspended factory until that option is present.
   allows the transport operation and includes the model in its media allowlist;
   it performs no identity, payer, provider capability, tariff or availability
   check and cannot authorize a call.
-- Managed synchronous speech, transcription and image generation are temporarily
-  unavailable. Their response can be lost after a paid call succeeds, and the
-  current client cannot retrieve the original result by call ID. Admission and
-  dispatch refuse them until recovery is implemented; image-edit and video use
-  their separate asynchronous contracts and remain subject to their own gates.
+- Product-scoped synchronous speech, transcription and image generation retain
+  the logical call ID. A retry reads the settled artifact by that original ID
+  and verifies its checksum, scope and receipt. The legacy synchronous task
+  path remains closed. Image edit and video use their original asynchronous
+  status and result contracts, with the original billing scope recorded.
+- When the product broker is configured, the generated signed plugin registers
+  `superwagie_managed_media`. A tool action requires the current admitted
+  OpenCode session, fixed certified operation and model, and permitted actor
+  and payer. Media file inputs resolve inside the authoritative session
+  workspace. Validated outputs are published under a stable filename by
+  exclusive write, then returned as path and digest. The same call ID drives
+  read-only recovery. Images, audio and video are not encoded into the tool
+  response or handed to a shell with a gateway key.
 - The native media transport bounds response bytes while reading, including
   streamed bodies without a Content-Length. Oversized or interrupted responses
   fail without retry; this does not establish that upstream work was unpaid.
@@ -189,5 +197,20 @@ guard leaves platform models unavailable while the app continues to start.
 A confirmed funding rejection whose authoritative receipt asset is `CREDIT/6`
 returns `platform_model_credits_required`. The UI opens credit membership or
 add-ons for that exact refusal. Missing asset and cash receipts retain
-`platform_model_funding_required` and its cash destination. Both require the
-original call's REJECTED receipt; neither starts another model call.
+`platform_model_funding_required`. Funding refusals that lack authoritative
+pre-admission evidence require the original call's REJECTED receipt. These
+responses do not start another model call.
+
+## Product-credit chat
+
+An opted-in chat permit binds each new call to the verified product-credit
+mode before dispatch. The journal records that scope with the original call
+ID. The isolated operator proxy obtains proof and sends the request and
+idempotency key to the gateway. Receipt reads verify the original call ID
+or authenticated alias, product scope, SuperWagie funding product and credit
+asset. Existing admitted calls continue using the billing mode recorded when
+they started. An exact product 402 `platform_model_credits_required` or 403
+`product_membership_expired` with `stage: pre_admission` closes the local chat
+or media call as rejected and preserves its user-facing error. This trusted
+gateway response establishes refusal before a balance hold or provider call.
+An uncertain result stays subject to reconciliation under its original mode.

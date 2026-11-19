@@ -96,9 +96,10 @@ export const createModelBootstrapStore = ({ dataDir, secretStore, now = () => Da
     decipher.setAuthTag(Buffer.from(record.tag, 'base64url'));
     return Buffer.concat([decipher.update(Buffer.from(record.data, 'base64url')), decipher.final()]).toString('utf8');
   };
-  const secretPut = async (value) => {
+  const secretPut = async (value, reference) => {
     if (!value) return null;
-    const ref = `model-bootstrap-${randomUUID()}`;
+    const ref = reference ?? `model-bootstrap-${randomUUID()}`;
+    if (reference !== undefined && !/^product-model-[a-f0-9]{64}$/.test(ref)) throw new Error('invalid product model reference');
     if (secretStore?.put) await secretStore.put(ref, value);
     else if (secretStore?.set) await secretStore.set(ref, value);
     else if (secretStore) throw new Error('model bootstrap secret store cannot write');
@@ -109,12 +110,21 @@ export const createModelBootstrapStore = ({ dataDir, secretStore, now = () => Da
     });
     return { ref, fingerprint: fingerprint(value), last4: value.slice(-4) };
   };
-  const secretGet = async (reference) => {
+  const secretGet = async (reference, { strict = false } = {}) => {
     if (!reference) return null;
     if (secretStore?.get) return secretStore.get(reference);
     if (secretStore) return null;
     return withSecretLock(async () => {
-      try { return await openSecret((await readSecretRecords())[reference]); } catch { return null; }
+      try {
+        const records = await readSecretRecords();
+        if (!Object.hasOwn(records, reference)) return null;
+        const result = await openSecret(records[reference]);
+        if (result === null && strict) throw new Error('invalid model bootstrap secret');
+        return result;
+      } catch (error) {
+        if (strict) throw error;
+        return null;
+      }
     });
   };
   const secretDelete = async (reference) => {

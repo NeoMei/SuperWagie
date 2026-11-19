@@ -78,14 +78,14 @@ describe('OpenCodeCliSettings', () => {
 
   test('shows the bundled engine and updater ownership by default', async () => {
     await render({}, { state: 'compatible', version: '2.1.4', installation: 'bundled', canInstall: false });
-    expect(host.textContent).toContain('OpenCode 2.1.4 is managed by SuperWagie and upgrades itself from official releases. It switches automatically when no conversation is running. Your system OpenCode is never used or changed.');
-    expect([...host.querySelectorAll('button')].some((button) => button.textContent === 'Use bundled OpenCode')).toBe(false);
+    expect(host.textContent).toContain('Kernel 2.1.4 is managed by SuperWagie and upgrades itself from official releases. It switches automatically when no conversation is running. Your system Kernel is never used or changed.');
+    expect([...host.querySelectorAll('button')].some((button) => button.textContent === 'Use bundled Kernel')).toBe(false);
   });
 
   test('marks a custom path as an explicit binding with a return action', async () => {
     await render({ opencodeBinary: '/opt/custom/opencode' }, { state: 'compatible', version: '2.1.4', installation: 'managed', canInstall: false });
-    expect(host.textContent).toContain('SuperWagie uses this custom OpenCode until you return to the bundled engine. Other OpenCode installations are untouched.');
-    expect([...host.querySelectorAll('button')].some((button) => button.textContent === 'Use bundled OpenCode')).toBe(true);
+    expect(host.textContent).toContain('SuperWagie uses this custom Kernel until you return to the bundled engine. Other Kernel installations are untouched.');
+    expect([...host.querySelectorAll('button')].some((button) => button.textContent === 'Use bundled Kernel')).toBe(true);
   });
 
   test('shows a downloaded official runtime waiting for the current conversation to finish', async () => {
@@ -94,6 +94,6 @@ describe('OpenCodeCliSettings', () => {
       { state: 'compatible', version: '2.1.4', installation: 'bundled', canInstall: false },
       { status: 'installed', latestVersion: '2.1.5', installedVersion: '2.1.5', packagedVersion: '2.1.4', restartRequired: true },
     );
-    expect(host.textContent).toContain('OpenCode 2.1.5 is downloaded and will switch in when the current conversation finishes.');
+    expect(host.textContent).toContain('Kernel 2.1.5 is downloaded and will switch in when the current conversation finishes.');
   });
 });

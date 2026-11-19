@@ -14,7 +14,7 @@ export async function readPlatformExecution(client, sessionID) {
   const sessionResult = sessionRecord.safeParse(await client.session.get({ sessionID }));
   if (!sessionResult.success) throw new Error('platform_execution_unavailable');
   const session = sessionResult.data;
-  const result = { model: session.model, parentID: session.parentID, idle: session.time?.idle, promptID: undefined };
+  const result = { model: session.model, parentID: session.parentID, ...(typeof session.directory === 'string' && { directory: session.directory }), idle: session.time?.idle, promptID: undefined };
   const seen = new Set();
   let cursor;
   for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {

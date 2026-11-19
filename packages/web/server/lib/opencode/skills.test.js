@@ -119,27 +119,23 @@ describe('skills', () => {
 
     const userSkills = (scope) => [
       ['alpha', 'home/.agents/skills/alpha/SKILL.md', scope, 'agents'],
-      ['alpha-inner', 'home/.agents/skills/alpha/nested/inner/SKILL.md', scope, 'agents'],
       ['beta', 'home/.agents/skills/group/beta/SKILL.md', scope, 'agents'],
       ['delta', 'home/.claude/skills/delta/SKILL.md', scope, 'claude'],
       ['gamma', 'home/.agents/skills/linked-gamma/SKILL.md', scope, 'agents'],
-      ['venv-skill', 'home/.claude/skills/delta/.venv/lib/pkg/SKILL.md', scope, 'claude'],
     ];
 
-    it('finds the same skills as before for a project, a home-directory project and no project', async () => {
+    it('discovers installed skills through collections and links while skipping supporting trees', async () => {
       const root = await buildTree();
       const home = path.join(root, 'home');
       try {
         await withHome(home, async () => {
           expect(await discoveredIn(root, path.join(home, 'work', 'project'))).toEqual([
             ['alpha', 'home/.agents/skills/alpha/SKILL.md', 'user', 'agents'],
-            ['alpha-inner', 'home/.agents/skills/alpha/nested/inner/SKILL.md', 'user', 'agents'],
             ['beta', 'home/.agents/skills/group/beta/SKILL.md', 'user', 'agents'],
             ['delta', 'home/work/project/.claude/skills/delta/SKILL.md', 'project', 'claude'],
             ['gamma', 'home/.agents/skills/linked-gamma/SKILL.md', 'user', 'agents'],
             ['oc', 'home/work/project/.opencode/skills/oc/SKILL.md', 'project', 'opencode'],
             ['proj', 'home/work/project/.agents/skills/proj/SKILL.md', 'project', 'agents'],
-            ['venv-skill', 'home/.claude/skills/delta/.venv/lib/pkg/SKILL.md', 'user', 'claude'],
           ]);
           // The home directory's own skill roots are read once but still
           // land as project skills, the way the second pass always left them.

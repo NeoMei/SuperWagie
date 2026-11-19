@@ -70,7 +70,8 @@ try {
   receipt.historySeedEngineVersion = seedInfo.version; receipt.historySeedKind = 'shell-command';
   fixture = await startPlatformAccountFixture();
   const port = await reservePort(), debugPort = await reservePort();
-  writeFileSync(path.join(data, 'settings.json'), JSON.stringify({ desktopLocalPort: port, embeddedKnowledgePort: await reservePort(), desktopLanAccessEnabled: false, desktopCloseAction: 'quit', lastDirectory: project }));
+  // Keep the history seed and app on the bundled engine in this isolated fixture.
+  writeFileSync(path.join(data, 'settings.json'), JSON.stringify({ opencodeBinary: engine, desktopLocalPort: port, embeddedKnowledgePort: await reservePort(), desktopLanAccessEnabled: false, desktopCloseAction: 'quit', lastDirectory: project }));
   const environment = { ...desktopOpenCodeProbeEnvironment(process.env), ...fixture.env, HOME: home, USERPROFILE: home,
     APPDATA: path.join(home, 'AppData/Roaming'), LOCALAPPDATA: path.join(home, 'AppData/Local'),
     XDG_CONFIG_HOME: path.join(home, '.config'), XDG_DATA_HOME: path.join(home, '.local/share'),

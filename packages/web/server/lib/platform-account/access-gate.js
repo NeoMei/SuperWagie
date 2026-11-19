@@ -175,9 +175,10 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
     }
   };
 
-  const guardUpgrade = async (req, socket, reject) => {
+  const guardUpgrade = async (req, socket, reject, onAuthorized) => {
     try {
       const authorization = await authorize(req, null, { allowUrlToken: true });
+      onAuthorized?.(authorization);
       track(authorization, socket);
       return true;
     } catch (error) {

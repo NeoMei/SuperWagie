@@ -83,6 +83,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ELECTRON_BUILDER_ARCH: arm64
+          OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL: ${{ vars.OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL }}
         run: |
           bun run build:web-assets
           bun run prepare:opencode-cli

@@ -23,6 +23,32 @@ const bind = async (runtime, state, changes = {}, purpose = 'embedding') => runt
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('model configuration persistence and boundaries', () => {
+  it('routes certified saved account voice bindings through product media without reading the legacy secret', async () => {
+    const baseUrl = 'https://inference.example.test/v1';
+    let secretReads = 0;
+    let productEnabled = false;
+    const { runtime } = await fixture({
+      env: { OPENCHAMBER_LLMROUTER_API_URL: baseUrl },
+      useProductManagedMedia: () => productEnabled,
+      readModelBootstrapCredential: async () => { secretReads += 1; return 'legacy-managed-key'; },
+    });
+    await runtime.saveAccountKeyConnection({
+      revision: 0,
+      apiKey: 'legacy-managed-key',
+      assertCurrent: () => {},
+      connection: { id: 'account-key-fixture', name: 'SuperWagie', providerId: 'llmrouter', protocol: 'openai-compatible', baseUrl,
+        credentialSource: { type: 'model-bootstrap', providerId: 'llmrouter', ref: 'fixture-private-reference' } },
+      bindings: [{ purpose: 'stt-realtime', model: 'qwen3-asr-flash', parameters: {} }, { purpose: 'ocr', model: 'paddleocr', parameters: {} }],
+    });
+    expect(await runtime.resolveBinding('stt-realtime')).toMatchObject({ protocol: 'openai-compatible', apiKey: 'legacy-managed-key' });
+    productEnabled = true;
+    const previous = secretReads;
+    expect(await runtime.resolveBinding('stt-realtime', { supportedProtocols: ['managed-media'] })).toMatchObject({ protocol: 'managed-media', model: 'qwen3-asr-flash' });
+    expect(await runtime.resolveBinding('stt-realtime')).not.toHaveProperty('apiKey');
+    await expect(runtime.resolveBinding('ocr')).rejects.toMatchObject({ code: 'model_configuration_managed_unavailable' });
+    expect(secretReads).toBe(previous);
+  });
+
   it.each(['rotation', 'reader-failure'])('refuses selected bootstrap credentials at the final staged-write observation after %s', async (change) => {
     const baseUrl = 'https://inference.example.test/v1';
     let key = 'fixture-selected-key';

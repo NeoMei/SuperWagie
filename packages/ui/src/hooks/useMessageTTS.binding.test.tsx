@@ -27,6 +27,7 @@ let statusAvailable = true;
 let delayedStatus: Promise<Response> | null = null;
 let failedStatus = false;
 let restartRequired = false;
+let productSpeechRefusal: { status: number; code: string } | null = null;
 let statusReads = 0;
 const calls: string[] = [];
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -39,6 +40,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input)
   if (url.endsWith('/api/tts/say/status')) return Response.json({ available: true, voices: [] });
   if (url.endsWith('/api/tts/speak') || url.endsWith('/api/dictation/tts/speak') || url.endsWith('/api/tts/say/speak')) {
     calls.push(new URL(url, 'http://localhost/').pathname);
+    if (productSpeechRefusal) return Response.json({ code: productSpeechRefusal.code, error: 'Product speech was refused' }, { status: productSpeechRefusal.status });
     return restartRequired ? Response.json({error:'platform_model_scope_restart_required'},{status:403}) : Response.json({ error: 'Fixture stops before audio playback' }, { status: 503 });
   }
   if (url.endsWith('/api/fs/home')) return Response.json({ home: '/fixture' });
@@ -60,16 +62,17 @@ let root: Root;
 const initial = useConfigStore.getState();
 beforeEach(() => {
   configuredBinding = true; statusAvailable = true; delayedStatus = null; failedStatus = false; statusReads = 0; calls.length = 0; browserSpeeches = 0;
+  restartRequired = false; productSpeechRefusal = null;
   audioResumes = 0;
   for (const context of audioContexts) context.state = 'suspended';
   invalidateServerTTSStatus();
-  useConfigStore.setState({ showMessageTTSButtons: true, ttsInputMode: 'raw', voiceProvider: 'browser',
+  useConfigStore.setState({ showMessageTTSButtons: true, ttsInputMode: 'raw', ttsChunkedMode: false, voiceProvider: 'browser',
     voiceApiKeys: { openai: false, openaiCompatible: false, stt: false }, openaiCompatibleUrl: '', refreshVoiceApiKeys: async () => {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove();
-  useConfigStore.setState({ showMessageTTSButtons: initial.showMessageTTSButtons, ttsInputMode: initial.ttsInputMode,
+  useConfigStore.setState({ showMessageTTSButtons: initial.showMessageTTSButtons, ttsInputMode: initial.ttsInputMode, ttsChunkedMode: initial.ttsChunkedMode,
     voiceProvider: initial.voiceProvider, voiceApiKeys: initial.voiceApiKeys,
     openaiCompatibleUrl: initial.openaiCompatibleUrl, refreshVoiceApiKeys: initial.refreshVoiceApiKeys });
 });
@@ -81,9 +84,9 @@ afterAll(async () => {
     else Reflect.deleteProperty(globalThis, name);
   }
 });
-function Probe() {
+function Probe({ text = 'Read this message.' }: { text?: string }) {
   const reader = useMessageTTS('binding-fixture');
-  return <button onClick={() => void reader.play('Read this message.', { summarize: false })}>Play</button>;
+  return <button onClick={() => void reader.play(text, { summarize: false })}>Play</button>;
 }
 for (const legacyProvider of ['browser', 'local'] as const) {
   test(`a binding overrides ${legacyProvider} and clear resumes that unchanged preference`, async () => {
@@ -170,6 +173,31 @@ test('message playback reports the restart action for an account scope refusal',
   try {
     await act(async () => root.render(<Probe />)); await act(async () => host.querySelector('button')?.click());
     expect(errors.mock.calls.some((args) => args[0] === 'Your account or sign-in has changed. Restart SuperWagie to continue.')).toBe(true);
+    expect(browserSpeeches).toBe(0);
+  } finally { errors.mockRestore(); }
+});
+
+test.each([
+  { status: 402, code: 'platform_model_credits_required', message: 'There are not enough credits for this model call.' },
+  { status: 403, code: 'product_membership_expired', message: 'An active SuperWagie membership is required.' },
+])('explains $code and stops sending further speech chunks', async ({ status, code, message }) => {
+  productSpeechRefusal = { status, code };
+  const { toast } = await import('sonner');
+  const errors = spyOn(toast, 'error');
+  const { useI18nStore } = await import('@/lib/i18n/store');
+  useI18nStore.getState().setLocale('en');
+  useConfigStore.setState({ ttsChunkedMode: true });
+  const text = [
+    'The first sentence has enough words to be read separately as the first part of this message.',
+    'The second sentence makes the complete message long enough to use sentence-by-sentence playback.',
+    'The third sentence would create a new synthesis request if the queue continued after refusal.',
+  ].join(' ');
+  try {
+    await act(async () => root.render(<Probe text={text} />));
+    await act(async () => host.querySelector('button')?.click());
+    expect(calls).toEqual(['/api/tts/speak']);
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors.mock.calls[0][0]).toContain(message);
     expect(browserSpeeches).toBe(0);
   } finally { errors.mockRestore(); }
 });

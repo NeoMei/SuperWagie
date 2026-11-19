@@ -51,6 +51,8 @@ const fixture = async (options = {}) => {
   app.use('/v1', (req, res, next) => { expect(req.headers.authorization).toBe(`Bearer ${currentAccess}`); next(); });
   app.get('/v1/me', (_req, res) => res.json({ id: 'actor-a', name: 'Alice', email: 'alice@example.test' }));
   app.get('/v1/accounts', (_req, res) => res.json([{ id: 'personal-a', name: 'Alice', kind: 'personal', role: 'owner' }, { id: 'team-a', name: 'Team A', kind: 'team', role: 'member' }]));
+  app.get('/v1/capabilities', (req, res) => res.json({ product_id: 'superwagie', product_credit_wallet: req.get('X-UniHub-Product-Credit-Wallet') === 'product_v1' && options.productCredits !== undefined }));
+  app.get('/v1/accounts/:account/product-credits', (req, res) => req.get('X-UniHub-Product-Credit-Wallet') === 'product_v1' ? res.json(options.productCredits) : res.sendStatus(403));
   app.get('/v1/accounts/:account/subscriptions', (_req, res) => res.json([{ id: 'sub-a', product_id: 'superwagie', status: 'active', paid_through: new Date(clock + 100000).toISOString(), offer: { name: 'Test plan', ...options.subscriptionOffer } }]));
   app.get('/v1/accounts/:account/credits', (_req, res) => failCredits ? res.status(503).end() : res.json(options.creditBatches ?? [
     { id: 'credit-a', available: '9007199254740993', reserved: '7', starts_at: new Date(clock - 1000).toISOString(), expires_at: new Date(clock + 100000).toISOString(), frozen: false },
@@ -85,6 +87,26 @@ const apiKeyApp = (runtime, who = identity) => {
 };
 
 describe('personal SuperWagie API key metadata', () => {
+  it('keeps product capability closed when no private model broker is available', async () => {
+    const f = await fixture({ productCredits: {} });
+    await f.runtime.callback(await f.begin());
+    const projection = await f.runtime.selectAccount(identity, 'personal-a');
+    expect(projection.productCreditWallet).toBeUndefined();
+    expect(projection.credits.available).toBe('9007199254740993');
+    expect(f.runtime.captureCommerceSession(identity).productWalletSupported).toBe(false);
+  });
+
+  it('keeps unexpired product packs visible on an inactive membership and never sums legacy credits', async () => {
+    const paidThrough = new Date(Date.now() - 10_000).toISOString();
+    const startsAt = new Date(Date.now() - 60_000).toISOString();
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const f = await fixture({ productWalletReady: () => true, productCredits: { product_id: 'superwagie', credit_scope: 'product_v1', available: '0', reserved: '0', active_membership: false, membership_paid_through: paidThrough, batches: [{ id: 'pack', available: '8000000', reserved: '0', starts_at: startsAt, expires_at: expiresAt, frozen: true, kind: 'addon', source_scope: 'product', product_id: 'superwagie' }] } });
+    await f.runtime.callback(await f.begin());
+    const projection = await f.runtime.selectAccount(identity, 'personal-a');
+    expect(projection).toMatchObject({ productCreditWallet: true, consoleUrl: null, credits: { available: '0', reserved: '0', activeMembership: false, membershipPaidThrough: paidThrough, batches: [{ id: 'pack', available: '8000000', expiresAt }] } });
+    expect(projection.credits.batches).toHaveLength(1);
+  });
+
   it('permits only exact quote routes on the captured payer and refuses a replaced session', async () => {
     const f = await fixture(); await f.runtime.callback(await f.begin());
     await f.runtime.selectAccount(identity, 'personal-a');
@@ -553,6 +575,60 @@ describe('platform account managed knowledge authority', () => {
     });
     return { grants, routeStarted, dispatchCount: () => dispatchCount, dispatchRequests: () => dispatchRequests, escapeHits: () => escapeHits };
   };
+  it('pins governed product knowledge to the original credential and recovers without another paid send', async () => {
+    const productCredits = { product_id: 'superwagie', credit_scope: 'product_v1', available: '10000000', reserved: '0', active_membership: true, batches: [] };
+    const model = 'text-embedding-v4';
+    const wireOperation = 'embeddings.create';
+    const embedding_space = { provider: 'aliyun', model, version: 'v4', dimensions: 1024, input_semantics: 'text' };
+    const bytes = Buffer.from('{"object":"list","model":"text-embedding-v4","data":[{"index":0,"embedding":[0.1]}]}');
+    const responseHeaders = { 'content-type': 'application/json', 'cache-control': 'private, no-store' };
+    const attempts = [];
+    let capabilityReady = true;
+    let producer = 'product-key-stable';
+    const f = await fixture({
+      productCredits,
+      productWalletReady: () => capabilityReady,
+      productModelProxy: async ({ actorToken, accountId, operation, callId: original, taskId: task, policyDigest, body }) => {
+        expect(actorToken).toMatch(/^ey/);
+        expect(accountId).toBe('personal-a');
+        expect(task).toBe(taskId);
+        attempts.push(operation);
+        const seconds = Math.floor(Date.now() / 1000);
+        const authority = { version: 1, issuer: 'llmrouter-knowledge-v1', audience: 'superwagie', origin_product_id: 'superwagie',
+          instance_id: 'default', actor_id: 'actor-a', account_id: 'personal-a', task_id: taskId };
+        const pin = { model, wire_operation: wireOperation, policy_digest: routePin, route_generation: routeGeneration, embedding_space,
+          issued_at: seconds - 1, expires_at: seconds + 20 };
+        if (operation === 'knowledge-route') return Response.json({ ...authority, authorized_credential_id: 'product-key-stable', ...pin }, { headers: responseHeaders });
+        expect(original).toBe(callId);
+        if (operation === 'knowledge-embedding') {
+          expect(policyDigest).toBe(routePin);
+          expect(body).toEqual(Buffer.from('{"model":"text-embedding-v4","input":"scope test","dimensions":1024}'));
+          throw new Error('response disconnected after dispatch');
+        }
+        expect(operation).toBe('knowledge-result');
+        const receipt = { ...authority, call_id: callId, attempt_id: 1, status: 'SETTLED',
+          producer_credential_id: producer, authorized_credential_id: 'product-key-stable', model, wire_operation: wireOperation, policy_digest: routePin,
+          route_generation: routeGeneration, embedding_space, content_sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+          issued_at: seconds - 1, expires_at: seconds + 20 };
+        return new Response(bytes, { headers: { ...responseHeaders, 'X-UniHub-Knowledge-Receipt': Buffer.from(JSON.stringify(receipt)).toString('base64url') } });
+      },
+    });
+    f.env.OPENCHAMBER_UNIHUB_GATEWAY_URL = f.env.OPENCHAMBER_UNIHUB_API_URL + '/platform/v1';
+    await f.runtime.callback(await f.begin());
+    await f.runtime.selectAccount(identity, 'personal-a');
+    const route = await f.runtime.preflightKnowledgeRoute(identity, { taskId, model, wireOperation });
+    expect(route).toMatchObject({ billing: { creditScope: 'product_v1', authorizedCredentialId: 'product-key-stable' }, policyDigest: routePin });
+    const binding = { taskId, callId, model, billing: route.billing };
+    await expect(f.runtime.dispatchKnowledgeEmbeddingPinned(identity, { ...binding, policyDigest: routePin,
+      body: Buffer.from('{"model":"text-embedding-v4","input":"scope test","dimensions":1024}') })).rejects.toMatchObject({ code: 'platform_knowledge_outcome_unknown' });
+    capabilityReady = false;
+    const recovered = await f.runtime.readKnowledgeResultWithEvidence(identity, { ...binding, wireOperation });
+    expect(recovered).toMatchObject({ rawBytes: bytes, receipt: { callId, producerCredentialId: 'product-key-stable' } });
+    producer = 'other-key';
+    await expect(f.runtime.readKnowledgeResultWithEvidence(identity, { ...binding, wireOperation })).rejects.toMatchObject({ code: 'platform_knowledge_result_unavailable' });
+    expect(attempts).toEqual(['knowledge-route', 'knowledge-route', 'knowledge-embedding', 'knowledge-result', 'knowledge-result']);
+  });
+
   it('uses distinct paid and index-read authority and verifies result bytes from one loopback response', async () => {
     const f = await fixture(); await f.runtime.callback(await f.begin()); const { grants, dispatchRequests } = addKnowledgeRoutes(f); await f.runtime.selectAccount(identity, 'personal-a');
     const preflight = await f.runtime.preflightKnowledgeRoute(identity, { taskId, model: 'text-embedding-v4', wireOperation: 'embeddings.create' });

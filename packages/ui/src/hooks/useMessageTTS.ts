@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useId, useRef } from 'react';
 import { toast } from 'sonner';
-import { formatMessage, useI18nStore } from '@/lib/i18n';
+import { formatMessage, useI18nStore, type I18nKey } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
@@ -28,6 +28,11 @@ import {
 // Below this length the reply is comfortable to listen to as-is; summarizing
 // would only add latency.
 const TTS_SUMMARIZE_MIN_CHARS = 600;
+const speechErrorMessages = new Map<string, I18nKey>([
+    ['platform_model_scope_restart_required', 'platformAccount.modelRestartRequired'],
+    ['platform_model_credits_required', 'platformAccount.creditsFundingRequired'],
+    ['product_membership_expired', 'platformAccount.productWallet.modelMembershipExpired'],
+]);
 
 const SUMMARIZE_SYSTEM_PROMPT = 'Summarize the assistant reply for text-to-speech listening. Reply with 2-4 sentences of plain spoken prose in the same language as the reply. No markdown, no lists, no code — mention code changes briefly in words instead.';
 
@@ -187,8 +192,9 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     baseURL,
                     onEnd: finish,
                     onError: (error) => {
-                        if (error === 'platform_model_scope_restart_required' && isCurrentReading(token)) {
-                            toast.error(formatMessage(useI18nStore.getState().dictionary, 'platformAccount.modelRestartRequired'));
+                        const message = speechErrorMessages.get(error);
+                        if (message && runtimeKey === getRuntimeKey() && isCurrentReading(token)) {
+                            toast.error(formatMessage(useI18nStore.getState().dictionary, message));
                         }
                         finish();
                     },

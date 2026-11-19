@@ -2,6 +2,7 @@ import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { isEnterpriseMode } from '../enterprise-mode.js';
+import { ocrDocumentSchema, paddleDocumentResult } from './ocr-contract.js';
 import { llmRouterInferenceApiUrl } from '../model-configuration/bootstrap-endpoints.js';
 
 const JOBS = '/api/v2/ocr/jobs';
@@ -10,11 +11,6 @@ const MAX_RESPONSE = 16 * 1024 * 1024;
 const identifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/);
 const taskSchema = z.object({ id: identifier, job_id: identifier, state: z.enum(['pending', 'running', 'done', 'failed']) });
 const statusSchema = taskSchema.extend({ progress: z.object({ totalPages: z.number().int().nonnegative(), extractedPages: z.number().int().nonnegative() }) });
-const pageSchema = z.object({
-  index: z.number().int().nonnegative().optional(), width: z.number().finite().positive().optional(), height: z.number().finite().positive().optional(),
-  text: z.string(), layout: z.array(z.object({ label: z.string(), content: z.string(), bbox: z.array(z.number().finite()).length(4).optional() })).max(100000),
-}).strict();
-const documentSchema = z.object({ id: identifier, pages: z.array(pageSchema).min(1).max(1000) }).strict();
 const fail = (code, status = 403) => { throw Object.assign(new Error(code), { code, status }); };
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const fingerprint = (binding) => hash(JSON.stringify([binding.connectionId, binding.providerId, binding.protocol, binding.baseUrl, binding.model, binding.apiKey, binding.parameters, binding.revision]));
@@ -89,21 +85,10 @@ export const createAccountKeyOcrBroker = ({ resolveBinding, captureOwner, enterp
       }
       if (!match || now() >= match.job.resourceExpiresAt) return fail('knowledge_scope_expired');
       await currentBinding(match.scope);
-      const document = parse(documentSchema, await upstream(match.scope, `/${encodeURIComponent(match.job.id)}/document`, { method: 'GET' }));
+      const document = parse(ocrDocumentSchema, await upstream(match.scope, `/${encodeURIComponent(match.job.id)}/document`, { method: 'GET' }));
       if (document.id !== match.job.id) return fail('knowledge_provider_unavailable', 502);
-      const pages = document.pages.map((page) => {
-        const prunedResult = { parsing_res_list: page.layout.map((block) => {
-          const value = { block_label: block.label, block_content: block.content };
-          if (block.bbox) value.block_bbox = block.bbox;
-          return value;
-        }) };
-        if (page.index !== undefined) prunedResult.page_index = page.index;
-        if (page.width !== undefined) prunedResult.width = page.width;
-        if (page.height !== undefined) prunedResult.height = page.height;
-        return { markdown: { text: page.text }, prunedResult };
-      });
       await currentBinding(match.scope);
-      return send(response, 200, { result: { layoutParsingResults: pages } }, 'application/x-ndjson');
+      return send(response, 200, paddleDocumentResult(document), 'application/x-ndjson');
     }
     if (request.headersDistinct?.authorization?.length !== 1) return fail('knowledge_unauthorized');
     const credential = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/i)?.[1];

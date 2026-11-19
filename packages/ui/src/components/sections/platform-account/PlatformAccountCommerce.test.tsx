@@ -46,9 +46,10 @@ let checkoutActionFailure: 'operation' | 'read' | null = null;
 let paymentMutationsBeforePurchase = 0;
 let checkoutCloseStatus = 'CLOSED';
 const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-  const path = String(input instanceof Request ? input.url : input);
+  const target = new URL(String(input instanceof Request ? input.url : input), 'http://localhost');
+  const { pathname } = target;
+  const path = pathname + target.search;
   if (init?.method && init.method !== 'GET') { writes++; mutations.push({ path, body: String(init.body) }); }
-  const pathname = new URL(path, 'http://localhost').pathname;
   const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
   if (pathname === '/api/platform-account/commerce/orders' && method === 'GET') return Response.json(commerce.orders ?? []);
   if (pathname === '/api/platform-account/commerce' && method === 'GET') {
@@ -102,7 +103,7 @@ const button = (text: string) => {
 };
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined; host?.remove(); host = undefined;
-  writes = 0; accountRefreshes = 0; mutations.length = 0; Object.assign(commerce, structuredClone(initialCommerce)); activeMembership = true; currentMembership = undefined; upgradeQuote = undefined; loseUpgradeResponse = false; upgradeRejection = null; commerceReadFailures = 0; commerceReads = 0; purchaseFailure = null; checkoutActionFailure = null; paymentMutationsBeforePurchase = 0; checkoutCloseStatus = 'CLOSED'; usePlatformAccountTabStore.getState().setTab('billing');
+  writes = 0; accountRefreshes = 0; mutations.length = 0; Object.assign(commerce, structuredClone(initialCommerce)); delete commerce.productCreditWallet; activeMembership = true; currentMembership = undefined; upgradeQuote = undefined; loseUpgradeResponse = false; upgradeRejection = null; commerceReadFailures = 0; commerceReads = 0; purchaseFailure = null; checkoutActionFailure = null; paymentMutationsBeforePurchase = 0; checkoutCloseStatus = 'CLOSED'; usePlatformAccountTabStore.getState().setTab('billing');
 });
 afterAll(async () => {
   fetchFixture.mockRestore(); await browser.happyDOM.close();
@@ -373,6 +374,52 @@ test('existing eligible offers can use a sufficient balance without external pay
   expect(writes).toBe(0);
 });
 
+test('scoped checkout shows the annual plan due date and the selected pack terms', async () => {
+  const monthly = commerce.offers?.find((offer) => offer.id === 'membership-a');
+  if (!monthly) throw new Error('Missing fixture membership');
+  const annual = { ...monthly, id: 'annual-a', name: 'SuperWagie Annual', period: 'year', price: '120000000' };
+  commerce.offers?.push(annual, { ...monthly, id: 'pack-one', name: 'One-month pack', kind: 'addon', period: 'once', price: '50000000', monthlyCredit: '1000000000' });
+  commerce.productCreditWallet = true;
+  currentMembership = { id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-08T00:00:00Z', offer: { id: annual.id, name: annual.name, period: 'year', rank: annual.rank } };
+  await render('overview');
+  await act(async () => button('Subscribe').click());
+  const annualCard = host?.querySelector('[role="radio"][aria-label="SuperWagie Annual"]')?.parentElement;
+  expect(annualCard?.textContent).toContain('Current plan');
+  expect(annualCard?.textContent).toContain('CNY 120.00');
+  expect(annualCard?.textContent).toContain('Paid through');
+  await act(async () => button('Monthly').click());
+  expect(host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.disabled).toBe(true);
+  expect(host?.textContent).toContain('You can change billing periods after your current subscription expires.');
+  await act(async () => button('Buy extra credits').click());
+  await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="One-month pack"]')?.click());
+  expect(host?.textContent).toContain('Valid through the same day next month');
+  expect(host?.textContent).toContain('1000 credits');
+  expect(button('Buy One-month pack for CNY 50.00').disabled).toBe(false);
+});
+
+test('scoped upgrade quotes charge the full new period and show the estimated original-payment refund', async () => {
+  const offer = commerce.offers?.find((item) => item.id === 'membership-a');
+  if (!offer) throw new Error('Missing fixture membership');
+  commerce.productCreditWallet = true;
+  commerce.wallets = [{ productId: '', asset: 'CNY/6', amount: '500000000' }];
+  commerce.payments.mode = 'unconfigured';
+  currentMembership = { id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-08T00:00:00Z', offer: { id: 'previous-plan', name: 'Standard', period: 'month', rank: 0 } };
+  upgradeQuote = {
+    paymentSource: 'wallet', id: 'quote-new', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1,
+    offer, amount: offer.price, additionalCredits: offer.monthlyCredit, periodStart: '2026-11-08T00:00:00Z', createdAt: '2026-11-08T00:00:00Z', expiresAt: '2099-12-08T00:00:00Z',
+    productCreditUpgrade: { previousOrderId: 'old-order', estimatedRefundAmount: '30500000', refundPaymentSource: 'external' },
+  };
+  await render('overview');
+  await act(async () => button('Subscribe').click());
+  await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
+  await act(async () => button('Check upgrade price').click());
+  expect(host?.textContent).toContain('Estimated refund');
+  expect(host?.textContent).toContain('CNY 30.50');
+  expect(host?.textContent).toContain('A new subscription period starts when payment is confirmed.');
+  expect(host?.textContent).not.toContain('Your membership still ends');
+  expect(paymentMutations()).toHaveLength(1);
+});
+
 test('an active Standard member sees their plan as current and can explicitly buy a Professional upgrade', async () => {
   const standard = commerce.offers?.find((offer) => offer.id === 'membership-a');
   if (!standard || !commerce.offers) throw new Error('Missing fixture membership');
@@ -537,6 +584,24 @@ test('point summary separates authoritative batches and excludes frozen, future 
   expect(writes).toBe(0);
 });
 
+test('expired membership shows retained frozen pack credits and their original expiry', async () => {
+  const account: Extract<PlatformAccountState, { status: 'signed-in' }> = {
+    status: 'signed-in', user: { id: 'actor-a', name: 'Alice', email: '' }, accounts: [], accountId: 'team-a', expiresAt: '2099-12-01T00:00:00Z',
+    membership: [], productCreditWallet: true,
+    credits: { available: '0', reserved: '0', activeMembership: false, membershipPaidThrough: '2000-01-01T00:00:00Z',
+      batches: [{ id: 'held-pack', kind: 'addon', sourceScope: 'product', productId: 'superwagie', available: '8000000', reserved: '0',
+        startsAt: '2020-01-01T00:00:00Z', expiresAt: '2099-11-30T16:15:00Z', frozen: true }] },
+    consoleUrl: null, modelService: 'unavailable',
+  };
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  useI18nStore.getState().setLocale('en');
+  await act(async () => root?.render(<I18nProvider><PlatformMembershipSummary account={account} actions={null} /></I18nProvider>));
+  expect(host.textContent).toContain('Retained extra credits8');
+  expect(host.textContent).toContain('Pack · 8 credits · expires 12/1/2099');
+  expect(host.textContent).toContain('Remaining credits keep their original expiry');
+  expect(Array.from(host.querySelectorAll('dl > div > dd:first-of-type')).map((item) => item.textContent)).toEqual(['0', '0', '8']);
+});
+
 test('a source-unavailable account keeps its authoritative total without inventing source balances', async () => {
   const account: Extract<PlatformAccountState, { status: 'signed-in' }> = {
     status: 'signed-in', user: { id: 'actor-a', name: 'Alice', email: '' }, accounts: [], accountId: 'team-a', expiresAt: '2099-12-01T00:00:00Z',
@@ -673,6 +738,20 @@ test('refreshing newly fulfilled checkout benefits refreshes the account once wi
   await act(async()=>button('Refresh wallets and orders').click());expect(accountRefreshes).toBe(1);
   commerce.checkouts[0].refund_status='SUCCEEDED';
   await act(async()=>button('Refresh wallets and orders').click());expect(accountRefreshes).toBe(2);expect(writes).toBe(0);
+});
+
+test('completed upgrade returns show the original partial refund and withhold duplicate refund controls', async () => {
+  commerce.productCreditWallet = true;
+  commerce.checkouts = [{
+    id: 'original-paid', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Original membership', amount: '100000000',
+    currency: 'CNY', payment_status: 'PAID', fulfillment_status: 'FULFILLED', refund_status: '', upgrade_return_status: 'UPGRADE_RETURNED',
+    upgrade_refund_amount: '20000000', expires_at: '2099-12-08T00:00:00Z', created_at: '2026-11-08T00:00:00Z',
+  }];
+  await render('orders');
+  expect(host?.textContent).toContain('Previous plan refund returned');
+  expect(host?.textContent).toContain('Refund amount CNY 20.00');
+  expect(host?.textContent).not.toContain('Request a refund');
+  expect(paymentMutations()).toHaveLength(0);
 });
 
 test('a refunded checkout does not hold the purchase panel open', async () => {

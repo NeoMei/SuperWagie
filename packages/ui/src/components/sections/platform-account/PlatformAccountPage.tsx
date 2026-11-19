@@ -160,11 +160,14 @@ export const PlatformAccountPage: React.FC = () => {
   const modelLockError = signedIn?.modelService === 'unavailable' && (signedIn.modelUnavailableReason === 'platform_store_busy' || signedIn.modelUnavailableReason === 'platform_store_lock_unavailable') ? signedIn.modelUnavailableReason : null;
   const signedInIdentity = identity?.status === 'signed-in' ? identity : null;
   const selectedAccount = signedIn?.accounts.find((account) => account.id === signedIn.accountId);
-  const currentMembership = signedIn?.membership.find((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now());
+  const currentMembership = signedIn?.credits.activeMembership === false ? undefined : signedIn?.membership.find((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now());
   const membershipSummary = (actions: Parameters<React.ComponentProps<typeof PlatformAccountCommerce>['membershipSummary']>[0] | null) => signedIn ? <PlatformMembershipSummary account={signedIn} actions={actions} /> : null;
+  const hasWallet = signedIn?.productCreditWallet === true;
+  const visibleTab = tab === 'wallet' && !hasWallet || tab === 'keys' && hasWallet ? 'billing' : tab;
   const tabs: Array<{ id: typeof tab; label: string; icon: IconName }> = [
     { id: 'billing', label: t('platformAccount.billingTab'), icon: 'bank-card' },
-    { id: 'keys', label: t('platformAccount.apiKeysTab'), icon: 'key' },
+    ...(hasWallet ? [{ id: 'wallet' as const, label: t('platformAccount.productWallet.tab'), icon: 'bank-card' as const }] : []),
+    ...(!hasWallet ? [{ id: 'keys' as const, label: t('platformAccount.apiKeysTab'), icon: 'key' as const }] : []),
     { id: 'usage', label: t('platformAccount.usageTab'), icon: 'bar-chart' },
     { id: 'orders', label: t('platformAccount.ordersTab'), icon: 'file-list-2' },
     { id: 'profile', label: t('platformAccount.profileTab'), icon: 'user' },
@@ -190,7 +193,7 @@ export const PlatformAccountPage: React.FC = () => {
   const refreshAction = !unsupported && identity?.status !== 'unsupported' && identity?.status !== 'unconfigured' && <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setProfileRevision((value) => value + 1); void refreshIdentity(); void perform(readPlatformAccount); }}>{t('platformAccount.refresh')}</Button>;
   return <div className="@container/account flex h-full min-h-0 flex-col">
     {signedInIdentity && <nav aria-label={t('settings.page.platform-account.title')} className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/60 px-4 pe-10 @3xl/account:px-6">
-      {tabs.map((item) => <Button key={item.id} variant="ghost" data-platform-account-tab={item.id} aria-current={tab === item.id ? 'page' : undefined} className={`h-12 shrink-0 gap-2 rounded-none border-b-2 px-3 ${tab === item.id ? 'border-interactive-selection-foreground text-foreground' : 'border-transparent text-muted-foreground'}`} onClick={() => setTab(item.id)}><Icon name={item.icon} className="size-4" />{item.label}</Button>)}
+      {tabs.map((item) => <Button key={item.id} variant="ghost" data-platform-account-tab={item.id} aria-current={visibleTab === item.id ? 'page' : undefined} className={`h-12 shrink-0 gap-2 rounded-none border-b-2 px-3 ${visibleTab === item.id ? 'border-interactive-selection-foreground text-foreground' : 'border-transparent text-muted-foreground'}`} onClick={() => setTab(item.id)}><Icon name={item.icon} className="size-4" />{item.label}</Button>)}
       <div className="ms-auto flex shrink-0 items-center">{tab !== 'keys' || !signedIn?.accountId || signedIn.user.id !== signedInIdentity.user.id ? refreshAction : null}</div>
     </nav>}
     <div className="flex min-h-0 flex-1 flex-col @3xl/account:flex-row">
@@ -219,16 +222,16 @@ export const PlatformAccountPage: React.FC = () => {
     </SettingsSection>}
     {signedInIdentity && tab === 'profile' && <PlatformAccountProfile key={`${getRuntimeKey()}:${signedInIdentity.user.id}`} onProfileUpdated={() => setProfileRevision((value) => value + 1)} />}
     {signedInIdentity && tab === 'profile' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.session', { time: new Date(signedInIdentity.expiresAt).toLocaleString() })}</p>}
-    {signedIn && (tab === 'billing' || tab === 'orders') && <>
+    {signedIn && (visibleTab === 'billing' || tab === 'orders' || visibleTab === 'wallet') && <>
       {tab === 'billing' && (!signedIn.accountId || unsupported) && membershipSummary(null)}
-      {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} view={tab === 'orders' ? 'orders' : 'overview'} payer={selectedAccount ? t('platformAccount.accountName', { name: selectedAccount.name, kind: t(selectedAccount.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') }) : signedIn.accountId} membershipSummary={membershipSummary} hasActiveMembership={Boolean(currentMembership)} currentMembership={currentMembership} onAccountRefresh={() => void perform(readPlatformAccount)} />}
+      {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} view={tab === 'orders' ? 'orders' : visibleTab === 'wallet' ? 'wallet' : 'overview'} payer={selectedAccount ? t('platformAccount.accountName', { name: selectedAccount.name, kind: t(selectedAccount.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') }) : signedIn.accountId} membershipSummary={membershipSummary} hasActiveMembership={signedIn.credits.activeMembership ?? Boolean(currentMembership)} currentMembership={currentMembership} onAccountRefresh={() => void perform(readPlatformAccount)} />}
     </>}
-    {signedInIdentity && tab === 'billing' && !unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <>
+    {signedInIdentity && visibleTab === 'billing' && !unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <>
       <PlatformAccountUsageChart key={`activity:${JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])}`} accountId={signedIn.accountId} />
       <PlatformAccountUsageSummary key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} />
       <Button size="sm" variant="ghost" onClick={() => setTab('usage')}>{t('platformAccount.viewUsage')}</Button>
     </>}
-    {signedInIdentity && tab === 'keys' && !unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountApiKeys key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} onConfigured={refreshModelConfiguration} />}
+    {signedInIdentity && visibleTab === 'keys' && !unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountApiKeys key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} onConfigured={refreshModelConfiguration} />}
     {signedInIdentity && tab === 'usage' && <>
       {!unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountUsageChart key={`activity:${JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])}`} accountId={signedIn.accountId} />}
       {!unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountUsage

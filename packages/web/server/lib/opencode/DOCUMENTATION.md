@@ -404,7 +404,7 @@ edits keep their existing merge behavior and preserve unmanaged model settings.
 - `getProjectConfigCandidates(workingDirectory)`, `getLayerError(layers, filePath)`: The project folder's own config files, and the parse error `readConfigLayers` recorded for one file.
 - `getAncestors(startDir, stopDir)`, `findWorktreeRoot(startDir)`: Git worktree helpers.
 - `isPromptFileReference(value)`, `resolvePromptFilePath(reference)`, `writePromptFile(filePath, content)`: Prompt file reference handling.
-- `walkSkillMdFiles(rootDir)`: Async. Recursively finds all SKILL.md files at any depth, following links and skipping a link back to its own ancestor. Sibling directories are read in parallel, at most 8 file-system calls at once, and the result keeps depth-first readdir order: discovery lets a later file win a duplicate name, so the order is part of the contract.
+- `walkSkillMdFiles(rootDir)`: Finds SKILL.md files through collections and linked skill directories. A skill owns its supporting tree, and discovery skips hidden directories, `node_modules` and links back to ancestors. Sibling directories are read in parallel, at most 8 file-system calls at once. The result keeps depth-first readdir order so the last file with a duplicate name wins.
 - `pathExists(target)`: Async existence probe shared by the skill walk and source lookup. Returns false when access fails.
 - `addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source)`: Indexes an already parsed skill file; `parsed` null (unreadable file) adds nothing.
 - `resolveSkillSearchDirectories(workingDirectory)`: Returns skill search path order (config, project, home, custom).

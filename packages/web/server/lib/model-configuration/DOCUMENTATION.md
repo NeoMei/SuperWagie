@@ -269,12 +269,14 @@ changing any behavior.
 An earlier version can leave `alibaba-qwen3-asr-flash` saved as an `stt-short`
 binding. Disk integrity checks recognize that id through a private legacy
 table, so the file stays readable, the row stays visible for removal, and the
-public preset catalog stays free of the retired recommendation. Resolution,
+public preset catalog stays free of the retired recommendation. Legacy resolution,
 connection probes and new writes reject it with
-`model_configuration_unsupported_protocol`, and reading never rewrites the
-file. Migrating or deleting the row during read would change persisted state
-without an explicit user action; keeping the id selectable would bring the
-removed `managed-media` ASR path back.
+`model_configuration_unsupported_protocol`. The negotiated product media
+adapter accepts the certified saved `qwen3-asr-flash` binding and supplies
+no endpoint credential to the caller. The opted-in runtime also projects
+certified saved account-managed ASR, speech and image generation bindings
+onto the same broker. It respects saved BYOK selections and does not
+rewrite configuration or read the old credential for these calls.
 
 ### Why a separate credential store and not existing general settings
 

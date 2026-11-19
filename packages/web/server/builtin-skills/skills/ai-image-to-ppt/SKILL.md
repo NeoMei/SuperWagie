@@ -24,6 +24,7 @@ sticky batch rules. That reference uses
 [`scripts/host_routing_policy.py`](scripts/host_routing_policy.py) for the
 deterministic batch state; the Skill retains host discovery and host-tool calls.
 
+- When the user selects SuperWagie's managed product image model and the current chat provides `superwagie_managed_media`, generate with `operation: image_generation`, the selected certified model, the approved text prompt and an allowed wide size. Recover pending work with the original callID. Use the returned workspace image as a host artifact in the normal import and validation flow.
 - Prefer the host's callable OpenAI image tool; it does not require an
   `OPENAI_API_KEY`.
 - Then try the matching OpenAI API adapter only when configured or when the

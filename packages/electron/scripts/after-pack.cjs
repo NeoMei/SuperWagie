@@ -59,6 +59,8 @@ module.exports = async (context) => {
   }
   verifyPackagedAppContents(resourcesPath, { remoteClient });
   if (!remoteClient) {
+    const { stageProductModelOrigin } = await import('../product-model-distribution.mjs');
+    stageProductModelOrigin(resourcesPath, process.env.OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL);
     const architecture = ({ 1: 'x64', 3: 'arm64' })[context.arch];
     verifyEmbeddedKnowledge(resourcesPath, context.electronPlatformName, architecture);
     verifyHyMemoryResources(path.join(resourcesPath, 'hy-memory'), { target: `${context.electronPlatformName}-${Arch[context.arch]}` });

@@ -217,3 +217,30 @@ describe('knowledge library routes', () => {
     await request(appWith(createRuntime())).post('/api/knowledge-library/provision').send({}).expect(400, { error: 'model_key_required' });
   });
 });
+
+it('accepts only an authenticated product OCR document action and preserves typed no-charge refusals', async () => {
+  const { createManagedKnowledgeMiddleware } = await import('./managed-context.js');
+  const identity = { type: 'session', token: 'fixture' };
+  const actor = { actingUserId: 'actor', billingAccountId: 'payer', authSession: 'session', expiresAt: Date.now() + 60_000 };
+  const app = express();
+  app.use(createManagedKnowledgeMiddleware({ enabled: () => false, productOcrEnabled: () => true,
+    resolveIdentity: async (req) => req.get('X-Test-Session') ? identity : null,
+    isRequestOriginAllowed: async (req) => req.get('Origin') === 'https://local.fixture',
+    readSettings: async () => ({ projects: [{ id: 'project', path: '/fixture/project' }], activeProjectId: 'project' }),
+    getAccountRuntime: () => ({ actor: () => actor }),
+  }));
+  const called = [];
+  registerKnowledgeLibraryRoutes(app, { runtime: createRuntime({ runProductOcr: async (...args) => {
+    called.push(args);
+    if (args[2].action === 'confirm') throw Object.assign(new Error('refused'), { code: 'invalid_ocr_document' });
+    return { state: 'pending' };
+  } }) });
+  const route = '/api/knowledge-library/documents/fixture/ocr';
+  await request(app).post(route).send({ action: 'preview' }).expect(401);
+  await request(app).post(route).set('X-Test-Session', 'signed').set('Origin', 'https://other.fixture').send({ action: 'preview' }).expect(403);
+  const send = (body) => request(app).post(route).set('X-Test-Session', 'signed').set('Origin', 'https://local.fixture').send(body);
+  await send({ action: 'preview', path: '/hostile.pdf', payer: 'untrusted' }).expect(400);
+  await send({ action: 'resume' }).expect('Cache-Control', 'private, no-store').expect(200, { state: 'pending' });
+  expect(called).toEqual([['fixture', { identity, context: { directory: '/fixture/project', actorFence: actor }, intentId: undefined }, { action: 'resume' }]]);
+  await send({ action: 'confirm', approvalId: 'c91bb3a5-b409-4406-9c98-65016c64e1a6' }).expect(400, { error: 'invalid_ocr_document' });
+});

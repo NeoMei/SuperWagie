@@ -223,6 +223,6 @@ describe('TrackerSettings', () => {
     expect(container.textContent).toContain('Acme Tickets');
     expect(container.querySelector('[data-settings-item="integrations.acme-tickets"]')).not.toBeNull();
     expect(buttonLabels()).not.toContain('Connect');
-    expect(container.textContent).toContain('Update OpenChamber');
+    expect(container.textContent).toContain('Update SuperWagie');
   });
 });

@@ -1,18 +1,26 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { SettingsSection, SettingsFieldRow, SettingsControlGroup, SettingsChipGroup, SettingsRadioGroup, SettingsRadioOption, SettingsTwoColumn, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { PlatformAccountError, type PlatformAccountState } from '@/lib/platformAccount';
-import { readPlatformCommerce, readPlatformOrders, createPlatformCheckout, updatePlatformCheckout, purchasePlatformOffer, createPlatformUpgradeQuote, acceptPlatformUpgradeQuote, reconcilePlatformIntent, formatPlatformMoney, formatPlatformPoints, type PlatformCommerceState, type PlatformCommerceIntent, type PlatformUpgradeQuote, type PlatformCheckout } from '@/lib/platformCommerce';
+import { readPlatformCommerce, readPlatformOrders, createPlatformCheckout, updatePlatformCheckout, purchasePlatformOffer, createPlatformUpgradeQuote, acceptPlatformUpgradeQuote, reconcilePlatformIntent, formatPlatformMoney, formatPlatformPoints, formatProductBillingDate, type PlatformCommerceState, type PlatformCommerceIntent, type PlatformUpgradeQuote, type PlatformCheckout } from '@/lib/platformCommerce';
+import { PlatformProductWallet } from './PlatformProductWallet';
 import { PlatformPaymentPanel } from './PlatformPaymentPanel';
 import { platformAccountErrorKey } from './platformAccountErrors';
 import { usePlatformAccountTabStore } from './platformAccountTabs';
 
-type PendingCommand = { kind: 'checkout'; offerId?: string; quoteId?: string; provider: 'wechat' | 'alipay'; productId: string; amount: string; idempotencyKey: string }
+type PendingCommand = { kind: 'checkout'; walletTopUp?: true; offerId?: string; quoteId?: string; provider: 'wechat' | 'alipay'; productId: string; amount: string; idempotencyKey: string }
   | { kind: 'purchase'; offerId: string; productId: string; amount: string; idempotencyKey: string }
   | { kind: 'upgrade'; quoteId: string; productId: string; amount: string; idempotencyKey: string };
 /** A payment attempt the account has not settled yet. */
+const cashTopUpUnits = (input: string): string | null => {
+  if (!/^\d{1,10}(?:\.\d{1,2})?$/.test(input.trim())) return null;
+  const [whole, fraction = ''] = input.trim().split('.');
+  const amount = BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'));
+  return amount > 0n && amount <= 1_000_000_000_000_000n ? amount.toString() : null;
+};
 const WAITING_PAYMENT = ['CREATED', 'PENDING', 'UNKNOWN'];
 const waitingCheckout = (checkout: { payment_status: string; refund_status: string }) => WAITING_PAYMENT.includes(checkout.payment_status) && !checkout.refund_status;
 const pollableCheckout = (checkout: PlatformCheckout) => waitingCheckout(checkout)
@@ -24,7 +32,7 @@ const unresolvedPayment = (checkout: PlatformCheckout) => !settledCheckout(check
     || ['PENDING', 'REVIEW'].includes(checkout.refund_status));
 /** The provider is queried on this cadence while a code is on screen. */
 const PAYMENT_POLL_MS = 4000;
-const commandRejected = (error: PlatformAccountError) => (error.code === 'credit_rates_unavailable' && error.status === 409) || ['platform_account_changed', 'platform_session_changed', 'platform_billing_forbidden', 'platform_scope_required', 'platform_offer_unavailable', 'platform_membership_active', 'platform_amount_invalid', 'platform_operation_pending', 'payment_not_configured', 'platform_idempotency_conflict', 'subscription_required', 'quote_expired', 'platform_quote_expired', 'platform_quote_unavailable', 'points_runtime_unavailable', 'unsupported_plan_change'].includes(error.code);
+const commandRejected = (error: PlatformAccountError) => (error.code === 'credit_rates_unavailable' && error.status === 409) || ['platform_account_changed', 'platform_session_changed', 'platform_billing_forbidden', 'platform_scope_required', 'platform_offer_unavailable', 'platform_product_wallet_unavailable', 'platform_membership_active', 'platform_amount_invalid', 'platform_operation_pending', 'payment_not_configured', 'platform_idempotency_conflict', 'subscription_required', 'quote_expired', 'platform_quote_expired', 'platform_quote_unavailable', 'points_runtime_unavailable', 'unsupported_plan_change'].includes(error.code);
 const isCommerceReadFailure = (error: PlatformAccountError) => error.status >= 500 || ['platform_unavailable', 'platform_response_invalid', 'platform_commerce_unavailable', 'service_unavailable'].includes(error.code);
 /** A saved intent error describes the attempt, not the commerce read that returned it. */
 const intentErrorKey = (errorCode?: string): I18nKey | null => errorCode ? platformAccountErrorKey(new PlatformAccountError(errorCode), 'platformAccount.commandUnknown') : null;
@@ -38,6 +46,10 @@ const orderStatusKey = (status: string): I18nKey | null => {
     case 'NONE': return 'platformAccount.noRefund';
     case 'REFUNDED': return 'platformAccount.order.refunded';
     case 'PARTIALLY_REFUNDED': return 'platformAccount.order.partiallyRefunded';
+    case 'UPGRADE_PENDING': return 'platformAccount.productWallet.upgradeRefundPending';
+    case 'UPGRADE_RELEASING': return 'platformAccount.productWallet.upgradeRefundReleasing';
+    case 'UPGRADE_RETURNED': return 'platformAccount.productWallet.upgradeRefundReturned';
+    case 'UPGRADE_REVIEW': return 'platformAccount.productWallet.upgradeRefundReview';
     case 'PROCESSING': return 'platformAccount.order.processing';
     case 'CANCELLED': return 'platformAccount.order.cancelled';
     case 'REJECTED': return 'platformAccount.order.rejected';
@@ -48,13 +60,13 @@ const orderStatusKey = (status: string): I18nKey | null => {
 export const PlatformAccountCommerce: React.FC<{
   accountId: string;
   payer: string;
-  view: 'overview' | 'orders';
+  view: 'overview' | 'orders' | 'wallet';
   hasActiveMembership: boolean;
   currentMembership?: Extract<PlatformAccountState, { status: 'signed-in' }>['membership'][number];
   membershipSummary: (actions: { openMembership: () => void; openAddon: () => void; membershipOpen: boolean; addonOpen: boolean; disabled: boolean }) => React.ReactNode;
   onAccountRefresh: () => void;
 }> = ({ accountId, payer, view, hasActiveMembership, currentMembership, membershipSummary, onAccountRefresh }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [state, setState] = React.useState<PlatformCommerceState | null>(null);
   const [orderHistory, setOrderHistory] = React.useState<PlatformCommerceState['orders']>(null);
   const [ordersLoading, setOrdersLoading] = React.useState(false);
@@ -62,8 +74,9 @@ export const PlatformAccountCommerce: React.FC<{
   const [checkingPayment, setCheckingPayment] = React.useState(false);
   const [error, setError] = React.useState<I18nKey | null>(null);
   const [commerceReadFailed, setCommerceReadFailed] = React.useState(false);
+  const [topUp, setTopUp] = React.useState('');
   const [offerId, setOfferId] = React.useState('');
-  const [billingPeriod, setBillingPeriod] = React.useState<'month' | 'year'>('month');
+  const [billingPeriod, setBillingPeriod] = React.useState<'month' | 'year'>(currentMembership?.offer.period === 'year' ? 'year' : 'month');
   const purchaseTarget = usePlatformAccountTabStore((store) => store.purchaseTarget);
   const [buyingTask, setBuyingTask] = React.useState<'membership' | 'addon' | null>(hasActiveMembership ? null : 'membership');
   const [paymentChannel, setPaymentChannel] = React.useState<'wechat' | 'alipay' | 'wallet'>('wechat');
@@ -224,7 +237,7 @@ export const PlatformAccountCommerce: React.FC<{
   };
   const submitCommand = (original: PendingCommand) => {
     return mutate(() => original.kind === 'checkout'
-      ? createPlatformCheckout({ accountId, offerId: original.offerId, quoteId: original.quoteId, provider: original.provider, idempotencyKey: original.idempotencyKey })
+      ? createPlatformCheckout({ accountId, offerId: original.offerId, quoteId: original.quoteId, amount: original.walletTopUp ? original.amount : undefined, provider: original.provider, idempotencyKey: original.idempotencyKey })
       : original.kind === 'upgrade'
         ? acceptPlatformUpgradeQuote({ accountId, quoteId: original.quoteId, idempotencyKey: original.idempotencyKey })
         : purchasePlatformOffer({ accountId, offerId: original.offerId, idempotencyKey: original.idempotencyKey }), original);
@@ -232,7 +245,7 @@ export const PlatformAccountCommerce: React.FC<{
   const switchChannel = async (checkout: PlatformCheckout, provider: 'wechat' | 'alipay') => {
     if (mutationActive.current || command) return;
     const intent = state?.intents.find((item) => item.kind === 'checkout' && item.resourceId === checkout.id);
-    if (!intent || (!intent.offerId && !intent.quoteId)) {
+    if (!intent || (!intent.offerId && !intent.quoteId && !intent.walletTopUp)) {
       setError('platformAccount.commerceFailed');
       return;
     }
@@ -256,12 +269,12 @@ export const PlatformAccountCommerce: React.FC<{
 
       const replacement: PendingCommand = {
         kind: 'checkout', offerId: intent.quoteId ? undefined : intent.offerId, quoteId: intent.quoteId,
-        provider, productId: intent.productId, amount: intent.amount, idempotencyKey: crypto.randomUUID(),
+        provider, walletTopUp: intent.walletTopUp, productId: intent.productId, amount: intent.amount, idempotencyKey: crypto.randomUUID(),
       };
       setCommand(replacement);
       let result;
       try {
-        result = await createPlatformCheckout({ accountId, offerId: replacement.offerId, quoteId: replacement.quoteId, provider, idempotencyKey: replacement.idempotencyKey });
+        result = await createPlatformCheckout({ accountId, offerId: replacement.offerId, quoteId: replacement.quoteId, amount: replacement.walletTopUp ? replacement.amount : undefined, provider, idempotencyKey: replacement.idempotencyKey });
       } catch (cause) {
         if (isCurrent() && cause instanceof PlatformAccountError) {
           if (commandRejected(cause) || cause.code === 'quote_invalidated') setCommand(null);
@@ -317,30 +330,43 @@ export const PlatformAccountCommerce: React.FC<{
     } finally { mutationActive.current = false; if (version === generation.current && runtimeKey === getRuntimeKey()) setBusy(false); }
   };
   const channels = state?.payments.providers ?? [];
+  const topUpAmount = cashTopUpUnits(topUp);
   const external = state?.payments.mode === 'external' && paymentChannel !== 'wallet';
   const effectiveChannel = paymentChannel === 'alipay' && channels.includes('alipay') ? 'alipay' : channels.includes('wechat') ? 'wechat' : 'alipay';
-  const offers = state?.offers?.filter((offer) => offer.productId === 'superwagie' || (offer.productId === 'llmrouter' && offer.kind === 'addon')) ?? [];
+  const scopedWallet = state?.productCreditWallet === true;
+  const offers = state?.offers?.filter((offer) => offer.productId === 'superwagie' || (!scopedWallet && offer.productId === 'llmrouter' && offer.kind === 'addon')) ?? [];
   const selectedOffer = offers.find((offer) => offer.id === offerId);
+  const membershipOffers = offers.filter((offer) => offer.kind === 'membership');
+  const availableTerms = (['month', 'year'] as const).filter((term) => membershipOffers.some((offer) => offer.period === term));
+  const visibleTerm = availableTerms.includes(billingPeriod) ? billingPeriod : availableTerms[0] ?? billingPeriod;
+  const memberships = membershipOffers.filter((offer) => offer.period === visibleTerm).sort((a, b) => a.rank - b.rank);
+  const currentOffer = membershipOffers.find((offer) => offer.id === currentMembership?.offer.id);
+  const currentTerm = currentMembership?.offer.period ?? currentOffer?.period;
+  const currentRank = currentMembership?.offer.rank ?? currentOffer?.rank;
   const membershipRestriction = (offer: NonNullable<PlatformCommerceState['offers']>[number]): I18nKey | undefined => {
-    if (offer.kind !== 'membership' || !hasActiveMembership || !currentMembership) return;
-    const current = currentMembership.offer;
-    if (offer.id === current.id) return 'platformAccount.currentPlan';
-    if (current.period && offer.period !== current.period) return 'platformAccount.upgradeSamePeriod';
-    if (current.rank !== undefined && offer.rank <= current.rank) return 'platformAccount.upgradeHigherTier';
+    if (offer.kind !== 'membership' || !hasActiveMembership) return;
+    if (!currentMembership) return scopedWallet ? 'platformAccount.membershipActive' : undefined;
+    if (offer.id === currentMembership.offer.id) return 'platformAccount.currentPlan';
+    if (currentTerm !== undefined && offer.period !== currentTerm) return 'platformAccount.upgradeSamePeriod';
+    if (currentRank === undefined ? scopedWallet : offer.rank <= currentRank) return 'platformAccount.upgradeHigherTier';
   };
   const selectedOfferRestriction = selectedOffer && membershipRestriction(selectedOffer);
-  const memberships = offers.filter((offer) => offer.kind === 'membership' && offer.period === billingPeriod).sort((a, b) => a.rank - b.rank);
+  const otherTerm = scopedWallet && hasActiveMembership && currentTerm !== undefined && visibleTerm !== currentTerm;
+  const canUpgradeVisibleTier = memberships.some((offer) => !membershipRestriction(offer) && offer.salesReadiness?.ready !== false && offer.purchaseReadiness?.ready !== false);
+  const renewalEnabled = scopedWallet && state?.productWallet?.products.find((item) => item.product_id === 'superwagie')?.subscription_renewal.enabled === true;
   const addons = offers.filter((offer) => offer.kind === 'addon');
   const membershipActive = hasActiveMembership && selectedOffer?.kind === 'membership';
-  const wallet = selectedOffer && state?.wallets?.find((item) => item.productId === selectedOffer.productId);
+  const walletProduct = state?.productCreditWallet ? '' : selectedOffer?.productId;
+  const wallet = selectedOffer && state?.wallets?.find((item) => item.productId === walletProduct);
   const validQuote = quote?.offer.id === selectedOffer?.id && (quote?.paymentSource ?? 'wallet') === (external ? 'external' : 'wallet') ? quote : null;
+  const resetQuote = validQuote?.productCreditUpgrade;
   const purchaseAmount = validQuote?.amount ?? selectedOffer?.price ?? '0';
   const insufficient = !external && selectedOffer && state?.wallets !== null && BigInt(wallet?.amount ?? '0') < BigInt(purchaseAmount);
   const addonNeedsMembership = !hasActiveMembership && selectedOffer?.kind === 'addon' && selectedOffer.productId === 'superwagie';
   const unresolved = !!command || !!state?.checkouts?.some(unresolvedPayment) || !!state?.intents.some((intent) => intent.status === 'PREPARED' || intent.status === 'UNKNOWN');
   const finance = state?.financialAccess === true;
   const walletName = (product: string) => product === 'superwagie' ? t('platformAccount.membershipWallet') : product === 'llmrouter' ? t('platformAccount.modelWallet') : product === '' ? t('platformAccount.unifiedWallet') : t('platformAccount.originalRequest');
-  const purchaseName = (product: string) => t(product === 'superwagie' ? 'platformAccount.membershipPlans' : product === 'llmrouter' ? 'platformAccount.addonPlans' : 'platformAccount.originalRequest');
+  const purchaseName = (product: string, walletTopUp?: true) => walletTopUp ? t('platformAccount.productWallet.topUp') : t(product === 'superwagie' ? 'platformAccount.membershipPlans' : product === 'llmrouter' ? 'platformAccount.addonPlans' : 'platformAccount.originalRequest');
   const offerName = (offer: NonNullable<PlatformCommerceState['offers']>[number]) => offer.kind === 'addon' && offer.productId === 'llmrouter' ? t('platformAccount.addonPlans') : offer.name;
   const orderStatus = (status: string) => {
     const key = orderStatusKey(status);
@@ -379,20 +405,22 @@ export const PlatformAccountCommerce: React.FC<{
   };
   const renderOffer = (offer: NonNullable<PlatformCommerceState['offers']>[number]) => {
     const restriction = membershipRestriction(offer);
+    const currentPlan = scopedWallet && restriction === 'platformAccount.currentPlan' ? currentMembership : undefined;
     return <div key={offer.id} className="space-y-2">
       <SettingsRadioOption className="oc-tile h-full p-4" selected={!restriction && offerId === offer.id} onSelect={() => selectOffer(offer.id)} disabled={busy || unresolved || !!restriction || offer.salesReadiness?.ready === false || offer.purchaseReadiness?.ready === false} ariaLabel={offerName(offer)}
-        label={<span dir="auto" className="text-base font-medium">{offerName(offer)}</span>}
+        label={<span dir="auto" className="text-base font-medium">{offerName(offer)}{currentPlan && <span className="ms-2 text-sm font-normal text-muted-foreground">{t('platformAccount.productWallet.currentPlan')}</span>}</span>}
         description={<span className="flex flex-col gap-2 pt-2">
           <span dir="auto" className="text-2xl font-medium tabular-nums text-foreground">{t(offer.kind === 'addon' ? 'platformAccount.priceOnce' : offer.period === 'year' ? 'platformAccount.priceAnnual' : 'platformAccount.priceMonthly', { price: money(offer.price) })}</span>
-          <span>{t(offer.kind === 'addon' ? 'platformAccount.addonPoints' : 'platformAccount.monthlyPoints', { points: formatPlatformPoints(offer.monthlyCredit), count: offer.validityMonths })}</span>
+          <span>{t(offer.kind === 'addon' ? scopedWallet ? 'platformAccount.pointsAmount' : 'platformAccount.addonPoints' : 'platformAccount.monthlyPoints', { points: formatPlatformPoints(offer.monthlyCredit), count: offer.validityMonths })}</span>
+          {currentPlan && <time dateTime={currentPlan.paid_through}>{t(renewalEnabled ? 'platformAccount.productWallet.nextRenewal' : 'platformAccount.paidThrough', { date: formatProductBillingDate(currentPlan.paid_through, locale) })}</time>}
         </span>} />
-      {restriction && <p className={SETTINGS_HELPER_CLASS}>{t(restriction)}</p>}
+      {restriction && !currentPlan && <p className={SETTINGS_HELPER_CLASS}>{t(restriction)}</p>}
       {offer.salesReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.creditRatesUnavailable')}</p>}
       {offer.purchaseReadiness?.ready === false && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.pointsRuntimeUnavailable')}</p>}
     </div>;
   };
   const collapsedOverview = view === 'overview' && buyingTask === null;
-  const commerceTitle = view === 'orders' ? t('platformAccount.history') : undefined;
+  const commerceTitle = view === 'orders' ? t('platformAccount.history') : view === 'wallet' ? t('platformAccount.productWallet.tab') : undefined;
   const refreshAction = <Button size="sm" variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>;
   const commerceUnavailable = !state || commerceReadFailed;
   const statusRow = (error || busy || purchaseApplied || collapsedOverview) && <div className="flex items-center justify-between gap-3">
@@ -402,7 +430,7 @@ export const PlatformAccountCommerce: React.FC<{
   if (!state) return <>{view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">{summary()}</SettingsTwoColumn>}<SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={collapsedOverview ? undefined : refreshAction} contentClassName="space-y-3">
     {statusRow}
     {command && !busy && <SettingsControlGroup title={t('platformAccount.pendingCommand')} description={t('platformAccount.commandUnknown')}>
-      <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId), amount: money(command.amount) })}</p>
+      <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId, command.kind === 'checkout' ? command.walletTopUp : undefined), amount: money(command.amount) })}</p>
       <Button variant="outline" disabled={busy || commerceUnavailable} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
     </SettingsControlGroup>}
   </SettingsSection></>;
@@ -415,12 +443,12 @@ export const PlatformAccountCommerce: React.FC<{
   const orders = orderHistory?.filter((order) => order.productId === 'superwagie' || order.productId === 'llmrouter') ?? [];
   const intentRow = (intent: PlatformCommerceIntent) => {
     const errorKey = intentErrorKey(intent.errorCode);
-    return <SettingsFieldRow key={intent.idempotencyKey} label={t('platformAccount.purchaseRecord', { product: purchaseName(intent.productId), amount: money(intent.amount) })} description={<>{t(`platformAccount.intent.${intent.status}`)}{errorKey ? ` · ${t(errorKey)}` : ''}</>}>
+    return <SettingsFieldRow key={intent.idempotencyKey} label={t('platformAccount.purchaseRecord', { product: purchaseName(intent.productId, intent.walletTopUp), amount: money(intent.amount) })} description={<>{t(`platformAccount.intent.${intent.status}`)}{errorKey ? ` · ${t(errorKey)}` : ''}</>}>
     {intent.status !== 'APPLIED' && intent.status !== 'FAILED' && <Button size="sm" variant="ghost" disabled={busy || commerceUnavailable} onClick={() => void mutate(() => reconcilePlatformIntent(accountId, intent.idempotencyKey))}>{t(intent.resourceId ? 'platformAccount.recheckIntent' : 'platformAccount.retryOriginal')}</Button>}
   </SettingsFieldRow>;
   };
   const paymentPanel = (checkout: PlatformCheckout, active: boolean) => {
-    const canReplace = active && !command && state.intents.some((intent) => intent.kind === 'checkout' && intent.resourceId === checkout.id && (intent.offerId || intent.quoteId));
+    const canReplace = active && !command && state.intents.some((intent) => intent.kind === 'checkout' && intent.resourceId === checkout.id && (intent.offerId || intent.quoteId || intent.walletTopUp));
     return <PlatformPaymentPanel key={checkout.id} checkout={checkout} busy={busy || checkingPayment} compact={!active}
       channels={canReplace ? channels : []} onSwitchChannel={canReplace ? (provider) => void switchChannel(checkout, provider) : undefined}
       onRenew={canReplace && channels.includes(checkout.provider) ? () => void switchChannel(checkout, checkout.provider) : undefined}
@@ -431,18 +459,42 @@ export const PlatformAccountCommerce: React.FC<{
     {view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">
       {summary()}
     </SettingsTwoColumn>}
-    <SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={view === 'orders' ? refreshAction : undefined} contentClassName="space-y-3">
+    <SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={view !== 'overview' ? refreshAction : undefined} contentClassName="space-y-3">
       {statusRow}
       {command && !busy && <SettingsControlGroup title={t('platformAccount.pendingCommand')} description={t('platformAccount.commandUnknown')}>
-        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId), amount: money(command.amount) })}</p>
+        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId, command.kind === 'checkout' ? command.walletTopUp : undefined), amount: money(command.amount) })}</p>
       <Button variant="outline" disabled={busy || commerceUnavailable} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
       </SettingsControlGroup>}
       {buyingTask !== null && !commerceReadFailed && state.payments.mode === 'unconfigured' && <p className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]" role="status">{t('platformAccount.paymentUnconfigured')}</p>}
       {!finance && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.memberRestricted')}</p>}
+      {view === 'wallet' && state.payments.canTopUp && channels.length > 0 && <SettingsControlGroup title={t('platformAccount.productWallet.topUp')}>
+        <SettingsFieldRow label={t('platformAccount.productWallet.topUpAmount')}>
+          <Input dir="ltr" inputMode="decimal" aria-label={t('platformAccount.productWallet.topUpAmount')} value={topUp} onChange={(event) => setTopUp(event.target.value)} disabled={busy || unresolved || commerceUnavailable} />
+        </SettingsFieldRow>
+        <SettingsFieldRow label={t('platformAccount.paymentChannel')}>
+          <SettingsChipGroup value={effectiveChannel} onChange={setPaymentChannel} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({
+            value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy || unresolved || commerceUnavailable,
+          }))} />
+        </SettingsFieldRow>
+        <Button disabled={busy || unresolved || commerceUnavailable || !topUpAmount} onClick={() => {
+          if (topUpAmount) void submitCommand({ kind: 'checkout', walletTopUp: true, provider: effectiveChannel, productId: 'superwagie', amount: topUpAmount, idempotencyKey: crypto.randomUUID() });
+        }}>{topUpAmount ? t('platformAccount.productWallet.confirmTopUp', { amount: money(topUpAmount) }) : t('platformAccount.productWallet.topUp')}</Button>
+      </SettingsControlGroup>}
+      {view === 'wallet' && state.productWallet && <PlatformProductWallet accountId={accountId} wallet={state.productWallet} orderStatus={orderStatus} disabled={busy || commerceUnavailable}
+        onSaving={(saving) => {
+          mutationActive.current = saving;
+          if (saving) ++generation.current;
+          setBusy(saving);
+        }}
+        onWalletUpdated={(next) => {
+          const value = { ...(lastCommerceState.current ?? state), productWallet: next, wallets: [{ productId: '', asset: next.cash.asset, amount: next.cash.available }] };
+          setState(value);
+          lastCommerceState.current = value;
+        }} />}
       {state.missingScopes.length > 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.missingScopes')}</p>}
       {finance && recoverableIntents.length > 0 && <SettingsControlGroup title={t('platformAccount.pendingCommand')}>{recoverableIntents.map(intentRow)}</SettingsControlGroup>}
       {payment && !inlinePayment && paymentPanel(payment, true)}
-      {view === 'orders' && pastPayments.map((item) => paymentPanel(item, false))}
+      {(view === 'orders' || view === 'wallet') && pastPayments.filter((item) => view === 'orders' || item.walletTopUp).map((item) => paymentPanel(item, false))}
       {view === 'overview' && !commerceReadFailed && buyingTask !== null && <>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SettingsChipGroup value={buyingTask} onChange={(task) => { setBuyingTask(task); setQuote(null); }} aria-label={t('platformAccount.buyingTask')} options={[
@@ -451,28 +503,28 @@ export const PlatformAccountCommerce: React.FC<{
         ]} />
         <div className="flex items-center gap-2">{refreshAction}<Button variant="ghost" size="sm" onClick={() => setBuyingTask(null)}>{t('dialog.common.actions.close')}</Button></div>
       </div>
-      {buyingTask === 'membership' && <SettingsControlGroup description={t('platformAccount.membershipRules')}>
-        {offers.some((offer) => offer.kind === 'membership' && offer.period === 'year') && <SettingsFieldRow label={t('platformAccount.billingPeriod')}>
-          <SettingsChipGroup value={billingPeriod} onChange={(period) => { setBillingPeriod(period); setQuote(null); if (selectedOffer?.kind === 'membership' && selectedOffer.period !== period) setOfferId(''); }} aria-label={t('platformAccount.billingPeriod')} options={[
-            { value: 'month', label: t('platformAccount.monthly'), disabled: busy || unresolved },
-            { value: 'year', label: t('platformAccount.yearly'), disabled: busy || unresolved },
-          ]} />
+      {buyingTask === 'membership' && <SettingsControlGroup description={t(state.productCreditWallet ? 'platformAccount.productWallet.membershipRules' : 'platformAccount.membershipRules')}>
+        {availableTerms.length > 1 && <SettingsFieldRow label={t('platformAccount.billingPeriod')}>
+          <SettingsChipGroup value={visibleTerm} onChange={(period) => { setBillingPeriod(period); setQuote(null); if (selectedOffer?.kind === 'membership' && selectedOffer.period !== period) setOfferId(''); }} aria-label={t('platformAccount.billingPeriod')} options={availableTerms.map((term) => ({
+            value: term, label: t(term === 'month' ? 'platformAccount.monthly' : 'platformAccount.yearly'), disabled: busy || unresolved,
+          }))} />
         </SettingsFieldRow>}
         {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
           : memberships.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noMembershipOffers')}</p>
-          : <SettingsRadioGroup className="grid gap-3 @xl:grid-cols-2" aria-label={t('platformAccount.membershipPlans')}>
+          : <SettingsRadioGroup className={scopedWallet ? "grid gap-3 @xl:grid-cols-2 @4xl:grid-cols-3" : "grid gap-3 @xl:grid-cols-2"} aria-label={t('platformAccount.membershipPlans')}>
             {memberships.map(renderOffer)}
           </SettingsRadioGroup>}
         {hasActiveMembership && (currentMembership ? <>
-          <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.currentMembershipTerm', { plan: currentMembership.offer.name, date: new Date(currentMembership.paid_through).toLocaleDateString() })}</p>
-          {memberships.some((offer) => !membershipRestriction(offer) && offer.salesReadiness?.ready !== false && offer.purchaseReadiness?.ready !== false) && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.upgradeHint')}</p>}
+          {!scopedWallet && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.currentMembershipTerm', { plan: currentMembership.offer.name, date: new Date(currentMembership.paid_through).toLocaleDateString() })}</p>}
+          {otherTerm && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.otherTermAfterExpiry')}</p>}
+          {canUpgradeVisibleTier && <p className={SETTINGS_HELPER_CLASS}>{t(scopedWallet ? 'platformAccount.productWallet.upgradeHint' : 'platformAccount.upgradeHint')}</p>}
         </> : <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.membershipActive')}</p>)}
       </SettingsControlGroup>}
-      {buyingTask === 'addon' && <SettingsControlGroup description={t('platformAccount.addonRules')}>
+      {buyingTask === 'addon' && <SettingsControlGroup description={t(scopedWallet ? 'platformAccount.productWallet.addonRules' : 'platformAccount.addonRules')}>
         {!hasActiveMembership && <p className="text-[var(--status-warning-text)]" role="status">{t('platformAccount.subscriptionRequired')}</p>}
         {state.offers === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.offersUnavailable')}</p>
           : addons.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noAddonOffers')}</p>
-          : <SettingsRadioGroup className="grid gap-3 @xl:grid-cols-2" aria-label={t('platformAccount.addonPlans')}>
+          : <SettingsRadioGroup className={scopedWallet ? "grid gap-3 @xl:grid-cols-2 @4xl:grid-cols-3" : "grid gap-3 @xl:grid-cols-2"} aria-label={t('platformAccount.addonPlans')}>
             {addons.map(renderOffer)}
           </SettingsRadioGroup>}
       </SettingsControlGroup>}
@@ -480,22 +532,27 @@ export const PlatformAccountCommerce: React.FC<{
       {inlinePayment && selectedOffer && <div ref={checkoutRegion} data-purchase-confirmation>{payment ? paymentPanel(payment, true) : <SettingsControlGroup title={t('platformAccount.purchaseSelection')}>
         <div className="space-y-2">
           <SettingsFieldRow label={t('platformAccount.taskAccount')}><span>{payer}</span></SettingsFieldRow>
-          {channels.length > 0 && <SettingsFieldRow label={t('platformAccount.paymentChannel')}><SettingsChipGroup value={external ? effectiveChannel : 'wallet'} onChange={(channel) => { setPaymentChannel(channel); setQuote(null); }} aria-label={t('platformAccount.paymentChannel')} options={[...channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy || unresolved })), { value: 'wallet' as const, label: t('platformAccount.legacyBalances'), disabled: busy || unresolved }]} /></SettingsFieldRow>}
+          {channels.length > 0 && <SettingsFieldRow label={t('platformAccount.paymentChannel')}><SettingsChipGroup value={external ? effectiveChannel : 'wallet'} onChange={(channel) => { setPaymentChannel(channel); setQuote(null); }} aria-label={t('platformAccount.paymentChannel')} options={[...channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy || unresolved })), { value: 'wallet' as const, label: t(state.productCreditWallet ? 'platformAccount.productWallet.cash' : 'platformAccount.legacyBalances'), disabled: busy || unresolved }]} /></SettingsFieldRow>}
           <SettingsFieldRow label={t('platformAccount.offer')}><span dir="auto">{offerName(selectedOffer)}</span></SettingsFieldRow>
-          <SettingsFieldRow label={t(validQuote ? 'platformAccount.upgradeDifference' : 'platformAccount.price')}><span dir="auto">{money(purchaseAmount)}</span></SettingsFieldRow>
-          <SettingsFieldRow label={t('platformAccount.walletDestination')}><span>{walletName(selectedOffer.productId)}</span></SettingsFieldRow>
-          <SettingsFieldRow label={t(validQuote ? 'platformAccount.upgradeCredits' : selectedOffer.kind === 'membership' ? 'platformAccount.monthlyCreditGrant' : 'platformAccount.creditGrant')}><span dir="auto">{t('platformAccount.pointsAmount', { points: formatPlatformPoints(validQuote?.additionalCredits ?? selectedOffer.monthlyCredit) })}</span></SettingsFieldRow>
-          {selectedOffer.kind === 'addon' ? <SettingsFieldRow label={t('platformAccount.offerValidity')}><span>{t('platformAccount.months', { count: selectedOffer.validityMonths })}</span></SettingsFieldRow> : <SettingsFieldRow label={t('platformAccount.billingPeriod')}><span>{selectedOffer.period === 'month' ? t('platformAccount.monthly') : selectedOffer.period === 'year' ? t('platformAccount.yearly') : t('platformAccount.order.remoteStatus', { status: selectedOffer.period })}</span></SettingsFieldRow>}
+          <SettingsFieldRow label={t(validQuote && !resetQuote ? 'platformAccount.upgradeDifference' : 'platformAccount.price')}><span dir="auto">{money(purchaseAmount)}</span></SettingsFieldRow>
+          <SettingsFieldRow label={t(scopedWallet ? 'platformAccount.productWallet.creditsDestination' : 'platformAccount.walletDestination')}><span>{state.productCreditWallet ? t('platformAccount.productWallet.productCredit') : walletName(selectedOffer.productId)}</span></SettingsFieldRow>
+          <SettingsFieldRow label={t(resetQuote ? 'platformAccount.productWallet.newPeriodCredits' : validQuote ? 'platformAccount.upgradeCredits' : selectedOffer.kind === 'membership' ? 'platformAccount.monthlyCreditGrant' : 'platformAccount.creditGrant')}><span dir="auto">{t('platformAccount.pointsAmount', { points: formatPlatformPoints(validQuote?.additionalCredits ?? selectedOffer.monthlyCredit) })}</span></SettingsFieldRow>
+          {selectedOffer.kind === 'addon' ? <SettingsFieldRow label={t('platformAccount.offerValidity')}><span>{scopedWallet && selectedOffer.validityMonths === 1 ? t('platformAccount.productWallet.addonExpiry') : t('platformAccount.months', { count: selectedOffer.validityMonths })}</span></SettingsFieldRow> : <SettingsFieldRow label={t('platformAccount.billingPeriod')}><span>{selectedOffer.period === 'month' ? t('platformAccount.monthly') : selectedOffer.period === 'year' ? t('platformAccount.yearly') : t('platformAccount.order.remoteStatus', { status: selectedOffer.period })}</span></SettingsFieldRow>}
           {validQuote && <>
             <SettingsFieldRow label={t('platformAccount.quoteValidUntil')}><span>{new Date(validQuote.expiresAt).toLocaleString()}</span></SettingsFieldRow>
-            {currentMembership && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.upgradeKeepsExpiry', { date: new Date(currentMembership.paid_through).toLocaleDateString() })}</p>}
+            {resetQuote ? <>
+              <SettingsFieldRow label={t('platformAccount.productWallet.estimatedRefund')} description={t(resetQuote.refundPaymentSource === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}>
+                <span dir="auto">{money(resetQuote.estimatedRefundAmount)}</span>
+              </SettingsFieldRow>
+              <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.resetUpgrade')}</p>
+            </> : currentMembership && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.upgradeKeepsExpiry', { date: new Date(currentMembership.paid_through).toLocaleDateString() })}</p>}
           </>}
           {insufficient && (!membershipActive || validQuote) && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.insufficientWallet')}</p>}
           <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.oneTimePurchase')}</p>
           <div className="flex flex-wrap gap-2">
             {membershipActive ? validQuote
-              ? <><Button disabled={busy || unresolved || !finance || !state.payments.canPurchase || !!insufficient || (!external && state.wallets === null) || Date.parse(validQuote.expiresAt) <= Date.now()} onClick={confirmUpgrade}>{t('platformAccount.confirmUpgrade', { price: money(validQuote.amount) })}</Button><Button variant="outline" disabled={busy || unresolved || !finance || !state.payments.canPurchase} onClick={() => void requestUpgrade()}>{t('platformAccount.getUpgradeQuote')}</Button></>
-              : <Button disabled={busy || unresolved || !finance || !state.payments.canPurchase || !currentMembership || selectedOffer.salesReadiness?.ready === false || selectedOffer.purchaseReadiness?.ready === false} onClick={() => void requestUpgrade()}>{t('platformAccount.getUpgradeQuote')}</Button>
+              ? <><Button disabled={busy || unresolved || !finance || !state.payments.canPurchase || !!insufficient || (!external && state.wallets === null) || !!selectedOfferRestriction || Date.parse(validQuote.expiresAt) <= Date.now()} onClick={confirmUpgrade}>{t('platformAccount.confirmUpgrade', { price: money(validQuote.amount) })}</Button><Button variant="outline" disabled={busy || unresolved || !finance || !state.payments.canPurchase} onClick={() => void requestUpgrade()}>{t(scopedWallet ? 'platformAccount.productWallet.upgradeQuote' : 'platformAccount.getUpgradeQuote')}</Button></>
+              : <Button disabled={busy || unresolved || !finance || !state.payments.canPurchase || !currentMembership || !!selectedOfferRestriction || selectedOffer.salesReadiness?.ready === false || selectedOffer.purchaseReadiness?.ready === false} onClick={() => void requestUpgrade()}>{t(scopedWallet ? 'platformAccount.productWallet.upgradeQuote' : 'platformAccount.getUpgradeQuote')}</Button>
               : <Button className="max-w-full whitespace-normal text-start" disabled={busy || unresolved || selectedOffer.salesReadiness?.ready === false || selectedOffer.purchaseReadiness?.ready === false || !finance || addonNeedsMembership || !state.payments.canPurchase || !!insufficient || (!external && state.wallets === null)} onClick={() => void submitCommand({ ...(external ? { kind: 'checkout', provider: effectiveChannel } as const : { kind: 'purchase' } as const), offerId: selectedOffer.id, productId: selectedOffer.productId, amount: selectedOffer.price, idempotencyKey: crypto.randomUUID() })}>{t('platformAccount.purchase', { name: offerName(selectedOffer), price: money(selectedOffer.price) })}</Button>}
             {addonNeedsMembership && <Button variant="outline" onClick={() => { setBuyingTask('membership'); selectOffer(null); }}>{t('platformAccount.membershipPlans')}</Button>}
           </div>

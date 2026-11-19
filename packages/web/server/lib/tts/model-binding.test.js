@@ -6,6 +6,7 @@ import request from 'supertest';
 
 import { registerTtsRoutes } from './routes.js';
 import { createDictationService } from '../dictation/service.js';
+import { pcm16ToWav } from '../dictation/audio.js';
 
 const servers = [];
 afterEach(async () => {
@@ -80,7 +81,7 @@ describe('unified speech model bindings', () => {
     });
     const app = appWithBinding(async (purpose, options) => {
       expect(purpose).toBe('stt-short');
-      expect(options.supportedProtocols).toEqual(['openai-compatible']);
+      expect(options.supportedProtocols).toEqual(['openai-compatible', 'managed-media']);
       return { protocol: 'openai-compatible', baseUrl, apiKey: 'fixture-stt', model: 'selected-transcribe', parameters: {} };
     });
     const result = await request(app).post('/api/stt/transcribe').set('content-type', 'audio/webm').send(Buffer.from('audio'));
@@ -101,7 +102,7 @@ describe('unified speech model bindings', () => {
     });
     const app = appWithBinding(async (purpose, options) => {
       expect(purpose).toBe('stt-short');
-      expect(options.supportedProtocols).toEqual(['openai-compatible']);
+      expect(options.supportedProtocols).toEqual(['openai-compatible', 'managed-media']);
       return { protocol: 'openai-compatible', baseUrl, apiKey: 'fixture-stt', model: 'selected-transcribe', parameters: {} };
     });
     const result = await request(app).post('/api/stt/transcribe')
@@ -149,8 +150,10 @@ describe('unified speech model bindings', () => {
       }),
       resolvePlatformIdentity: async () => ({ type: 'client', token: 'fixture-identity' }),
     });
-    const result = await request(app).post('/api/tts/speak').send({ text: 'Hello' });
+    const result = await request(app).post('/api/tts/speak').set('Idempotency-Key', 'stable-speech').send({ text: 'Hello' });
     expect(result.status).toBe(200);
+    expect(result.headers['x-unihub-idempotency-key']).toBe('stable-speech');
+    expect(dispatched[0].callID).toBe('stable-speech');
     expect(Buffer.from(result.body).toString('utf8')).toBe('managed-audio');
     expect(result.headers['content-type']).toBe('audio/mpeg');
     expect(dispatched).toHaveLength(1);
@@ -160,6 +163,32 @@ describe('unified speech model bindings', () => {
     expect(dispatched[0].identity).toEqual({ type: 'client', token: 'fixture-identity' });
     expect(dispatched[0].sessionID).toBe('media_fixture_session');
     expect(admitted).toEqual([{ identity: { type: 'client', token: 'fixture-identity' }, model: 'qwen3-tts-flash' }]);
+  });
+
+  it('uses stable account-bound managed transcription without accepting provider overrides', async () => {
+    const identity = { type: 'client', token: 'voice-owner' };
+    const mediaDispatch = vi.fn().mockResolvedValueOnce({ transcript: 'written' }).mockRejectedValueOnce(
+      Object.assign(new Error('private provider detail'), { code: 'product_membership_expired', status: 403 }),
+    );
+    const app = appWithBinding(async () => ({ protocol: 'managed-media', model: 'qwen3-asr-flash', parameters: {} }), {
+      getPlatformModelRuntime: () => ({ isMediaOperationConfigured: () => true, admitMediaTask: async () => ({ sessionID: 'media_voice' }), mediaDispatch }),
+      resolvePlatformIdentity: async () => identity,
+    });
+    const rejected = await request(app).post('/api/stt/transcribe').set('content-type', 'audio/webm').send(Buffer.from('audio'));
+    expect(rejected.status).toBe(415);
+    expect(mediaDispatch).not.toHaveBeenCalled();
+    const wav = pcm16ToWav(Buffer.alloc(200, 5), 16000);
+    const send = () => request(app).post('/api/stt/transcribe?model=untrusted').set('content-type', 'audio/wav')
+      .set('Idempotency-Key', 'stable-voice').send(wav);
+    const result = await send();
+    expect(result.body).toEqual({ transcript: 'written' });
+    expect(result.headers['x-unihub-idempotency-key']).toBe('stable-voice');
+    expect(mediaDispatch).toHaveBeenCalledWith({ identity, sessionID: 'media_voice', callID: 'stable-voice', model: 'qwen3-asr-flash',
+      operation: 'transcription', inputs: { audioDataUri: 'data:audio/wav;base64,' + wav.toString('base64') } });
+    const failed = await send();
+    expect(failed.status).toBe(403);
+    expect(failed.body.code).toBe('product_membership_expired');
+    expect(JSON.stringify(failed.body)).not.toContain('private');
   });
 
   it('surfaces a configured managed admission refusal without falling back', async () => {
@@ -227,7 +256,7 @@ describe('unified speech model bindings', () => {
     const service = createDictationService({ modelsDir: '/unused', resolveModelBinding: async (purpose, options) => {
       resolutions += 1;
       expect(purpose).toBe('stt-realtime');
-      expect(options.supportedProtocols).toEqual(['openai-compatible']);
+      expect(options.supportedProtocols).toEqual(['openai-compatible', 'managed-media']);
       return configured ? { baseUrl: 'http://127.0.0.1:1/v1', model: 'configured-stt', apiKey: 'fixture-key', parameters: {} } : null;
     } });
     expect(await service.getStatus()).toMatchObject({ provider: 'openai-compatible', available: true, activeModel: 'configured-stt' });
@@ -236,6 +265,29 @@ describe('unified speech model bindings', () => {
     expect(await service.getStatus()).toMatchObject({ provider: 'openai-compatible', available: false, reasonCode: 'stt_not_configured' });
     expect(resolutions).toBe(3);
     service.shutdown();
+  });
+
+  it('binds managed dictation to the authenticated socket actor and commits a single paid WAV segment', async () => {
+    const identity = { type: 'session', token: 'dictation-owner' };
+    const mediaDispatch = vi.fn(async () => ({ transcript: 'dictated with credits' }));
+    const service = createDictationService({
+      modelsDir: '/unused',
+      resolveModelBinding: async () => ({ protocol: 'managed-media', model: 'qwen3-asr-flash' }),
+      getPlatformModelRuntime: () => ({ isMediaOperationConfigured: () => true, admitMediaTask: async () => ({ sessionID: 'managed-dictation' }), mediaDispatch }),
+    });
+    try {
+      expect(await service.createSttSession()).toMatchObject({ reasonCode: 'platform_auth_required' });
+      const { session } = await service.createSttSession(identity);
+      const transcript = once(session, 'transcript');
+      const callID = 'dictation_' + session.segmentId;
+      session.appendPcm16(Buffer.alloc(3200, 5));
+      session.commit();
+      expect(await transcript).toMatchObject([{ transcript: 'dictated with credits', isFinal: true }]);
+      expect(mediaDispatch).toHaveBeenCalledTimes(1);
+      expect(mediaDispatch).toHaveBeenCalledWith({ identity, sessionID: 'managed-dictation', model: 'qwen3-asr-flash', callID,
+        operation: 'transcription', inputs: { audioDataUri: expect.stringMatching(/^data:audio\/wav;base64,UklGR/) } });
+      session.close();
+    } finally { service.shutdown(); }
   });
 
   it('applies the continuous dictation binding to a real transcription session', async () => {

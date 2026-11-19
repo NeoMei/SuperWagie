@@ -1,4 +1,5 @@
 import { configuredProviderError } from '../tts/provider-errors.js';
+import { managedAudioFailure, transcribeManagedAudio } from '../tts/managed-audio.js';
 import { isEnterpriseMode, ENTERPRISE_MODE_ERROR } from '../enterprise-mode.js';
 import { detectTextLanguage } from '../tts/language-detect.js';
 /**
@@ -23,7 +24,7 @@ import {
 } from './local/model-catalog.js';
 import { ensureLocalTtsModel, isLocalTtsModelInstalled } from './local/model-downloader.js';
 
-export function createDictationService({ modelsDir, resolveModelBinding = async () => null }) {
+export function createDictationService({ modelsDir, resolveModelBinding = async () => null, getPlatformModelRuntime = () => null }) {
   const workerClient = new DictationWorkerClient();
   /** modelId -> 'downloading' | 'error' */
   const downloadStates = new Map();
@@ -74,10 +75,10 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
    * The server resolves the binding; client options cannot supply an endpoint
    * or credential. Returns { session } or a stable visible failure.
    */
-  const createSttSession = async () => {
+  const createSttSession = async (identity) => {
     let binding;
     try {
-      binding = await resolveModelBinding('stt-realtime', { supportedProtocols: ['openai-compatible'] });
+      binding = await resolveModelBinding('stt-realtime', { supportedProtocols: ['openai-compatible', 'managed-media'] });
     } catch (error) {
       return { error: error.message, retryable: false, reasonCode: error.code || 'stt_not_configured' };
     }
@@ -85,7 +86,28 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
       const unbound = isEnterpriseMode() ? enterpriseRefusal() : notConfigured();
       return { ...unbound, retryable: false };
     }
+    let transcribe;
+    if (binding.protocol === 'managed-media') {
+      const runtime = getPlatformModelRuntime();
+      if (!identity) return { error: 'UniHub account login is required', retryable: false, reasonCode: 'platform_auth_required' };
+      if (runtime?.isMediaOperationConfigured?.(binding.model, 'transcription') !== true) {
+        return { error: 'Managed dictation is temporarily unavailable', retryable: false, reasonCode: 'platform_media_recovery_unavailable' };
+      }
+      let previous = Promise.resolve();
+      transcribe = (audio, segmentId) => {
+        // The durable media task admits a new paid call after the previous
+        // segment's dispatch. A segment never changes its logical call ID.
+        const result = previous.then(() => transcribeManagedAudio({ runtime, identity, model: binding.model,
+          callID: 'dictation_' + segmentId, audio, mimeType: 'audio/wav' }));
+        previous = result;
+        return result.catch((error) => {
+          const failure = managedAudioFailure(error);
+          throw Object.assign(new Error(failure.body.error), { dictationReasonCode: failure.body.code });
+        });
+      };
+    }
     const session = new OpenAICompatibleTranscriptionSession({
+      transcribe,
       baseURL: binding.baseUrl,
       model: binding.model,
       apiKey: binding.apiKey,
@@ -112,7 +134,7 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
     let binding;
     let bindingError;
     try {
-      binding = await resolveModelBinding('stt-realtime', { supportedProtocols: ['openai-compatible'] });
+      binding = await resolveModelBinding('stt-realtime', { supportedProtocols: ['openai-compatible', 'managed-media'] });
     } catch (error) {
       bindingError = { error: error.message, reasonCode: error.code || 'stt_not_configured' };
     }
@@ -131,6 +153,11 @@ export function createDictationService({ modelsDir, resolveModelBinding = async 
     if (!binding) {
       const unbound = isEnterpriseMode() ? enterpriseRefusal() : notConfigured();
       return { provider: 'openai-compatible', available: false, ...unbound, ttsModels };
+    }
+    if (binding.protocol === 'managed-media') {
+      const available = getPlatformModelRuntime()?.isMediaOperationConfigured?.(binding.model, 'transcription') === true;
+      return { provider: 'managed-media', available, activeModel: binding.model, ttsModels,
+        ...(!available && { error: 'Managed dictation is temporarily unavailable', reasonCode: 'platform_media_recovery_unavailable' }) };
     }
     return { provider: 'openai-compatible', available: true, activeModel: binding.model, ttsModels };
   };

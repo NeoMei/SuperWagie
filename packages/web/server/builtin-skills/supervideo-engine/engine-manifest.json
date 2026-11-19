@@ -236,8 +236,8 @@
     },
     {
       "path": "src/providers/tts.mjs",
-      "size": 15426,
-      "sha256": "f27f5f200616dcfbf5f8417c05b4379e5bca9049b6bd57c30d23e4eed60506a2"
+      "size": 15860,
+      "sha256": "16232148586b8dacb75519dc1ea58cef60dddf46326e30c84b5949daae7ed425"
     },
     {
       "path": "src/quality.mjs",
@@ -311,8 +311,8 @@
     },
     {
       "path": "src/runtime-cli.mjs",
-      "size": 41042,
-      "sha256": "36ba67713ab19c413e17ec3efd938728e92ad1ee046a85f7f98fcf7d0f3481b4"
+      "size": 41378,
+      "sha256": "ad1f5567e74d2f5fb320d2a2cb8a8900faa9cfaf2148c0a048f84669d3c3ee6e"
     },
     {
       "path": "vendor/office/DOCX-PREVIEW-LICENSE",

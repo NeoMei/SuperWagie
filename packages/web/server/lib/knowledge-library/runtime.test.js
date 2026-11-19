@@ -179,13 +179,26 @@ const setupConfiguredBackend = async ({ adopted = false, provisioned = true, dic
       }
       return json({ data: models });
     }
-    if (route.startsWith('/api/v1/models/') && options.method === 'PUT') {
-      const model = JSON.parse(options.body);
-      const host = new URL(model.parameters.base_url).hostname.replace(/^\[|\]$/g, '');
+    const modelRoute = /^\/api\/v1\/models\/([^/]+)(\/credentials)?$/.exec(route);
+    if (modelRoute && options.method === 'PUT') {
+      const stored = models.find((entry) => entry.id === decodeURIComponent(modelRoute[1]));
+      if (!stored) return json({ error: 'Fixture model not found' }, 404);
+      const body = JSON.parse(options.body);
+      if (modelRoute[2]) {
+        for (const field of ['api_key', 'app_secret']) {
+          if (body[field]) stored.parameters[field] = body[field];
+        }
+        return json({ data: { fields: {
+          api_key: { configured: Boolean(stored.parameters.api_key) },
+          app_secret: { configured: Boolean(stored.parameters.app_secret) },
+        } } });
+      }
+      const host = new URL(body.parameters.base_url).hostname.replace(/^\[|\]$/g, '');
       if (rejectModelUpdates || !activeHosts.split(',').includes(host)) return json({ error: 'SSRF rejected fixture model host' }, 500);
-      Object.assign(models.find((entry) => route.endsWith(`/${entry.id}`)), model);
-      updates.push(model);
-      return json({ data: model });
+      const { api_key, app_secret } = stored.parameters;
+      Object.assign(stored, body, { parameters: { ...body.parameters, api_key, app_secret } });
+      updates.push(body);
+      return json({ data: { ...stored, parameters: { ...stored.parameters, api_key: undefined, app_secret: undefined } } });
     }
     if (route === '/api/v1/knowledge-bases') {
       if (options.method === 'POST') {
@@ -412,7 +425,7 @@ describe('knowledge model hosts', () => {
   });
 
   it('applies a new bound host before concurrent consumers and retains it on key rotation and unbinding', async () => {
-    const { runtime, connectVision, spawns, updates, modelConfiguration, kills } = await setupConfiguredBackend();
+    const { runtime, connectVision, spawns, models, modelConfiguration, kills } = await setupConfiguredBackend();
     await runtime.start();
     await connectVision('https://coding.dashscope.aliyuncs.com/v1');
     const results = await Promise.all([runtime.search({ query: 'one' }), runtime.search({ query: 'two' })]);
@@ -422,7 +435,7 @@ describe('knowledge model hosts', () => {
     expect(spawns[1].SSRF_WHITELIST_EXTRA.split(',')).toContain('coding.dashscope.aliyuncs.com');
     await connectVision('https://coding.dashscope.aliyuncs.com/v1', 'fixture-rotated-key');
     await runtime.search({ query: 'rotated' });
-    expect(updates.at(-1).parameters.api_key).toBe('fixture-rotated-key');
+    expect(models.find((model) => model.id === 'v1').parameters.api_key).toBe('fixture-rotated-key');
     const { revision } = await modelConfiguration.getPublicConfiguration();
     await modelConfiguration.saveBinding('vision', { revision, binding: null });
     await runtime.search({ query: 'unbound' });

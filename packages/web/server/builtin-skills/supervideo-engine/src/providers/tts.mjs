@@ -41,11 +41,12 @@ async function synthesizeBase(root,sentence,{voice,runtime={},hostReceipt}={}) {
  let directory;
  try{
   let path,origin,words,alignment,providerReceipt;
-  if(voice.provider==='host'){
+  if(voice.provider==='host'||voice.provider==='managed-media'&&(hostReceipt!==undefined||process.env.OPENCHAMBER_PRODUCT_MANAGED_MEDIA==='1')){
    const r=hostReceipt;
    if(r?.status==='failed')throw mediaError(r.error?.code??'PROVIDER_FAILED',r.error?.detail??'Host speech generation failed; retry the provider');
    if(!r||r.status!=='succeeded')throw mediaError('HOST_AUDIO_REQUIRED','Supply a succeeded audio receipt from the host');
    if(r.sentenceId!==sentence.id||r.textHash!==canonicalHash(sentence.text)||! /^[a-f0-9]{64}$/.test(r.sha256))throw mediaError('HOST_RECEIPT_MISMATCH','Receipt must bind sentence, text and audio hash');
+   if(voice.provider==='managed-media'&&(r.model!==voice.model||r.voice!==voice.voice||!/^[-a-zA-Z0-9._:]{1,200}$/.test(r.callID??'')||r.origin?.kind!=='provider'))throw mediaError('HOST_RECEIPT_MISMATCH','Managed receipt must bind the configured model, voice and original call ID');
    origin=r.origin;const bytes=await readFile(r.path);if(sha256(bytes)!==r.sha256)throw mediaError('HOST_RECEIPT_MISMATCH','Audio bytes differ from the host receipt');
    directory=await mkdtemp(join(tmpdir(),'supervideo-host-audio-'));path=join(directory,`narration${extname(r.path)}`);await writeFile(path,bytes);
    const measured=await probeAudio(path,runtime);
@@ -126,7 +127,7 @@ export async function synthesize(root,sentence,{voice,runtime={},hostReceipt}={}
  const job=scene?await claimJob(root,{id:`tts-${sentence.id}`,kind:'tts',sentenceId:sentence.id,sceneIds:[scene.id],key,inputs:[canonicalHash(sentence.text),canonicalHash(voice)]}):null;
  try{
   // An explicitly supplied host receipt is new evidence, never silently ignored by a cache hit.
-  if(voice.provider==='host'&&hostReceipt!==undefined){
+  if((voice.provider==='host'||voice.provider==='managed-media')&&hostReceipt!==undefined){
    const supplied=await synthesizeBase(root,baseSentence,{voice,runtime,hostReceipt});
    await cacheSegment(root,baseKey,supplied);
    segment=rate===1?supplied:await changeRate(root,supplied,rate,runtime,baseKey);

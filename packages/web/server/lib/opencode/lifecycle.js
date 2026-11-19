@@ -787,7 +787,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     for (const source of [inheritedEnv, userEnvironment]) {
       for (const key of Object.keys(source)) {
         // Only this host may bind the model proxy and managed diagram runtime.
-        if (['OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN', ...EXCALIDRAW_ENV_KEYS].includes(key.toUpperCase())) delete source[key];
+        if (['OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN', 'OPENCHAMBER_PRODUCT_MANAGED_MEDIA', ...EXCALIDRAW_ENV_KEYS].includes(key.toUpperCase())) delete source[key];
       }
     }
     // What OpenChamber sets for OpenCode is recorded as injected, so a shell

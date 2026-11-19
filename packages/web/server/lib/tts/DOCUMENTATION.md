@@ -182,10 +182,16 @@ or Bailian binary WAV, and never forwards cloud error bodies. Resolver errors ar
 visible failures and never fall back to another provider.
 
 The short transcription route `POST /api/stt/transcribe` resolves `stt-short`
-with `supportedProtocols: ['openai-compatible']` and fails closed when no binding
-exists: `503 stt_not_configured`, or `403 enterprise_mode` in enterprise mode.
-A binding with any other protocol returns `501
-model_configuration_unsupported_protocol`. A transcription request against a
+with `openai-compatible` and `managed-media` support. It fails closed
+when no binding exists with `503 stt_not_configured` or `403 enterprise_mode`.
+An unavailable managed adapter returns `501 model_configuration_unsupported_protocol`.
+Product-scoped speech and short transcription use the authenticated actor's
+existing media task and accept a stable `Idempotency-Key`. A retry with the
+original request resolves the original artifact. Message playback recognizes
+the exact insufficient-credit and expired-membership responses, stops the
+remaining sentence requests, and explains the refusal in the current language.
+The product short transcription endpoint accepts PCM WAV. The web server
+refuses unsupported audio before admitting a model call. A request against a
 configured binding that fails returns `502 model_configuration_provider_failed`
 with the upstream error text discarded. Resolver and enterprise errors keep their
 own status and code. The request carries only `model`, `response_format` and a
@@ -242,3 +248,5 @@ ASR validator accepts only `model`, `response_format` and a WAV `file`, so a
 legacy path would send a destination and payload the account-key binding no
 longer defines, and would let client-supplied fields choose where conversation
 audio goes.
+
+Continuous dictation also supports the managed product adapter. Its authenticated WebSocket submits buffered WAV segments through stable original media call IDs.

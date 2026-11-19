@@ -12,7 +12,7 @@ const identity = { type: 'client', token: 'video-owner' };
 const model = 'wan2.6-t2v';
 const mp4 = Buffer.from('000000186674797069736f6d0000020069736f6d69736f32', 'hex');
 
-const fixture = async () => {
+const fixture = async (product = false) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'managed-video-broker-'));
   cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));
   let taskStatus = 'QUEUED'; let chargeStatus = 'UNKNOWN'; let submits = 0; let badHash = false; let payload = mp4; let declaredSize;
@@ -41,13 +41,35 @@ const fixture = async () => {
   let actorState = { actingUserId: 'alice', billingAccountId: 'personal', authSession: 'login-fixture' };
   let readBarrier = null;
   const account = { actor: () => { if (!actorState) throw new Error('logged out'); return actorState; }, request: async (_who, target, init) => { const body = JSON.parse(init.body); return { token: `grant-${body.models[0]}`, actor_id: 'alice', account_id: target.split('/')[3], task_id: body.task_id, origin_product_id: 'superwagie', models: body.models, expires_at: new Date(Date.now() + 600000).toISOString() }; } };
+  const productOperations = [];
+  if (product) {
+    account.usesProductCreditWallet = async () => true;
+    account.request = async () => { throw new Error('unexpected legacy Key request'); };
+    account.proxyProductModel = async (_identity, { operation, accountId, model: selected, callId, body }) => {
+      expect({ accountId, selected, callId }).toEqual({ accountId: 'personal', selected: model, callId: 'video_product' });
+      productOperations.push(operation);
+      switch (operation) {
+        case 'video':
+          expect(JSON.parse(body)).toMatchObject({ model, seconds: 5, size: '1280*720' });
+          return Response.json({ task_id: 'provider-video' });
+        case 'video-status':
+          return Response.json({ id: 'pc_video', idempotency_key: callId, task_id: 'provider-video', status: taskStatus });
+        case 'receipt':
+          return Response.json({ call_id: 'pc_video', idempotency_key: callId, status: chargeStatus, asset: 'CREDIT/6', credit_scope: 'product_v1', funding_product_id: 'superwagie' });
+        case 'video-result':
+          return new Response(mp4, { headers: { 'content-type': 'video/mp4', 'x-content-sha256': crypto.createHash('sha256').update(mp4).digest('hex') } });
+        default:
+          throw new Error('unexpected product operation');
+      }
+    };
+  }
   let promptID = 'msg_test';
   const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env, getAccountRuntime: () => account, readExecution: async () => { if (readBarrier) { readBarrier.entered.resolve(); await readBarrier.release.promise; } return {promptID, idle: null, model: {providerID: 'unihub', id: 'agent'}}; }, isManaged: () => true, enterprise: () => false });
   cleanups.push(() => runtime.close()); await runtime.materializePlugin();
   await runtime.admit(identity, {id: 'ses_video', model: {providerID: 'unihub', id: 'agent'}}, 'msg_test');
   const child = runtime.createChildEnv();
   const call = (route, body) => fetch(child.OPENCHAMBER_UNIHUB_PROXY_URL + route, {method: 'POST', headers: {authorization: `Bearer ${child.OPENCHAMBER_UNIHUB_PROXY_TOKEN}`, 'content-type': 'application/json'}, body: JSON.stringify(body)});
-  return {runtime, call, setStatus: (value, settlement) => {taskStatus = value; chargeStatus = settlement;}, setPrompt: value => {promptID = value;}, setActor: value => {actorState = value;}, holdRead: () => {readBarrier = {entered:Promise.withResolvers(),release:Promise.withResolvers()}; return readBarrier;}, badHash: () => {badHash = true;}, setPayload: (bytes, declared) => {payload = bytes; declaredSize = declared;}, submits: () => submits};
+  return {runtime, call, productOperations, disallowNewProductCalls: () => { account.usesProductCreditWallet = async () => { throw new Error('product plans unavailable'); }; }, setStatus: (value, settlement) => {taskStatus = value; chargeStatus = settlement;}, setPrompt: value => {promptID = value;}, setActor: value => {actorState = value;}, holdRead: () => {readBarrier = {entered:Promise.withResolvers(),release:Promise.withResolvers()}; return readBarrier;}, badHash: () => {badHash = true;}, setPayload: (bytes, declared) => {payload = bytes; declaredSize = declared;}, submits: () => submits};
 };
 
 describe('managed video broker', () => {
@@ -86,6 +108,20 @@ describe('managed video broker', () => {
     expect(response.status).toBe(403);
     expect(f.submits()).toBe(0);
   });
+  it('pins a product-funded video to its own receipt and download across capability failure', async () => {
+    const f = await fixture(true);
+    const input = { sessionID: 'ses_video', callID: 'video_product', model, prompt: 'fixture prompt', seconds: 5, size: '1280*720' };
+    expect((await f.call('/media/video', input)).status).toBe(200);
+    expect((await f.call('/media/video', input)).status).toBe(409);
+    f.disallowNewProductCalls();
+    f.setStatus('SUCCESS', 'SETTLED');
+    const download = await f.call('/media/video/result', { sessionID: input.sessionID, callID: input.callID });
+    expect(download.status).toBe(200);
+    expect(Buffer.from(await download.arrayBuffer())).toEqual(mp4);
+    expect(f.productOperations).toEqual(['video', 'video-status', 'receipt', 'video-result']);
+    expect(f.submits()).toBe(0);
+  });
+
   it('submits once with a stable call ID, polls the call ID and returns only settled owned MP4 bytes', async () => {
     const f = await fixture(); const input = {sessionID: 'ses_video', callID: 'video_call_1', model, prompt: 'orange cat', seconds: 5, size: '1280*720'};
     const submitted = await f.call('/media/video', input); expect(submitted.status).toBe(200); expect(await submitted.json()).toEqual({callID: 'video_call_1', sessionID: 'ses_video'});

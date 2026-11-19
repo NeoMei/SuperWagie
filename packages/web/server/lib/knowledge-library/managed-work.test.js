@@ -240,3 +240,46 @@ it('matches Go original request bytes containing HTML characters before proving 
   expect((await f.callbackPost('/result', { ...fields, input_sha256: sha(Buffer.from(JSON.stringify({ model: 'qwen3-rerank', input: { query: 'query <>&', documents: ['text <>&'] }, parameters: { top_n: 1, return_documents: false } }))) }, true)).status).toBe(403);
   expect(f.counters().reranks).toBe(0);
 });
+
+it('claims a product OCR revision once and opens a new attempt only after a verified pre-admission refusal', async () => {
+  const f = await setup();
+  const pdf = { id: 'doc', libraryId: 'library', root: f.root, relPath: 'original.pdf' };
+  const source = path.join(f.root, pdf.relPath);
+  await fs.writeFile(source, '%PDF-1.7\noriginal');
+  let optedIn = true;
+  const account = { ...f.account, usesProductCreditWallet: async () => optedIn, proxyProductModel: vi.fn() };
+  const makeWork = () => createManagedWorkAdmission({ dataDir: f.dir, productOcrEnabled: () => true,
+    authorizeOwner: (principal) => principal.userId === 'actor', getAccountRuntime: () => account,
+    resolveNamespace: async () => ({ projectId: 'project', spaceId: 'host' }), resolveDocument: async () => null,
+    resolveModelBinding: async () => null,
+  });
+  const execution = { identity: f.identity, context: f.context };
+  await expect(makeWork().authorizeProductOcr(pdf, {})).rejects.toMatchObject({ code: 'knowledge_work_auth_required' });
+  const first = await makeWork().authorizeProductOcr(pdf, execution);
+  optedIn = false;
+  await expect(first.claim()).rejects.toMatchObject({ code: 'knowledge_work_ocr_unavailable' });
+  optedIn = true;
+  expect(await Promise.all([first.claim(), first.claim()])).toEqual(expect.arrayContaining([true, false]));
+  const recovered = await makeWork().authorizeProductOcr(pdf, execution);
+  expect(recovered).toMatchObject({ exists: true, original: first.original });
+  expect(await recovered.claim()).toBe(false);
+  const differentDocument = await makeWork().authorizeProductOcr({ ...pdf, id: 'different-doc' }, execution);
+  expect(differentDocument).toMatchObject({ exists: false });
+  expect(differentDocument.original).not.toBe(first.original);
+  f.switchActor({ billingAccountId: 'different-payer' });
+  const differentPayer = await makeWork().authorizeProductOcr(pdf, execution);
+  expect(differentPayer).toMatchObject({ exists: false });
+  expect(differentPayer.original).not.toBe(first.original);
+  await expect(recovered.assertCurrent()).rejects.toMatchObject({ code: 'knowledge_work_auth_changed' });
+  f.switchActor({ billingAccountId: 'payer' });
+  await recovered.recordRefusal('platform_model_credits_required');
+  const retry = await makeWork().authorizeProductOcr(pdf, execution);
+  expect(retry).toMatchObject({ exists: false });
+  expect(retry.original).not.toBe(first.original);
+  await fs.writeFile(source, '%PDF-1.7\nmodified');
+  await expect(retry.assertCurrent()).rejects.toMatchObject({ code: 'knowledge_work_document_changed' });
+  expect(await makeWork().authorizeProductOcr(pdf, execution)).toMatchObject({ exists: false });
+  f.switchActor({ expiresAt: Date.now() - 1 });
+  await expect(makeWork().authorizeProductOcr(pdf, execution)).rejects.toMatchObject({ code: 'knowledge_work_owner_forbidden' });
+  expect(account.proxyProductModel).not.toHaveBeenCalled();
+});

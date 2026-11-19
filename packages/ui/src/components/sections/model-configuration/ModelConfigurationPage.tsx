@@ -148,8 +148,9 @@ const PurposeEditor: React.FC<{
     connection.providerId === preset.providerId && connection.protocol === preset.protocol
   ));
   const chosenConnection = configuration.connections.find((connection) => connection.id === connectionId);
-  const unavailableManagedMedia = chosenConnection?.protocol === 'managed-media' && ['tts', 'stt-short', 'image-generation'].includes(purpose.id);
-  const canTest = Boolean(chosenConnection && purpose.probeProtocols?.includes(chosenConnection.protocol));
+  const savedManagedMedia = binding?.connectionId === connectionId && binding.model === model.trim() ? binding.managedMediaReady : undefined;
+  const unavailableManagedMedia = savedManagedMedia === false || (savedManagedMedia !== true && chosenConnection?.protocol === 'managed-media' && ['tts', 'stt-short', 'stt-realtime', 'image-generation'].includes(purpose.id));
+  const canTest = Boolean(savedManagedMedia === undefined && chosenConnection && purpose.probeProtocols?.includes(chosenConnection.protocol));
   const selectedConnections = chosenConnection && !eligibleConnections.some((connection) => connection.id === chosenConnection.id)
     ? [chosenConnection, ...eligibleConnections] : eligibleConnections;
   const parsedDimensions = dimensions === '' ? undefined : Number(dimensions);

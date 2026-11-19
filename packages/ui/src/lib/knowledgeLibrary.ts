@@ -37,6 +37,7 @@ const documentSchema = z.object({
   size: z.number(),
   state: documentStateSchema,
   parseStatus: z.string().nullable().optional(),
+  productOcr: z.literal(true).optional(),
   lastError: z.object({ code: z.string(), message: z.string().optional() }).nullable().optional(),
 });
 
@@ -215,6 +216,21 @@ export const listKnowledgeDocuments = async (
     signal,
   );
   return body.documents;
+};
+
+type ProductOcrCommand = { action: 'preview' | 'resume' } | { action: 'confirm'; approvalId: string };
+const productOcrResult = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('confirmation'), id: z.string().uuid(), payer: z.string(), expiresAt: z.number().int() }),
+  z.object({ state: z.enum(['pending', 'processing', 'failed']) }),
+]);
+export const requestProductOcr = async (documentId: string, command: ProductOcrCommand, signal?: AbortSignal) => {
+  const response = await runtimeFetch(`/api/knowledge-library/documents/${encodeURIComponent(documentId)}/ocr`, {
+    method: 'POST', headers: { ...scopeHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(command), signal,
+  });
+  if (!response.ok) throw new KnowledgeLibraryError(await errorCodeOf(response));
+  const result = productOcrResult.safeParse(await response.json());
+  if (!result.success) throw new KnowledgeLibraryError('bad_response');
+  return result.data;
 };
 
 type SearchPayload = { query: string; libraryId?: string };

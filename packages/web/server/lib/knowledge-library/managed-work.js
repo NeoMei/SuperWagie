@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import { createCompletionJournal, bindingSchema, storageSchema, discoverSchema, useSchema, indexBindingFields, parseCanonicalJSON, parseStrictJSON, verifyCompletionReply, verifySearchReply } from './managed-completion.js';
 
+import { PRODUCT_OCR_MAX_FILE_BYTES, PRODUCT_OCR_MODEL, productOcrRefusals } from '../embedded-knowledge/ocr-contract.js';
 import { MAX_FILE_BYTES, shouldIndex } from './scan.js';
 import { MANAGED_TEXT_EMBEDDING, managedEmbeddingCatalogEntry } from './managed-embedding-catalog.js';
 import { createManagedKeyStorage } from './managed-key-storage.js';
@@ -17,6 +18,7 @@ const fail = (code, status) => { throw Object.assign(new Error(code), { code, st
 const equalScope = (a, b) => a?.actingUserId === b?.actingUserId && a?.billingAccountId === b?.billingAccountId && a?.authSession === b?.authSession && a?.expiresAt === b?.expiresAt && b.expiresAt > Date.now();
 const secretFile = 'key-v1';
 const keyStorage = createManagedKeyStorage();
+const billingArgs = (billing) => billing ? { billing } : {};
 const MAX_SNAPSHOT_BYTES = Math.min(MAX_FILE_BYTES, 8 * 1024 * 1024);
 // This bounded pilot supports one plain CJK or ASCII text chunk only.
 const pilotText = (text, multiline = false) => z.string().safeParse(text).success && (multiline ? /^[\n\x20-\x7e\u3400-\u9fff\u3000-\u303f\uff01-\uff5e]+$/u : /^[\x20-\x7e\u3400-\u9fff\u3000-\u303f\uff01-\uff5e]+$/u).test(text) && !text.includes('#') && (multiline ? text.trim().length > 0 : text === text.trim());
@@ -30,7 +32,7 @@ async function keyFor(directory) {
   let file;
   try {
     const entries = await fs.readdir(directory);
-    if (!entries.includes(secretFile) && entries.some((entry) => entry.startsWith('kbw_') || entry.startsWith('snapshot_kbw_') || entry.startsWith('completion-') || entry.startsWith('storage-anchor'))) fail('knowledge_work_storage_unavailable', 503);
+    if (!entries.includes(secretFile) && entries.some((entry) => entry.startsWith('kbw_') || entry.startsWith('snapshot_kbw_') || entry.startsWith('dispatch_product-ocr_') || entry.startsWith('completion-') || entry.startsWith('storage-anchor'))) fail('knowledge_work_storage_unavailable', 503);
     try {
       file = await keyStorage.createFile(filename);
       await file.writeFile(crypto.randomBytes(32));
@@ -50,7 +52,7 @@ async function keyFor(directory) {
   } finally { await file?.close(); }
 }
 
-async function documentDigest(document, key) {
+async function documentDigest(document, key, maxBytes = MAX_SNAPSHOT_BYTES) {
   if (!document || !z.string().safeParse(document.root).success || !path.isAbsolute(document.root) || !z.string().safeParse(document.relPath).success || document.relPath.includes('\\') || path.isAbsolute(document.relPath)) fail('knowledge_work_document_invalid', 409);
   const segments = document.relPath.split('/');
   if (segments.some((value) => !value || value === '.' || value === '..') || !shouldIndex(document.relPath).ok) fail('knowledge_work_document_invalid', 409);
@@ -66,7 +68,7 @@ async function documentDigest(document, key) {
   const file = await fs.open(target, constants.constants.O_RDONLY | constants.constants.O_NOFOLLOW);
   try {
     const before = await file.stat();
-    if (!before.isFile() || before.size < 1 || before.size > MAX_SNAPSHOT_BYTES) fail('knowledge_work_document_invalid', 409);
+    if (!before.isFile() || before.size < 1 || before.size > maxBytes) fail('knowledge_work_document_invalid', 409);
     const hash = crypto.createHmac('sha256', key).update('knowledge-work-content-v1\0');
     const buffer = Buffer.alloc(64 * 1024);
     const chunks = []; let bytes = 0;
@@ -74,7 +76,7 @@ async function documentDigest(document, key) {
       const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
       if (!bytesRead) break;
       bytes += bytesRead;
-      if (bytes > MAX_SNAPSHOT_BYTES) fail('knowledge_work_document_invalid', 409);
+      if (bytes > maxBytes) fail('knowledge_work_document_invalid', 409);
       const chunk = Buffer.from(buffer.subarray(0, bytesRead));
       hash.update(chunk); chunks.push(chunk);
     }
@@ -197,7 +199,7 @@ async function claimDispatch(directory, workId, key, record) {
   return fresh;
 }
 
-export function createManagedWorkAdmission({ dataDir, enabled = () => false, authorizeOwner, getAccountRuntime, resolveDocument, resolveModelBinding, resolveNamespace, instanceId = 'default' }) {
+export function createManagedWorkAdmission({ dataDir, enabled = () => false, authorizeOwner, productOcrEnabled = () => false, authorizeOcrOwner = authorizeOwner, getAccountRuntime, resolveDocument, resolveModelBinding, resolveNamespace, instanceId = 'default' }) {
   if (!dataDir || ![enabled, authorizeOwner, getAccountRuntime, resolveDocument, resolveModelBinding, resolveNamespace].every((fn) => typeof fn === 'function')) throw new TypeError('managed work dependencies required');
   const directory = path.join(dataDir, 'knowledge-managed-work');
   const hostBootId = crypto.randomBytes(32).toString('hex');
@@ -237,10 +239,11 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     } finally { await fs.rm(temporary, { force: true }); }
     if (process.platform !== 'win32') { const parent = await fs.open(directory, 'r'); try { await parent.sync(); } finally { await parent.close(); } }
   };
-  const capture = async (identity, context, expected) => {
-    if (!enabled() || !identity) fail('knowledge_work_auth_required', 401);
+  const capture = async (identity, context, expected, ocr = false) => {
+    if (!(ocr ? productOcrEnabled() : enabled()) || !identity) fail('knowledge_work_auth_required', 401);
+    const authorized = ocr ? authorizeOcrOwner : authorizeOwner;
     const account = getAccountRuntime(); const actor = account?.actor(identity); const principal = account?.instancePrincipal(identity);
-    if (!actor?.actingUserId || !actor.billingAccountId || !actor.authSession || actor.expiresAt <= Date.now() || !principal?.issuer || principal.userId !== actor.actingUserId || authorizeOwner(principal) !== true) fail('knowledge_work_owner_forbidden', 403);
+    if (!actor?.actingUserId || !actor.billingAccountId || !actor.authSession || actor.expiresAt <= Date.now() || !principal?.issuer || principal.userId !== actor.actingUserId || authorized(principal) !== true) fail('knowledge_work_owner_forbidden', 403);
     if (context?.actorFence && !equalScope(context.actorFence, actor)) fail('knowledge_work_auth_changed', 409);
     if (expected && !equalScope(expected, actor)) fail('knowledge_work_auth_changed', 409);
     const commerce = account.captureCommerceSession(identity);
@@ -249,7 +252,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     if (!scope?.projectId || !scope?.spaceId) fail('knowledge_work_scope_required', 403);
     const tuple = [1, principal.issuer, commerce.serviceId, instanceId, actor.actingUserId, actor.billingAccountId, scope.projectId, scope.spaceId];
     const secret = await key(); const namespace = derive(secret, 'knowledge-namespace-v1', JSON.stringify(tuple));
-    if (!equalScope(actor, account.actor(identity)) || authorizeOwner(account.instancePrincipal(identity)) !== true) fail('knowledge_work_auth_changed', 409);
+    if (!equalScope(actor, account.actor(identity)) || authorized(account.instancePrincipal(identity)) !== true) fail('knowledge_work_auth_changed', 409);
     return { actor, principal, account, commerce, tuple, namespace, scope };
   };
   const assertRoute = (route, current, expected) => {
@@ -311,7 +314,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     assertRoute(route, current); await capture(identity, context, current.actor);
     const hex = derive(secret, 'knowledge-work-id-v1', workId).slice(0, 32);
     const knowledgeId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
-    const record = { version: 2, namespace: current.namespace, namespaceTuple: current.tuple, actor: current.actor.actingUserId, payer: current.actor.billingAccountId, library: document.libraryId, document: document.id, tenant: document.tenantId, knowledgeBase: document.knowledgeBaseId, knowledgeId, indexRevision, taskId, grantId: `kgrant_${derive(secret, 'knowledge-work-grant-v1', workId)}`, model: model.publicModel, embeddingSpace: model.space, policyDigest: route.policyDigest, routeGeneration: route.routeGeneration, source: frozen.source, content: frozen.content, snapshotSHA256: digest(frozen.bytes), expiresAt: Math.min(Date.now() + 600_000, current.actor.expiresAt) };
+    const record = { version: 2, namespace: current.namespace, namespaceTuple: current.tuple, actor: current.actor.actingUserId, payer: current.actor.billingAccountId, library: document.libraryId, document: document.id, tenant: document.tenantId, knowledgeBase: document.knowledgeBaseId, knowledgeId, indexRevision, taskId, grantId: `kgrant_${derive(secret, 'knowledge-work-grant-v1', workId)}`, model: model.publicModel, embeddingSpace: model.space, policyDigest: route.policyDigest, routeGeneration: route.routeGeneration, ...billingArgs(route.billing), source: frozen.source, content: frozen.content, snapshotSHA256: digest(frozen.bytes), expiresAt: Math.min(Date.now() + 600_000, current.actor.expiresAt) };
     await saveSnapshot(directory, workId, secret, frozen.bytes); await saveRecord(workId, record, secret); await capture(identity, context, current.actor);
     return { status: 'prepared', workId, dispatchable: false };
   });
@@ -353,14 +356,14 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     if (!pending) fail('knowledge_work_storage_unavailable', 503);
     const fresh = await claimDispatch(directory, workId, await key(), record);
     await liveRecord(workId);
-    if (fresh) await current.account.dispatchKnowledgeEmbeddingPinned(current.live.identity, { taskId: record.task, callId, model: record.model, policyDigest: current.record.policyDigest, body });
+    if (fresh) await current.account.dispatchKnowledgeEmbeddingPinned(current.live.identity, { taskId: record.task, callId, model: record.model, policyDigest: current.record.policyDigest, body, ...billingArgs(current.record.billing) });
     return { status: 'submitted' };
   };
   const result = async (workId, nonce, callId) => {
     const current = await liveRecord(workId); const claims = decode(await authorize(workId, nonce));
     const dispatch = await readDispatch(directory, workId, await key());
     if (dispatch.call !== callId || dispatch.task !== current.record.taskId) fail('knowledge_work_auth_changed', 409);
-    const { rawBytes, receipt } = await current.account.readKnowledgeResultWithEvidence(current.live.identity, { taskId: dispatch.task, callId, model: current.record.model, wireOperation: 'embeddings.create' });
+    const { rawBytes, receipt } = await current.account.readKnowledgeResultWithEvidence(current.live.identity, { taskId: dispatch.task, callId, model: current.record.model, wireOperation: 'embeddings.create', ...billingArgs(current.record.billing) });
     if (receipt.instanceId !== instanceId || receipt.actorId !== current.record.actor || receipt.accountId !== current.record.payer || receipt.taskId !== dispatch.task || receipt.callId !== callId || receipt.model !== current.record.model || receipt.wireOperation !== 'embeddings.create' || receipt.policyDigest !== current.record.policyDigest || receipt.routeGeneration !== current.record.routeGeneration || receipt.contentSha256 !== digest(rawBytes) || !receipt.producerCredentialId || !Number.isSafeInteger(receipt.attemptId)) fail('knowledge_work_result_invalid', 503);
     await liveRecord(workId);
     return { assertion: await sign('weknora-result-v1', { attempt_id: String(receipt.attemptId), producer_credential_id: receipt.producerCredentialId, ...claims, call_id: callId, model: current.record.model, operation: 'embedding', wire_operation: 'embeddings.create', status: 'SETTLED', content_sha256: receipt.contentSha256 }), content: rawBytes.toString('base64') };
@@ -486,7 +489,8 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     const rerankRoute = await current.account.preflightKnowledgeRoute(identity, { taskId, model: rerank.model, wireOperation: 'rerank.create' });
     if (rerankRoute.actorId !== current.record.actor || rerankRoute.accountId !== current.record.payer || rerankRoute.instanceId !== instanceId || rerankRoute.model !== rerank.model || !/^[a-f0-9]{64}$/.test(rerankRoute.policyDigest ?? '')) fail('knowledge_work_space_unverified', 409);
     await capture(identity, context, current.actor);
-    const record = { version: 2, indexWorkId, query, queryDigest: derive(secret, 'knowledge-search-query-v1', query), taskId, grantId: `kgrant_${derive(secret, 'knowledge-work-grant-v1', workId)}`, rerankPolicyDigest: rerankRoute.policyDigest, rerankRouteGeneration: rerankRoute.routeGeneration, expiresAt: Math.min(Date.now() + 600_000, current.actor.expiresAt) };
+    if (JSON.stringify(embeddingRoute.billing) !== JSON.stringify(rerankRoute.billing)) fail('knowledge_work_auth_changed', 409);
+    const record = { version: 2, indexWorkId, query, queryDigest: derive(secret, 'knowledge-search-query-v1', query), taskId, grantId: `kgrant_${derive(secret, 'knowledge-work-grant-v1', workId)}`, rerankPolicyDigest: rerankRoute.policyDigest, rerankRouteGeneration: rerankRoute.routeGeneration, ...billingArgs(embeddingRoute.billing), expiresAt: Math.min(Date.now() + 600_000, current.actor.expiresAt) };
     await claimDispatch(directory, workId, secret, record);
     return { status: 'prepared', workId, dispatchable: false };
   });
@@ -531,7 +535,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     const body = Buffer.from(JSON.stringify(operation === 'embedding' ? { model, input: input.input, dimensions: 1024, encoding_format: 'float' } : input));
     const record = { work: workId, call: callId, task: current.search.taskId, model, operation, digest: digest(body) };
     const fresh = await claimDispatch(directory, `${workId}_${operation}`, await key(), record); await liveSearch(workId);
-    if (fresh) await current.account[operation === 'embedding' ? 'dispatchKnowledgeEmbeddingPinned' : 'dispatchKnowledgeRerankPinned'](current.live.identity, { taskId: record.task, callId, model, policyDigest: operation === 'embedding' ? current.record.policyDigest : current.search.rerankPolicyDigest, body });
+    if (fresh) await current.account[operation === 'embedding' ? 'dispatchKnowledgeEmbeddingPinned' : 'dispatchKnowledgeRerankPinned'](current.live.identity, { taskId: record.task, callId, model, policyDigest: operation === 'embedding' ? current.record.policyDigest : current.search.rerankPolicyDigest, body, ...billingArgs(current.search.billing) });
     return { status: 'submitted' };
   };
   const searchResult = async (workId, nonce, callId, operation, inputSHA256) => {
@@ -554,7 +558,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     }
     if (dispatch.call !== callId || dispatch.task !== current.search.taskId) fail('knowledge_work_auth_changed', 409);
     const wire = operation === 'embedding' ? 'embeddings.create' : 'rerank.create';
-    const { rawBytes, receipt } = await current.account.readKnowledgeResultWithEvidence(current.live.identity, { taskId: dispatch.task, callId, model: dispatch.model, wireOperation: wire });
+    const { rawBytes, receipt } = await current.account.readKnowledgeResultWithEvidence(current.live.identity, { taskId: dispatch.task, callId, model: dispatch.model, wireOperation: wire, ...billingArgs(current.search.billing) });
     if (receipt.instanceId !== instanceId || receipt.actorId !== current.record.actor || receipt.accountId !== current.record.payer || receipt.taskId !== dispatch.task || receipt.callId !== callId || receipt.model !== dispatch.model || receipt.wireOperation !== wire || receipt.policyDigest !== (operation === 'embedding' ? current.record.policyDigest : current.search.rerankPolicyDigest) || receipt.routeGeneration !== (operation === 'embedding' ? current.record.routeGeneration : current.search.rerankRouteGeneration) || receipt.contentSha256 !== digest(rawBytes)) fail('knowledge_work_result_invalid', 503);
     await liveSearch(workId);
     return { assertion: await sign('weknora-search-result-v1', { ...claims, call_id: callId, model: dispatch.model, operation, wire_operation: wire, status: 'SETTLED', content_sha256: receipt.contentSha256 }), content: rawBytes.toString('base64') };
@@ -573,6 +577,69 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     await capture(identity, context, current.actor);
     return { libraryId: `kbl_${derive(secret, 'knowledge-library-id-v1', JSON.stringify([current.namespace, canonical]))}`, documentId: `kbd_${derive(secret, 'knowledge-document-id-v1', JSON.stringify([current.namespace, canonical, relPath]))}` };
   };
+  const authorizeProductOcr = async (document, execution) => {
+    const { identity, context } = execution ?? {};
+    const current = await capture(identity, context, undefined, true);
+    if (!idPattern.test(document?.id ?? '') || !idPattern.test(document?.libraryId ?? '') || path.extname(document?.relPath ?? '').toLowerCase() !== '.pdf') fail('knowledge_work_ocr_pdf_required', 400);
+    const secret = await key();
+    const frozen = await documentDigest(document, secret, PRODUCT_OCR_MAX_FILE_BYTES);
+    if (frozen.bytes.length < 8 || frozen.bytes.subarray(0, 5).toString('ascii') !== '%PDF-') fail('knowledge_work_ocr_pdf_required', 400);
+    const record = { version: 1, product: 'superwagie', scope: 'product_v1', account: current.actor.billingAccountId,
+      namespace: current.namespace, document: document.id, library: document.libraryId, source: frozen.source, content: frozen.content };
+    const initialWorkId = `product-ocr_${derive(secret, 'knowledge-product-ocr-v1', JSON.stringify(record))}`;
+    const read = (workId) => readDispatch(directory, workId, secret).catch((error) => { if (error.code !== 'ENOENT') throw error; return null; });
+    // Only a recorded response that proves no provider admission permits a new
+    // approval. A missing or ambiguous response keeps the original call.
+    let workId = initialWorkId;
+    let previous;
+    for (let attempt = 1; ; attempt += 1) {
+      previous = await read(workId);
+      if (!previous) break;
+      if (JSON.stringify(previous) !== JSON.stringify(record)) fail('knowledge_work_conflict', 409);
+      const refusal = await read(`${workId}_refused`);
+      if (!refusal) break;
+      if (!productOcrRefusals.has(refusal.code)) fail('knowledge_work_storage_unavailable', 503);
+      workId = `${initialWorkId}_${attempt}`;
+    }
+    const original = 'swocr_' + derive(secret, 'knowledge-product-ocr-dispatch-v1', workId).slice(0, 60);
+    const assertCurrent = async () => {
+      await capture(identity, context, current.actor, true);
+      const latest = await documentDigest(document, secret, PRODUCT_OCR_MAX_FILE_BYTES);
+      if (latest.source !== frozen.source || latest.content !== frozen.content) fail('knowledge_work_document_changed', 409);
+      await capture(identity, context, current.actor, true);
+    };
+    const ensureMaySubmit = async () => {
+      const enabled = await current.account.usesProductCreditWallet(identity).catch(() => false);
+      if (enabled !== true) fail('knowledge_work_ocr_unavailable', 503);
+      await assertCurrent();
+    };
+    await capture(identity, context, current.actor, true);
+    return {
+      actor: current.actor, documentId: document.id, original, source: frozen.bytes, sourceHash: digest(frozen.bytes), exists: Boolean(previous),
+      accountName: async () => {
+        const accounts = z.array(z.object({ id: z.string(), name: z.string() })).max(200).parse(await current.commerce.request('/v1/accounts'));
+        const account = accounts.find((entry) => entry.id === current.actor.billingAccountId);
+        if (!account) fail('knowledge_work_scope_changed', 403);
+        await capture(identity, context, current.actor, true);
+        return account.name;
+      },
+      assertCurrent,
+      ensureMaySubmit,
+      claim: async () => {
+        await ensureMaySubmit();
+        return claimDispatch(directory, workId, secret, record);
+      },
+      recordRefusal: async (code) => {
+        if (!productOcrRefusals.has(code) || !await read(workId)) fail('knowledge_work_conflict', 409);
+        await claimDispatch(directory, `${workId}_refused`, secret, { code });
+      },
+      send: async ({ operation, body }) => {
+        await capture(identity, context, current.actor, true);
+        return current.account.proxyProductModel(identity, { accountId: current.actor.billingAccountId, model: PRODUCT_OCR_MODEL, callId: original,
+          operation, body, signal: AbortSignal.timeout(operation === 'ocr-submit' ? 120_000 : 20_000) });
+      },
+    };
+  };
   const revisionState = async (identity, workId, context) => {
     const current = await capture(identity, context);
     const record = await readWorkRecord(directory, workId, await key());
@@ -590,7 +657,7 @@ export function createManagedWorkAdmission({ dataDir, enabled = () => false, aut
     const privateKey = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' });
     return { WEKNORA_MANAGED_KNOWLEDGE_PILOT: '1', WEKNORA_MANAGED_KNOWLEDGE_PUBLIC_KEY: crypto.createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64'), WEKNORA_MANAGED_KNOWLEDGE_AUTH_URL: url.toString(), WEKNORA_MANAGED_JOURNAL_KEY_FILE: await workerKeyFile(directory, secret, 'journal'), WEKNORA_MANAGED_CALL_KEY_FILE: await workerKeyFile(directory, secret, 'call'), WEKNORA_MANAGED_BINDING_KEY_FILE: await workerKeyFile(directory, secret, 'binding'), WEKNORA_MANAGED_CALLBACK_KEY_FILE: callbackKeyFile };
   };
-  return { prepare, documentIdentity, revisionState, issue, authorize, snapshot, dispatch, result, prepareSearch, issueSearch, authorizeSearch, searchSnapshot, dispatchSearch, searchResult, workerRequest, acceptResponse, acceptSearchResponse, authorizeCompleted, workerConfiguration, hasStorageAnchor: async () => Boolean((await (await journal()).load()).anchor), callbackKeyFile: async () => workerKeyFile(directory, await key(), 'callback'), captureScope: async (identity, context) => { const current = await capture(identity, context); return { namespace: current.namespace, actor: current.actor, scope: current.scope }; } };
+  return { prepare, documentIdentity, revisionState, authorizeProductOcr, issue, authorize, snapshot, dispatch, result, prepareSearch, issueSearch, authorizeSearch, searchSnapshot, dispatchSearch, searchResult, workerRequest, acceptResponse, acceptSearchResponse, authorizeCompleted, workerConfiguration, hasStorageAnchor: async () => Boolean((await (await journal()).load()).anchor), callbackKeyFile: async () => workerKeyFile(directory, await key(), 'callback'), captureScope: async (identity, context) => { const current = await capture(identity, context); return { namespace: current.namespace, actor: current.actor, scope: current.scope }; } };
 }
 
 // This listener is separate from the browser API. Its response is only useful

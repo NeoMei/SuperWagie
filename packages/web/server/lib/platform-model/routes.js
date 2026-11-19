@@ -7,7 +7,7 @@ import { PlatformModelError } from './runtime.js';
 const fail = (res, error) => res.status(error instanceof PlatformModelError ? error.status : 503).json({ error: error instanceof PlatformModelError ? error.code : 'platform_models_unavailable' });
 
 /** Authenticated UI traffic supplies identity; the plugin callback has a separate listener. */
-export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, readSession, isRequestOriginAllowed, waitForOpenCodeRequest = () => true }) => {
+export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, readSession, isRequestOriginAllowed, productCreditsEnabled = () => false, waitForOpenCodeRequest = () => true }) => {
   const identity = (req, res) => resolveIdentity(req, res, { allowUrlToken: false });
   const parseJson = express.json({ limit: '1mb', inflate: false });
   const readPrompt = (req, res) => new Promise((resolve, reject) => {
@@ -64,7 +64,11 @@ export const registerPlatformModelRoutes = (app, { runtime, resolveIdentity, rea
       if (!match) return next();
       if (!await waitForOpenCodeRequest(req, res)) return;
       const session = await readSession(match[1]);
-      if (session?.model?.providerID !== 'unihub') return next();
+      const providerID = session?.model?.providerID;
+      if (providerID?.startsWith('superwagie-account-') && await productCreditsEnabled(who)) {
+        throw new PlatformModelError('platform_product_managed_provider_required', 403);
+      }
+      if (providerID !== 'unihub') return next();
       if (!await isRequestOriginAllowed(req)) throw new PlatformModelError('platform_origin_forbidden', 403);
       if (!['prompt', 'synthetic'].includes(match[2])) throw new PlatformModelError('platform_protocol_unsupported', 403);
       await readPrompt(req, res);
