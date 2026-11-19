@@ -505,16 +505,6 @@ is mounted only while open and keyed by its open count, so every open, including
 a handover while it is already on screen, starts with the query it was given
 (empty for a plain open) and no directory filter.
 
-The header's page buttons (Issues and PRs, Scheduled tasks, Archive, extension
-pages, Usage in the footer) are toggles: pressed while their page is open, and
-the next click closes it.
-
-The full Web/Electron header pins the available Workbench at the start of its
-fixed page group. Other extension pages fit after that group or enter the
-extension-page menu together. Workbench never enters that menu. Catalog
-availability still controls its presence; compact and mobile headers retain
-their existing entries.
-
 Sidebar queries beginning with `ses_` match only the full session ID,
 case-insensitively and ignoring surrounding whitespace. Partial IDs and typos
 return no matches, without falling back to titles, directories, group labels,
@@ -735,13 +725,35 @@ session with an active action in its own directory. Archived buckets do not show
 indicators. Indicators stay inside the existing row/header action-padding boundary, so
 hover, keyboard focus, and always-visible action buttons move them left without hiding them.
 
+## Toolbar
+
+The full Web and Electron header starts with a collapsed row of tool icons.
+Its disclosure opens a scrollable grid of the same pages with their labels.
+The grid can use at most 40 percent of the viewport height so the session list
+stays available even with many extension pages. The disclosure stays in the
+header and the search, add project, and display controls stay beside it.
+
+The buttons reflect the shared main-page state in either layout. Clicking an
+open page's button closes it, including the Usage entry in the footer.
+Changing the toolbar layout neither changes the active page nor persists a
+preference. VS Code keeps its search-only layout, and the separate mobile
+session list keeps its own controls.
+
+The available Workbench is the first fixed tool. Other extension pages
+appear together after the fixed tools when there is room in the collapsed row,
+or together in the extension menu. The expanded grid includes all available
+tools and uses the same catalog and feature availability rules as the row.
+At large interface font sizes the compact tools can wrap within the sidebar
+so every fixed button and the extension menu remain reachable.
+
 ## Decisions
 
 ### Why Workbench stays outside extension-page overflow
 
 Workbench is the return point for the main workspace. Keeping it with the
 ordinary extension pages hid that entry when the sidebar narrowed. Its fixed
-first button reserves space before the remaining extension pages are measured.
+place as the first tool reserves space before the remaining extension pages
+are measured.
 
 ### Why the avatar opens a separate user center
 

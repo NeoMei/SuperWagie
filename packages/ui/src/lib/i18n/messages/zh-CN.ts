@@ -727,6 +727,7 @@ const baseDict = {
   'multirun.fusion.actions.starting': '正在开始...',
   'multirun.fusion.toast.noOutputs': '未找到可用于融合的助手输出。',
   'multirun.fusion.toast.failed': '启动融合失败。',
+  'sessions.sidebar.header.toolbar': '工具栏',
   'sessions.sidebar.header.actions.searchSessions': '搜索会话',
   'sessions.sidebar.header.actions.exitSelection': '退出选择',
   'sessions.sidebar.header.actions.selectSessions': '选择会话',

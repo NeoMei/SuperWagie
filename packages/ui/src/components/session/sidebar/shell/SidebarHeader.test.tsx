@@ -92,6 +92,7 @@ describe('SidebarHeader', () => {
     expect(document.querySelector('[aria-label="Search sessions"]')).toBeNull();
     expect(document.querySelector('[aria-label="Add project"]')).toBeNull();
     expect(document.querySelector('[aria-label="Display mode"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Toolbar"]')).toBeNull();
   });
 
   test('compact variant clears the search query with the clear button', async () => {
@@ -179,6 +180,44 @@ describe('SidebarHeader', () => {
       }
     } finally {
       useUIStore.setState(initial);
+    }
+  });
+
+  test('the toolbar shows named tools when expanded and keeps the open page when collapsed', async () => {
+    const initial = useUIStore.getState();
+    try {
+      useUIStore.getState().setArchivePageOpen(false);
+      await act(async () => root.render(
+        <I18nProvider>
+          <TooltipProvider>
+            <SidebarHeader {...baseProps} />
+          </TooltipProvider>
+        </I18nProvider>,
+      ));
+
+      const disclosure = document.querySelector<HTMLButtonElement>('button[aria-label="Toolbar"]')!;
+      const tools = () => document.getElementById(disclosure.getAttribute('aria-controls') ?? '');
+      const archive = () => document.querySelector<HTMLButtonElement>('button[aria-label="Archive"]')!;
+      expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+      expect(archive().textContent).toBe('');
+
+      await act(async () => disclosure.click());
+      expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+      expect(disclosure.textContent).toBe('Toolbar');
+      expect(tools()?.contains(archive())).toBe(true);
+      expect(archive().textContent).toBe('Archive');
+      expect(tools()?.querySelector('button[aria-label="Search sessions"]')).toBeNull();
+
+      await act(async () => archive().click());
+      expect(useUIStore.getState().isArchivePageOpen).toBe(true);
+      expect(archive().getAttribute('aria-pressed')).toBe('true');
+
+      await act(async () => disclosure.click());
+      expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+      expect(archive().textContent).toBe('');
+      expect(archive().getAttribute('aria-pressed')).toBe('true');
+    } finally {
+      await act(async () => useUIStore.setState(initial));
     }
   });
 
