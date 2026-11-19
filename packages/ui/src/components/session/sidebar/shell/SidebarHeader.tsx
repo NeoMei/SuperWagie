@@ -402,15 +402,15 @@ export function SidebarHeader(props: Props): React.ReactNode {
     <div className="select-none flex-shrink-0 px-2.5 py-1">
       <div className="flex h-auto min-h-8 flex-col gap-1">
         <div ref={rowRef} className="flex min-h-8 flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1">
-            <div ref={fixedToolsRef} className="ms-[3px] flex shrink-0 items-center gap-1">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1">
+            <div ref={fixedToolsRef} className="ms-[3px] flex min-w-0 max-w-[calc(100%-3px)] shrink-0 flex-wrap items-center gap-1">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     onClick={() => setToolbarExpanded((expanded) => !expanded)}
                     className={cn(
-                      headerActionButtonClass,
+                      headerActionButtonClass, 'shrink-0',
                       toolbarExpanded && 'w-auto justify-start gap-1 pe-2 typography-meta font-medium',
                     )}
                     aria-label={toolbarLabel}
@@ -428,7 +428,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
             {!toolbarExpanded && (guestPagesInline ? extensionTools.map((tool) => renderTool(tool, false)) : guestPages.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="xs" className="w-6 text-muted-foreground" aria-label={t('sessions.sidebar.header.actions.extensionPages')}>
+                  <Button variant="ghost" size="xs" className="w-6 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.header.actions.extensionPages')}>
                     <Icon name="puzzle" className={headerActionIconClass} />
                   </Button>
                 </DropdownMenuTrigger>

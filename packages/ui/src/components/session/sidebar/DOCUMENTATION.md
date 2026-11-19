@@ -743,6 +743,8 @@ The available Workbench is the first fixed tool. Other extension pages
 appear together after the fixed tools when there is room in the collapsed row,
 or together in the extension menu. The expanded grid includes all available
 tools and uses the same catalog and feature availability rules as the row.
+At large interface font sizes the compact tools can wrap within the sidebar
+so every fixed button and the extension menu remain reachable.
 
 ## Decisions
 
