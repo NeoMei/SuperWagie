@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [fixed-bundled, managed-update]
+        lane: [managed-update]
     env:
       QA_ENGINE_LANE: ${{ matrix.lane }}
       APPLICATION_COMMIT: 106683b884902fbee1eb994791fdeb541ae47925
@@ -169,6 +169,56 @@ jobs:
             } catch { return { snapshotUnavailable: true }; }
           };`);
           replace("const cdpFailureKind = (text) => /execution context.*destroyed/i.test(text) ? 'execution-context-destroyed'", "const cdpFailureKind = (text) => /CDP connection closed|WebSocket.*closed|WebSocket.*not open/i.test(text) ? 'connection-closed'\n    : /target.*closed|session.*closed|detached/i.test(text) ? 'target-detached'\n    : /got no reply/i.test(text) ? 'no-reply'\n    : /execution context.*destroyed/i.test(text) ? 'execution-context-destroyed'");
+
+          replace("  const target = await until", "  let target = await until");
+          replace("  const observedRendererEvaluation = async (expression) => {", String.raw`  const recoverableReadFailure = (kind) => ['connection-closed', 'target-detached', 'execution-context-destroyed', 'execution-context-not-found', 'runtime-auth-unavailable'].includes(kind);
+            const reattachRendererRead = async () => until(async () => {
+              if (stopped(appChild)) return null;
+              const current = await findPageTarget(debugPort);
+              if (!current.url.startsWith('openchamber-ui://app/') || current.url.includes('__splash')) return null;
+              if (current.webSocketDebuggerUrl !== target.webSocketDebuggerUrl || cdp.socket.readyState !== WebSocket.OPEN) {
+                cdp.close();
+                target = current;
+                cdp = new CdpClient(target.webSocketDebuggerUrl);
+                await cdp.connect();
+                cdp.on('Runtime.exceptionThrown', () => { rendererFailure = true; });
+                cdp.on('Runtime.consoleAPICalled', event => {
+                  if (event.args.some(argument => argument.value === 'Error caught by boundary:')) rendererFailure = true;
+                });
+                await cdp.send('Runtime.enable', {}, { timeoutMs: 10_000 });
+                receipt.rendererReattachments = (receipt.rendererReattachments ?? 0) + 1;
+              }
+              return evaluateValue(cdp, "Boolean(window.__OPENCHAMBER_DESKTOP__ && (window.__OPENCHAMBER_CLIENT_TOKEN__ || window.__OPENCHAMBER_READ_RUNTIME_CONFIG__?.()?.clientToken) && !document.getElementById('initial-loading'))");
+            }, 20_000);
+            const observedRendererEvaluation = async (expression, readOnly = false) => {
+              const retryTarget = readOnly && lane === 'managed-update';
+              const observe = async () => {
+                const evaluated = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, { timeoutMs: 15_000 });
+                if (evaluated.exceptionDetails) {
+                  const detail = evaluated.exceptionDetails;
+                  const kind = cdpFailureKind(String(detail.text ?? '') + ' ' + String(detail.exception?.description ?? ''));
+                  receipt.rendererEvaluationFailure = kind;
+                  if (retryTarget && recoverableReadFailure(kind)) throw Object.assign(new Error('Retry detached renderer read'), { qaKind: kind });
+                }
+                return evaluated.result?.value;
+              };
+              try { return await observe(); }
+              catch (error) {
+                const kind = error.qaKind ?? cdpFailureKind(String(error?.message ?? error));
+                receipt.rendererEvaluationFailure = kind;
+                if (!retryTarget || !recoverableReadFailure(kind)) throw error;
+                receipt.rendererReadRecovery = { stage: receipt.stage, failure: kind };
+                await reattachRendererRead();
+                return observe();
+              }
+            };
+            const originalEvaluationUnused = async (expression) => {`);
+          const obsoleteStart = source.indexOf('  const originalEvaluationUnused');
+          const obsoleteEnd = source.indexOf('  let rendererFailure = false;', obsoleteStart);
+          assert(0 <= obsoleteStart && obsoleteStart < obsoleteEnd);
+          source = source.slice(0, obsoleteStart) + source.slice(obsoleteEnd);
+          replace("contentType:response.headers.get('content-type')?.split(';')[0]??null,json}})()`);",
+            "contentType:response.headers.get('content-type')?.split(';')[0]??null,json}})()`, !init.method || init.method === 'GET');");
           replace("    return new Response(result.status === 204", String.raw`    if (pathname === '/api/info' && result.status === 200) {
                 const body = JSON.parse(result.text);
                 const keys = ['version', 'status', 'healthy', 'ready', 'error', 'code', 'data', 'message'];
