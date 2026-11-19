@@ -648,7 +648,7 @@ const baseDict = {
   'sessions.scheduledTasks.editor.targetRetry': '重试',
   'sessions.scheduledTasks.editor.targetRequired': '请选择目标会话。',
   'sessions.scheduledTasks.editor.taskName.label': '任务名称',
-  'sessions.scheduledTasks.editor.taskName.placeholder': '每日同步',
+  'sessions.scheduledTasks.editor.taskName.placeholder': '请输入任务名称',
   'sessions.scheduledTasks.editor.scheduleType.label': '计划类型',
   'sessions.scheduledTasks.editor.scheduleType.daily': '每天',
   'sessions.scheduledTasks.editor.scheduleType.weekly': '每周',

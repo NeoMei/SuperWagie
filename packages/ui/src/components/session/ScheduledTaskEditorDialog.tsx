@@ -23,7 +23,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { fetchEligibleScheduledTaskTargets } from '@/lib/scheduledTasksApi';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
@@ -589,46 +589,46 @@ const toDraft = (
   };
 };
 
-const validateDraft = (draft: ScheduledTaskDraft, t: ReturnType<typeof useI18n>['t']): string | null => {
-  if (draft.sessionMode === 'existing' && !draft.targetSessionId) return t('sessions.scheduledTasks.editor.targetRequired');
+const validateDraft = (draft: ScheduledTaskDraft): I18nKey | null => {
+  if (draft.sessionMode === 'existing' && !draft.targetSessionId) return 'sessions.scheduledTasks.editor.targetRequired';
   if (!draft.name.trim()) {
-    return t('sessions.scheduledTasks.editor.validation.taskNameRequired');
+    return 'sessions.scheduledTasks.editor.validation.taskNameRequired';
   }
   if (!draft.execution.prompt.trim()) {
-    return t('sessions.scheduledTasks.editor.validation.promptRequired');
+    return 'sessions.scheduledTasks.editor.validation.promptRequired';
   }
   if (!draft.execution.useDefaults && (!draft.execution.providerID.trim() || !draft.execution.modelID.trim())) {
-    return t('sessions.scheduledTasks.editor.validation.modelRequired');
+    return 'sessions.scheduledTasks.editor.validation.modelRequired';
   }
 
   if (draft.schedule.kind === 'once') {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.schedule.onceDate)) {
-      return t('sessions.scheduledTasks.editor.validation.dateFormat');
+      return 'sessions.scheduledTasks.editor.validation.dateFormat';
     }
     if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(draft.schedule.onceTime)) {
-      return t('sessions.scheduledTasks.editor.validation.timeFormat');
+      return 'sessions.scheduledTasks.editor.validation.timeFormat';
     }
   } else if (draft.schedule.kind === 'cron') {
     if (!draft.schedule.cronExpression.trim()) {
-      return t('sessions.scheduledTasks.editor.validation.cronRequired');
+      return 'sessions.scheduledTasks.editor.validation.cronRequired';
     }
     const cronResult = isValidCronExpression(draft.schedule.cronExpression);
     if (!cronResult.valid) {
-      return t('sessions.scheduledTasks.editor.validation.cronInvalid');
+      return 'sessions.scheduledTasks.editor.validation.cronInvalid';
     }
   } else {
     const validTimes = draft.schedule.times.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
     if (validTimes.length === 0) {
-      return t('sessions.scheduledTasks.editor.validation.atLeastOneTime');
+      return 'sessions.scheduledTasks.editor.validation.atLeastOneTime';
     }
   }
 
   if (draft.schedule.kind === 'weekly' && draft.schedule.weekdays.length === 0) {
-    return t('sessions.scheduledTasks.editor.validation.atLeastOneWeekday');
+    return 'sessions.scheduledTasks.editor.validation.atLeastOneWeekday';
   }
 
   if (!draft.schedule.timezone.trim()) {
-    return t('sessions.scheduledTasks.editor.validation.timezoneRequired');
+    return 'sessions.scheduledTasks.editor.validation.timezoneRequired';
   }
 
   return null;
@@ -820,6 +820,7 @@ export function ScheduledTaskEditorDialog(props: {
     })
   );
   const [saving, setSaving] = React.useState(false);
+  const [nameValidationFailed, setNameValidationFailed] = React.useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = React.useState(false);
   const [showFileMention, setShowFileMention] = React.useState(false);
   const [mentionQuery, setMentionQuery] = React.useState('');
@@ -832,6 +833,7 @@ export function ScheduledTaskEditorDialog(props: {
     return new Date(initialDate.getFullYear(), initialDate.getMonth(), 1);
   });
   const datePickerRef = React.useRef<HTMLDivElement>(null);
+  const nameInputRef = React.useRef<HTMLInputElement>(null);
   const promptTextareaRef = React.useRef<HTMLTextAreaElement>(null);
   const mentionRef = React.useRef<FileMentionHandle>(null);
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
@@ -887,6 +889,7 @@ export function ScheduledTaskEditorDialog(props: {
     const sourceDate = parseISODateToLocal(task?.schedule?.date || '') || new Date();
     setCalendarMonth(new Date(sourceDate.getFullYear(), sourceDate.getMonth(), 1));
     setIsDatePickerOpen(false);
+    setNameValidationFailed(false);
     setShowCommandAutocomplete(false);
     setShowFileMention(false);
     setCommandQuery('');
@@ -1210,9 +1213,13 @@ export function ScheduledTaskEditorDialog(props: {
   }, [showCommandAutocomplete, showFileMention, showSnippetAutocomplete]);
 
   const handleSubmit = React.useCallback(async () => {
-    const validationError = validateDraft(draft, t);
+    const validationError = validateDraft(draft);
     if (validationError) {
-      toast.error(validationError);
+      if (validationError === 'sessions.scheduledTasks.editor.validation.taskNameRequired') {
+        setNameValidationFailed(true);
+        nameInputRef.current?.focus();
+      }
+      toast.error(t(validationError));
       return;
     }
 
@@ -1316,6 +1323,9 @@ export function ScheduledTaskEditorDialog(props: {
                     <FieldLabel htmlFor="sched-name" required>{t('sessions.scheduledTasks.editor.taskName.label')}</FieldLabel>
                     <Input
                       id="sched-name"
+                      ref={nameInputRef}
+                      required
+                      aria-invalid={nameValidationFailed && !draft.name.trim() ? true : undefined}
                       value={draft.name}
                       onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
                       placeholder={t('sessions.scheduledTasks.editor.taskName.placeholder')}

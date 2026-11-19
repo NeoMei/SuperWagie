@@ -656,7 +656,7 @@ const baseDict = {
   'sessions.scheduledTasks.editor.targetRetry': 'Try again',
   'sessions.scheduledTasks.editor.targetRequired': 'Select a target session.',
   'sessions.scheduledTasks.editor.taskName.label': 'Task name',
-  'sessions.scheduledTasks.editor.taskName.placeholder': 'Daily sync',
+  'sessions.scheduledTasks.editor.taskName.placeholder': 'Enter a task name',
   'sessions.scheduledTasks.editor.scheduleType.label': 'Schedule type',
   'sessions.scheduledTasks.editor.scheduleType.daily': 'Daily',
   'sessions.scheduledTasks.editor.scheduleType.weekly': 'Weekly',
