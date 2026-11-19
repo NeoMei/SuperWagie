@@ -1,4 +1,4 @@
-name: Validate the existing Windows x64 installer
+name: Diagnose the installed Windows x64 runtime
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
 jobs:
   validate-existing-windows:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       APPLICATION_COMMIT: 106683b884902fbee1eb994791fdeb541ae47925
       APPLICATION_TREE: 93616ee6aa480a8b6993606736dbc3b8ea94ee86
@@ -120,11 +120,96 @@ jobs:
           } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM .qa/receipts/installation.json
           "QA_APPLICATION=$application" | Add-Content -Encoding utf8 $env:GITHUB_ENV
 
-      - name: Run the original native smoke against the installed product
+
+      - name: Prepare a test-only diagnostic overlay
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const script = 'packages/electron/scripts/smoke-packaged-runtime.mjs';
+          let source = readFileSync(script, 'utf8');
+          assert.equal(createHash('sha256').update(source).digest('hex'), process.env.RUNTIME_PROBE_SHA256);
+          const replace = (before, after) => {
+            assert.equal(source.split(before).length, 2);
+            source = source.replace(before, () => after);
+          };
+          replace("import { spawn } from 'node:child_process';", "import { spawn, execFileSync } from 'node:child_process';");
+          replace("let seedChild, appChild, cdp, fixture;", String.raw`let seedChild, appChild, cdp, fixture;
+          const safeVersion = (value) => typeof value === 'string' && /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]{1,48})?$/.test(value) ? value : null;
+          const safeTransport = (error) => typeof error?.reason === 'string' && ['Transport', 'UnexpectedStatus', 'UnsupportedContentType', 'MalformedResponse'].includes(error.reason) ? error.reason : 'other';
+          const installedEngineProcesses = () => {
+            const script = [
+              '$ProgressPreference = "SilentlyContinue"',
+              '$rows = Get-CimInstance Win32_Process -Filter "Name = \'opencode.exe\'" | Select-Object -First 8 | ForEach-Object {',
+              '$ports = @(Get-NetTCPConnection -OwningProcess $_.ProcessId -State Listen -ErrorAction SilentlyContinue | Select-Object -First 8 -ExpandProperty LocalPort)',
+              '[ordered]@{ pid = $_.ProcessId; parentPid = $_.ParentProcessId; parentIsApp = ($_.ParentProcessId -eq [int]$env:QA_APP_PID); installedBinary = ($_.ExecutablePath -eq $env:QA_ENGINE); ports = $ports }',
+              '}',
+              'ConvertTo-Json -InputObject @($rows) -Compress -Depth 4',
+            ].join('\n');
+            try {
+              const data = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+                env: { ...process.env, QA_APP_PID: String(appChild?.pid ?? 0), QA_ENGINE: engine },
+                stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', timeout: 8_000, maxBuffer: 16_384, windowsHide: true,
+              });
+              return { processes: JSON.parse(data) };
+            } catch { return { snapshotUnavailable: true }; }
+          };`);
+          replace("const cdpFailureKind = (text) => /execution context.*destroyed/i.test(text) ? 'execution-context-destroyed'", "const cdpFailureKind = (text) => /CDP connection closed|WebSocket.*closed|WebSocket.*not open/i.test(text) ? 'connection-closed'\n    : /target.*closed|session.*closed|detached/i.test(text) ? 'target-detached'\n    : /got no reply/i.test(text) ? 'no-reply'\n    : /execution context.*destroyed/i.test(text) ? 'execution-context-destroyed'");
+          replace("    return new Response(result.status === 204", String.raw`    if (pathname === '/api/info' && result.status === 200) {
+                const body = JSON.parse(result.text);
+                const keys = ['version', 'status', 'healthy', 'ready', 'error', 'code', 'data', 'message'];
+                (receipt.engineInfoObservations ??= []).push({
+                  contentType: receipt.lastRendererApi.contentType,
+                  version: safeVersion(body?.version),
+                  nestedVersion: safeVersion(body?.data?.version),
+                  versionType: typeof body?.version,
+                  knownFields: keys.filter((key) => body && Object.hasOwn(body, key)),
+                  bodyIsArray: Array.isArray(body), bodyIsNull: body === null,
+                });
+              }
+              return new Response(result.status === 204`);
+          replace("  assert.equal(info.version, receipt.expectedEngineVersion);", String.raw`  if (!receipt.engineVersionMatches) {
+              receipt.engineProcessSnapshot = installedEngineProcesses();
+              for (const delay of [250, 1000, 2000]) {
+                await wait(delay);
+                try { await sdk.server.info(); } catch (error) { (receipt.engineInfoRetryFailures ??= []).push(safeTransport(error)); }
+              }
+            }
+            assert.equal(info.version, receipt.expectedEngineVersion);`);
+          replace("    const created = await sdk.shell.create({ command", String.raw`    receipt.shellDiagnostics = { created: false, statusCounts: {}, pollErrors: {}, resultRead: false, cleanupCompleted: false };
+              const created = await sdk.shell.create({ command`);
+          replace("    try {\n      const shell = await until(async () => { const value = (await sdk.shell.get({ id: created.data.id, location: { directory: project } })).data; return value.status !== 'running' && value; }, 30_000);", String.raw`    receipt.shellDiagnostics.created = true;
+              try {
+                const shell = await until(async () => {
+                  try {
+                    const value = (await sdk.shell.get({ id: created.data.id, location: { directory: project } })).data;
+                    const status = ['running', 'exited', 'killed', 'failed', 'spawnError'].includes(value.status) ? value.status : 'other';
+                    receipt.shellDiagnostics.statusCounts[status] = (receipt.shellDiagnostics.statusCounts[status] ?? 0) + 1;
+                    return value.status !== 'running' && value;
+                  } catch (error) {
+                    const kind = safeTransport(error);
+                    receipt.shellDiagnostics.pollErrors[kind] = (receipt.shellDiagnostics.pollErrors[kind] ?? 0) + 1;
+                    throw error;
+                  }
+                }, 30_000);`);
+          replace("      const output = outputPage.output;", "      receipt.shellDiagnostics.resultRead = true;\n      const output = outputPage.output;");
+          replace("    } finally { await sdk.shell.remove({ id: created.data.id, location: { directory: project } }); }", "    } finally { await sdk.shell.remove({ id: created.data.id, location: { directory: project } }); receipt.shellDiagnostics.cleanupCompleted = true; }");
+          const target = 'packages/electron/scripts/.qa-windows-installed-runtime.mjs';
+          writeFileSync(target, source);
+          writeFileSync('.qa/receipts/diagnostic-probe.json', JSON.stringify({
+            originalSha256: process.env.RUNTIME_PROBE_SHA256,
+            diagnosticSha256: createHash('sha256').update(source).digest('hex'),
+          }) + '\n');
+          NODE
+          node --check packages/electron/scripts/.qa-windows-installed-runtime.mjs
+
+      - name: Run the diagnostic native smoke against the installed product
         shell: pwsh
         timeout-minutes: 6
         run: |
-          node packages/electron/scripts/smoke-packaged-runtime.mjs --app $env:QA_APPLICATION --receipt .qa/receipts/runtime.json
+          node packages/electron/scripts/.qa-windows-installed-runtime.mjs --app $env:QA_APPLICATION --receipt .qa/receipts/runtime.json
           if ($LASTEXITCODE -ne 0) { throw 'Installed runtime smoke failed' }
 
       - name: Upload immutable artifact and native smoke receipts
