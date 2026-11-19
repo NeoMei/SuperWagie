@@ -735,6 +735,7 @@ const baseDict = {
   'multirun.fusion.actions.starting': 'Starting...',
   'multirun.fusion.toast.noOutputs': 'No assistant outputs found to fuse.',
   'multirun.fusion.toast.failed': 'Failed to start fusion.',
+  'sessions.sidebar.header.toolbar': 'Toolbar',
   'sessions.sidebar.header.actions.searchSessions': 'Search sessions',
   'sessions.sidebar.header.actions.exitSelection': 'Exit selection',
   'sessions.sidebar.header.actions.selectSessions': 'Select sessions',

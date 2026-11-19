@@ -50,7 +50,7 @@ type Props = {
 };
 
 /**
- * Whether the remaining extension pages get buttons next to the fixed pages
+ * Whether the remaining extension pages get buttons next to the fixed tools
  * without pushing into the list controls. All or nothing: once they stop
  * fitting, they all move into one menu, so a page never hops between the row
  * and the menu as the sidebar resizes. The measured parts don't change with
@@ -58,64 +58,83 @@ type Props = {
  */
 function useGuestPagesFitInline(
   rowRef: React.RefObject<HTMLDivElement | null>,
-  builtinPagesRef: React.RefObject<HTMLDivElement | null>,
+  fixedToolsRef: React.RefObject<HTMLDivElement | null>,
   listControlsRef: React.RefObject<HTMLDivElement | null>,
   count: number,
+  expanded: boolean,
 ): boolean {
   const [fits, setFits] = React.useState(true);
   React.useLayoutEffect(() => {
     const row = rowRef.current;
-    const builtinPages = builtinPagesRef.current;
+    const fixedTools = fixedToolsRef.current;
     const listControls = listControlsRef.current;
-    if (!row || !builtinPages || !listControls || count === 0) return;
+    if (!row || !fixedTools || !listControls || count === 0 || expanded) return;
     const measure = () => {
-      const button = builtinPages.lastElementChild;
+      const button = fixedTools.lastElementChild;
       const buttonWidth = button ? button.getBoundingClientRect().width : 0;
-      const gap = Number.parseFloat(getComputedStyle(builtinPages).columnGap) || 0;
+      const fixedStyle = getComputedStyle(fixedTools);
+      const gap = Number.parseFloat(fixedStyle.columnGap) || 0;
+      const inset = Number.parseFloat(fixedStyle.marginInlineStart) || 0;
       const rowGap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
-      const needed = builtinPages.getBoundingClientRect().width + count * (gap + buttonWidth);
-      const available = row.getBoundingClientRect().right - builtinPages.getBoundingClientRect().left
-        - listControls.getBoundingClientRect().width - rowGap;
+      const needed = inset + fixedTools.getBoundingClientRect().width + count * (gap + buttonWidth);
+      const available = row.getBoundingClientRect().width - listControls.getBoundingClientRect().width - rowGap;
       setFits(needed <= available);
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(row);
-    observer.observe(builtinPages);
+    observer.observe(fixedTools);
     observer.observe(listControls);
     return () => observer.disconnect();
-  }, [rowRef, builtinPagesRef, listControlsRef, count]);
+  }, [rowRef, fixedToolsRef, listControlsRef, count, expanded]);
   return fits;
 }
 
 const PRESSED_PAGE_BUTTON_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground';
 const IDLE_PAGE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
 
+type SidebarTool = {
+  id: string;
+  label: string;
+  pressed: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+};
+
 /**
  * A page the sidebar opens in the main area. The button stays pressed while
  * its page is open, and the same click closes the page again.
  */
-function SidebarPageButton({ label, pressed, onClick, className, children }: {
-  label: string;
-  pressed: boolean;
-  onClick: () => void;
+function SidebarPageButton({ tool, className, showLabel = false }: {
+  tool: SidebarTool;
   className: string;
-  children: React.ReactNode;
+  showLabel?: boolean;
 }): React.ReactNode {
+  const { label, pressed, onClick, icon } = tool;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
           onClick={onClick}
-          className={cn(className, pressed ? PRESSED_PAGE_BUTTON_CLASS : IDLE_PAGE_BUTTON_CLASS)}
+          className={cn(
+            showLabel
+              ? 'flex min-h-14 min-w-0 cursor-pointer flex-col items-center justify-center gap-1 rounded-md px-1.5 py-1.5'
+              : className,
+            pressed
+              ? PRESSED_PAGE_BUTTON_CLASS
+              : showLabel
+                ? 'oc-tile oc-tile-hover text-foreground focus-visible:bg-interactive-hover'
+                : IDLE_PAGE_BUTTON_CLASS,
+          )}
           aria-label={label}
           aria-pressed={pressed}
         >
-          {children}
+          {icon}
+          {showLabel ? <span className="line-clamp-2 max-w-full text-center typography-meta [overflow-wrap:anywhere]">{label}</span> : null}
         </button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={4}><p>{label}</p></TooltipContent>
+      <TooltipContent side={showLabel ? 'top' : 'bottom'} sideOffset={4}><p>{label}</p></TooltipContent>
     </Tooltip>
   );
 }
@@ -146,10 +165,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
     expandAll,
   } = props;
 
+  const [toolbarExpanded, setToolbarExpanded] = React.useState(false);
+  const toolbarPanelId = React.useId();
   const rowRef = React.useRef<HTMLDivElement>(null);
-  const builtinPagesRef = React.useRef<HTMLDivElement>(null);
+  const fixedToolsRef = React.useRef<HTMLDivElement>(null);
   const listControlsRef = React.useRef<HTMLDivElement>(null);
-  const guestPagesInline = useGuestPagesFitInline(rowRef, builtinPagesRef, listControlsRef, guestPages.length);
+  const guestPagesInline = useGuestPagesFitInline(rowRef, fixedToolsRef, listControlsRef, guestPages.length, toolbarExpanded);
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
   const toggleSelectionMode = useSessionMultiSelectStore((state) => state.toggleMode);
@@ -321,110 +342,105 @@ export function SidebarHeader(props: Props): React.ReactNode {
     );
   }
 
+  const toolbarLabel = t('sessions.sidebar.header.toolbar');
+  const guestTool = (guest: (typeof availableGuestPages)[number]): SidebarTool => {
+    const pressed = openGuestPageId === guest.id;
+    return {
+      id: `guest:${guest.id}`,
+      label: guest.pageTitle ?? guest.name,
+      pressed,
+      onClick: () => useUIStore.getState().setOpenGuestPage(pressed ? null : guest.id),
+      icon: <GuestIcon
+        icon={resolveGuestIconName(guest.icon)}
+        iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)}
+        className={headerActionIconClass}
+      />,
+    };
+  };
+  const fixedTools: SidebarTool[] = [];
+  if (workbenchPage) fixedTools.push(guestTool(workbenchPage));
+  if (showSourceBoard && overviewAvailable) fixedTools.push({
+    id: 'overview',
+    label: t('overview.title'),
+    pressed: isOverviewOpen,
+    onClick: () => useUIStore.getState().setOverviewOpen(!isOverviewOpen),
+    icon: <Icon name="compass-3" className={headerActionIconClass} />,
+  });
+  if (showSourceBoard) fixedTools.push({
+    id: 'source-board',
+    label: t('sourceBoard.title'),
+    pressed: isSourceBoardOpen,
+    onClick: () => useUIStore.getState().setSourceBoardOpen(!isSourceBoardOpen),
+    icon: <Icon name="git-pull-request" className={headerActionIconClass} />,
+  });
+  fixedTools.push({
+    id: 'scheduled-tasks',
+    label: t('sessions.sidebar.header.actions.scheduledTasks'),
+    pressed: isScheduledOpen,
+    onClick: () => useUIStore.getState().setScheduledTasksDialogOpen(!isScheduledOpen),
+    icon: <Icon name="calendar-schedule" className={headerActionIconClass} />,
+  }, {
+    id: 'archive',
+    label: t('sessions.sidebar.nav.archive'),
+    pressed: isArchiveOpen,
+    onClick: () => useUIStore.getState().setArchivePageOpen(!isArchiveOpen),
+    icon: <Icon name="archive" className={headerActionIconClass} />,
+  });
+  if (!enterpriseMode) fixedTools.push({
+    id: 'integrations',
+    label: t('integrationsCatalog.sidebar.open'),
+    pressed: isIntegrationsCatalogOpen,
+    onClick: () => useUIStore.getState().setIntegrationsCatalogOpen(!isIntegrationsCatalogOpen),
+    icon: <Icon name="store-2" className={headerActionIconClass} />,
+  });
+  const extensionTools = guestPages.map(guestTool);
+  const renderTool = (tool: SidebarTool, showLabel: boolean) => (
+    <SidebarPageButton key={tool.id} tool={tool} className={cn(headerActionButtonClass, 'shrink-0')} showLabel={showLabel} />
+  );
+
   return (
     <div className="select-none flex-shrink-0 px-2.5 py-1">
       <div className="flex h-auto min-h-8 flex-col gap-1">
-        {/* h-8 is a minimum, not a fixed height: at a large interface font
-            size the rem-sized buttons no longer fit one row, and the two
-            clusters wrap onto a second line instead of overflowing the
-            sidebar's overflow-x-hidden edge. */}
         <div ref={rowRef} className="flex min-h-8 flex-wrap items-center justify-between gap-2">
-          {/* Quiet toolbar at the top of the list: the pages the sidebar opens
-              at left, most used first; controls for the list itself at right.
-              ms-[3px] compensates the icon inset inside the 24px buttons so the
-              first glyph sits 16px from the sidebar edge, in line with the
-              titlebar controls. */}
-          <div className="ms-[3px] flex min-w-0 items-center gap-1.5">
-            <div ref={builtinPagesRef} className="flex items-center gap-1.5">
-              {workbenchPage ? (
-                <SidebarPageButton
-                  label={workbenchPage.pageTitle ?? workbenchPage.name}
-                  pressed={openGuestPageId === workbenchPage.id}
-                  onClick={() => useUIStore.getState().setOpenGuestPage(openGuestPageId === workbenchPage.id ? null : workbenchPage.id)}
-                  className={cn(headerActionButtonClass, 'shrink-0')}
-                >
-                  <GuestIcon icon={resolveGuestIconName(workbenchPage.icon)} iconSrc={guestPackageIconSrc(workbenchPage.id, workbenchPage.icon, getRuntimeUrlResolver().authenticatedAsset)} className={headerActionIconClass} />
-                </SidebarPageButton>
-              ) : null}
-
-              {showSourceBoard && overviewAvailable ? (
-                <SidebarPageButton
-                  label={t('overview.title')}
-                  pressed={isOverviewOpen}
-                  onClick={() => useUIStore.getState().setOverviewOpen(!isOverviewOpen)}
-                  className={headerActionButtonClass}
-                >
-                  <Icon name="compass-3" className={headerActionIconClass} />
-                </SidebarPageButton>
-              ) : null}
-
-              {showSourceBoard ? (
-                <SidebarPageButton
-                  label={t('sourceBoard.title')}
-                  pressed={isSourceBoardOpen}
-                  onClick={() => useUIStore.getState().setSourceBoardOpen(!isSourceBoardOpen)}
-                  className={headerActionButtonClass}
-                >
-                  <Icon name="git-pull-request" className={headerActionIconClass} />
-                </SidebarPageButton>
-              ) : null}
-
-              <SidebarPageButton
-                label={t('sessions.sidebar.header.actions.scheduledTasks')}
-                pressed={isScheduledOpen}
-                onClick={() => useUIStore.getState().setScheduledTasksDialogOpen(!isScheduledOpen)}
-                className={headerActionButtonClass}
-              >
-                <Icon name="calendar-schedule" className={headerActionIconClass} />
-              </SidebarPageButton>
-
-              <SidebarPageButton
-                label={t('sessions.sidebar.nav.archive')}
-                pressed={isArchiveOpen}
-                onClick={() => useUIStore.getState().setArchivePageOpen(!isArchiveOpen)}
-                className={headerActionButtonClass}
-              >
-                <Icon name="archive" className={headerActionIconClass} />
-              </SidebarPageButton>
-
-              {enterpriseMode ? null : (
-                <SidebarPageButton
-                  label={t('integrationsCatalog.sidebar.open')}
-                  pressed={isIntegrationsCatalogOpen}
-                  onClick={() => useUIStore.getState().setIntegrationsCatalogOpen(!isIntegrationsCatalogOpen)}
-                  className={headerActionButtonClass}
-                >
-                  <Icon name="store-2" className={headerActionIconClass} />
-                </SidebarPageButton>
-              )}
+          <div className="flex min-w-0 items-center gap-1">
+            <div ref={fixedToolsRef} className="ms-[3px] flex shrink-0 items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setToolbarExpanded((expanded) => !expanded)}
+                    className={cn(
+                      headerActionButtonClass,
+                      toolbarExpanded && 'w-auto justify-start gap-1 pe-2 typography-meta font-medium',
+                    )}
+                    aria-label={toolbarLabel}
+                    aria-expanded={toolbarExpanded}
+                    aria-controls={toolbarPanelId}
+                  >
+                    <Icon name={toolbarExpanded ? 'arrow-down-s' : 'arrow-right-s'} className={cn(headerActionIconClass, 'shrink-0')} />
+                    {toolbarExpanded ? <span>{toolbarLabel}</span> : null}
+                  </button>
+                </TooltipTrigger>
+                {!toolbarExpanded ? <TooltipContent side="top" sideOffset={4}><p>{toolbarLabel}</p></TooltipContent> : null}
+              </Tooltip>
+              {!toolbarExpanded ? fixedTools.map((tool) => renderTool(tool, false)) : null}
             </div>
-            {guestPagesInline ? guestPages.map((guest) => {
-              const pressed = openGuestPageId === guest.id;
-              return (
-                <SidebarPageButton
-                  key={guest.id}
-                  label={guest.pageTitle ?? guest.name}
-                  pressed={pressed}
-                  onClick={() => useUIStore.getState().setOpenGuestPage(pressed ? null : guest.id)}
-                  className={headerActionButtonClass}
-                >
-                  <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className={headerActionIconClass} />
-                </SidebarPageButton>
-              );
-            }) : guestPages.length > 0 && <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="xs" className="w-6 text-muted-foreground" aria-label={t('sessions.sidebar.header.actions.extensionPages')}>
-                  <Icon name="puzzle" className={headerActionIconClass} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.extensionPages')}</DropdownMenuLabel>
-                {guestPages.map((guest) => <DropdownMenuItem key={guest.id} onSelect={() => useUIStore.getState().setOpenGuestPage(guest.id)}>
-                  <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className="size-4" />
-                  <span>{guest.pageTitle ?? guest.name}</span>
-                </DropdownMenuItem>)}
-              </DropdownMenuContent>
-            </DropdownMenu>}
+            {!toolbarExpanded && (guestPagesInline ? extensionTools.map((tool) => renderTool(tool, false)) : guestPages.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="xs" className="w-6 text-muted-foreground" aria-label={t('sessions.sidebar.header.actions.extensionPages')}>
+                    <Icon name="puzzle" className={headerActionIconClass} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel>{t('sessions.sidebar.header.actions.extensionPages')}</DropdownMenuLabel>
+                  {guestPages.map((guest) => <DropdownMenuItem key={guest.id} onSelect={() => useUIStore.getState().setOpenGuestPage(guest.id)}>
+                    <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className="size-4" />
+                    <span>{guest.pageTitle ?? guest.name}</span>
+                  </DropdownMenuItem>)}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ))}
           </div>
 
           <div ref={listControlsRef} className="flex min-w-0 items-center gap-1.5">
@@ -482,6 +498,15 @@ export function SidebarHeader(props: Props): React.ReactNode {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        </div>
+
+        <div
+          id={toolbarPanelId}
+          className={toolbarExpanded
+            ? 'grid max-h-[40vh] grid-cols-[repeat(auto-fill,minmax(min(100%,5rem),1fr))] gap-1.5 overflow-y-auto pb-1'
+            : 'hidden'}
+        >
+          {toolbarExpanded ? [...fixedTools, ...extensionTools].map((tool) => renderTool(tool, true)) : null}
         </div>
 
         {isSessionSearchOpen ? (
