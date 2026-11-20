@@ -86,6 +86,7 @@ type PlatformPaymentPanelProps = {
   channels?: Provider[];
   /** Switches the payment channel by starting an equivalent checkout. */
   onSwitchChannel?: (provider: Provider) => void;
+  channelSwitchPending?: boolean;
   /** Manual status read; the panel also polls on its own while waiting. */
   onRefresh: () => void;
   onRenew?: () => void;
@@ -102,7 +103,7 @@ type PlatformPaymentPanelProps = {
  * field list or hunting for a QR elsewhere on the page. The commerce owner polls and reconciles the original order.
  */
 export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
-  checkout, busy, channels = [], onSwitchChannel, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false,
+  checkout, busy, channels = [], onSwitchChannel, channelSwitchPending, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false,
 }) => {
   const { t } = useI18n();
   const [codeImage, setCodeImage] = React.useState<{ source: string; image: string } | null>(null);
@@ -117,6 +118,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const qr = codeUrl && codeImage?.source === codeUrl ? codeImage : null;
   const paymentProvider = checkout.provider;
   const upgrade = checkout.product_credit_upgrade;
+  const appliedCreditAmount = upgrade?.applied_credit_amount;
   const returned = checkout.upgrade_refund_amount;
   const returnAmount = returned === undefined ? null : t('platformAccount.productWallet.refundAmount', { amount: t('platformAccount.cny', { amount: formatPlatformMoney(returned) }) });
   const offerName = checkout.walletTopUp ? t('platformAccount.productWallet.topUp') : checkout.offer_name;
@@ -174,19 +176,25 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
     </div>
 
     {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
-    {upgrade && waiting && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.estimatedRefund')} {t('platformAccount.cny', { amount: formatPlatformMoney(upgrade.estimated_refund_amount) })} · {t(upgrade.refund_payment_source === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}</p>}
+    {upgrade && waiting && appliedCreditAmount === undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.estimatedRefund')} {t('platformAccount.cny', { amount: formatPlatformMoney(upgrade.estimated_refund_amount) })} · {t(upgrade.refund_payment_source === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}</p>}
     <div className="mt-3 flex flex-col gap-4 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6">
       <div className="min-w-0 space-y-3">
         <div className="space-y-1">
+          {waiting && appliedCreditAmount !== undefined && <>
+            <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.netPlanPrice')} {t('platformAccount.cny', { amount: formatPlatformMoney(String(BigInt(checkout.amount) + BigInt(appliedCreditAmount))) })}</p>
+            <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.oldPlanCredit')} {t('platformAccount.cny', { amount: formatPlatformMoney(appliedCreditAmount) })}</p>
+          </>}
           <p className="typography-micro text-muted-foreground">{t(waiting ? 'platformAccount.payAmount' : checkout.payment_status === 'PAID' ? 'platformAccount.amountPaid' : 'platformAccount.price')}</p>
           <p className="flex items-baseline gap-1.5">
             <span className="text-3xl font-medium leading-none tabular-nums" dir="auto">¥{formatPlatformMoney(checkout.amount)}</span>
             <span className="typography-meta text-muted-foreground">{providerName}</span>
           </p>
         </div>
+        {waiting && appliedCreditAmount !== undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.resetUpgrade')}</p>}
         {channels.length > 1 && onSwitchChannel && waiting && <div className="space-y-1">
           <p className="typography-micro text-muted-foreground">{t('platformAccount.paymentChannel')}</p>
           <SettingsChipGroup value={paymentProvider} onChange={(next) => { if (next !== paymentProvider && !busy) onSwitchChannel(next); }} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy }))} />
+          {channelSwitchPending && <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.error.channelSwitchPending')}</p>}
         </div>}
         {codeUrl && <p className={`${SETTINGS_HELPER_CLASS} max-w-[22rem]`}>{scanHint}</p>}
         {session?.kind === 'redirect' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.legacyCheckoutHint')}</p>}

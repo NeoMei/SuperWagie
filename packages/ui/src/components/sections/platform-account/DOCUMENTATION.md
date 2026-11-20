@@ -32,7 +32,7 @@ The SuperWagie account page owns in-app registration and login, the user center 
 - The usage summary leads with settled CREDIT consumption, total calls and settled calls. Credits use exact micro-unit arithmetic with insignificant trailing zeros removed. A present authorized charge map without CREDIT means zero credit consumption; a missing financial map or actor-only report remains unavailable. CNY and quota amounts are never converted to credits. Consumption records keep nonzero cash/quota totals and refunds in collapsed Billing details, and zero refunds are omitted from call rows. Pending and unknown calls stay visible. The detailed ledger and task receipts retain the original charge asset and integer precision. Legacy task receipts with no asset direct the user to Consumption records. The report does not infer usage from BYOK providers or from local task receipts.
 - The default user-center tab is Membership and usage. Profile and security remain reachable through Personal details, including login-session expiry. A managed model funding refusal opens the existing billing tab at the add-on plans through the transient `platform-account.model-recharge` target. The target is consumed once, including when commerce is already mounted, and preserves any selected offer. Navigation never selects an offer, starts payment, transfers balances or changes a pending command's original product. Funding and refresh do not replay the failed chat.
 - External checkout and purchase are separate explicit actions. An active member sees their current plan and term end before selecting a higher tier in the same billing period. The current plan becomes purchasable again after expiry. Selecting an eligible upgrade allows the member to request an authoritative quote and separately confirm its exact payment and additional points. Expired quotes can be refreshed. A conclusively rejected `quote_invalidated` upgrade clears the stale quote and permits a new quote; a generic conflict or unknown outcome retains same-key recovery. Quote reads do not change the subscription. Accepting an upgrade uses its durable original idempotency key, including after a lost response. New SuperWagie add-ons require membership; historical shared add-ons retain their original rules.
-- Switching a waiting checkout requires the original checkout to return CLOSED before a replacement is created. An expired artifact is insufficient evidence. A paid response refreshes benefits without a replacement. The offer or quote comes from the intent bound to the original checkout; a missing match surfaces an error.
+- Switching a waiting checkout requires the original checkout to return CLOSED before a replacement is created. A waiting response retains the original channel and any valid code returned with that checkout, and explains how to retry the switch. An expired artifact is insufficient evidence. A paid response refreshes benefits without a replacement. The offer or quote comes from the intent bound to the original checkout; a missing match surfaces an error.
 - The formal credit program is available only when the server explicitly reports native CREDIT readiness. Missing readiness keeps it unavailable. Server-provided purchase readiness disables these offers with a clear explanation; prices are never hardcoded candidate products. An unconfigured external payment gateway does not prevent eligible existing offers from using sufficient authorized balance, but it never creates a QR code or a pretend checkout. No funding action automatically retries a task.
 - The backend journals financial commands before contacting UniHub. A lost response exposes same-key recovery, and overview reloads the durable intents after remount. Unknown or prepared intents block new commands. Refresh only reads state; it never settles, purchases or retries a financial command.
 - Recharges shown in history are scoped to this instance. Purchase orders come from the server. Payment, fulfillment and refund statuses remain separate.
@@ -134,10 +134,14 @@ row remains useful when another model fails or the next poll is interrupted.
 ## Direct checkout controls
 
 The membership/add-on confirmation includes an explicit payment method when
-merchant checkout is configured. Choosing a channel, changing tabs and opening
-the account page remain read-only. The legacy cash option remains separate.
+merchant checkout is configured. Choosing a method before submitting a payment,
+changing tabs and opening the account page are read-only. The legacy cash option
+remains separate.
 Upgrade quotes bind their selected payment source and show the server's exact
 cent-rounded external charge before confirmation.
+Negotiated legacy upgrade quotes and their payment panels show the plan price,
+applied old-plan credit, and amount due. Payment starts the new term. The
+estimated-refund explanation belongs to the full-price upgrade flow.
 
 The checkout panel recovers server records after reopening. Waiting, unknown,
 paid-but-activating, completed and original-channel refund states stay distinct.

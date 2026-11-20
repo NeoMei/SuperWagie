@@ -262,7 +262,7 @@ export const PlatformAccountCommerce: React.FC<{
         if (settledCheckout(previous)) {
           accountRefresh.current();
         } else if (waitingCheckout(previous)) {
-          setError('platformAccount.error.operationPending');
+          setError(provider === checkout.provider ? 'platformAccount.error.operationPending' : 'platformAccount.error.channelSwitchPending');
         }
         return;
       }
@@ -360,6 +360,7 @@ export const PlatformAccountCommerce: React.FC<{
   const wallet = selectedOffer && state?.wallets?.find((item) => item.productId === walletProduct);
   const validQuote = quote?.offer.id === selectedOffer?.id && (quote?.paymentSource ?? 'wallet') === (external ? 'external' : 'wallet') ? quote : null;
   const resetQuote = validQuote?.productCreditUpgrade;
+  const appliedCreditAmount = resetQuote?.appliedCreditAmount;
   const purchaseAmount = validQuote?.amount ?? selectedOffer?.price ?? '0';
   const insufficient = !external && selectedOffer && state?.wallets !== null && BigInt(wallet?.amount ?? '0') < BigInt(purchaseAmount);
   const addonNeedsMembership = !hasActiveMembership && selectedOffer?.kind === 'addon' && selectedOffer.productId === 'superwagie';
@@ -423,9 +424,11 @@ export const PlatformAccountCommerce: React.FC<{
   const commerceTitle = view === 'orders' ? t('platformAccount.history') : view === 'wallet' ? t('platformAccount.productWallet.tab') : undefined;
   const refreshAction = <Button size="sm" variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>;
   const commerceUnavailable = !state || commerceReadFailed;
-  const statusRow = (error || busy || purchaseApplied || collapsedOverview) && <div className="flex items-center justify-between gap-3">
-    <p className={`min-h-5 min-w-0 flex-1 ${error ? 'text-[var(--status-error-text)]' : SETTINGS_HELPER_CLASS}`} role={error ? 'alert' : 'status'}>{error ? t(error) : busy ? t('platformAccount.loading') : purchaseApplied ? t('platformAccount.purchaseApplied') : null}</p>
-    {view === 'overview' && (collapsedOverview || commerceUnavailable || Boolean(error)) && refreshAction}
+  const channelSwitchPending = error === 'platformAccount.error.channelSwitchPending';
+  const summaryError = channelSwitchPending ? null : error;
+  const statusRow = (summaryError || busy || purchaseApplied || collapsedOverview) && <div className="flex items-center justify-between gap-3">
+    <p className={`min-h-5 min-w-0 flex-1 ${summaryError ? 'text-[var(--status-error-text)]' : SETTINGS_HELPER_CLASS}`} role={summaryError ? 'alert' : 'status'}>{summaryError ? t(summaryError) : busy ? t('platformAccount.loading') : purchaseApplied ? t('platformAccount.purchaseApplied') : null}</p>
+    {view === 'overview' && (collapsedOverview || commerceUnavailable || Boolean(summaryError)) && refreshAction}
   </div>;
   if (!state) return <>{view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">{summary()}</SettingsTwoColumn>}<SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={collapsedOverview ? undefined : refreshAction} contentClassName="space-y-3">
     {statusRow}
@@ -451,6 +454,7 @@ export const PlatformAccountCommerce: React.FC<{
     const canReplace = active && !command && state.intents.some((intent) => intent.kind === 'checkout' && intent.resourceId === checkout.id && (intent.offerId || intent.quoteId || intent.walletTopUp));
     return <PlatformPaymentPanel key={checkout.id} checkout={checkout} busy={busy || checkingPayment} compact={!active}
       channels={canReplace ? channels : []} onSwitchChannel={canReplace ? (provider) => void switchChannel(checkout, provider) : undefined}
+      channelSwitchPending={active && channelSwitchPending}
       onRenew={canReplace && channels.includes(checkout.provider) ? () => void switchChannel(checkout, checkout.provider) : undefined}
       onDismiss={active && view === 'overview' && !unresolvedPayment(checkout) ? () => { setVisibleCheckoutId(''); setPurchaseApplied(false); } : undefined}
       onRefresh={() => void checkoutAction(checkout.id, 'reconcile')} onClose={() => void checkoutAction(checkout.id, 'close')} onRefund={() => void checkoutAction(checkout.id, 'refund')} />;
@@ -534,16 +538,20 @@ export const PlatformAccountCommerce: React.FC<{
           <SettingsFieldRow label={t('platformAccount.taskAccount')}><span>{payer}</span></SettingsFieldRow>
           {channels.length > 0 && <SettingsFieldRow label={t('platformAccount.paymentChannel')}><SettingsChipGroup value={external ? effectiveChannel : 'wallet'} onChange={(channel) => { setPaymentChannel(channel); setQuote(null); }} aria-label={t('platformAccount.paymentChannel')} options={[...channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy || unresolved })), { value: 'wallet' as const, label: t(state.productCreditWallet ? 'platformAccount.productWallet.cash' : 'platformAccount.legacyBalances'), disabled: busy || unresolved }]} /></SettingsFieldRow>}
           <SettingsFieldRow label={t('platformAccount.offer')}><span dir="auto">{offerName(selectedOffer)}</span></SettingsFieldRow>
-          <SettingsFieldRow label={t(validQuote && !resetQuote ? 'platformAccount.upgradeDifference' : 'platformAccount.price')}><span dir="auto">{money(purchaseAmount)}</span></SettingsFieldRow>
+          {validQuote && appliedCreditAmount !== undefined ? <>
+            <SettingsFieldRow label={t('platformAccount.productWallet.netPlanPrice')}><span dir="auto">{money(validQuote.offer.price)}</span></SettingsFieldRow>
+            <SettingsFieldRow label={t('platformAccount.productWallet.oldPlanCredit')}><span dir="auto">{money(appliedCreditAmount)}</span></SettingsFieldRow>
+            <SettingsFieldRow label={t('platformAccount.payAmount')}><span dir="auto">{money(purchaseAmount)}</span></SettingsFieldRow>
+          </> : <SettingsFieldRow label={t(validQuote && !resetQuote ? 'platformAccount.upgradeDifference' : 'platformAccount.price')}><span dir="auto">{money(purchaseAmount)}</span></SettingsFieldRow>}
           <SettingsFieldRow label={t(scopedWallet ? 'platformAccount.productWallet.creditsDestination' : 'platformAccount.walletDestination')}><span>{state.productCreditWallet ? t('platformAccount.productWallet.productCredit') : walletName(selectedOffer.productId)}</span></SettingsFieldRow>
           <SettingsFieldRow label={t(resetQuote ? 'platformAccount.productWallet.newPeriodCredits' : validQuote ? 'platformAccount.upgradeCredits' : selectedOffer.kind === 'membership' ? 'platformAccount.monthlyCreditGrant' : 'platformAccount.creditGrant')}><span dir="auto">{t('platformAccount.pointsAmount', { points: formatPlatformPoints(validQuote?.additionalCredits ?? selectedOffer.monthlyCredit) })}</span></SettingsFieldRow>
           {selectedOffer.kind === 'addon' ? <SettingsFieldRow label={t('platformAccount.offerValidity')}><span>{scopedWallet && selectedOffer.validityMonths === 1 ? t('platformAccount.productWallet.addonExpiry') : t('platformAccount.months', { count: selectedOffer.validityMonths })}</span></SettingsFieldRow> : <SettingsFieldRow label={t('platformAccount.billingPeriod')}><span>{selectedOffer.period === 'month' ? t('platformAccount.monthly') : selectedOffer.period === 'year' ? t('platformAccount.yearly') : t('platformAccount.order.remoteStatus', { status: selectedOffer.period })}</span></SettingsFieldRow>}
           {validQuote && <>
             <SettingsFieldRow label={t('platformAccount.quoteValidUntil')}><span>{new Date(validQuote.expiresAt).toLocaleString()}</span></SettingsFieldRow>
             {resetQuote ? <>
-              <SettingsFieldRow label={t('platformAccount.productWallet.estimatedRefund')} description={t(resetQuote.refundPaymentSource === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}>
+              {appliedCreditAmount === undefined && <SettingsFieldRow label={t('platformAccount.productWallet.estimatedRefund')} description={t(resetQuote.refundPaymentSource === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}>
                 <span dir="auto">{money(resetQuote.estimatedRefundAmount)}</span>
-              </SettingsFieldRow>
+              </SettingsFieldRow>}
               <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.resetUpgrade')}</p>
             </> : currentMembership && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.upgradeKeepsExpiry', { date: new Date(currentMembership.paid_through).toLocaleDateString() })}</p>}
           </>}

@@ -15,6 +15,8 @@ test('both channels render in the purchase confirmation and show payment through
     import { PlatformAccountCommerce } from '@/components/sections/platform-account/PlatformAccountCommerce';
     import { CSSVariableGenerator } from '@/lib/theme/cssGenerator'; import { getDefaultTheme } from '@/lib/theme/themes';
     const original = { id:'original-checkout', account_id:'account', product_id:'superwagie', provider:'wechat', offer_name:'Confirmed plan', amount:'99000000', currency:'CNY', payment_status:'PENDING', fulfillment_status:'NOT_STARTED', refund_status:'', expires_at:new Date(Date.now()+900000).toISOString(), created_at:new Date().toISOString(), session:{ kind:'qr', url:'weixin://wxpay/bizpayurl?pr=fixture', expires_at:new Date(Date.now()+900000).toISOString() } };
+    // The merchant QR has its own earlier deadline and carries a time zone offset.
+    const alipaySessionExpiry = new Date(Date.parse(original.expires_at) - 60_000 + 8 * 60 * 60 * 1000).toISOString().replace('Z', '123456+08:00');
     const offer = { id:'addon', productId:'superwagie', name:'200 credits', accountKind:'both', kind:'addon', period:'once', price:'9800000', monthlyCredit:'200000000', validityMonths:12, rank:1, sandbox:false };
     let checkout = {...original}, intent, view = 'orders', sequence = 0;
     window.writes=[]; window.opened=[]; window.open=(url)=>{window.opened.push(url);return null;};
@@ -26,7 +28,9 @@ test('both channels render in the purchase confirmation and show payment through
         if (url.endsWith('/checkouts')) {
           const { provider, idempotencyKey } = JSON.parse(init.body);
           checkout = { ...original, id:'payment-'+(++sequence), provider, offer_name:offer.name, amount:offer.price,
-            session:{kind:'qr',expires_at:original.expires_at,url:provider==='alipay'?'https://qr.alipay.com/fixture':'weixin://wxpay/bizpayurl?pr=fixture'} };
+            session: provider === 'alipay'
+              ? { kind: 'qr', expires_at: alipaySessionExpiry, url: 'https://qr.alipay.com/fixture' }
+              : { kind: 'qr', expires_at: original.expires_at, url: 'weixin://wxpay/bizpayurl?pr=fixture' } };
           intent = {idempotencyKey,kind:'checkout',accountId:'account',productId:offer.productId,amount:offer.price,offerId:offer.id,provider,resourceId:checkout.id,status:'PENDING',createdAt:checkout.created_at};
           return Response.json({...intent,checkout});
         }
@@ -90,19 +94,26 @@ test('both channels render in the purchase confirmation and show payment through
     await click('Request original-channel refund');assert.equal(await evaluate('window.paymentWrites().length'),0);
     await click('Confirm refund');await until('window.paymentWrites().length===1');
     assert.match((await evaluate('window.paymentWrites()'))[0],/checkouts\/original-checkout\/refund$/);
-    for (const [provider,width] of [['WeChat Pay',1200],['Alipay',390]]) {
+    for (const [initialProvider, provider, width] of [['WeChat Pay', 'WeChat Pay', 1200], ['WeChat Pay', 'Alipay', 390], ['Alipay', 'WeChat Pay', 1200]]) {
       await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});
       await evaluate('window.startPurchase()');
       await until('[...document.querySelectorAll("button")].some(node=>node.textContent==="Open add-ons"&&!node.disabled)');
       await click('Open add-ons');
       await evaluate('document.querySelector("[role=radio]").click()');
-      await click('WeChat Pay');
+      await click(initialProvider);
       await evaluate('window.confirmation=document.querySelector("[data-purchase-confirmation]");[...window.confirmation.querySelectorAll("button")].find(node=>node.textContent.startsWith("Buy ")).click()');
       await until('window.confirmation.querySelector("img")?.naturalWidth > 0');
-      if (provider === 'Alipay') {
-        await click('Alipay');
-        await until('window.confirmation.querySelector("img")?.alt.includes("Alipay") && window.confirmation.querySelector("img").naturalWidth > 0');
-        assert.deepEqual((await evaluate('window.paymentWrites()')).map(url=>url.split('/').at(-1)), ['checkouts','close','checkouts']);
+      if (provider !== initialProvider) {
+        const originalCheckoutId = await evaluate('window.confirmation.querySelector("[data-payment-checkout]").getAttribute("data-payment-checkout")');
+        assert.match(await evaluate('window.confirmation.querySelector("img").alt'), initialProvider === 'Alipay' ? /Alipay/ : /WeChat/);
+        await click(provider);
+        const brand = provider === 'Alipay' ? 'Alipay' : 'WeChat';
+        await until(`(window.confirmation.querySelector("img")?.alt.includes(${JSON.stringify(brand)}) && window.confirmation.querySelector("img").naturalWidth > 0) || Boolean(document.querySelector("[role=alert]"))`);
+        assert.equal(await evaluate('document.querySelector("[role=alert]")?.textContent ?? null'), null, 'Checkout creation and summary should accept the merchant QR expiry format');
+        const writes = await evaluate('window.paymentWrites()');
+        assert.deepEqual(writes.map(url => url.split('/').at(-1)), ['checkouts', 'close', 'checkouts']);
+        assert.equal(writes[1], '/api/platform-account/commerce/checkouts/' + originalCheckoutId + '/close');
+        assert.notEqual(await evaluate('window.confirmation.querySelector("[data-payment-checkout]").getAttribute("data-payment-checkout")'), originalCheckoutId);
       }
       assert.equal(await evaluate('window.confirmation===document.querySelector("[data-purchase-confirmation]")'),true);
       assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
@@ -111,7 +122,7 @@ test('both channels render in the purchase confirmation and show payment through
       const evidence=process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR;
       if(evidence){
         mkdirSync(evidence,{recursive:true});
-        const slug=provider==='Alipay'?'alipay':'wechat';
+        const slug = provider === 'Alipay' ? 'alipay' : initialProvider === 'Alipay' ? 'alipay-to-wechat' : 'wechat';
         const shot=await cdp.send('Page.captureScreenshot',{format:'png'});
         writeFileSync(path.join(evidence,slug+'-inline.png'),Buffer.from(shot.data,'base64'));
         const qr=await evaluate('window.confirmation.querySelector("img").src.split(",")[1]');
@@ -122,7 +133,7 @@ test('both channels render in the purchase confirmation and show payment through
       await evaluate('window.result("PAID","FULFILLED")');
       await until('window.confirmation.innerText.includes("Return to purchase")');
       assert.equal(await evaluate('window.confirmation.querySelector("img")'),null);
-      assert.equal(await evaluate('window.paymentWrites().length'),provider === 'Alipay' ? 3 : 1);
+      assert.equal(await evaluate('window.paymentWrites().length'), provider !== initialProvider ? 3 : 1);
       assert.deepEqual(await evaluate('window.opened'),[]);
       await click('Return to purchase');
       await until('!window.confirmation.querySelector("[data-payment-checkout]")');

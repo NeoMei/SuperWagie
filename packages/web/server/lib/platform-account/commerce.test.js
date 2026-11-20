@@ -25,7 +25,7 @@ const fixture = async () => {
   const checkoutRecords = new Map();
   const orders = new Map(); const quotes = new Map(); const byKey = new Map();
   const upstream = async (route, init = {}) => {
-    state.calls.push({ walletVersion: init.headers?.['X-UniHub-Product-Credit-Wallet'], route, method: init.method ?? 'GET', body: init.body, key: init.headers?.['Idempotency-Key'] });
+    state.calls.push({ walletVersion: init.headers?.['X-UniHub-Product-Credit-Wallet'], netUpgrade: init.headers?.['X-UniHub-Legacy-Net-Upgrade'], route, method: init.method ?? 'GET', body: init.body, key: init.headers?.['Idempotency-Key'] });
     if (route === '/v1/accounts') return [{ id: state.account, kind: 'personal', role: state.role }];
     if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: state.scopes, product_credit_wallet: state.productCreditWallet, sandbox: state.sandbox, product_wallet_recharge: state.sandbox, real_payments_configured: state.cashPayments ?? false, payment_providers: state.cashPayments ? ['wechat'] : [], native_credits: { ready: state.creditsReady } };
     if (route.endsWith('/product-wallet') || route.endsWith('/product-wallet/superwagie/renewal')) return { version: 'product_v1', account_id: state.account, cash: { asset: 'CNY/6', available: String(state.wallet) }, can_manage: true, products: [{ product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 0 }, addon_renewal: { enabled: false, version: 1 }, orders: [], addon_offers: [] }, ...(state.otherWalletProducts ?? [])] };
@@ -76,6 +76,12 @@ const fixture = async () => {
         if (body.payment_source === 'external') Object.assign(result, {
           payment_source: 'external', original_amount: selected.price, rounding_rule: 'cny_cent_ceil_v1',
         });
+        if (state.netUpgrade) {
+          result.amount = state.netUpgrade.amount;
+          if (body.payment_source === 'external') result.original_amount = state.netUpgrade.originalAmount ?? state.netUpgrade.amount;
+          result.product_credit_upgrade.applied_credit_amount = state.netUpgrade.appliedCreditAmount;
+          result.product_credit_upgrade.estimated_refund_amount = state.netUpgrade.estimatedRefundAmount ?? '0';
+        }
       }
       quotes.set(result.id, result); return result;
     }
@@ -332,6 +338,7 @@ describe('UniHub commerce without sandbox funding', () => {
     const result = await f.runtime.acceptUpgrade(identity, { accountId: f.state.account, quoteId: quote.id, idempotencyKey: crypto.randomUUID() });
     expect(result).toMatchObject({ kind: 'upgrade', status: 'APPLIED' });
     expect(f.state.wallet).toBe(9_500_000n); expect(f.state.credits).toBe(1_000_000n);
+    expect(f.state.calls.some(call => call.netUpgrade !== undefined)).toBe(false);
   });
 
   it('accepts and replays a reset upgrade against the new subscription and original order', async () => {
@@ -366,6 +373,55 @@ describe('UniHub commerce without sandbox funding', () => {
     const after = await f.runtime.checkoutAction(identity, first.resourceId, 'reconcile', { accountId });
     expect(after).toMatchObject({ payment_status: 'PAID', product_credit_upgrade: { previous_subscription_id: 'sub-a', previous_order_id: 'order-old' } });
     expect(f.state.calls.filter((call) => call.method === 'POST' && call.route.endsWith('/checkouts'))).toHaveLength(1);
+  });
+
+  it('negotiates a product-wallet upgrade quote that pays only the net amount', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.cashPayments = true;
+    f.state.offers = [{ ...membership, credit_scope: 'product_v1' }];
+    f.state.netUpgrade = { amount: '700000', originalAmount: '699999', appliedCreditAmount: '300000' };
+    const accountId = f.state.account;
+    const quote = await f.runtime.quoteUpgrade(identity, { accountId, subscriptionId: 'sub-a', offerId: membership.id, paymentSource: 'external' });
+    expect(quote).toMatchObject({ offer: { price: '1000000' }, amount: '700000', originalAmount: '699999',
+      productCreditUpgrade: { previousOrderId: 'order-old', estimatedRefundAmount: '0', appliedCreditAmount: '300000' } });
+    const checkout = await f.runtime.createCheckout(identity, { accountId, quoteId: quote.id, provider: 'wechat', idempotencyKey: crypto.randomUUID() });
+    expect(checkout).toMatchObject({ amount: '700000', checkout: { amount: '700000', product_credit_upgrade: { applied_credit_amount: '300000' } } });
+    expect(f.state.calls.filter(call => call.netUpgrade !== undefined)).toEqual([
+      expect.objectContaining({ route: `/v1/accounts/${accountId}/quotes`, method: 'POST', walletVersion: 'product_v1', netUpgrade: '1' }),
+      expect.objectContaining({ route: `/v1/accounts/${accountId}/checkouts`, method: 'POST', walletVersion: 'product_v1', netUpgrade: '1' }),
+    ]);
+  });
+
+  it('binds a net upgrade to its original wallet acceptance and replays with the same capability', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.offers = [{ ...membership, credit_scope: 'product_v1' }];
+    f.state.netUpgrade = { amount: '695001', appliedCreditAmount: '304999' };
+    const accountId = f.state.account;
+    const quote = await f.runtime.quoteUpgrade(identity, { accountId, subscriptionId: 'sub-a', offerId: membership.id });
+    const key = crypto.randomUUID();
+    f.state.loseResponse = true;
+    const unknown = await f.runtime.acceptUpgrade(identity, { accountId, quoteId: quote.id, idempotencyKey: key });
+    expect(unknown).toMatchObject({ amount: '695001', status: 'UNKNOWN' });
+    expect(await f.runtime.reconcile(identity, key, { accountId })).toMatchObject({ amount: '695001', status: 'APPLIED' });
+    expect(f.state.calls.filter(call => call.route.endsWith(`/quotes/${quote.id}/accept`))).toEqual([
+      expect.objectContaining({ method: 'POST', key, walletVersion: 'product_v1', netUpgrade: '1' }),
+      expect.objectContaining({ method: 'POST', key, walletVersion: 'product_v1', netUpgrade: '1' }),
+    ]);
+    expect(f.state.wallet).toBe(9_304_999n);
+  });
+
+  it.each([
+    { amount: '0', appliedCreditAmount: '1000000' },
+    { amount: '700000', appliedCreditAmount: '200000' },
+    { amount: '700000', appliedCreditAmount: '300000', estimatedRefundAmount: '100000' },
+  ])('rejects an invalid net upgrade quote %j', async (netUpgrade) => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.offers = [{ ...membership, credit_scope: 'product_v1' }];
+    f.state.netUpgrade = netUpgrade;
+    await expect(f.runtime.quoteUpgrade(identity, { accountId: f.state.account, subscriptionId: 'sub-a', offerId: membership.id })).rejects.toMatchObject({ code: 'platform_response_invalid', status: 502 });
   });
 
   it('refuses a second refund when the old payment already has an upgrade return', async () => {

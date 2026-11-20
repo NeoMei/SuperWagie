@@ -35,7 +35,7 @@ const offerSchema = z.object({
 });
 const upgradeSourceSchema = z.object({
   previous_subscription_id: id, previous_order_id: id, previous_version: z.number().int().nonnegative().optional(),
-  estimated_refund_amount: units, refund_payment_source: z.enum(['wallet', 'external']),
+  estimated_refund_amount: units, refund_payment_source: z.enum(['wallet', 'external']), applied_credit_amount: units.optional(),
 });
 const orderSchema = z.object({
   id, account_id: id, actor_id: id, product_id: z.string(), offer: offerSchema, amount: units,
@@ -49,7 +49,7 @@ const quoteSchema = z.object({
   product_credit_upgrade: upgradeSourceSchema.optional(),
   period_start: z.string().datetime(), expires_at: z.string().datetime(), created_at: z.string().datetime(),
 });
-const checkoutSession = z.object({ kind: z.enum(['qr', 'redirect']), url: z.string().min(1).max(16000), expires_at: z.string().datetime() });
+const checkoutSession = z.object({ kind: z.enum(['qr', 'redirect']), url: z.string().min(1).max(16000), expires_at: z.string().datetime({ offset: true }) });
 const checkoutSchema = z.object({
   id, account_id: id, product_id: product, provider: z.enum(['wechat', 'alipay']), offer_name: z.string(), walletTopUp: z.literal(true).optional(), amount: units, currency: z.literal('CNY'),
   payment_status: z.enum(['CREATED', 'PENDING', 'UNKNOWN', 'PAID', 'CLOSED', 'REVIEW']), fulfillment_status: z.enum(['NOT_STARTED', 'PENDING', 'FULFILLED', 'REVIEW']), refund_status: z.enum(['', 'PENDING', 'SUCCEEDED', 'REVIEW', 'REJECTED']).default(''),
@@ -100,6 +100,7 @@ const requestCheckout = (ctx, suffix, init, useProductWallet) => versionRequest(
   ctx.capabilities.alipay_checkout_qr === true ? { ...init, headers: { ...init?.headers, 'X-UniHub-Alipay-QR': '1' } } : init, useProductWallet);
 const versioned = (ctx) => ctx.capabilities.product_credit_wallet === true;
 const versionRequest = (ctx, path, init, useProductWallet = versioned(ctx)) => ctx.session.request(path, useProductWallet ? productWalletHeaders(init) : init);
+const upgradeHeaders = (negotiated) => ({ 'Content-Type': 'application/json', ...(negotiated && { 'X-UniHub-Legacy-Net-Upgrade': '1' }) });
 const hasScopes = (caps, names) => names.every((scope) => caps.scopes.includes(scope));
 const financialRole = (role) => role === 'owner' || role === 'billing_admin';
 const supportedOffer = (offer, useProductWallet) => useProductWallet
@@ -203,7 +204,8 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
   const dispatch = async (ctx, journal, storageId, intent) => {
     await mutateIntent(journal, storageId, { status: 'UNKNOWN', errorCode: undefined });
     try {
-      const init = { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': intent.idempotencyKey } };
+      const isProductWalletUpgrade = intent.walletVersion === PRODUCT_WALLET_VERSION && Boolean(intent.quoteId);
+      const init = { method: 'POST', headers: { ...upgradeHeaders(isProductWalletUpgrade), 'Idempotency-Key': intent.idempotencyKey } };
       let values;
       let checkout;
       if (intent.kind === 'checkout') {
@@ -472,22 +474,30 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
       if (pointsRuntimeUnavailable(offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       const input = { subscription_id: body.subscriptionId, offer_id: body.offerId };
       if (body.paymentSource === 'external') input.payment_source = 'external';
-      const quote = parse(quoteSchema, await versionRequest(ctx, pathFor(body.accountId, 'quotes'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }));
+      const useProductWallet = versioned(ctx);
+      const quote = parse(quoteSchema, await versionRequest(ctx, pathFor(body.accountId, 'quotes'), { method: 'POST', headers: upgradeHeaders(useProductWallet), body: JSON.stringify(input) }));
       if (quote.account_id !== body.accountId || quote.subscription_id !== body.subscriptionId || quote.offer.id !== body.offerId || quote.offer.product_id !== 'superwagie' || quote.offer.kind !== 'membership' || quote.offer.sandbox !== offer.sandbox || quote.offer.credit_scope !== offer.credit_scope || quote.offer.entitlements?.pricing_program !== offer.entitlements?.pricing_program || Date.parse(quote.expires_at) <= now()) fail('platform_response_invalid', 502);
       if (pointsRuntimeUnavailable(quote.offer.entitlements?.pricing_program, ctx.capabilities)) fail('points_runtime_unavailable', 409);
       if (body.paymentSource === 'external' && (quote.payment_source !== 'external' || quote.rounding_rule !== 'cny_cent_ceil_v1' || !quote.original_amount || BigInt(quote.amount) !== ((BigInt(quote.original_amount) + 9999n) / 10000n) * 10000n)) fail('platform_response_invalid', 502);
       const reset = quote.product_credit_upgrade;
-      if (Boolean(reset) !== versioned(ctx) || (reset && (reset.previous_subscription_id !== quote.subscription_id || quote.amount !== offer.price || quote.grant_amount !== offer.monthly_credit || (body.paymentSource === 'external' && quote.original_amount !== offer.price)))) fail('platform_response_invalid', 502);
+      if (Boolean(reset) !== useProductWallet || (reset && (reset.previous_subscription_id !== quote.subscription_id || quote.grant_amount !== offer.monthly_credit))) fail('platform_response_invalid', 502);
+      const appliedCreditAmount = reset?.applied_credit_amount;
+      if (appliedCreditAmount !== undefined) {
+        const amountDue = BigInt(quote.amount);
+        if (reset.estimated_refund_amount !== '0' || quote.offer.price !== offer.price || amountDue <= 0n || amountDue + BigInt(appliedCreditAmount) !== BigInt(offer.price)) fail('platform_response_invalid', 502);
+      } else if (reset && (quote.amount !== offer.price || (body.paymentSource === 'external' && quote.original_amount !== offer.price))) {
+        fail('platform_response_invalid', 502);
+      }
       const journal = await store();
       const quoteStorageId = intentId(ctx.session, body.accountId, quote.id);
-      const binding = { paymentSource: body.paymentSource, walletVersion: versioned(ctx) ? PRODUCT_WALLET_VERSION : undefined, previousOrderId: reset?.previous_order_id, id: quote.id, serviceId: ctx.session.serviceId, actorId: ctx.session.actingUserId, accountId: body.accountId, subscriptionId: body.subscriptionId, offerId: quote.offer.id, amount: quote.amount, expiresAt: quote.expires_at, sandbox: quote.offer.sandbox, pricingProgram: quote.offer.entitlements?.pricing_program };
+      const binding = { paymentSource: body.paymentSource, walletVersion: useProductWallet ? PRODUCT_WALLET_VERSION : undefined, previousOrderId: reset?.previous_order_id, id: quote.id, serviceId: ctx.session.serviceId, actorId: ctx.session.actingUserId, accountId: body.accountId, subscriptionId: body.subscriptionId, offerId: quote.offer.id, amount: quote.amount, expiresAt: quote.expires_at, sandbox: quote.offer.sandbox, pricingProgram: quote.offer.entitlements?.pricing_program };
       await journal.mutate((_intents, quotes) => {
         const previous = quotes[quoteStorageId];
         if (previous && (previous.subscriptionId !== binding.subscriptionId || previous.offerId !== binding.offerId || previous.amount !== binding.amount || previous.expiresAt !== binding.expiresAt || previous.sandbox !== binding.sandbox || previous.pricingProgram !== binding.pricingProgram || previous.paymentSource !== binding.paymentSource || previous.walletVersion !== binding.walletVersion || previous.previousOrderId !== binding.previousOrderId)) fail('platform_response_invalid', 502);
         for (const [storedId, saved] of Object.entries(quotes)) if (Date.parse(saved.expiresAt) <= now()) delete quotes[storedId];
         quotes[quoteStorageId] = binding;
       });
-      return { paymentSource: body.paymentSource, roundingRule: quote.rounding_rule, originalAmount: quote.original_amount, id: quote.id, accountId: quote.account_id, subscriptionId: quote.subscription_id, subscriptionVersion: quote.subscription_version, offer: publicOffer(quote.offer, ctx.capabilities), amount: quote.amount, additionalCredits: quote.grant_amount, periodStart: quote.period_start, expiresAt: quote.expires_at, createdAt: quote.created_at, ...(reset && { productCreditUpgrade: { previousOrderId: reset.previous_order_id, estimatedRefundAmount: reset.estimated_refund_amount, refundPaymentSource: reset.refund_payment_source } }) };
+      return { paymentSource: body.paymentSource, roundingRule: quote.rounding_rule, originalAmount: quote.original_amount, id: quote.id, accountId: quote.account_id, subscriptionId: quote.subscription_id, subscriptionVersion: quote.subscription_version, offer: publicOffer(quote.offer, ctx.capabilities), amount: quote.amount, additionalCredits: quote.grant_amount, periodStart: quote.period_start, expiresAt: quote.expires_at, createdAt: quote.created_at, ...(reset && { productCreditUpgrade: { previousOrderId: reset.previous_order_id, estimatedRefundAmount: reset.estimated_refund_amount, refundPaymentSource: reset.refund_payment_source, ...(appliedCreditAmount !== undefined && { appliedCreditAmount }) } }) };
     },
     acceptUpgrade: async (identity, rawBody) => {
       const body = parse(upgradeInput, rawBody, 'platform_request_invalid');

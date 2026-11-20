@@ -69,10 +69,16 @@ it('replays Alipay scans without persisting presentation and explicitly reads th
   const body = { ...f.body, provider: 'alipay' };
   f.state.url = 'https://qr.alipay.com/fixture';
   expect((await f.runtime.createCheckout({}, body)).status).toBe('UNKNOWN');
+  const sessionExpiry = '2030-06-01T12:00:00.123456789+08:00';
+  f.state.checkout.session.expires_at = sessionExpiry;
   await f.runtime.close();
   const restarted = f.create();
+  const app = express();
+  registerPlatformCommerceRoutes(app, { runtime: restarted, resolveIdentity: () => ({}), isRequestOriginAllowed: () => true });
+  const summary = await request(app).get('/api/platform-account/commerce?summary=1').expect(200);
+  expect(summary.body.checkouts[0].session.expires_at).toBe(sessionExpiry);
   const recovered = await restarted.reconcile({}, body.idempotencyKey, { accountId: 'acct' });
-  expect(recovered.checkout.session).toMatchObject({ kind: 'qr', url: f.state.url });
+  expect(recovered.checkout.session).toEqual({ kind: 'qr', url: f.state.url, expires_at: sessionExpiry });
   const posts = f.state.calls.filter(({ route, init }) => route.endsWith('/checkouts') && init?.method === 'POST');
   expect(posts.map(({ init }) => JSON.parse(init.body))).toEqual([
     { offer_id: 'points', provider: 'alipay', require_qr: true },

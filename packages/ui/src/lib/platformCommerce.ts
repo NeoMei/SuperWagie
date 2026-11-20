@@ -33,8 +33,8 @@ const checkoutSchema = z.object({
   expires_at: z.iso.datetime(), created_at: z.iso.datetime(), order_id: z.string().optional(), error_code: z.string().optional(),
   upgrade_return_status: z.enum(['UPGRADE_PENDING', 'UPGRADE_RELEASING', 'UPGRADE_RETURNED', 'UPGRADE_REVIEW']).optional(),
   upgrade_refund_amount: units.optional(),
-  product_credit_upgrade: z.object({ previous_subscription_id: z.string(), previous_order_id: z.string(), estimated_refund_amount: units, refund_payment_source: z.enum(['wallet', 'external']) }).optional(),
-  session: z.object({ kind: z.enum(['qr', 'redirect']), url: z.string().min(1).max(16000), expires_at: z.iso.datetime() }).optional(),
+  product_credit_upgrade: z.object({ previous_subscription_id: z.string(), previous_order_id: z.string(), estimated_refund_amount: units, refund_payment_source: z.enum(['wallet', 'external']), applied_credit_amount: units.optional() }).optional(),
+  session: z.object({ kind: z.enum(['qr', 'redirect']), url: z.string().min(1).max(16000), expires_at: z.iso.datetime({ offset: true }) }).optional(),
 }).refine(({ provider: paymentProvider, session }) => {
   if (!session) return true;
   try {
@@ -81,7 +81,7 @@ const upgradeQuoteSchema = z.object({
   paymentSource: z.enum(['wallet', 'external']).optional(), roundingRule: z.literal('cny_cent_ceil_v1').optional(), originalAmount: units.optional(),
   id: z.string().min(1), accountId: z.string().min(1), subscriptionId: z.string().min(1),
   subscriptionVersion: z.number().int().nonnegative(), offer: offerSchema, amount: units, additionalCredits: units,
-  productCreditUpgrade: z.object({ previousOrderId: z.string().min(1), estimatedRefundAmount: units, refundPaymentSource: z.enum(['wallet', 'external']) }).optional(),
+  productCreditUpgrade: z.object({ previousOrderId: z.string().min(1), estimatedRefundAmount: units, refundPaymentSource: z.enum(['wallet', 'external']), appliedCreditAmount: units.optional() }).optional(),
   periodStart: z.iso.datetime(), expiresAt: z.iso.datetime(), createdAt: z.iso.datetime(),
 });
 export type PlatformUpgradeQuote = z.infer<typeof upgradeQuoteSchema>;
