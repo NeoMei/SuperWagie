@@ -169,6 +169,12 @@ uses a redirect or HTTP success as evidence of funds arriving.
   Unknown acceptance can recover after quote expiry with the same key. A known
   order is read from the account order list; missing order IDs are never replaced
   by a newly generated request. Renewal is not exposed through this adapter.
+- Product-wallet upgrade quotes and their bound checkout and wallet-acceptance
+  requests advertise legacy net-upgrade support. A quote with applied old-plan
+  credit must carry a positive amount due and zero estimated refund. The amount
+  due plus the applied credit matches the quoted catalog price. External quotes
+  retain the original amount and its cent-ceiling validation. Earlier quotes
+  and scoped full-price upgrades keep the original refund contract.
 - Only an upgrade acceptance returning HTTP 409 `quote_invalidated` is a
   definitive pre-admission quote rejection. It marks the intent FAILED so a
   freshly quoted action can proceed. Generic `conflict` remains UNKNOWN because
@@ -345,6 +351,9 @@ The purchase summary omits purchase-order history and reads checkout state in
 parallel with catalog and wallets after the account and scopes are verified.
 Order history uses the separate authenticated commerce orders read. Its failure
 has its own state and never becomes an empty history or a purchase failure.
+Provider sessions can report their expiry in UTC or with an explicit RFC 3339
+offset. Both the managed backend and renderer accept those representations and
+compare the resulting instant independently of the device's time zone.
 
 A pre-admission operation_pending response is different: UniHub returns it
 from its commercial check before any checkout record exists, so there is no
@@ -505,11 +514,12 @@ permissions; adding a pilot cookie neither creates nor removes those permissions
   commercial calendar, using the last day in shorter months and restoring
   the activation day when it exists. Annual plans pay for 12 such periods.
   A pack is valid for one calendar month from checkout fulfillment. A
-  same-term upgrade uses the full new price and starts a new cycle on
-  confirmed payment. The previous plan's recoverable value goes back to
-  its original payment channel after its current model calls settle. The
-  quote describes the estimate. The purchase journal keeps both the old
-  order binding and the new subscription association through recovery.
+  same-term upgrade starts a new cycle on confirmed payment. A scoped
+  full-price upgrade estimates the previous plan's recoverable value for
+  return through its original payment channel after its current model calls
+  settle. A negotiated legacy upgrade applies that value to the quote and
+  charges the amount due. The purchase journal keeps the original order
+  binding and the new subscription association through recovery.
 
 ### Running the isolated model proxy
 

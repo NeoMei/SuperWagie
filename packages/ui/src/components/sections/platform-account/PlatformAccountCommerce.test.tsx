@@ -420,6 +420,31 @@ test('scoped upgrade quotes charge the full new period and show the estimated or
   expect(paymentMutations()).toHaveLength(1);
 });
 
+test('a legacy plan upgrade shows the list price, applied credit and net amount due', async () => {
+  const offer = commerce.offers?.find((item) => item.id === 'membership-a');
+  if (!offer) throw new Error('Missing fixture membership');
+  commerce.productCreditWallet = true;
+  currentMembership = { id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-08T00:00:00Z', offer: { id: 'previous-plan', name: 'Standard', period: 'month', rank: 0 } };
+  upgradeQuote = {
+    paymentSource: 'external', id: 'quote-net', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1,
+    offer, amount: '7000000', originalAmount: '6999999', roundingRule: 'cny_cent_ceil_v1', additionalCredits: offer.monthlyCredit,
+    periodStart: '2026-11-08T00:00:00Z', createdAt: '2026-11-08T00:00:00Z', expiresAt: '2099-12-08T00:00:00Z',
+    productCreditUpgrade: { previousOrderId: 'old-order', estimatedRefundAmount: '0', refundPaymentSource: 'external', appliedCreditAmount: '3000000' },
+  };
+  await render('overview');
+  await act(async () => button('Subscribe').click());
+  await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
+  await act(async () => button('Check upgrade price').click());
+  const panel = host?.querySelector('[data-purchase-confirmation]');
+  expect(panel?.textContent).toContain('Plan priceCNY 10.00');
+  expect(panel?.textContent).toContain('Old plan creditCNY 3.00');
+  expect(panel?.textContent).toContain('Amount dueCNY 7.00');
+  expect(panel?.textContent).toContain('A new subscription period starts when payment is confirmed.');
+  expect(panel?.textContent).not.toContain('Estimated refund');
+  await act(async () => button('Confirm upgrade for CNY 7.00').click());
+  expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ quoteId: 'quote-net', provider: 'wechat' });
+});
+
 test('an active Standard member sees their plan as current and can explicitly buy a Professional upgrade', async () => {
   const standard = commerce.offers?.find((offer) => offer.id === 'membership-a');
   if (!standard || !commerce.offers) throw new Error('Missing fixture membership');
@@ -658,11 +683,11 @@ test('switching a restored waiting checkout uses its checkout intent to recreate
   expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
 });
 
-test('an unresolved checkout close keeps the original channel and shows the pending error', async () => {
+for (const closeStatus of ['PENDING', 'UNKNOWN']) test(`a ${closeStatus} close keeps the original checkout and lets the user retry the channel switch`, async () => {
   commerce.payments = { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] };
   commerce.checkouts = [{ id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z', session: { kind: 'qr', url: 'weixin://pay/fixture', expires_at: '2099-01-01T00:00:00Z' } }];
   commerce.intents = [{ idempotencyKey: 'restored-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '10000000', offerId: 'membership-a', resourceId: 'waiting-checkout', provider: 'wechat', status: 'PENDING', createdAt: '2026-11-08T00:00:00Z' }];
-  checkoutCloseStatus = 'PENDING';
+  checkoutCloseStatus = closeStatus;
   await render('orders');
   expect(host?.textContent).toContain('WeChat Pay');
   const channelGroup = [...(host?.querySelectorAll('[role="group"]') ?? [])].find((item) => item.getAttribute('aria-label') === 'Payment method');
@@ -672,9 +697,16 @@ test('an unresolved checkout close keeps the original channel and shows the pend
   expect(paymentMutations().map((item) => item.path)).toEqual([
     '/api/platform-account/commerce/checkouts/waiting-checkout/close',
   ]);
-  expect(host?.textContent).toContain('An earlier request is unresolved. Check its original status before starting another purchase or recharge.');
-  expect(host?.textContent).toContain('WeChat Pay');
+  const originalPanel = channelGroup?.closest('[data-payment-checkout]');
+  expect(originalPanel?.getAttribute('data-payment-checkout')).toBe('waiting-checkout');
+  expect(originalPanel?.textContent).toContain('The original payment method stays selected until the provider confirms the order is closed. Try switching again.');
   expect(channelGroup?.querySelector('[aria-pressed="true"]')?.textContent).toBe('WeChat Pay');
+  expect(alipay?.disabled).toBe(false);
+  await act(async () => alipay?.click());
+  expect(paymentMutations().map((item) => item.path)).toEqual([
+    '/api/platform-account/commerce/checkouts/waiting-checkout/close',
+    '/api/platform-account/commerce/checkouts/waiting-checkout/close',
+  ]);
 });
 
 for (const status of ['PENDING', 'PAID']) test(`switching from an expired checkout whose close returns ${status} does not create another order`, async () => {
@@ -695,7 +727,7 @@ for (const status of ['PENDING', 'PAID']) test(`switching from an expired checko
     expect(host?.textContent).toContain('Your purchase is active');
     expect(accountRefreshes).toBe(1);
   } else {
-    expect(host?.textContent).toContain('An earlier request is unresolved.');
+    expect(host?.textContent).toContain('The original payment method stays selected');
   }
 });
 
@@ -738,6 +770,22 @@ test('refreshing newly fulfilled checkout benefits refreshes the account once wi
   await act(async()=>button('Refresh wallets and orders').click());expect(accountRefreshes).toBe(1);
   commerce.checkouts[0].refund_status='SUCCEEDED';
   await act(async()=>button('Refresh wallets and orders').click());expect(accountRefreshes).toBe(2);expect(writes).toBe(0);
+});
+
+test('a pending net upgrade payment retains the quoted credit without a refund estimate', async () => {
+  commerce.checkouts = [{
+    id: 'net-upgrade-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Professional', amount: '7000000',
+    currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-12-08T00:00:00Z', created_at: '2026-11-08T00:00:00Z',
+    product_credit_upgrade: { previous_subscription_id: 'subscription-old', previous_order_id: 'order-old', estimated_refund_amount: '0', refund_payment_source: 'external', applied_credit_amount: '3000000' },
+  }];
+  await render('orders');
+  const panel = host?.querySelector('[data-payment-checkout="net-upgrade-checkout"]');
+  expect(panel?.textContent).toContain('Plan price CNY 10.00');
+  expect(panel?.textContent).toContain('Old plan credit CNY 3.00');
+  expect(panel?.textContent).toContain('Amount due¥7.00');
+  expect(panel?.textContent).toContain('A new subscription period starts when payment is confirmed.');
+  expect(panel?.textContent).not.toContain('Estimated refund');
+  expect(paymentMutations()).toHaveLength(0);
 });
 
 test('completed upgrade returns show the original partial refund and withhold duplicate refund controls', async () => {
