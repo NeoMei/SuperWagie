@@ -112,7 +112,8 @@ const PASTED = filePart('pasted-context-1.txt', 'text/plain', `data:text/plain;b
 const IMAGE = filePart('image-1.png', 'image/png', 'data:image/png;base64,iVBORw0KGgo=');
 const BY_PATH = filePart('notes.md', 'text/plain', 'file:///repo/docs/notes.md');
 const PDF = filePart('spec.pdf', 'application/pdf', 'data:application/pdf;base64,JVBERg==');
-const FILES = [PASTED, IMAGE, BY_PATH, PDF];
+const INLINE_PDF = filePart('report.pdf', 'application/pdf', 'data:application/pdf;base64,JVBERi0xLjcK');
+const FILES = [PASTED, IMAGE, BY_PATH, PDF, INLINE_PDF];
 
 const unavailable = (): never => { throw new Error('Attachment citations must not call these runtime APIs'); };
 const vscodeRuntime = (openFile: (path: string) => Promise<void>): RuntimeAPIs => ({
@@ -213,6 +214,16 @@ describe('a file-name citation in a sent message', () => {
         } finally {
             files.restore();
         }
+    });
+
+    test('an inline PDF citation opens the existing chat preview', async () => {
+        const popups = await renderMessage('read [report.pdf] now');
+        await act(async () => { chip('report.pdf').click(); });
+
+        expect(popups).toMatchObject([{
+            title: 'report.pdf',
+            pdf: { dataUrl: INLINE_PDF.url },
+        }]);
     });
 
     test('a file the app cannot show stays a plain label', async () => {

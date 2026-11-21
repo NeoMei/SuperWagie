@@ -8,9 +8,11 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useSessionActivityTimingStore } from '@/sync/session-activity-timing';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { applyGlobalSessionStatusEvents, useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { resetSessionLiveTools } from '@/sync/session-live-tool';
 import type { State } from '@/sync/types';
 import type { FormRequest, PermissionRequest, Session } from '@/lib/opencode/model';
+import { translateWireEvent } from '@/lib/opencode/events';
 
 let WorkStatusSubagentsSection: typeof import('./WorkStatusSubagentsSection').WorkStatusSubagentsSection;
 const directory = '/subagent-test';
@@ -65,9 +67,10 @@ describe('subagent status rows', () => {
       }
     };
     ({ WorkStatusSubagentsSection } = await import('./WorkStatusSubagentsSection'));
-    useUIStore.setState({ workStatusExpandedSections: {} });
+    useUIStore.setState({ workStatusExpandedSections: {}, contextPanelByDirectory: {} });
     useSessionActivityTimingStore.setState({ startedAt: new Map(), settledMs: new Map() });
     useGlobalSessionStatusStore.setState({ observedById: new Map(), statusById: new Map() });
+    resetSessionLiveTools();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -106,6 +109,65 @@ describe('subagent status rows', () => {
     }));
     expect(icon()).toBe('#oc-close-circle');
     expect(row().getAttribute('aria-label')).toContain('Failed');
+  });
+
+  test('shows the current child tool after execution starts and hides it at settlement', async () => {
+    const data = { sessionID: child.id, assistantMessageID: 'assistant', id: 'call' };
+    const base = { id: 'evt_tool', created: 100, durable: { aggregateID: child.id, seq: 1, version: 1 as const } };
+    const opening = translateWireEvent({
+      ...base, type: 'session.tool.input.started', data: { ...data, name: 'shell' },
+    });
+    const starting = translateWireEvent({
+      ...base, type: 'session.tool.called', data: { ...data, executed: true, input: { command: 'private-command' } },
+    });
+    const settling = translateWireEvent({
+      ...base,
+      created: 101,
+      durable: { ...base.durable, seq: 3, version: 2 },
+      type: 'session.tool.success',
+      data: { ...data, executed: true, content: [{ type: 'text', text: 'tool-output' }] },
+    });
+    await publish({ session_status: { child: { type: 'busy' } } });
+    await act(async () => applyGlobalSessionStatusEvents(directory, opening));
+    expect(rowContent().textContent).not.toContain('Shell Command');
+    row().focus();
+    await act(async () => applyGlobalSessionStatusEvents(directory, starting));
+    expect(rowContent().textContent).toContain('Shell Command');
+    expect(document.activeElement === row()).toBe(true);
+    expect(rowContent().textContent).toContain('$0.25');
+    expect(rowContent().textContent).not.toContain('private-command');
+    await publish({ form: { child: [childForm] } });
+    expect(rowContent().textContent).not.toContain('Shell Command');
+    await publish({ form: {} });
+    expect(rowContent().textContent).toContain('Shell Command');
+    await act(async () => applyGlobalSessionStatusEvents(directory, settling));
+    expect(rowContent().textContent).not.toContain('Shell Command');
+  });
+
+  test('keeps the other child tool visible when parallel work settles', async () => {
+    const event = (id: string, tool: string, startedAt: number): ReturnType<typeof translateWireEvent> => {
+      const data = { sessionID: child.id, assistantMessageID: 'assistant', id };
+      const base = { id: 'evt_tool', created: startedAt, durable: { aggregateID: child.id, seq: 1, version: 1 as const } };
+      return [
+        ...translateWireEvent({ ...base, type: 'session.tool.input.started', data: { ...data, name: tool } }),
+        ...translateWireEvent({ ...base, type: 'session.tool.called', data: { ...data, executed: true, input: {} } }),
+      ];
+    };
+    await publish({ session_status: { child: { type: 'busy' } } });
+    await act(async () => applyGlobalSessionStatusEvents(directory, [...event('read', 'read', 100), ...event('edit', 'edit', 101)]));
+    expect(rowContent().textContent).toContain('Edit File');
+    await act(async () => applyGlobalSessionStatusEvents('/other-worktree', [{
+      type: 'message.tool.transition',
+      properties: { sessionID: child.id, messageID: 'assistant', partID: 'edit', transition: { kind: 'success', output: '', executed: true, end: 102 } },
+    }]));
+    expect(rowContent().textContent).toContain('Edit File');
+    await act(async () => applyGlobalSessionStatusEvents(directory, [{
+      type: 'message.tool.transition',
+      properties: { sessionID: child.id, messageID: 'assistant', partID: 'edit', transition: { kind: 'success', output: '', executed: true, end: 102 } },
+    }]));
+    expect(rowContent().textContent).toContain('Read File');
+    await act(async () => applyGlobalSessionStatusEvents(directory, [{ type: 'session.idle', properties: { sessionID: child.id } }]));
+    expect(rowContent().textContent).not.toContain('Read File');
   });
 
   test('keeps permission and question blockers ahead of the running timer', async () => {
@@ -171,6 +233,14 @@ describe('subagent status rows', () => {
     expect(icon()).toBe('#oc-checkbox-circle');
     await publish({ session_status: { child: { type: 'busy' } } });
     expect(icon()).toBe('#oc-record-circle');
+  });
+
+  test('opens a child in its own worktree in the read-only chat panel', async () => {
+    const childDirectory = '/subagent-test-worktree';
+    await publish({ session: [parent, { ...child, directory: childDirectory }] });
+    await act(async () => row().click());
+    const tab = useUIStore.getState().contextPanelByDirectory[directory]?.tabs.find((tab) => tab.dedupeKey === 'session:child');
+    expect(tab).toMatchObject({ mode: 'chat', readOnly: true, targetDirectory: childDirectory });
   });
 
   test('settles a child the global status store saw finish', async () => {

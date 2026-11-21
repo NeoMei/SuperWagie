@@ -1036,9 +1036,9 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
         if (currentTransport === "ws" && code === "WS_FALLBACK") {
           retryDelayMs = 0
-          // Transport switch (WS → SSE fallback), not a real disconnection.
-          // The consumer still gets a hook so it can resync authoritative
-          // state; real networks can lose/buffer events around transport flips.
+          // The old connection ended. The next transport proves readiness
+          // independently. A fallback can lose events even if HTTP still works.
+          notifyDisconnected("ws_fallback")
           onTransportSwitch?.()
         } else if (!isAbortError(error)) {
           consecutiveFailures += 1

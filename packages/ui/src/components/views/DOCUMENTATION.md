@@ -115,6 +115,10 @@ their scope: the work-status Changes row counts working-tree changes and opens
 `working`, and a file opened from the Git panel or a tool card opens its own
 working or staged diff.
 
+The comparison picker shows its Automatic action first, then each remote's
+known default branch when it is in the branch list. Search still ranks matches
+by the query. Desktop Changes, Walkthrough and mobile Changes share the picker.
+
 A status read re-reads the Branch file list (one request). Each expanded file
 re-reads its patch only when its own `revision` from that listing moved
 (`branchPathRevisions` into `useRangeKeyedCache`), so an agent's read-only shell

@@ -8,6 +8,7 @@ import { findCatalogModel, type Provider, type Model, type Agent, type Config } 
 import type { DesktopSettings } from "@/lib/desktop";
 import type { CatalogKind } from "@/lib/opencode/events";
 import { OpencodeApiError, opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { folderTrust } from "@/lib/opencodeTrust";
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
@@ -4394,6 +4395,8 @@ export const useConfigStore = create<ConfigStore>()(
                                 const configError = get().projectConfigErrors[configDirectoryKey];
                                 if (configError) {
                                     markStartupTrace('initializeApp:projectConfigInvalid', { configDirectoryKey, name: configError.name });
+                                } else if (folderTrust.isPaused(configDirectory)) {
+                                    markStartupTrace('initializeApp:projectAwaitsTrust', { configDirectoryKey });
                                 } else if (isLocationNotFound(_agentsLoadErrors.get(configDirectoryKey))
                                     || await opencodeClient.getDirectoryAvailability(configDirectory) === 'missing') {
                                     if (!isConfigRuntimeContextCurrent(runtimeContext)) return;

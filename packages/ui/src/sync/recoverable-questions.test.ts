@@ -5,6 +5,7 @@ import type { FormRequest, ToolPart } from "@/lib/opencode/model"
 import {
   applyRecoverableQuestionEvents,
   classifyQuestionToolError,
+  DEFERRED_QUESTION_NOTE,
   deriveRecoveredQuestions,
   formReleaseKey,
   formToolLink,
@@ -14,6 +15,7 @@ import {
   noteFormToolReleased,
   moveRecoveredQuestions,
   noteQuestionFormSnapshot,
+  noteQuestionToolSnapshot,
   questionToolLink,
   resetRecoverableQuestions,
   submitRecoveredAnswer,
@@ -286,6 +288,28 @@ describe("recovery of a question whose ask died", () => {
 })
 
 describe("settlement beats recovery", () => {
+  test("a deferred answer in refreshed history closes its own question", () => {
+    const form = questionForm("frm_deferred")
+    noteQuestionFormSnapshot("/repo", [form])
+    const deferred = failedTool(DEFERRED_QUESTION_NOTE, "aborted")
+    const view = viewWith(deferred)
+    const scope = new Set([form.sessionID])
+    const answered = {
+      id: "msg_answer",
+      sessionID: form.sessionID,
+      role: "user" as const,
+      time: { created: 3 },
+      metadata: { openchamber: { deferredAnswer: { formID: form.id } } },
+    }
+    expect(deriveRecoveredQuestions(view, useRecoverableQuestionsStore.getState(), scope)).toMatchObject([
+      { evidence: "deferred-on-send" },
+    ])
+    noteQuestionToolSnapshot("/repo", form.sessionID, view.part, [{ ...answered, sessionID: "ses_other" }])
+    expect(deriveRecoveredQuestions(view, useRecoverableQuestionsStore.getState(), scope)).toHaveLength(1)
+    noteQuestionToolSnapshot("/repo", form.sessionID, view.part, [answered])
+    expect(deriveRecoveredQuestions(view, useRecoverableQuestionsStore.getState(), scope)).toEqual([])
+  })
+
   test("a replayed interruption cannot replace a confirmed answer", () => {
     applyRecoverableQuestionEvents("/repo", [
       formCreated(questionForm("frm_1")),

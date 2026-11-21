@@ -49,7 +49,7 @@ send never re-resolves mutable UI state:
   contextPreview?, // bounded display-only summary captured by the UI
   text,           // text to deliver (agent mention stripped, file mentions resolved); defaults to content
   agentMention?,  // delivered as an `agent` part
-  attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, dataUrl }],
+  attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, composerAnchor?, deliverAsPath?, dataUrl }],
   context: [      // what the composer had attached, in send order
     { kind: 'context', text, metadata, instructions? },  // a draft chip or linked issue/PR; metadata is the UI's structured payload
     { kind: 'instruction', text },                       // derived from the text (skill instruction)
@@ -78,6 +78,19 @@ the context block back. The payload inside `metadata` is the UI's contract
 context entry). Public snapshots and broadcasts strip the payloads —
 attachment `dataUrl` (megabytes of base64) and `context` (a PR diff, say) —
 so they do not ride every update; the only way to get them back is a `take`.
+
+### Preparing image paths at delivery
+
+`deliverAsPath` marks original image bytes captured for a known text-only
+model. The queue keeps those bytes with the editable text. At each delivery
+attempt, the queue uses its own directory-scoped OpenCode client to write the
+image to a fresh path under the kernel's temporary directory. This gives an
+isolated space a file in the same kernel that receives the message, and keeps
+persisted items usable after the temporary directory or the queue process is
+restarted. Confirmed paths accompany the prompt text or the slash command's
+arguments. Any failed or unconfirmed write keeps the original item and context
+available for editing and uses the queue's existing retry delay. All image
+writes finish before model changes, goal creation, or message admission.
 
 Snapshots retain `contextPreview`, capped at 100 characters plus an ellipsis.
 It carries the attached comment or context label when `content` is empty and

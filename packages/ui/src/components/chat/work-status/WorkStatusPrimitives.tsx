@@ -149,6 +149,7 @@ type RowProps = {
   iconColor?: string;
   leading?: React.ReactNode;
   label: React.ReactNode;
+  detail?: string;
   value?: React.ReactNode;
   muted?: boolean;
   /** Turns the row into a button; the caller decides what it opens. */
@@ -167,6 +168,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   iconColor,
   leading,
   label,
+  detail,
   value,
   muted,
   onClick,
@@ -175,7 +177,10 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   className,
 }) => {
   const labelId = React.useId();
+  const detailId = `${labelId}-detail`;
   const touch = React.useContext(WorkStatusTouchContext);
+  const hasDetail = Boolean(detail);
+  const detailTitle = tooltip ? undefined : detail;
   const leadingNode = leading ?? (icon ? (
     <Icon
       name={icon}
@@ -183,6 +188,11 @@ export const WorkStatusRow: React.FC<RowProps> = ({
       style={iconColor ? { color: iconColor } : undefined}
     />
   ) : null);
+  const labelNode = (
+    <span id={labelId} className={cn('min-w-0 flex-1 truncate', touch ? 'typography-ui-label' : 'text-[0.8125rem]', muted && 'text-muted-foreground')}>
+      {label}
+    </span>
+  );
   const body = (
     <>
       {touch && leadingNode ? (
@@ -190,9 +200,14 @@ export const WorkStatusRow: React.FC<RowProps> = ({
         // the status glyphs sections centre in a 14px slot line up as well.
         <span className="flex size-5 shrink-0 items-center justify-center [&>span]:size-5 [&_svg]:size-4">{leadingNode}</span>
       ) : leadingNode}
-      <span id={labelId} className={cn('min-w-0 flex-1 truncate', touch ? 'typography-ui-label' : 'text-[0.8125rem]', muted && 'text-muted-foreground')}>
-        {label}
-      </span>
+      {hasDetail ? (
+        <span className="flex min-w-0 flex-1 flex-col">
+          {labelNode}
+          <span id={detailId} dir="auto" className={cn('oc-ui-start-align truncate text-muted-foreground', touch ? 'typography-meta' : 'text-xs')}>
+            {detail}
+          </span>
+        </span>
+      ) : labelNode}
       {value !== undefined && value !== null ? (
         <span className={cn('flex shrink-0 items-center gap-1.5 tabular-nums', touch ? 'typography-ui-label font-medium text-foreground' : 'text-[0.8125rem]')}>{value}</span>
       ) : null}
@@ -201,7 +216,8 @@ export const WorkStatusRow: React.FC<RowProps> = ({
 
   const shared = cn(
     'flex w-full items-center text-start text-muted-foreground',
-    touch ? 'min-h-11 gap-3 rounded-xl px-2.5' : 'h-7 gap-2 rounded-md px-1',
+    touch ? 'min-h-11 gap-3 rounded-xl px-2.5' : 'gap-2 rounded-md px-1',
+    !touch && (hasDetail ? 'min-h-9 py-0.5' : 'h-7'),
     className,
   );
 
@@ -209,20 +225,21 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   // a row action). The row's button is stretched under the content instead:
   // the whole row still answers a press, and controls inside it sit above.
   const row = onClick ? (
-    <div className={cn(shared, 'oc-ref-tint-scope relative transition-colors hover:text-foreground')}>
+    <div className={cn(shared, 'oc-ref-tint-scope relative transition-colors hover:text-foreground')} title={detailTitle}>
       <button
         type="button"
         onClick={onClick}
         // The label no longer sits inside the button, so it names it here.
         aria-label={ariaLabel}
         aria-labelledby={ariaLabel ? undefined : labelId}
+        aria-describedby={hasDetail ? detailId : undefined}
         className="absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--interactive-focus-ring)]"
       />
       <div className={cn('pointer-events-none relative flex min-w-0 flex-1 items-center [&_a]:pointer-events-auto [&_button]:pointer-events-auto', touch ? 'gap-3' : 'gap-2')}>
         {body}
       </div>
     </div>
-  ) : <div className={shared} tabIndex={tooltip ? 0 : undefined}>{body}</div>;
+  ) : <div className={shared} tabIndex={tooltip ? 0 : undefined} title={detailTitle}>{body}</div>;
 
   if (!tooltip) return row;
 

@@ -153,7 +153,7 @@ which requests only providers enabled for this panel.
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
 | PR + checks | `useFreshestSourceControlVisualSummaryForBranch` | **read-only**; follows the freshest bound-identity entry for the branch |
-| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
+| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | running tool names come from the directory-scoped live tool index |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only in builds with workflows |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
@@ -183,6 +183,12 @@ Running rows reuse `SessionActivityDuration` and its shared one-second ticker
 for the current turn's elapsed time, including retries and waiting within that
 turn. No timer is shown until the activity store has an observed start; blocked,
 settled, and collapsed rows do not mount a running counter.
+
+A running row's second line names the most recently started tool that is still
+running in the child's directory. The live tool index advances the line as
+calls start and settle, including overlaps. It sends no extra requests and
+shows only the tool name. Permission and form warnings take precedence, and
+rows fall back to their status and timer while the current tool is unknown.
 
 Rows are ordered newest first by creation time, never by last activity, which
 reshuffled them on every step and moved them under the pointer. Rows group by
@@ -633,13 +639,19 @@ loads, the pin's row shows a spinner: `readMessageFocusInFlight` names the
 message a request is still bringing to the screen, and the timeline marks it
 shown (`markMessageFocusShown`) once it lands; settling or expiry clears it too.
 
-Opening a subagent takes the same branch as the transcript's Task tool: an
-embedded panel, mobile, or VS Code navigates to the session instead of nesting
-a tab.
+Opening a subagent targets its own directory, including a different worktree.
+Desktop and web open its read-only chat beside the parent. Mobile and VS Code
+navigate directly to the child.
 
 ## Context sources
 
-Linked issues and change requests first, then skills and MCP counts.
+Linked issues and change requests first, then session knowledge, loaded skills,
+and available skills and MCP counts.
+
+Loaded skill rows come from recorded skill activations and successful skill calls
+in the current session's message cache. Repeated loads of the same skill ID
+occupy one row. The cache covers the history already loaded into the chat.
+The available-skills count continues to reflect the project catalog.
 
 Agents are deliberately absent: an agent is who does the work, not material
 loaded into the context. Tools are absent too — `Agent.tools` is a per-agent

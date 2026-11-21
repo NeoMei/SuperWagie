@@ -68,6 +68,23 @@ export const referenceLinksInText = (text: string, read: ReadonlyMap<string, Com
     return [...references.values()];
 };
 
+export function anchorComposerReference(reference: ComposerReference): ComposerReference {
+    if (findWebLinks(reference.url)[0]?.link !== reference.url) return reference;
+    try {
+        const url = new URL(reference.url);
+        if (url.username || url.password) return reference;
+    } catch {
+        return reference;
+    }
+    return { ...reference, composerAnchor: reference.url };
+}
+
+export function selectAnchoredReferences(text: string, references: readonly ComposerReference[]): ComposerReference[] {
+    if (references.length === 0) return [];
+    const links = new Set(findWebLinks(text).map(({ link }) => link));
+    return references.filter(({ composerAnchor }) => !composerAnchor || links.has(composerAnchor));
+}
+
 /** The picker's chips, then the items the text links that no chip carries: a chip keeps what the picker set on it, such as the diff. */
 export const withReferencesFromText = (
     chips: readonly ComposerReference[],

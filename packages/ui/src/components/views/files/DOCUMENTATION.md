@@ -56,6 +56,11 @@ Hidden surfaces retain drafts, loaded content and scroll state. They stop
 directory and file metadata polling; reopening checks freshness once before
 normal polling resumes. Autosave is independent of visibility.
 
+The context panel's file tab menu copies the clicked tab's path without
+selecting it. A local Electron runtime can also reveal that file through its
+existing file capability. Web and remote runtimes offer path copying. Other
+tab types, mobile and VS Code keep their own menus.
+
 Background polling never supersedes an in-flight directory read. Explicit
 refresh after file mutations does. Each directory failure remains local and
 preserves its previous successful snapshot.

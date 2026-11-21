@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import type { ComposerReference } from '@/components/chat/composer/composerReferences';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { useI18n } from '@/lib/i18n';
 
 import type { ReferencePickerConfirmFailure } from './ReferencePickerDialog';
@@ -23,6 +24,7 @@ export function useAttachReferences(
     const repositoryContext = useRepositoryReadContext(directory);
     const { t } = useI18n();
     return React.useCallback(async (selections) => {
+        const isCurrent = captureRuntimeInstance();
         const resolved = await resolveComposerReferences(selections, {
             sourceControl,
             context: repositoryContext && repositoryContext !== 'missing' ? repositoryContext : null,
@@ -31,6 +33,7 @@ export function useAttachReferences(
                 : Promise.reject(new Error('Trackers are not available here'))),
             trackerName: (provider) => readTrackerDescriptor(provider).name,
         });
+        if (!isCurrent()) return null;
         if (resolved.references.length > 0) onAttach(resolved.references);
         if (resolved.failures.length === 0) return null;
         return {

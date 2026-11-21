@@ -185,6 +185,8 @@ const serverAttachmentSchema = z.object({
     size: z.number(),
     source: z.enum(['local', 'server', 'vscode']),
     serverPath: z.string().optional(),
+    composerAnchor: z.string().optional(),
+    deliverAsPath: z.boolean().optional(),
     /** The file's on-disk path, when the runtime resolved one; the model is handed it as the file identity. */
     agentPath: z.string().optional(),
     /** Present only on a taken item; broadcasts and snapshots omit payloads. */
@@ -285,6 +287,8 @@ const toAttachedFile = (attachment: ServerQueueAttachment): AttachedFile => {
     };
     if (attachment.serverPath) file.serverPath = attachment.serverPath;
     if (attachment.agentPath) file.agentPath = attachment.agentPath;
+    if (attachment.composerAnchor) file.composerAnchor = attachment.composerAnchor;
+    if (attachment.deliverAsPath) file.deliverAsPath = true;
     return file;
 };
 
@@ -335,6 +339,8 @@ const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInpu
     };
     if (attachment.serverPath) input.serverPath = attachment.serverPath;
     if (attachment.agentPath) input.agentPath = attachment.agentPath;
+    if (attachment.composerAnchor) input.composerAnchor = attachment.composerAnchor;
+    if (attachment.deliverAsPath) input.deliverAsPath = true;
     return input;
 };
 

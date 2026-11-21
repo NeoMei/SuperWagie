@@ -23,6 +23,7 @@ import type {
   SessionRevert,
 } from "@opencode/client"
 import { z } from "zod"
+import { withFolderTrust } from "@/lib/opencodeTrust"
 import type { FilesAPI } from "../api/types"
 import { getDesktopHomeDirectory } from "../desktop"
 import { isAmbiguousTransportFailure, isDefiniteTransportFailure, markAmbiguousTransportFailure, markDefiniteTransportFailure } from "@/lib/relay/transport-error"
@@ -391,7 +392,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
   return OpenCode.make({
     baseUrl: toOpencodeClientRoot(config.baseUrl),
     headers: config.directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(toOpenCodeDirectory(config.directory)) } : undefined,
-    fetch: async (input: string | URL | Request, init?: RequestInit) => {
+    fetch: withFolderTrust(async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url)
       const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
       if (isEventStreamUrl(url) || method === "POST") {
@@ -458,7 +459,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
         if (!responseHasBody || signal.aborted) cleanup()
         else signal.addEventListener("abort", cleanup, { once: true })
       }
-    },
+    }, config.directory),
   })
 }
 
@@ -1842,8 +1843,8 @@ class OpencodeService {
     return true
   }
 
-  async cancelForm(sessionID: string, formID: string, directory?: string | null): Promise<boolean> {
-    await call("session.form.cancel", () => this.clientFor(directory).session.form.cancel({ sessionID, formID }))
+  async cancelForm(sessionID: string, formID: string, directory?: string | null, message?: string): Promise<boolean> {
+    await call("session.form.cancel", () => this.clientFor(directory).session.form.cancel({ sessionID, formID, message }))
     return true
   }
 
@@ -2279,12 +2280,14 @@ class OpencodeService {
     directory: string | null | undefined,
     files: Array<{ filename: string; bytes: Uint8Array }>,
   ): Promise<Array<{ filename: string; path: string } | { filename: string; error: Error }>> {
+    const isCurrent = captureRuntimeInstance()
     const client = this.clientFor(directory)
     const info = await call("server.info", () => client.server.info())
     const folderName = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, "0")).join("")
     const folder = `${info.paths.tmp.replace(/[\\/]+$/, "")}/openchamber/${folderName}`
     const results: Array<{ filename: string; path: string } | { filename: string; error: Error }> = []
     for (const { filename, bytes } of files) {
+      if (!isCurrent()) throw new Error("Runtime changed while saving attachments")
       try {
         const written = await call("file.write", () => client.experimental.file.write({ path: `${folder}/${filename}`, payload: bytes }))
         results.push({ filename, path: written.data.path })
@@ -2292,6 +2295,7 @@ class OpencodeService {
         results.push({ filename, error: error instanceof Error ? error : new Error(String(error)) })
       }
     }
+    if (!isCurrent()) throw new Error("Runtime changed while saving attachments")
     return results
   }
 

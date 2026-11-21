@@ -5,8 +5,8 @@ import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { createRuntimeUrlAuthFixture } from '@/lib/runtime-url-auth.fixture';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { ChildStoreManager } from './child-store';
-import { dismissOpenFormsForSession, readUnloadedFormToolLinks, setActionRefs } from './session-actions';
-import { formTurnHold, resetRecoverableQuestions, useRecoverableQuestionsStore } from './recoverable-questions';
+import { cancelForm, deferQuestionsAfterSend, dismissOpenFormsForSession, readUnloadedFormToolLinks, setActionRefs } from './session-actions';
+import { DEFERRED_QUESTION_NOTE, deriveRecoveredQuestions, formTurnHold, resetRecoverableQuestions, useRecoverableQuestionsStore } from './recoverable-questions';
 
 const directory = '/form-hold/project';
 const session = (id: string, parentID?: string): Session => ({
@@ -71,6 +71,48 @@ describe('form turn holding on a new prompt', () => {
         expect(owner.getState().form.root).toEqual([deferred]);
         expect(owner.getState().form.child).toBeUndefined();
         expect(owner.getState().form.other).toEqual([unrelated]);
+    });
+
+    test('keeps a waiting question until the follow-up is admitted and exposes it as answerable afterward', async () => {
+        const question = form('question');
+        question.metadata = { ...question.metadata, kind: 'question' };
+        const child = form('child', 'child');
+        const owner = seed([question, child], [tool(question, 'running'), tool(child, 'running')]);
+        const toDefer: FormRequest[] = [];
+        expect(await dismissOpenFormsForSession('root', (item) => { toDefer.push(item); })).toBe(true);
+        expect(toDefer).toEqual([question]);
+        expect(cancel.mock.calls.map((call) => call.slice(0, 2))).toEqual([['child', child.id]]);
+        expect(owner.getState().form.root).toEqual([question]);
+        await deferQuestionsAfterSend(toDefer);
+        expect(cancel.mock.calls.at(-1)).toEqual(['root', question.id, directory, DEFERRED_QUESTION_NOTE]);
+        expect(owner.getState().form.root).toBeUndefined();
+        const recovered = deriveRecoveredQuestions(owner.getState(), useRecoverableQuestionsStore.getState(), new Set(['root']));
+        expect(recovered).toMatchObject([{ form: question, evidence: 'deferred-on-send' }]);
+    });
+
+    test('keeps explicit cancellation final when a deferred follow-up finishes afterward', async () => {
+        const question = form('explicit');
+        question.metadata = { ...question.metadata, kind: 'question' };
+        const owner = seed([question], [tool(question, 'running')]);
+        const toDefer: FormRequest[] = [];
+        await dismissOpenFormsForSession('root', (item) => { toDefer.push(item); });
+        await cancelForm('root', question.id);
+        await deferQuestionsAfterSend(toDefer);
+        expect(cancel.mock.calls).toEqual([['root', question.id, directory]]);
+        expect(deriveRecoveredQuestions(owner.getState(), useRecoverableQuestionsStore.getState(), new Set(['root']))).toEqual([]);
+    });
+
+    test('leaves a form live when its linked tool ended after the follow-up began', async () => {
+        const question = form('released');
+        question.metadata = { ...question.metadata, kind: 'question' };
+        const owner = seed([question], [tool(question, 'running')]);
+        const toDefer: FormRequest[] = [];
+        await dismissOpenFormsForSession('root', (item) => { toDefer.push(item); });
+        const ended = tool(question, 'completed');
+        owner.setState({ part: { [ended.messageID]: [ended] } });
+        await deferQuestionsAfterSend(toDefer);
+        expect(cancel).not.toHaveBeenCalled();
+        expect(owner.getState().form.root).toEqual([question]);
     });
 
     test('terminal evidence from another existing copy keeps the form answerable', async () => {

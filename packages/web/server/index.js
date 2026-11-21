@@ -101,6 +101,8 @@ import {
 } from './lib/opencode/core-routes.js';
 import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
 import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
+import { createOpenCodeTrust } from './lib/opencode-trust/index.js';
+import { installOpenCodeTrustFetch } from './lib/opencode-trust/fetch.js';
 import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
 import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
@@ -188,7 +190,7 @@ import { permissionDefaultOf, readSpacePermissionDefault } from './lib/spaces/sp
 import { dockerHostOf } from './lib/spaces/places/ssh-host.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
-import { configureGitEnvironment, getCheckedOutBranch, getWorktrees, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
+import { configureGitEnvironment, getCheckedOutBranch, getWorktreeBootstrapStatus, getWorktrees, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
@@ -435,6 +437,12 @@ const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZen
 
 const OPENCHAMBER_DATA_DIR = OPENCHAMBER_USER_CONFIG_ROOT;
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
+let readTrustEnvironment = () => process.env;
+const openCodeTrust = createOpenCodeTrust({
+  storePath: path.join(OPENCHAMBER_DATA_DIR, 'opencode-trust.json'),
+  getEnvironment: () => readTrustEnvironment(),
+  allowDirectory: (directory) => !spacesHost?.refuseDirectory(directory),
+});
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
 const APNS_TOKENS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'apns-tokens.json');
 const REMOTE_CLIENTS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'remote-clients.json');
@@ -506,6 +514,7 @@ const validateDirectoryPath = (...args) => projectDirectoryRuntime.validateDirec
 const resolveProjectDirectory = (...args) => projectDirectoryRuntime.resolveProjectDirectory(...args);
 const resolveOptionalProjectDirectory = (...args) => projectDirectoryRuntime.resolveOptionalProjectDirectory(...args);
 
+let lastDirectoryTrustCheck = 0;
 const settingsRuntime = createSettingsRuntime({
   fsPromises,
   path,
@@ -540,7 +549,13 @@ const settingsRuntime = createSettingsRuntime({
     });
   },
   // Declared further down; settings are only saved once the server serves requests.
-  onLastDirectoryChanged: (directory) => openCodeLifecycleRuntime.noteCurrentDirectory(directory),
+  onLastDirectoryChanged: (directory) => {
+    const check = ++lastDirectoryTrustCheck;
+    if (!directory || isSpaceDirectory(directory)) return;
+    void openCodeTrust.isTrusted(directory).then((trusted) => {
+      if (trusted && check === lastDirectoryTrustCheck) openCodeLifecycleRuntime.noteCurrentDirectory(directory);
+    }).catch(() => {});
+  },
 });
 
 const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
@@ -936,6 +951,17 @@ const waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
 const normalizeApiPrefix = (...args) => openCodeNetworkRuntime.normalizeApiPrefix(...args);
 const setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDetectedOpenCodeApiPrefix(...args);
 const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
+installOpenCodeTrustFetch({
+  scope: OPENCHAMBER_DATA_DIR,
+  active: () => !isShuttingDown,
+  openCodeTrust, buildOpenCodeUrl, getOpenCodeAuthHeaders,
+  fallbackDirectory: () => openCodeWorkingDirectory,
+  prepareDirectory: async (directory) => {
+    const status = await getWorktreeBootstrapStatus(directory);
+    if (status.status === 'ready' || status.phase === 'git-ready' || status.phase === 'setup-ready') return null;
+    return { status: 503, body: { error: 'The worktree must finish checkout before OpenCode opens it' } };
+  },
+});
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
 const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
 
@@ -1668,6 +1694,7 @@ const processForwardedServerEvent = (payload, emitSyntheticEvent, spaceId = null
 
 
 const serverUtilsRuntime = createServerUtilsRuntime({
+  openCodeTrust,
   // Read lazily: the archive store is created with the session service further
   // down, while the proxy is registered later still.
   getArchivedSessions: () => openChamberSessionService.archiveStore.getAll(),
@@ -1686,6 +1713,7 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   getRuntime: () => ({
     openCodePort,
     openCodeBaseUrl,
+    openCodeWorkingDirectory,
     openCodeNotReadySince,
     isOpenCodeReady,
     isRestartingOpenCode,
@@ -1913,9 +1941,10 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     }
     // A deleted project would fail every read scoped to it, and the first entry
     // also scopes server-side reads that have no directory of their own.
-    const existing = await Promise.all([...new Set(directories)].map(async (directory) => (
-      (await fs.promises.stat(directory).catch(() => null))?.isDirectory() ? directory : null
-    )));
+    const existing = await Promise.all([...new Set(directories)].map(async (directory) => {
+      if (isSpaceDirectory(directory) || !(await fsPromises.stat(directory).catch(() => null))?.isDirectory()) return null;
+      return (await openCodeTrust.isTrusted(directory).catch(() => false)) ? directory : null;
+    }));
     return existing.filter(Boolean);
   },
   noProjectDirectory: OPENCHAMBER_CHATS_DIR,
@@ -1960,6 +1989,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   }),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
 });
+
+readTrustEnvironment = () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv() ?? process.env;
 
 // Quota lookups, voice keys and routing read provider credentials from the
 // running OpenCode (`GET /api/credential`), plus the values of the variables a

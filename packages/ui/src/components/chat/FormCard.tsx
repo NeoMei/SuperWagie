@@ -240,7 +240,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
                     </div>
 
                     <div className="px-2 py-2 space-y-1">
-                        {recovered ? <div className="typography-micro text-muted-foreground">{t('chat.formCard.recoveredNotice')}</div> : null}
+                        {recovered ? <div className="typography-micro text-muted-foreground">{t(recovered.evidence === 'deferred-on-send' ? 'chat.formCard.deferredNotice' : 'chat.formCard.recoveredNotice')}</div> : null}
                         {shown.map(renderField)}
                     </div>
 

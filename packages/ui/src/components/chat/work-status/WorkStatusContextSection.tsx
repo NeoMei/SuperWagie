@@ -4,7 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
-import { useSession } from '@/sync/sync-context';
+import { useSession, useSessionMessagesSelector } from '@/sync/sync-context';
 import { getDistinctLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, getRepositoryThreadRef, isLinkedChange, type LinkedIssue, type RepositoryThreadRef } from '@/lib/linkedIssues';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
@@ -31,6 +31,7 @@ import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { resolveDraftPinnedKnowledge } from './draftKnowledge';
+import { sameLoadedSkills, selectLoadedSkills } from './loadedSkills';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
@@ -90,6 +91,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const projects = useProjectsStore((state) => state.projects);
   const isDraft = sessionId === null && newSessionDraft.open;
   const skills = useSkillsStore((state) => selectAvailableSkillsForDirectory(state));
+  const loadedSkills = useSessionMessagesSelector(sessionId ?? '', directory ?? undefined, selectLoadedSkills, sameLoadedSkills, true);
   const mcpStatus = useMcpStore(
     React.useCallback((state) => state.getStatusForDirectory(directory), [directory]),
   );
@@ -307,7 +309,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     [mcpStatus],
   );
 
-  const hasContext = linked.length > 0 || skills.length > 0 || mcpCount > 0
+  const hasContext = linked.length > 0 || skills.length > 0 || loadedSkills.length > 0 || mcpCount > 0
     || pinnedCount > 0 || plansToShow.length > 0 || memoryCount > 0;
   useReportWorkStatusPresence('context-sources', hasContext);
 
@@ -513,6 +515,16 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
         />
       ) : null}
 
+      {loadedSkills.map(({ id, name }) => (
+        <WorkStatusRow
+          key={`skill:${id}`}
+          icon="file-text"
+          muted
+          label={<span dir="auto" className="oc-ui-start-align">{name}</span>}
+          tooltip={name}
+          value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.loadedSkill')}</WorkStatusValue>}
+        />
+      ))}
       <WorkStatusRow
         muted
         label={t('chat.workStatus.breakdown.skills')}

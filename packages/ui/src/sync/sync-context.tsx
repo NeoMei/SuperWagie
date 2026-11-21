@@ -108,6 +108,7 @@ import {
   setSessionParentResolver,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
+import { resetSessionLiveTools } from "./session-live-tool"
 import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, settledPageKeys, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
 import { requestHostTurnStarts } from "./host-session-status-seed"
 import { setHostTurnStartRequester } from "./session-activity-timing"
@@ -3362,6 +3363,7 @@ export function SyncProvider(props: {
         void usePermissionStore.getState().refreshSpaceModes(spaceId)
       },
       onReconnect: ({ replayReset }) => {
+        if (replayReset) resetSessionLiveTools()
         // The first connection and every one after a gap: spaces being made or whose making failed
         // are known only to the journey list, and a step announced during the gap was missed.
         if (useUIStore.getState().isolatedSpacesEnabled && !isVSCodeRuntime()) {
@@ -3385,6 +3387,7 @@ export function SyncProvider(props: {
         resyncAfterStreamGap("stream-reconnect")
       },
       onDisconnect: (reason) => {
+        resetSessionLiveTools()
         if (!pipelineHasConnectedRef.current) {
           pipelineDisconnectedBeforeFirstConnectRef.current = true
         }
@@ -3397,13 +3400,7 @@ export function SyncProvider(props: {
       },
       onTransportSwitch: () => {
         void useMessageQueueStore.getState().resync().catch(() => undefined)
-        // Transport changes are gap-prone in real networks. Treat them like a
-        // reconnect and refresh active session snapshots from HTTP.
-        useConfigStore.setState({
-          isConnected: true,
-          hasEverConnected: true,
-          connectionPhase: "connected",
-        })
+        // Repair the gap while the replacement stream establishes readiness.
         resyncAfterStreamGap("transport-switch")
       },
     })

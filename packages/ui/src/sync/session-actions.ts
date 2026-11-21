@@ -16,7 +16,11 @@ import { useSessionUIStore } from "./session-ui-store"
 import { useSelectionStore } from "./selection-store"
 import {
   moveRecoveredQuestions,
+  DEFERRED_QUESTION_NOTE,
   formReleaseKey,
+  isWaitingQuestionCall,
+  noteDeferredQuestion,
+  questionToolLink,
   formToolLink,
   formTurnHold,
   noteFormToolReleased,
@@ -634,20 +638,27 @@ function descendantRevertCutoff(state: { session: readonly Session[] }, target: 
   return child ? Math.min(child.time.created, target.time.created) : target.time.created
 }
 
-async function cascadeRevertToDescendants(rootId: string, cutoff: number): Promise<void> {
+async function cascadeRevertToDescendants(rootId: string, cutoff: number, assertCurrent: () => void): Promise<void> {
   for (const { session, directory } of getDescendantSessions(rootId)) {
+    assertCurrent()
     try {
       // A running descendant would keep writing messages past the revert
       // boundary, so stop it first for the same reason the parent is aborted.
       await abortDescendantIfBusy(session.id, directory)
+      assertCurrent()
       const messages = await fetchSessionMessages(session.id, directory)
+      assertCurrent()
       // Equal timestamps belong to the reverted side of the boundary. Keeping
       // them would rely on unrelated message IDs to decide chronology.
       const target = firstUserMessageAtOrAfter(messages, cutoff)
       if (!target) continue
       await opencodeClient.stageRevert(session.id, target.id, { directory })
-      mirrorSessionIntoLiveStores(await opencodeClient.getSession(session.id, directory), directory)
+      assertCurrent()
+      const reverted = await opencodeClient.getSession(session.id, directory)
+      assertCurrent()
+      mirrorSessionIntoLiveStores(reverted, directory)
     } catch (error) {
+      assertCurrent()
       console.error(`[session-actions] Failed to cascade revert to descendant ${session.id}:`, error)
     }
   }
@@ -656,6 +667,8 @@ async function cascadeRevertToDescendants(rootId: string, cutoff: number): Promi
 /** Cancels a staged revert: the hidden messages come back, in descendants too. */
 export async function clearStagedRevert(sessionId: string): Promise<void> {
   const { directory } = dirStoreForSession(sessionId)
+  const pending = waitForPendingRevert(sessionId, directory)
+  if (pending) await pending
   for (const descendant of getDescendantSessions(sessionId)) {
     if (!descendant.session.revert) continue
     try {
@@ -682,6 +695,8 @@ export async function clearStagedRevert(sessionId: string): Promise<void> {
  * the reverted tail, as it does after another client's prompt.
  */
 export async function commitStagedRevert(sessionId: string, directory?: string | null): Promise<void> {
+  const pending = waitForPendingRevert(sessionId, directory)
+  if (pending) await pending
   if (!findLiveSession(sessionId)?.revert) return
   await opencodeClient.commitRevert(sessionId, directory)
 }
@@ -1201,7 +1216,7 @@ export async function createSession(
 export function openPendingSessionTranscript(sessionId: string, directory: string): void {
   registerSessionDirectory(sessionId, directory)
   _childStores?.ensureChild(directory, { bootstrap: false })
-  getImperativeSessionMessageLoader()?.initializeCreatedSession({ directory, sessionID: sessionId })
+  getImperativeSessionMessageLoader()?.initializeCreatedSession({ directory, sessionID: sessionId }, "pending")
 }
 
 /**
@@ -2234,6 +2249,12 @@ export async function optimisticSend(input: {
 
   assertRuntimeUnchanged()
   await waitForConnectionOrThrow()
+  assertRuntimeUnchanged()
+  const pendingRevert = waitForPendingRevert(input.sessionId, input.directory)
+  if (pendingRevert) {
+    await pendingRevert
+    assertRuntimeUnchanged()
+  }
   input.beforeOptimisticInsert?.()
   assertRuntimeUnchanged()
   input.appendSubmissions?.()
@@ -2870,8 +2891,9 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
   await submitRecoveredAnswer(question.form.id, async () => {
     assertAnswerable()
     const selection = recoveredAnswerSelection(question)
+    const deferred = question.evidence === "deferred-on-send"
     await useSessionUIStore.getState().sendMessage(
-      text,
+      deferred ? `Answer to your earlier question:\n\n${text}` : text,
       selection.providerID,
       selection.modelID,
       selection.agent,
@@ -2884,6 +2906,7 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
         userInitiated: true,
         queuedGoal: null,
         beforeSend: assertAnswerable,
+        metadata: deferred ? { openchamber: { deferredAnswer: { formID: question.form.id } } } : undefined,
         target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },
       },
     )
@@ -2905,7 +2928,7 @@ function openFormReleaseKeys(stores: ChildStoreManager): Set<string> {
   return keys
 }
 
-const formToolReads = new Map<string, { read: Promise<void>; isCurrentRuntime: () => boolean }>()
+const formToolReads = new Map<string, { read: Promise<boolean>; isCurrentRuntime: () => boolean }>()
 
 /**
  * Read the tool call of an open form whose message is not loaded (#5391). A
@@ -2915,12 +2938,12 @@ const formToolReads = new Map<string, { read: Promise<void>; isCurrentRuntime: (
  * after switching back. A failed read, one that finishes on another runtime,
  * or one whose form is no longer open records nothing.
  */
-function readFormToolLink(form: FormRequest): Promise<void> {
+function readFormToolLink(form: FormRequest): Promise<boolean> {
   const tool = formToolLink(form)
-  if (!tool) return Promise.resolve()
+  if (!tool) return Promise.resolve(false)
   const key = formReleaseKey(form, tool)
   const stores = _childStores
-  if (!stores) return Promise.resolve()
+  if (!stores) return Promise.resolve(false)
   const owners = [...stores.children].filter(([, store]) =>
     store.getState().form[form.sessionID]?.some((candidate) => {
       const link = formToolLink(candidate)
@@ -2934,20 +2957,23 @@ function readFormToolLink(form: FormRequest): Promise<void> {
       return link !== null && formReleaseKey(candidate, link) === key
     }),
   )
-  if (!isCurrentRuntime()) return Promise.resolve()
+  if (!isCurrentRuntime()) return Promise.resolve(false)
   const existing = formToolReads.get(key)
   if (existing?.isCurrentRuntime()) return existing.read
   const read = (async () => {
     try {
       const { sessionId, directory } = await resolveFormTarget(form.sessionID, form.id)
-      if (!isCurrentRuntime() || sessionId !== form.sessionID) return
+      if (!isCurrentRuntime() || sessionId !== form.sessionID) return false
       const { parts } = await opencodeClient.getSessionMessage(form.sessionID, tool.messageID, directory)
-      if (!isCurrentRuntime() || formTurnHold(form, { [tool.messageID]: parts }) !== "released") return
+      if (!isCurrentRuntime()) return false
+      const linked = { [tool.messageID]: parts }
+      if (formTurnHold(form, linked) !== "released") return isWaitingQuestionCall(form, linked)
       const openKeys = openFormReleaseKeys(stores)
       if (openKeys.has(key)) noteFormToolReleased(key, openKeys)
     } catch (error) {
       console.error("[session-actions] Could not read the tool call of an open form:", error)
     }
+    return false
   })().finally(() => {
     if (formToolReads.get(key)?.read === read) formToolReads.delete(key)
   })
@@ -3000,7 +3026,10 @@ function formCopiesHold(copies: readonly OpenFormCopy[]): "holds" | "released" |
  * it while the turn is still active) and queues other follow-ups after
  * dismissal. This helper does not abort the session.
  */
-export async function dismissOpenFormsForSession(sessionId: string): Promise<boolean> {
+export async function dismissOpenFormsForSession(
+  sessionId: string,
+  preserveWaitingQuestion?: (form: FormRequest) => void,
+): Promise<boolean> {
   if (!sessionId) return false
   const stores = _childStores
   if (!stores) return false
@@ -3027,14 +3056,17 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
   }
 
   const unread = [...copiesByForm.values()].filter((copies) => formCopiesHold(copies) === "unknown")
+  const readWaiting = new Set<OpenFormCopy[]>()
   if (unread.length > 0) {
-    await Promise.all(unread.map((copies) => readFormToolLink(copies[0].form)))
-    // The stores belong to another server now; none of these forms is on it.
+    await Promise.all(unread.map(async (copies) => {
+      if (await readFormToolLink(copies[0].form)) readWaiting.add(copies)
+    }))
     if (!isCurrentRuntime()) return false
   }
-  // Decided after the reads, so evidence that arrived meanwhile from any copy counts.
-  const toDismiss = [...copiesByForm.values()]
-    .map((copies) => copies.flatMap((copy) => {
+  // A refreshed copy must still refer to the same tool before any dismissal.
+  const toDismiss: OpenFormCopy[][] = []
+  for (const originalCopies of copiesByForm.values()) {
+    const copies = originalCopies.flatMap((copy) => {
       if (stores.getChild(copy.directory) !== copy.store) return []
       const current = copy.store.getState().form[copy.sessionId]?.find((form) => form.id === copy.form.id)
       if (!current) return []
@@ -3045,8 +3077,16 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
           || formReleaseKey(current, currentLink) !== formReleaseKey(copy.form, originalLink)) return []
       }
       return [{ ...copy, form: current }]
-    }))
-    .filter((copies) => copies.length > 0 && formCopiesHold(copies) !== "released")
+    })
+    if (copies.length === 0 || formCopiesHold(copies) === "released") continue
+    const { sessionId: ownerId, form } = copies[0]
+    if (preserveWaitingQuestion && ownerId === sessionId && (readWaiting.has(originalCopies)
+      || copies.some(({ store, form }) => isWaitingQuestionCall(form, store.getState().part)))) {
+      preserveWaitingQuestion(form)
+    } else {
+      toDismiss.push(copies)
+    }
+  }
   if (toDismiss.length === 0) return false
 
   // Optimistically clear the forms from the local store so the prompt
@@ -3074,9 +3114,74 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
   return true
 }
 
+/** Releases only the captured question, after OpenCode admits the follow-up. */
+export async function deferQuestionsAfterSend(forms: readonly FormRequest[]): Promise<void> {
+  const stores = _childStores
+  if (!stores) return
+  const isRuntimeCurrent = captureRuntimeInstance()
+  const isCurrent = () => isRuntimeCurrent() && _childStores === stores
+  await Promise.all(forms.map(async (form) => {
+    const link = questionToolLink(form)
+    if (!link) return
+    const key = formReleaseKey(form, link)
+    const isOpen = () => {
+      const copies: OpenFormCopy[] = []
+      for (const [directory, store] of stores.children) {
+        const candidate = store.getState().form[form.sessionID]?.find((item) => item.id === form.id)
+        if (!candidate) continue
+        const current = questionToolLink(candidate)
+        if (current && formReleaseKey(candidate, current) === key) {
+          copies.push({ directory, store, sessionId: form.sessionID, form: candidate })
+        }
+      }
+      return copies.length > 0 && formCopiesHold(copies) !== "released"
+    }
+    try {
+      if (!isCurrent() || !isOpen()) return
+      const target = await resolveFormTarget(form.sessionID, form.id)
+      if (!isCurrent() || !isOpen() || target.sessionId !== form.sessionID || !target.directory) return
+      if (await opencodeClient.cancelForm(form.sessionID, form.id, target.directory, DEFERRED_QUESTION_NOTE) !== true) return
+      if (!isCurrent()) return
+      noteDeferredQuestion(form, target.directory)
+      removeFormRequestFromChildStores(form.sessionID, form.id)
+    } catch (error) {
+      if (!isCurrent()) return
+      if (isFormRequestNotFoundError(error)) recoverStaleBlockingRequest(form.sessionID)
+      else console.error("[session-actions] Could not defer an open question after a send:", error)
+    }
+  }))
+}
+
 // ---------------------------------------------------------------------------
 // Message history
 // ---------------------------------------------------------------------------
+
+const pendingReverts = new WeakMap<ChildStoreManager, Map<string, Promise<void>>>()
+
+function revertKey(sessionId: string, directory: string | null | undefined): string {
+  return JSON.stringify([normalizePath(directory), sessionId])
+}
+
+export function waitForPendingRevert(sessionId: string, directory?: string | null): Promise<void> | undefined {
+  const owner = _childStores
+  if (!owner) return undefined
+  const operations = pendingReverts.get(owner)
+  if (!operations?.size) return undefined
+  const key = revertKey(sessionId, directory ?? getSessionDirectory(sessionId) ?? dir())
+  const initial = operations.get(key)
+  if (!initial) return undefined
+  const isCurrentRuntime = captureRuntimeInstance()
+  return (async () => {
+    let pending: Promise<void> | undefined = initial
+    while (pending) {
+      await pending
+      if (!isCurrentRuntime() || _childStores !== owner) throw new Error("runtime changed")
+      const next = operations.get(key)
+      if (next === pending) return
+      pending = next
+    }
+  })()
+}
 
 /**
  * Revert to a specific user message.
@@ -3087,13 +3192,55 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
  * 4. Call the runtime revert endpoint and merge returned session
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
-export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
+export async function revertToMessage(
+  sessionId: string,
+  messageId: string,
+  options?: { refreshHistory?: boolean },
+): Promise<void> {
+  const owner = _childStores
+  if (!owner) throw new Error("Child stores not initialized")
   const { store, directory } = dirStoreForSession(sessionId)
+  const key = revertKey(sessionId, directory)
+  let pending = pendingReverts.get(owner)
+  if (!pending) {
+    pending = new Map()
+    pendingReverts.set(owner, pending)
+  }
+  const previous = pending.get(key)
+  const isCurrentRuntime = captureRuntimeInstance()
+  const assertCurrent = () => {
+    if (!isCurrentRuntime() || _childStores !== owner) throw new Error("runtime changed")
+  }
+  const stage = async () => {
+    // A second revert can replace the staged cut once the first has settled.
+    await previous?.catch(() => undefined)
+    assertCurrent()
+    if (options?.refreshHistory) await refetchSessionMessages(sessionId)
+    assertCurrent()
+    await stageMessageRevert(sessionId, messageId, store, directory, assertCurrent)
+  }
+  const operation = stage()
+  pending.set(key, operation)
+  try {
+    await operation
+  } finally {
+    if (pending.get(key) === operation) pending.delete(key)
+  }
+}
+
+async function stageMessageRevert(
+  sessionId: string,
+  messageId: string,
+  store: DirectoryStoreApi,
+  directory: string | undefined,
+  assertCurrent: () => void,
+): Promise<void> {
   const state = store.getState()
 
   const localTarget = state.message[sessionId]?.find((message) => message.id === messageId)
   const targetMessage = localTarget
     ?? (await findSessionMessageById(sessionId, messageId, directory))
+  assertCurrent()
   if (!targetMessage) throw new Error(`Cannot revert session: message ${messageId} was not found`)
 
   // Abort if busy before mutating session state
@@ -3106,6 +3253,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     }
   }
 
+  assertCurrent()
   // Extract message text for prompt restoration.
   const messages = state.message[sessionId] ?? []
   const targetMsg = messages.find((m) => m.id === messageId)
@@ -3174,11 +3322,14 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   try {
     // Descendants go first because OpenCode also restores file snapshots during
     // revert. All sessions share a directory, so the parent's snapshot must win.
-    await cascadeRevertToDescendants(sessionId, descendantRevertCutoff(state, targetMessage))
+    await cascadeRevertToDescendants(sessionId, descendantRevertCutoff(state, targetMessage), assertCurrent)
+    assertCurrent()
     // Stage only: the messages disappear behind the revert marker while the
     // dock offers Commit (finalize) or Clear (bring them back).
     await opencodeClient.stageRevert(sessionId, revertMessageID, { directory })
+    assertCurrent()
     const revertedSession = await opencodeClient.getSession(sessionId, directory)
+    assertCurrent()
     const current = store.getState()
     const updated = [...current.session]
     const idx = updated.findIndex((s) => s.id === sessionId)
@@ -3191,6 +3342,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       fileTreeChanges.unknownChange(directory)
     }
   } catch (err) {
+    assertCurrent()
     // Rollback: restore removed messages + revert marker
     const current = store.getState()
     const rollback = [...current.session]

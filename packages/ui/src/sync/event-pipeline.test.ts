@@ -8,6 +8,12 @@ import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from "@/lib/runtime-
 import { useAuthSessionStore } from "@/lib/runtime-auth-expiry"
 import { classifyStreamPayload, createEventPipeline } from "./event-pipeline"
 
+function deferredVoid() {
+  let resolve!: () => void
+  const promise = new Promise<void>((complete) => { resolve = complete })
+  return { promise, resolve }
+}
+
 const failAfter = (ms: number) => new Promise<never>((_, reject) => {
   setTimeout(() => reject(new Error("Timed out waiting for event pipeline flush")), ms)
 })
@@ -471,6 +477,49 @@ describe("createEventPipeline over the WebSocket transport", () => {
     deactivateRelayTunnel()
     clearRuntimeUrlAuthToken()
     Reflect.deleteProperty(globalThis, "window")
+  })
+
+  test("reports a lost stream before falling back, and waits for SSE data to reconnect", async () => {
+    const socket = createFakeSocket()
+    const socketOpened = deferredVoid()
+    const tunnel: RelayTunnelClient = {
+      async fetch() { throw new Error("the test stream must not fetch") },
+      openWebSocket() {
+        socketOpened.resolve()
+        return socket
+      },
+      getStatus: () => ({ state: "connected" }),
+      subscribeStatus: () => () => undefined,
+      retry: () => undefined,
+      close: () => undefined,
+    }
+    adoptRelayTunnel({ relayUrl: "wss://relay.test", serverId: "fixture", hostEncPubJwk: {} }, tunnel)
+    const transitions: string[] = []
+    const fallback = deferredVoid()
+    const received = deferredVoid()
+    const pipeline = createEventPipeline({
+      sdk: createSdk([statusEvent("busy")], received.resolve),
+      onEvents: () => undefined,
+      transport: "auto",
+      onReconnect: () => transitions.push("connected"),
+      onDisconnect: () => transitions.push("disconnected"),
+      onTransportSwitch: () => {
+        transitions.push("fallback")
+        fallback.resolve()
+      },
+    })
+    try {
+      await Promise.race([socketOpened.promise, failAfter(500)])
+      socket.onmessage?.({ data: JSON.stringify({ type: "ready" }) })
+      await new Promise<void>((resolve) => setTimeout(resolve, 5))
+      socket.onclose?.({ code: 1006, reason: "connection lost" })
+      await Promise.race([fallback.promise, failAfter(500)])
+      expect(transitions).toEqual(["connected", "disconnected", "fallback"])
+      await Promise.race([received.promise, failAfter(500)])
+      expect(transitions).toEqual(["connected", "disconnected", "fallback", "connected"])
+    } finally {
+      pipeline.cleanup()
+    }
   })
 
   test("counts a heartbeat frame as stream activity without delivering an event", async () => {

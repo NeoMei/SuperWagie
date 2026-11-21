@@ -1,18 +1,22 @@
 import { create } from "zustand"
 import { z } from "zod"
 import type { SyncEvent } from "@/lib/opencode/events"
-import type { FormRequest, Part, ToolPart } from "@/lib/opencode/model"
+import type { FormRequest, Message, Part, ToolPart } from "@/lib/opencode/model"
 
 type QuestionToolLink = { messageID: string; toolID: string }
-export type QuestionAskOutcome = "answered" | "dismissed" | "turn-death" | "shutdown" | "pending" | "unresolved"
+export type QuestionAskOutcome = "answered" | "dismissed" | "turn-death" | "shutdown" | "deferred" | "pending" | "unresolved"
 type ClosedOutcome = "answered" | "dismissed"
+
+export const DEFERRED_QUESTION_NOTE = "The user sent a message and left this question unanswered. Continue with that message. Leave the decision from this question open until the user's answer arrives. If the answer is required to continue, explain what is waiting."
+
+const deferredAnswerSchema = z.object({ openchamber: z.object({ deferredAnswer: z.object({ formID: z.string().min(1) }) }) })
 
 export type RecoveredQuestion = {
   form: FormRequest
   directory: string
   sessionID: string
   toolMessageID: string
-  evidence: "tool-interrupted" | "local-interrupt-mark"
+  evidence: "tool-interrupted" | "local-interrupt-mark" | "deferred-on-send"
 }
 
 type SeenQuestion = {
@@ -56,6 +60,14 @@ export function questionToolLink(form: FormRequest): QuestionToolLink | null {
   return form.metadata?.kind === "question" ? formToolLink(form) : null
 }
 
+export function isWaitingQuestionCall(form: FormRequest, parts: RecoverableQuestionStoreView["part"]): boolean {
+  const tool = questionToolLink(form)
+  if (!tool) return false
+  const part = parts[tool.messageID]?.find((candidate) => candidate.id === tool.toolID)
+  return part?.type === "tool" && part.tool === "question"
+    && (part.state.status === "pending" || part.state.status === "running")
+}
+
 export type FormTurnHold = "holds" | "released" | "unknown"
 
 /** Unloaded linked calls stay unknown until a successful read establishes their state. */
@@ -96,6 +108,7 @@ function forgetReleasedForm(sessionID: string, formID: string): void {
 // Unknown wording fails closed. Shutdown keeps OpenCode's turn resumable.
 export function classifyQuestionToolError(error: string, errorType: string | undefined, local: boolean): QuestionAskOutcome {
   if (local) return error === "Interrupted" ? "turn-death" : "unresolved"
+  if (error === DEFERRED_QUESTION_NOTE) return "deferred"
   if (errorType !== undefined && errorType !== "aborted") return "dismissed"
   if (error === "Tool execution interrupted") return "turn-death"
   if (error === "Interaction cancelled because the location shut down") return "shutdown"
@@ -132,17 +145,25 @@ export function deriveRecoveredQuestions(
     const disposition = recovery.dispositions.get(toolKey(seen.tool))?.outcome
     const outcome = observed === "answered" || observed === "dismissed" || observed === "shutdown"
       ? observed : disposition ?? observed
-    if (outcome !== "turn-death") continue
+    if (outcome !== "turn-death" && outcome !== "deferred") continue
     recovered.push({
       form: seen.form,
       directory: seen.directory,
       sessionID: seen.sessionID,
       toolMessageID: seen.tool.messageID,
-      evidence: part?.state.status === "error" && part.state.errorSource === "local"
-        ? "local-interrupt-mark" : "tool-interrupted",
+      evidence: outcome === "deferred" ? "deferred-on-send"
+        : part?.state.status === "error" && part.state.errorSource === "local" ? "local-interrupt-mark" : "tool-interrupted",
     })
   }
   return recovered
+}
+
+function noteDeferredAnswerMessage(message: Message): void {
+  if (message.role !== "user" || !message.metadata) return
+  const answer = deferredAnswerSchema.safeParse(message.metadata)
+  if (!answer.success) return
+  const id = answer.data.openchamber.deferredAnswer.formID
+  if (useRecoverableQuestionsStore.getState().seen.get(id)?.sessionID === message.sessionID) noteLocalFormReplied(id)
 }
 
 /** Retain terminal authority from a committed transcript before history is trimmed. */
@@ -150,16 +171,22 @@ export function noteQuestionToolSnapshot(
   directory: string,
   sessionID: string,
   parts: RecoverableQuestionStoreView["part"],
+  messages: readonly Message[] = [],
 ): void {
   const recovery = useRecoverableQuestionsStore.getState()
+  let needsDeferredAnswerScan = false
   for (const seen of recovery.seen.values()) {
     if (seen.directory !== directory || seen.sessionID !== sessionID) continue
     const candidate = parts[seen.tool.messageID]?.find((part) => part.id === seen.tool.toolID)
     const outcome = partAskOutcome(candidate?.type === "tool" ? candidate : undefined)
-    if (outcome === "answered" || outcome === "dismissed" || outcome === "shutdown") {
+    if (outcome === "deferred" || recovery.dispositions.get(toolKey(seen.tool))?.outcome === "deferred") {
+      needsDeferredAnswerScan ||= !recovery.outcomes.has(seen.form.id)
+    }
+    if (outcome === "answered" || outcome === "dismissed" || outcome === "shutdown" || outcome === "deferred") {
       recordDisposition(sessionID, seen.tool, outcome)
     }
   }
+  if (needsDeferredAnswerScan) for (const message of messages) noteDeferredAnswerMessage(message)
 }
 
 function noteQuestionFormSeen(form: FormRequest, directory: string): void {
@@ -185,6 +212,13 @@ function noteQuestionFormSeen(form: FormRequest, directory: string): void {
 // Absence from a partial or failed snapshot is never settlement evidence.
 export function noteQuestionFormSnapshot(directory: string, forms: readonly FormRequest[]): void {
   for (const form of forms) noteQuestionFormSeen(form, directory)
+}
+
+export function noteDeferredQuestion(form: FormRequest, directory: string): void {
+  const tool = questionToolLink(form)
+  if (!tool) return
+  noteQuestionFormSeen(form, directory)
+  recordDisposition(form.sessionID, tool, "deferred")
 }
 
 export function moveRecoveredQuestions(sessionID: string, directory: string): void {
@@ -266,6 +300,9 @@ export function applyRecoverableQuestionEvents(directory: string, events: readon
         forgetReleasedForm(event.properties.sessionID, event.properties.formID)
         // Turn death cancels its form too; only a reply is conclusive here.
         if (event.properties.disposition === "replied") noteLocalFormReplied(event.properties.formID)
+        break
+      case "message.updated":
+        noteDeferredAnswerMessage(event.properties.info)
         break
       case "message.tool.transition": {
         const { sessionID, messageID, partID, transition } = event.properties

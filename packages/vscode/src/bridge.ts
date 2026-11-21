@@ -7,6 +7,7 @@ import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
 import { handleSystemBridgeMessage } from './bridge-system-runtime';
 import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
+import { openCodeTrust } from './opencodeTrust';
 import { waitForWorktreeRemoval } from './gitService';
 import { handlePermissionAutoAcceptBridgeMessage } from './bridge-permission-auto-accept-runtime';
 import { handleProjectSetupBridgeMessage } from './bridge-project-setup-runtime';
@@ -152,6 +153,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       {
         tryHandleLocalFsProxy,
         waitForWorktreeRemoval,
+        openCodeTrust,
         sessionState: sessionStateStore,
         buildUnavailableApiResponse,
         sanitizeForwardHeaders,

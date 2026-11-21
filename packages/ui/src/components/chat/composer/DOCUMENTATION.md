@@ -57,6 +57,17 @@ consuming the main composer's armed goal. Replies, deliberate dismissal,
 completed tools and location shutdown veto recovery. The send rechecks this
 authority immediately before dispatch and shares concurrent submissions.
 
+A direct normal follow-up in the question's own session goes into OpenCode's
+inbox before releasing a waiting question. A rejected send leaves the live
+question open. On admission the composer settles the tool with a deferral
+note and keeps the captured question available for a later answer. Shell
+input, slash commands, child forms, and permission requests use their usual
+handling. The later answer is an ordinary prompt stamped with the form ID,
+which closes the card in clients that have the question in memory, including
+when their next transcript read carries the answer. Question recovery remains
+in memory for the current runtime. Explicit cancellation and tool settlement
+can retire a captured question before the follow-up returns.
+
 Model picks in both the main and pinned composers retain pending intent until
 a confirmed send or model write. A retry wait may apply a BYOK pick through
 `useRetryModelPick`; Auto and account tasks keep their existing send path.
@@ -752,6 +763,63 @@ change, pending manual scroll events, selection callbacks and unmount cleanup.
 Its input forwards keys directly to the picker handle; it does not exercise
 the full composer's key routing or draft persistence. Happy DOM models
 `scrollIntoView`; native scrolling and positioning require a full-app live run.
+
+## Attachments in the editor
+
+Files chosen in the picker, dropped, or pasted insert bracket citations at the
+caret. A document's extracted parts share its citation. Issue, pull request,
+tracker, and extension picker results insert their URL and use the same editor
+chip and preview as a resolved pasted link. Other quoted context uses its
+existing preview and edit controls. The editor preserves the underlying text
+for copying and history. Delete removes the associated part from the next
+send. Undo reactivates it while the draft retains the file or reference.
+Explicitly linked file references in older drafts keep their existing behavior.
+
+For a model known to accept text and exclude images, dispatch resolves image
+parts to paths on the kernel's authoritative session directory. A file already
+named on the server uses its path. Other images are written using the kernel's
+temporary file API. The prompt keeps the citation in place where possible.
+Failure leaves the input recoverable. Models with image capability or unknown
+input metadata retain their original parts. The save-pasted-images preference
+still adds eager copies, while an unresolved isolated-space target waits for
+its real directory before preparing a text-model path. Neither operation uses
+an editor-selected model from a different target.
+
+Queue admission prepares paths for the captured model. A queued path image
+keeps its original bytes and citation identity so Edit restores the draft. Its
+delivery uses the prepared text and ignores that binary attachment. Browser,
+Electron, desktop VS Code, hosted mobile, and Capacitor share the composer and
+SDK dispatch. Their existing queue owners apply the same delivery marker.
+
+## Recovering an interrupted send
+
+With draft persistence enabled, the composer writes a record before clearing
+an ordinary typed prompt. It contains the original text and confirmed file
+mentions, keyed by runtime, directory, and session or new-draft identity.
+The record keeps attachment filenames so recovery can tell the user which
+files to reattach. Attachment bytes and review context stay in memory. The send route attaches the
+first draft's session ID when it allocates it, then records the prompt's ID
+and actual request directory at dispatch. A normal response clears the record.
+If the request fails while the page is open, the composer restores its draft
+and flushes that write before clearing the record.
+
+After a reload or renderer restart, the main composer restores a record that
+never dispatched. A first send which created a session restores to that
+session's draft. For an issued prompt, recovery verifies the session's current
+owner through OpenCode before reading its inbox and checking the exact message
+ID in the transcript. An admitted prompt clears its record. An absent message
+restores to the verified directory once the owner is reconfirmed. Unreachable
+or unverified owners leave the record for the next connection or focus. A dispatched slash command receives
+its ID from the server and has no exact identity for restoring it safely.
+
+Web and hosted mobile use browser storage. Electron and Capacitor use the same
+mechanism in their renderer or WebView. VS Code uses it in the extension
+webview and reads the target through the existing SDK bridge. With Web Locks,
+a live sender holds its record until it settles, and recovery is serialized
+across windows. Otherwise the record uses tab storage and survives a reload in
+that context. The unconfirmed record has a different lifetime from the draft:
+the user can keep typing while a prior submission waits for confirmation, and
+recovery joins that submission to the input for its original target.
 
 ## Input recall ownership
 

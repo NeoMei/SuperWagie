@@ -83,10 +83,8 @@ import {
 } from '@/lib/reviewFlow';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentColors } from '@/hooks/useAgentColors';
-import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
-import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
-import { buildTurnImageExportSource, cloneMessageImageExportSource, fitMessageImageExportLayout, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth } from './imageExport';
+import { buildTurnImageExportSource, captureAndSaveMessageImage, resolveMessageImageExportWidth } from './imageExport';
 import { hasTextSelectionInside } from '@/lib/textSelection';
 
 
@@ -1469,146 +1467,14 @@ const AssistantMessageBody = React.memo(({
             const sourceElement = requestedSourceElement ?? messageTextContentRef.current ?? messageContentRef.current;
             if (!sourceElement) return;
 
-            let wrapper: HTMLDivElement | null = null;
             try {
-                // Load the exporter before attaching its temporary clone so a slow
-                // chunk request cannot leave export-only content in the page layout.
-                const { toPng } = await import('html-to-image');
-                const originalElement = sourceElement;
-                const computedStyle = window.getComputedStyle(originalElement);
-                const rootStyle = window.getComputedStyle(document.documentElement);
-                const resolvedBackgroundColor =
-                    rootStyle.getPropertyValue('--surface-background').trim() ||
-                    computedStyle.backgroundColor ||
-                    window.getComputedStyle(document.body).backgroundColor;
-                const paddingSize = 24;
-                // The turn source is built off-screen, so the visible column is the
-                // only element still holding the width the reader saw.
-                const exportWidth = resolveMessageImageExportWidth(messageContentRef.current ?? originalElement);
-
-                wrapper = document.createElement('div');
-                wrapper.setAttribute('data-message-image-export', 'true');
-                wrapper.style.cssText = `
-                    padding: ${paddingSize}px;
-                    ${exportWidth ? `width: ${exportWidth}px; box-sizing: content-box;` : ''}
-                    background-color: ${resolvedBackgroundColor};
-                    display: inline-block;
-                `;
-                // Scrollbars are dead weight in a still image, and hiding them stops
-                // their gutter from clipping the last column of a wide table.
-                const exportStyle = document.createElement('style');
-                exportStyle.textContent = `
-                    [data-message-image-export] * { scrollbar-width: none; }
-                    [data-message-image-export] *::-webkit-scrollbar { display: none; }
-                `;
-                wrapper.appendChild(exportStyle);
-
-                const clone = cloneMessageImageExportSource(originalElement);
-                clone.style.cssText = `
-                    ${computedStyle.cssText}
-                    transform: none;
-                    contain: none;
-                `;
-
-                // A column-width canvas would clip an unwrapped code line behind its
-                // scroll container, so long lines wrap only for the export.
-                const codeWrapRoots = clone.querySelectorAll<HTMLElement>('[data-code-wrap]');
-                codeWrapRoots.forEach((root) => {
-                    root.setAttribute('data-code-wrap', 'true');
-                });
-
-                const actionRows = clone.querySelectorAll<HTMLElement>('[data-message-actions="true"]');
-                actionRows.forEach((row) => {
-                    row.style.display = 'none';
-                });
-                const actionGroups = clone.querySelectorAll<HTMLElement>('[data-message-action-group="true"]');
-                actionGroups.forEach((group) => {
-                    group.style.display = 'none';
-                });
-
-                const timestampElements = clone.querySelectorAll<HTMLElement>('[aria-label^="Message time:"]');
-                const footerRowsAdjusted = new Set<HTMLElement>();
-                timestampElements.forEach((element) => {
-                    const label = element.getAttribute('aria-label');
-                    const timestamp = label?.replace('Message time:', '').trim();
-                    if (!timestamp || element.textContent?.includes(timestamp)) {
-                        return;
-                    }
-
-                    const timestampText = document.createElement('span');
-                    timestampText.style.marginLeft = '4px';
-                    timestampText.textContent = timestamp;
-                    element.appendChild(timestampText);
-
-                    const metaGroup = element.parentElement;
-                    const footerRow = metaGroup?.parentElement as HTMLElement | null;
-                    if (!footerRow || footerRowsAdjusted.has(footerRow)) {
-                        return;
-                    }
-
-                    footerRow.style.justifyContent = 'flex-start';
-                    footerRowsAdjusted.add(footerRow);
-                });
-
-                wrapper.appendChild(clone);
-                document.body.appendChild(wrapper);
-
-                if (exportWidth) {
-                    // Keep the clone at the column so prose wraps where the reader saw it;
-                    // only the canvas and the clipped blocks grow.
-                    fitMessageImageExportLayout(wrapper, clone, exportWidth);
+                const width = resolveMessageImageExportWidth(messageContentRef.current ?? sourceElement);
+                if (await captureAndSaveMessageImage(sourceElement, { width, fileName: `message-${messageId}.png`, vscode: vscodeApi })) {
+                    toast.success(t('chat.messageBody.toast.imageSaved'));
                 }
-
-                const bounds = wrapper.getBoundingClientRect();
-                const canvasWidth = Math.ceil(bounds.width);
-                const canvasHeight = Math.ceil(bounds.height);
-
-                const dataUrl = await toPng(wrapper, {
-                    quality: 1,
-                    width: canvasWidth,
-                    height: canvasHeight,
-                    pixelRatio: resolveMessageImageExportPixelRatio(canvasWidth, canvasHeight),
-                    backgroundColor: resolvedBackgroundColor,
-                });
-
-                const fileName = `message-${messageId}.png`;
-
-                if (isVSCodeRuntime()) {
-                    const payload = await vscodeApi?.saveImage?.({ fileName, dataUrl }) as { saved?: boolean; canceled?: boolean; error?: string } | undefined;
-                    if (!payload) {
-                        throw new Error('Failed to save image in VS Code');
-                    }
-                    if (payload.saved !== true) {
-                        if (payload.canceled) {
-                            return;
-                        }
-                        throw new Error(payload.error || 'Failed to save image in VS Code');
-                    }
-                } else if (isCapacitorMobileApp()) {
-                    const blob = await fetch(dataUrl).then((response) => response.blob());
-                    await shareFileFromNativeApp(new File([blob], fileName, { type: blob.type || 'image/png' }));
-                } else {
-                    // Desktop titles the save dialog with the download URL, so a data URL
-                    // would put the whole image in the title.
-                    const blob = await fetch(dataUrl).then((response) => response.blob());
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.download = fileName;
-                    link.href = url;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                }
-
-                toast.success(t('chat.messageBody.toast.imageSaved'));
             } catch (error) {
                 console.error('Failed to generate image:', error);
                 toast.error(t('chat.messageBody.toast.generateImageFailed'));
-            } finally {
-                if (wrapper && wrapper.parentNode) {
-                    wrapper.parentNode.removeChild(wrapper);
-                }
             }
         },
         [messageId, t, vscodeApi]

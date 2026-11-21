@@ -1454,6 +1454,32 @@ describe('gh CLI account consent', () => {
     expect(await auth.isGhCliActiveForHost('github.com')).toBe(false);
   });
 
+  it('does not start a disabled github.com CLI while still reporting a saved account', async () => {
+    const fetch = stubGitHubUsers();
+    await auth.setGitHubAuth({ accessToken: 'token-a', user: { id: 7, login: 'saved-user' } });
+    auth.setGhCliDisabled(true);
+    const ghInvokedFile = path.join(directory, 'invoked-hosts.txt');
+    const app = makeApp();
+
+    const disabled = await request(app).get('/api/source-control/github/auth/status').expect(200);
+    expect(disabled.body).toMatchObject({
+      connected: true,
+      user: { username: 'saved-user' },
+      cli: { available: false, disabled: true, active: false },
+    });
+    await expect(fs.access(ghInvokedFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(usedCliToken(fetch)).toBe(false);
+
+    auth.setGhCliDisabled(false);
+    const enabled = await request(app).get('/api/source-control/github/auth/status').expect(200);
+    expect(enabled.body).toMatchObject({
+      connected: true,
+      user: { username: 'saved-user' },
+      cli: { available: true, disabled: false, active: false },
+    });
+    expect(await fs.readFile(ghInvokedFile, 'utf8')).toBe('github.com\n');
+  });
+
   it('reports an active CLI account as connected when the saved current account is invalid', async () => {
     stubGitHubUsers();
     const saved = await auth.setGitHubAuth({ accessToken: 'token-a', user: { id: 7, login: 'saved-user' } });

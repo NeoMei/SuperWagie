@@ -398,7 +398,7 @@ export const AttachedFilesList = memo(({ onShowPopup, className, draftIdentity }
   const attachedFiles = useDraftAttachedFiles(draftIdentity);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
-  const localFiles = attachedFiles.filter((file) => file.source !== 'server' && file.source !== 'vscode');
+  const localFiles = attachedFiles.filter((file) => !file.composerAnchor && file.source !== 'server' && file.source !== 'vscode');
 
   if (localFiles.length === 0) return null;
 

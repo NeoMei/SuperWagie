@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
-import type { Session } from '@/lib/opencode/model';
+import type { AssistantMessage, Message, Part, Session, ToolState } from '@/lib/opencode/model';
 import type { LinkedIssue } from '@/lib/linkedIssues';
 import { useUIStore } from '@/stores/useUIStore';
 import { I18nProvider } from '@/lib/i18n';
@@ -104,6 +104,43 @@ describe('agent-linked threads in the context section', () => {
     fetchSpy.mockRestore();
     await win.happyDOM.close();
     restoreGlobals();
+  });
+
+  test('shows activated and successfully loaded skills from the current session only', async () => {
+    await publish([]);
+    const store = getSyncChildStores().getChild(directory);
+    if (!store) throw new Error('Expected directory store');
+    const assistant: AssistantMessage = {
+      id: 'assistant', sessionID: sessionId, role: 'assistant', time: { created: 1 }, agent: 'build', providerID: 'provider', modelID: 'model',
+    };
+    const activated: Message = {
+      id: 'activated', sessionID: sessionId, role: 'skill', time: { created: 2 }, skill: 'compliance', name: 'Compliance guide', text: 'private-skill-content',
+    };
+    const skillCall = (id: string, state: ToolState): Part => ({
+      id, type: 'tool', callID: id, tool: 'skill', messageID: assistant.id, sessionID: sessionId, state,
+    });
+    const completed: ToolState = { status: 'completed', input: { id: 'review' }, metadata: { name: 'Review guide' }, output: 'private-skill-content', time: { start: 1, end: 2 } };
+    await act(async () => store.setState({
+      message: {
+        [sessionId]: [assistant, activated],
+        unrelated: [{ ...activated, id: 'other-activation', sessionID: 'unrelated', skill: 'other', name: 'Other session skill' }],
+      },
+      part: {
+        [assistant.id]: [
+          skillCall('loaded', completed),
+          skillCall('duplicate', { ...completed, input: { id: 'compliance' }, metadata: {} }),
+          skillCall('pending', { status: 'pending', input: { id: 'pending-skill' }, raw: '' }),
+          skillCall('failed', { status: 'error', input: { id: 'failed-skill' }, error: 'Missing', time: { start: 1, end: 2 } }),
+        ],
+      },
+    }));
+    expect(presence.get('context-sources')).toBe(true);
+    expect(container.textContent).toContain('Review guide');
+    expect(container.textContent?.match(/Compliance guide/g)).toHaveLength(1);
+    expect(container.textContent).not.toContain('Other session skill');
+    expect(container.textContent).not.toContain('pending-skill');
+    expect(container.textContent).not.toContain('failed-skill');
+    expect(container.textContent).not.toContain('private-skill-content');
   });
 
   test('an unpinned linked plan alone keeps context visible and pinned duplicates render once', async () => {

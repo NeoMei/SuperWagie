@@ -121,7 +121,7 @@ for (const mobile of [false, true]) {
 }
 test('keeps the mobile branch picker anchored on tablets', () => checkBranchSelection(true, true));
 
-test('offers going back to the detected base once one was chosen', async () => {
+test('shows remote default branches first and still offers returning to the detected base', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const globals = {
@@ -146,7 +146,8 @@ test('offers going back to the detected base once one was chosen', async () => {
   function Harness() {
     const [chosen, setChosen] = useState<string | null>(null);
     return <BranchComparisonSelector
-      branches={['feature', 'main', 'remotes/origin/main']}
+      branches={['feature', 'main', 'remotes/upstream/aaa', 'remotes/upstream/develop', 'remotes/origin/aaa', 'remotes/origin/main']}
+      defaultBranches={{ origin: 'main', upstream: 'develop', archived: 'missing' }}
       currentBranch="feature"
       base={chosen ?? 'origin/main'}
       automatic={chosen === null}
@@ -169,6 +170,14 @@ test('offers going back to the detected base once one was chosen', async () => {
     await act(async () => root.render(<I18nProvider><Harness /></I18nProvider>));
     expect(trigger().textContent).toContain('origin/main');
     await act(async () => trigger().click());
+    expect(Array.from(document.querySelectorAll('[cmdk-item]'), (element) => element.getAttribute('data-value'))).toEqual([
+      'automatic',
+      'refs/remotes/origin/main',
+      'refs/remotes/upstream/develop',
+      'refs/heads/main',
+      'refs/remotes/origin/aaa',
+      'refs/remotes/upstream/aaa',
+    ]);
     expect(item('automatic').textContent).toContain('Automatic');
     expect(checked('automatic')).toBe(true);
     expect(checked('refs/remotes/origin/main')).toBe(false);

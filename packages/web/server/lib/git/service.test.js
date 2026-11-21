@@ -38,6 +38,7 @@ import {
   stashPush,
   stashApply,
   listStashes,
+  countStashFiles,
   getWorktrees,
   setWorktreeTaskTitle,
   seedBranchTaskTitle,
@@ -6119,6 +6120,30 @@ describe('getCheckedOutBranch', () => {
 });
 
 describe('carry path validation and stashing', () => {
+  it('counts untracked-only and mixed stashes', async () => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    const trackedFile = path.join(repo, 'tracked.txt');
+    fs.writeFileSync(trackedFile, 'original\n');
+    runGit(repo, ['add', '.']);
+    runGit(repo, ['commit', '-m', 'Add tracked fixture']);
+    fs.mkdirSync(path.join(repo, 'data'));
+    fs.writeFileSync(path.join(repo, 'data', '报价.txt'), 'untracked\n');
+    await stashPush(repo, { message: 'Untracked only' });
+    fs.writeFileSync(trackedFile, 'edited\n');
+    fs.writeFileSync(path.join(repo, '报价.txt'), 'untracked\n');
+    await stashPush(repo, { message: 'Tracked and untracked' });
+    const [mixed, untracked] = await listStashes(repo);
+
+    await expect(countStashFiles(repo, [mixed.ref, untracked.ref])).resolves.toEqual({
+      [mixed.ref]: 2,
+      [untracked.ref]: 1,
+    });
+  });
+
   it('checks literal paths from the session directory and stashes absolute paths from the root', async () => {
     if (!canRunGit()) return;
     const repo = createTempDir();

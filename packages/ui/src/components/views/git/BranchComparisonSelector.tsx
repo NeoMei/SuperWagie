@@ -7,12 +7,14 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useI18n } from '@/lib/i18n';
 import { useTabletLayout } from '@/lib/device';
+import type { GitBranch } from '@/lib/api/types';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn } from '@/lib/utils';
 import { branchRefLabel } from './baseBranch';
 
 interface BranchComparisonSelectorProps {
   branches: readonly string[];
+  defaultBranches?: GitBranch['defaultBranches'];
   currentBranch: string | null;
   base: string | null;
   onSelect: (ref: string) => void;
@@ -23,13 +25,20 @@ interface BranchComparisonSelectorProps {
   mobile?: boolean;
 }
 
-export function BranchComparisonSelector({ branches, currentBranch, base, onSelect, automatic = false, onSelectAutomatic, mobile = false }: BranchComparisonSelectorProps) {
+export function BranchComparisonSelector({ branches, defaultBranches, currentBranch, base, onSelect, automatic = false, onSelectAutomatic, mobile = false }: BranchComparisonSelectorProps) {
   const { t } = useI18n();
   const tabletLayout = useTabletLayout();
   const useSheet = mobile && !tabletLayout.enabled;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const label = base ? branchRefLabel(base) : t('gitView.pr.field.baseBranch');
+
+  const defaultRefs = new Set(Object.entries(defaultBranches ?? {}).map(([remote, branch]) => `remotes/${remote}/${branch}`));
+  const availableBranches = open ? [...new Set(branches)].filter((name) => name !== currentBranch).sort() : [];
+  const orderedBranches = [
+    ...availableBranches.filter((name) => defaultRefs.has(name)),
+    ...availableBranches.filter((name) => !defaultRefs.has(name)),
+  ];
 
   const changeOpen = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -79,10 +88,7 @@ export function BranchComparisonSelector({ branches, currentBranch, base, onSele
         )}
         <CommandGroup>
           {open && rankByQuery(
-            [...new Set(branches)]
-              .filter((name) => name !== currentBranch)
-              .sort()
-              .map((name) => ({
+            orderedBranches.map((name) => ({
                 ref: name.startsWith('remotes/') ? `refs/${name}` : `refs/heads/${name}`,
                 label: branchRefLabel(name),
               })),

@@ -46,6 +46,8 @@ import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useChatColumnActions } from './chatColumnSession';
+import { MessageSelectionContext } from './message/useTranscriptMessageSelection';
+import { Icon } from '@/components/icon/Icon';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -128,6 +130,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     reviewTransferDirection = null,
 }) => {
     const { t } = useI18n();
+    const messageSelection = React.useContext(MessageSelectionContext);
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const alwaysShowMessageActions = isMobile || isTablet;
     const canPinIntoContext = !isVSCodeRuntime();
@@ -542,6 +545,19 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         }));
     }, [guestActionEntries, isUser, sessionId, t]);
 
+    const canSelectMessage = Boolean(messageSelection && hasTextContent && !assistantErrorText);
+    const selectionModeActive = Boolean(messageSelection?.ids);
+    const startMessageSelection = messageSelection?.start;
+    const messageActions = React.useMemo<MessageExtraAction[] | undefined>(() => {
+        if (!canSelectMessage || selectionModeActive || !startMessageSelection) return guestMessageActions;
+        return [{
+            id: 'select-messages',
+            label: t('chat.messageSelection.start'),
+            icon: <Icon name="checkbox-multiple" className="size-3.5" />,
+            onSelect: () => startMessageSelection(message.info.id),
+        }, ...(guestMessageActions ?? [])];
+    }, [canSelectMessage, guestMessageActions, message.info.id, selectionModeActive, startMessageSelection, t]);
+
     // NEW: Fork handler
     const handleFork = React.useCallback(() => {
         if (!sessionId || !message.info.id) return;
@@ -611,7 +627,21 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 data-message-row={slice ? `${slice.index}/${slice.count}` : undefined}
                 ref={messageContainerRef}
             >
-                <div className="chat-message-column relative">
+                <div className={cn('chat-message-column relative', canSelectMessage && selectionModeActive && 'ps-10!')}>
+                    {canSelectMessage && !sliceName && messageSelection?.ids && (
+                        <label data-export-ignore="" className="absolute start-0 top-0 z-10 flex size-8 cursor-pointer items-center justify-center">
+                            <input
+                                type="checkbox"
+                                aria-label={t('chat.messageSelection.toggle')}
+                                checked={messageSelection.ids.has(message.info.id)}
+                                onChange={() => undefined}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    messageSelection.toggle(message.info.id, event.shiftKey);
+                                }}
+                            />
+                        </label>
+                    )}
                     {isUser ? (
                         visibleParts.length === 0 ? null : (
                             <FadeInOnReveal
@@ -666,7 +696,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
                                                 errorResponseBody={assistantErrorResponseBody}
-                                                extraActions={guestMessageActions}
+                                                extraActions={messageActions}
                                                 promptOrigin={promptOrigin}
                                             />
                                         </div>
@@ -703,7 +733,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                         errorMessage={assistantErrorText}
                                         errorResponseBody={assistantErrorResponseBody}
                                         userMessagePart="actions"
-                                        extraActions={guestMessageActions}
+                                        extraActions={messageActions}
                                     />
                                 </div>
                             </FadeInOnReveal>
@@ -748,7 +778,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 footerModelName={headerModelName}
                                 footerAgentName={headerAgentName}
                                 footerVariant={headerVariant}
-                                extraActions={guestMessageActions}
+                                extraActions={messageActions}
                             />
 
                         </div>

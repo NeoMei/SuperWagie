@@ -30,6 +30,93 @@ plugin({
 const { default: MessageList } = await import('./MessageList');
 const { MarkdownContent } = await import('./MarkdownRendererImpl');
 
+test('message actions can enter transcript selection and copy a shift range in order', async () => {
+    const dom = new Window({ url: 'https://app.test' });
+    const copied: string[] = [];
+    Object.defineProperty(dom, 'innerWidth', { value: 390 });
+    Object.defineProperties(dom.navigator, {
+        clipboard: { value: { writeText: async (text: string) => { copied.push(text); } } },
+        maxTouchPoints: { value: 1 },
+    });
+    Object.defineProperties(dom.HTMLElement.prototype, {
+        clientHeight: { configurable: true, get: () => 800 },
+        clientWidth: { configurable: true, get: () => 800 },
+    });
+    dom.HTMLElement.prototype.getBoundingClientRect = () => new dom.DOMRect(0, 0, 800, 32);
+    const values = {
+        window: dom, document: dom.document, navigator: dom.navigator, HTMLElement: dom.HTMLElement, Element: dom.Element,
+        Node: dom.Node, DOMRect: dom.DOMRect, Event: dom.Event, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
+        getComputedStyle: dom.getComputedStyle.bind(dom), ResizeObserver: dom.ResizeObserver, MutationObserver: dom.MutationObserver,
+        requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
+        localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true,
+    };
+    const previous = Object.keys(values).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+    for (const [name, value] of Object.entries(values)) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () => new Promise(() => {});
+    const sdk = OpenCode.make({ baseUrl: 'https://timeline.test', fetch: () => new Promise<Response>(() => {}) });
+    const sessionId = 'message-selection';
+    const directory = '/repo';
+    const records: ChatMessageEntry['info'][] = [
+        { id: 'first', sessionID: sessionId, role: 'user', time: { created: 1 } },
+        { id: 'second', sessionID: sessionId, role: 'assistant', agent: 'build', providerID: 'mock', modelID: 'mock', finish: 'stop', time: { created: 2, completed: 3 } },
+        { id: 'third', sessionID: sessionId, role: 'user', time: { created: 4 } },
+    ];
+    const messages: ChatMessageEntry[] = records.map((info) => ({
+        info, parts: [{ id: `${info.id}-text`, sessionID: sessionId, messageID: info.id, type: 'text', text: `**${info.id}**` }],
+    }));
+    const unavailable = (): never => { throw new Error('Message selection must work without runtime I/O'); };
+    const runtime: RuntimeAPIs = {
+        runtime: { platform: 'web', isDesktop: false, isVSCode: false },
+        get terminal() { return unavailable(); }, get git() { return unavailable(); },
+        get files() { return unavailable(); }, get settings() { return unavailable(); },
+        get permissions() { return unavailable(); }, get notifications() { return unavailable(); },
+        get sourceControl() { return unavailable(); },
+    };
+    const host = document.createElement('div'); document.body.append(host);
+    const root = createRoot(host);
+    const openMenu = async () => {
+        const menu = host.querySelector<HTMLElement>('[data-message-id="first"] button[aria-label="More actions"]');
+        if (!menu) throw new Error('First prompt has no message actions');
+        await act(async () => { menu.click(); });
+    };
+    const byText = (selector: string, text: string) => [...document.querySelectorAll<HTMLElement>(selector)]
+        .find((element) => element.textContent?.trim() === text);
+    const renderSession = (id: string, entries: ChatMessageEntry[]) => act(async () => root.render(
+        <RuntimeAPIContext.Provider value={runtime}><ThemeSystemProvider><SyncProvider sdk={sdk} directory={directory}><I18nProvider>
+            <ChatColumnSessionContext.Provider value={{ sessionId: id, directory }}>
+                <MessageList sessionKey={id} directory={directory} messages={entries} isLoadingOlder={false} />
+            </ChatColumnSessionContext.Provider>
+        </I18nProvider></SyncProvider></ThemeSystemProvider></RuntimeAPIContext.Provider>,
+    ));
+    try {
+        await renderSession(sessionId, messages);
+        await openMenu();
+        const select = byText('[role="menuitem"], [role="dialog"] button', 'Select messages');
+        expect(select).toBeDefined();
+        await act(async () => { select?.click(); });
+        const third = host.querySelector<HTMLElement>('[data-message-id="third"] input[type="checkbox"]');
+        expect(third).not.toBeNull();
+        await act(async () => { third?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })); });
+        const copy = byText('button', 'Copy as Markdown');
+        expect(copy).toBeDefined();
+        await act(async () => { copy?.click(); });
+        expect(copied).toHaveLength(1);
+        expect(copied[0].match(/\*\*(first|second|third)\*\*/g)).toEqual(['**first**', '**second**', '**third**']);
+        expect(host.querySelector('button[aria-label="Save as image"]')).not.toBeNull();
+        await renderSession('another-session', []);
+        await renderSession(sessionId, messages);
+        expect(host.querySelector('input[type="checkbox"]')).toBeNull();
+    } finally {
+        await act(async () => root.unmount());
+        globalThis.fetch = originalFetch;
+        for (const [name, descriptor] of previous) {
+            if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);
+        }
+        await dom.happyDOM.close();
+    }
+});
+
 test('an omitted command continuation navigates to its owner row and keeps one source anchor', async () => {
     const dom = new Window({ url: 'https://app.test' });
     const frames = new Map<number, FrameRequestCallback>();

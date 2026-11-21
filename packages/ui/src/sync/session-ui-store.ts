@@ -12,6 +12,10 @@
  * SDK-calling actions that need domain data read it from sync-refs.
  */
 
+import { needsImagePathFallback, prepareTextModelImagePaths } from "@/components/chat/composer/attachments/attachmentSubmission"
+import { normalizeDroppedPath } from "@/components/chat/composer/attachments/filePaths"
+import { attachmentBasename, attachmentWireName } from "@/lib/attachmentIdentity"
+import type { ComposerSendProgress } from "@/lib/unconfirmedSends"
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { create } from "zustand"
 import { isSameModelRef, toModelRef, type Metadata, type ModelRef, type Part, type Session, type TextPart } from "@/lib/opencode/model"
@@ -26,7 +30,6 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
-import { attachmentWireName } from "@/lib/attachmentIdentity"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
@@ -80,6 +83,7 @@ import {
   unarchiveSessions as unarchiveSessionsAction,
   updateSessionTitle as updateSessionTitleAction,
   optimisticSend,
+  waitForPendingRevert,
   refetchSessionMessages,
   revertToMessage as revertToMessageAction,
   forkFromMessage as forkFromMessageAction,
@@ -175,6 +179,12 @@ export async function resolveSendSelection(
   }
 }
 
+export class ImagePathPreparationError extends Error {
+  constructor(public readonly filenames: readonly string[]) {
+    super("Could not prepare image attachment paths")
+  }
+}
+
 export async function routeMessage(params: {
   runtimeKey?: string
   sessionId: string
@@ -200,6 +210,8 @@ export async function routeMessage(params: {
   ready?: Promise<void>
   /** Runs right before the request that starts the turn leaves (the gate on a session's first send). */
   beforeSend?: () => void
+  progress?: (event: ComposerSendProgress) => void
+  metadata?: Metadata
   /**
    * Instructions read while `ready` settles and admitted right before the
    * request leaves, after `additionalParts`: the response style, which another
@@ -214,12 +226,18 @@ export async function routeMessage(params: {
    */
   markBusy?: boolean
 }): Promise<'command' | 'prompt' | 'shell'> {
+  const isCurrent = captureRuntimeInstance()
   const requestDirectory = params.directory ?? undefined
   // The request goes to the directory the session lives in when it leaves:
   // a session created from a draft can end up elsewhere than where its first
   // message was shown, and its record is there. The record decides, since a
   // store holding the session proves containment only.
   const sendDirectory = () => getAuthoritativeSessionDirectory(params.sessionId) ?? requestDirectory
+  const observeDispatch = (directory: string | undefined, messageId: string | null) => {
+    params.beforeSend?.()
+    const target = directory ?? opencodeClient.getDirectory()
+    if (params.progress && target) params.progress({ type: "dispatch", sessionId: params.sessionId, directory: target, messageId })
+  }
   // The session carries its own model and agent server-side. Sending them on
   // every turn would switch the session to whatever the composer happens to
   // show, so only a genuine change travels with the prompt. Resolved when the
@@ -244,9 +262,39 @@ export async function routeMessage(params: {
   }
   const contextFiles = (params.additionalParts ?? []).flatMap((part) => part.files ?? [])
   const sendFiles = [...(params.files ?? []), ...contextFiles]
+  const prepareImagePaths = async (text: string, directory: string | undefined) => {
+    // Use the profile chosen for this send, including queue and side-chat
+    // sends, and write on the runtime which owns the admitted session.
+    const inputModalities = useConfigStore.getState().getModelMetadata(params.providerID, params.modelID)?.modalities?.input
+    if (!needsImagePathFallback(inputModalities) || !sendFiles.some((file) => file.mime.toLowerCase().startsWith("image/"))) {
+      return { text, files: sendFiles }
+    }
+    const preparation = await prepareTextModelImagePaths({
+      text,
+      attachments: sendFiles.map((file) => {
+        const attachment = {
+          filePart: file,
+          filename: attachmentBasename(file.filename),
+          dataUrl: file.url,
+          mimeType: file.mime,
+        }
+        return file.url.startsWith("file://")
+          ? { ...attachment, source: "server" as const, serverPath: normalizeDroppedPath(file.url) }
+          : attachment
+      }),
+      inputModalities,
+      isCurrent,
+      write: (files) => opencodeClient.writeOpenCodeTempFiles(directory, files),
+    })
+    if (preparation.status === "retired") throw new Error("Message was not sent because the runtime changed.")
+    if (preparation.status === "failed") throw new ImagePathPreparationError(preparation.imageNames)
+    return { text: preparation.text, files: preparation.attachments.map(({ filePart }) => filePart) }
+  }
 
   if (params.inputMode === "shell") {
     await params.ready
+    const pendingRevert = waitForPendingRevert(params.sessionId, sendDirectory())
+    if (pendingRevert) await pendingRevert
     params.beforeSend?.()
     await opencodeClient.shellSession({
       runtimeKey: params.runtimeKey,
@@ -311,24 +359,28 @@ export async function routeMessage(params: {
       // Read while the session gets ready, so the request waits for neither.
       const lateContext = params.lateContext?.()
       await params.ready
+      const pendingRevert = waitForPendingRevert(params.sessionId, sendDirectory())
+      if (pendingRevert) await pendingRevert
       const commandContext = [
         ...contextItems,
         ...((await lateContext) ?? []),
         ...skillInstructionContext(),
       ]
       const selection = await sendSelection()
+      const directory = sendDirectory()
+      const delivery = await prepareImagePaths(tail.join(" "), directory)
       await opencodeClient.sendCommand({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
         model: selection.model,
         agent: selection.agent,
         command: cmdName,
-        arguments: tail.join(" "),
-        files: sendFiles,
+        arguments: delivery.text,
+        files: delivery.files,
         context: commandContext.length > 0 ? commandContext : undefined,
         delivery: params.delivery,
-        directory: sendDirectory(),
-        beforeSend: params.beforeSend,
+        directory,
+        beforeSend: () => observeDispatch(directory, null),
       })
       return 'command'
     }
@@ -360,21 +412,24 @@ export async function routeMessage(params: {
     send: async (messageID, context) => {
       const selection = await sendSelection()
       const lateContext = (await lateContextRead) ?? []
+      const directory = sendDirectory()
+      const delivery = await prepareImagePaths(params.content, directory)
       return opencodeClient.sendMessage({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
         providerID: params.providerID,
         model: selection.model,
         agent: selection.agent,
-        text: params.content,
+        text: delivery.text,
         agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
-        files: sendFiles,
+        files: delivery.files,
         context: context.length + lateContext.length > 0 ? [...context, ...lateContext] : undefined,
         delivery: params.delivery,
         messageId: messageID,
-        directory: sendDirectory(),
+        metadata: params.metadata,
+        directory,
         skills,
-        beforeSend: params.beforeSend,
+        beforeSend: () => observeDispatch(directory, messageID),
       }).then(() => {})
     },
   })
@@ -387,11 +442,15 @@ type CapturedSendTarget = {
   directory: string
 }
 
-type SendMessageOptions = {
+export type SendMessageOptions = {
   /** Explicit composer intent; automated continuations must not restore archives. */
   userInitiated?: boolean
   /** Revalidates captured request authority immediately before dispatch. */
   beforeSend?: () => void
+  progress?: (event: ComposerSendProgress) => void
+  /** Fires after a normal prompt was accepted by the session. */
+  onPromptAdmitted?: () => void
+  metadata?: Metadata
   target?: CapturedSendTarget
   sessionId?: string
   directory?: string
@@ -2172,6 +2231,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         // the chat can switch to it and show the message at once; the server
         // creates the session under this id while the message is on screen.
         const sessionId = descendingId("ses")
+        options?.progress?.({ type: "session", sessionId, directory: sessionDirectory })
         const draftAgent = saveDraftSessionSelection(sessionId, selection)
         openPendingSessionTranscript(sessionId, sessionDirectory)
         get().setCurrentSession(sessionId, sessionDirectory, "submitted-draft")
@@ -2188,6 +2248,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         const creation = (async () => {
           try {
             const createDirectory = await resolveDraftCreateDirectory(draft, sessionDirectory, assertOwner)
+            options?.progress?.({ type: "session", sessionId, directory: createDirectory ?? sessionDirectory })
             const created = await createSessionAction(
               draft.title,
               createDirectory,
@@ -2214,6 +2275,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             // The draft is a session now: it leaves the drafts every client lists.
             if (draft.workDraftId) void useSessionDraftsStore.getState().discard(draft.workDraftId, { final: true }).catch(() => undefined)
             const createdDirectory = finishDraftSession(draft, created, createDirectory) ?? sessionDirectory
+            options?.progress?.({ type: "session", sessionId, directory: createdDirectory })
             if (createdDirectory !== normalizePath(sessionDirectory)) {
               // The session lives elsewhere than where its first message was
               // shown (a start folder inside the worktree, a deleted directory
@@ -2276,6 +2338,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             skills: options?.skills,
             ready: creation,
             beforeSend: beforeFirstSend,
+            progress: options?.progress,
             lateContext: options?.lateContext,
             markBusy: false,
             additionalParts: draftParts?.map((p) => ({
@@ -2397,9 +2460,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
         : undefined
 
-      await routeMessage({
+      const route = await routeMessage({
         runtimeKey: capturedRuntimeKey,
         beforeSend: () => { assertOwner(); options?.beforeSend?.() },
+        progress: options?.progress,
+        metadata: options?.metadata,
         sessionId: targetSessionId || "",
         directory: currentSessionDirectory,
         content,
@@ -2427,6 +2492,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           })),
         })),
       })
+      if (isCurrentOwner() && route === "prompt") options?.onPromptAdmitted?.()
       if (isCurrentRuntime()) settleModelPick?.()
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
@@ -2471,8 +2537,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   revertToMessage: async (sessionId, messageId) => {
     // Ensure the complete message range is present before applying the revert
     // marker. Reverted UI is derived from session.revert + stored messages.
-    await refetchSessionMessages(sessionId)
-    await revertToMessageAction(sessionId, messageId)
+    await revertToMessageAction(sessionId, messageId, { refreshHistory: true })
   },
 
   // ---------------------------------------------------------------------------

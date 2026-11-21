@@ -54,6 +54,22 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { useOpenProjectOnBoard } from '@/components/sourceBoard/openTrackerItem';
 import { useProjectsInSidebarOrder } from '../list/useProjectsInSidebarOrder';
+import { useOpenCodeTrustPausedDirectory, useReviewOpenCodeFolder } from '@/components/projects/useOpenCodeTrustPause';
+
+const ProjectStatusContent = ({ directory, children }: { directory?: string | null; children: React.ReactNode }) => {
+  const { t } = useI18n();
+  const paused = useOpenCodeTrustPausedDirectory([directory]);
+  const review = useReviewOpenCodeFolder();
+  if (!paused) return <>{children}</>;
+  return (
+    <>
+      {t('projects.openCodeTrust.paused')}
+      <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={() => void review(paused)}>
+        {t('projects.openCodeTrust.review')}
+      </Button>
+    </>
+  );
+};
 
 type SessionProjectScrollerState = Pick<SessionGroupSectionProps,
   | 'editingId'
@@ -288,10 +304,12 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     }
     return <div className="relative py-1 text-start typography-micro text-muted-foreground" style={{ paddingInlineStart: row.flat ? FLAT_TEXT_INSET_PX : sessionTreeTextInset(row.depth ?? 0) }}>
       <span className="inline-flex flex-wrap items-center gap-1.5">
-        {row.status.state === 'loading' ? <Spinner className="size-3" /> : null}
-        {label}
-        {row.status.canGrantAccess ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={() => void grant()}>{t('sessions.sidebar.group.empty.grantAccess')}</Button> : null}
-        {row.status.state !== 'loading' ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={retry}>{t('sessions.sidebar.group.empty.retry')}</Button> : null}
+        <ProjectStatusContent directory={row.status.directory ?? row.group.directory}>
+          {row.status.state === 'loading' ? <Spinner className="size-3" /> : null}
+          {label}
+          {row.status.canGrantAccess ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={() => void grant()}>{t('sessions.sidebar.group.empty.grantAccess')}</Button> : null}
+          {row.status.state !== 'loading' ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={retry}>{t('sessions.sidebar.group.empty.retry')}</Button> : null}
+        </ProjectStatusContent>
       </span>
     </div>;
   }, [childStores, t]);

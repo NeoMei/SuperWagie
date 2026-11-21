@@ -453,20 +453,21 @@ export class SessionMessageLoader {
     store.setState(draft)
   }
 
-  initializeCreatedSession(target: SessionMessageTarget): void {
+  initializeCreatedSession(target: SessionMessageTarget, creation: "confirmed" | "pending" = "confirmed"): void {
     const normalized = this.normalizeTarget(target)
     if (!normalized || this.disposed) return
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
     const current = store.getState()
-    // The create response establishes an empty transcript, but events or a
-    // prompt may already have materialized a newer snapshot while it travelled.
-    if (current.message[normalized.sessionID] !== undefined) return
     const entry = this.getEntry(normalized)
+    const messages = current.message[normalized.sessionID]
+    // A confirmed create starts this transcript, including any first message
+    // that arrived before the reply. Keep an existing history window intact.
+    if (messages && (creation === "pending" || entry.historyCoverage?.store === store)) return
     this.bumpGeneration(entry)
     entry.inflight = null
     entry.verifiedEpoch = this.historyEpoch
     entry.historyCoverage = { store, epoch: this.historyEpoch, isCurrentRuntime: captureRuntimeInstance() }
-    store.setState({ message: { ...current.message, [normalized.sessionID]: [] } })
+    if (!messages) store.setState({ message: { ...current.message, [normalized.sessionID]: [] } })
     this.patchEntry(entry, {
       status: "ready",
       loadingKind: null,
@@ -491,9 +492,11 @@ export class SessionMessageLoader {
       historyCovered: this.coversHistory(normalized),
     })
     if (options?.reason !== "prefetch") this.touchSessionCache(normalized)
-    // Messages that arrived by event after an eviction are renderable but are
-    // not history coverage: the earlier transcript must be fetched again.
-    if (!options?.force && materialization.renderable && !entry.evicted) {
+    // A previously read transcript can render while a gap revalidates it.
+    // Live events alone can render, but opening that chat still needs history.
+    const previouslyRead = entry.historyCoverage?.store === store && entry.historyCoverage.isCurrentRuntime()
+    if (!options?.force && materialization.renderable && !entry.evicted
+      && (previouslyRead || options?.reason === "prefetch")) {
       if (!entry.snapshot.resolved) {
         this.patchEntry(entry, {
           status: "ready",
@@ -773,7 +776,7 @@ export class SessionMessageLoader {
     return normalized ? this.getEntry(normalized).snapshot : EMPTY_SESSION_MESSAGE_LOAD_STATE
   }
 
-  /** A server-read window or confirmed empty creation retained by this exact owner. */
+  /** A server-read window or initialized new transcript retained by this exact owner. */
   coversHistory(target: SessionMessageTarget): boolean {
     const normalized = this.normalizeTarget(target)
     if (!normalized) return false
@@ -1256,7 +1259,7 @@ export class SessionMessageLoader {
       { mode: mode === "prepend" ? "prepend" : "merge" },
     )
     if (!isCurrent()) return null
-    noteQuestionToolSnapshot(target.directory, target.sessionID, materialized.part)
+    noteQuestionToolSnapshot(target.directory, target.sessionID, materialized.part, page.session)
     // Records the page made redundant were removed before materializing;
     // that removal is a change even when the page itself changes nothing.
     const messagesChanged = materialized.messagesChanged || state.message !== current.message
