@@ -18,7 +18,7 @@ import { Decoration, Direction, EditorView, WidgetType, type DecorationSet } fro
 
 import { CHIP_TRAILING_PUNCTUATION, INLINE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS, SKILL_CHIP_ICON_HREF } from '@/lib/messages/inlineMessageLinks';
 import { getFileTypeIconHref } from '@/lib/fileTypeIcons';
-import { findAttachmentCitationRanges } from '../../attachmentCitations';
+import { findAttachmentCitationRanges, findLocalImagePathCitationRanges } from '../../attachmentCitations';
 import { resolveHighlightSegments, DEFAULT_HIGHLIGHT_CLASS, type HighlightRange } from '../../composerHighlight';
 import { findWebLinks } from '../referenceLinks';
 import { findSessionLinks, sessionLinkKey } from '@/lib/sessionLinks';
@@ -182,9 +182,15 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
             const filename = text.slice(range.start + 1, range.end - 1).trim();
             chips.push({
                 ...range,
-                widget: new ReferenceChipWidget(filename, filename, getFileTypeIconHref(filename, { themeVariant })),
+                widget: new ReferenceChipWidget(filename, filename, getFileTypeIconHref(filename, { themeVariant }), context.attachmentOpen?.get(filename)),
             });
         }
+    }
+
+    for (const { start, end, filename } of findLocalImagePathCitationRanges(text)) {
+        chips.push({ start, end, widget: new ReferenceChipWidget(
+            filename, filename, getFileTypeIconHref(filename, { themeVariant }), context.attachmentOpen?.get(filename),
+        ) });
     }
 
     if (text.includes('@')) {

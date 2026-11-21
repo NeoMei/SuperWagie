@@ -13,7 +13,7 @@ import { PastedReferences } from './pastedReferences';
 
 const EMPTY_REFERENCES: ReadonlyMap<string, ComposerReference> = new Map();
 
-export function usePastedReferences(options: { directory: string | null; scopeKey: string | null; enabled: boolean; text: () => string; remove: (link: string) => void }) {
+export function usePastedReferences(options: { directory: string | null; scopeKey: string | null; enabled: boolean; anchoredReferences?: readonly ComposerReference[]; text: () => string; remove: (link: string) => void }) {
     const { t } = useI18n();
     const translate = React.useRef(t);
     translate.current = t;
@@ -53,10 +53,18 @@ export function usePastedReferences(options: { directory: string | null; scopeKe
     const references = published?.scope === scope ? published.references : EMPTY_REFERENCES;
     const [preview, setPreview] = React.useState<{ scope: typeof scope; reference: ComposerReference; link: string } | null>(null);
     const closePreview = () => setPreview(null);
-    const chips = React.useMemo(() => new Map([...references].map(([link, reference]) =>
-        [link, { ...referenceLinkChip(reference, repositoryUrls), open: () => {
-            if (activeScope.current === scope && scope.runtime()) setPreview({ scope, reference, link });
-        } }] as const)), [references, repositoryUrls, scope]);
+    const chips = React.useMemo(() => {
+        const entries = new Map(references);
+        for (const reference of options.anchoredReferences ?? []) {
+            if (reference.composerAnchor) entries.set(reference.composerAnchor, reference);
+        }
+        return new Map([...entries].map(([link, reference]) => [link, {
+            ...referenceLinkChip(reference, repositoryUrls),
+            open: () => {
+                if (activeScope.current === scope && scope.runtime()) setPreview({ scope, reference, link });
+            },
+        }] as const));
+    }, [options.anchoredReferences, references, repositoryUrls, scope]);
     const currentPreview = preview?.scope === scope && scope.runtime() ? preview : null;
     return { manager, chips, preview: currentPreview?.reference ?? null, closePreview, removePreview: () => {
         if (currentPreview && activeScope.current === scope && scope.runtime()) remove.current(currentPreview.link);

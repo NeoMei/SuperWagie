@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import type { FormRequest, ModelSelection, Session, SessionStatus } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
 import type { MessagePage } from "@/lib/opencode/client"
+import type { ComposerSendProgress } from "@/lib/unconfirmedSends"
 import { getRuntimeKey, getRuntimeApiBaseUrl, switchRuntimeEndpoint } from "@/lib/runtime-switch"
 import { createPendingDraftWorktreeRequest, resolvePendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { useConfigStore } from "@/stores/useConfigStore"
@@ -10,7 +11,7 @@ import { ChildStoreManager } from "./child-store"
 import { sendRecoveredFormAnswer, setActionRefs, setOptimisticRefs } from "./session-actions"
 import { applyRecoverableQuestionEvents, noteQuestionFormSnapshot, resetRecoverableQuestions } from "./recoverable-questions"
 import { SessionMessageLoader, setImperativeSessionMessageLoader, type SessionMessagePageSource } from "./session-message-loader"
-import { DraftSendError, useSessionUIStore, type NewSessionDraftState, type PendingDraftSend } from "./session-ui-store"
+import { DraftSendError, ImagePathPreparationError, routeMessage, useSessionUIStore, type NewSessionDraftState, type PendingDraftSend } from "./session-ui-store"
 import { setSyncRefs } from "./sync-refs"
 
 // The first message of a new session, sent from the draft. The real stores,
@@ -207,7 +208,75 @@ const startDraftSend = async (draftId: number, content = "hello", inputMode: "no
   return { draft, sending, sessionId }
 }
 
+test("routes image paths using the captured model and authoritative session directory", async () => {
+  const target = { ...sessionRecord("ses_route_image", "/actual"), model: { providerID: "provider", id: "text-only" } }
+  childStores.ensureChild("/actual", { bootstrap: false }).setState({ session: [target] })
+  const getMetadata = useConfigStore.getState().getModelMetadata
+  const originalWrite = opencodeClient.writeOpenCodeTempFiles
+  const originalSend = opencodeClient.sendMessage
+  const checkedModels: string[][] = []
+  const writes: Array<{ directory: string | null | undefined; files: Array<{ filename: string; bytes: Uint8Array }> }> = []
+  const delivered: Array<Parameters<typeof opencodeClient.sendMessage>[0]> = []
+  useConfigStore.setState({
+    currentModelId: "some-vision-model",
+    getModelMetadata: (provider, model) => {
+      checkedModels.push([provider, model])
+      return { id: model, name: model, providerId: provider, modalities: { input: ["text"] } }
+    },
+  })
+  opencodeClient.writeOpenCodeTempFiles = async (directory, files) => {
+    writes.push({ directory, files })
+    return [{ filename: "shot.png", path: "/actual/tmp/shot.png" }]
+  }
+  opencodeClient.sendMessage = async (params) => { delivered.push(params); return "msg_route" }
+  const params = {
+    sessionId: target.id, directory: DIRECTORY, content: "Review [shot.png]",
+    providerID: "provider", modelID: "text-only",
+    files: [{ type: "file" as const, mime: "image/png", filename: "shot.png", url: "data:image/png;base64,AQID" }],
+  }
+  try {
+    await routeMessage(params)
+    expect(checkedModels).toContainEqual(["provider", "text-only"])
+    expect(writes.map(({ directory, files }) => [directory, files.map(({ filename, bytes }) => [filename, [...bytes]])]))
+      .toEqual([["/actual", [["shot.png", [1, 2, 3]]]]])
+    expect(delivered[0]).toMatchObject({ text: "Review [shot.png](/actual/tmp/shot.png)", files: [], directory: "/actual" })
+    opencodeClient.writeOpenCodeTempFiles = async () => [{ filename: "shot.png", error: new Error("offline") }]
+    await expect(routeMessage(params)).rejects.toBeInstanceOf(ImagePathPreparationError)
+    expect(delivered).toHaveLength(1)
+  } finally {
+    useConfigStore.setState({ getModelMetadata: getMetadata })
+    opencodeClient.writeOpenCodeTempFiles = originalWrite
+    opencodeClient.sendMessage = originalSend
+  }
+})
+
 describe("the first message of a draft", () => {
+  test("reports the created session and only records prompt dispatch when the request leaves", async () => {
+    const draft = openDraft(101)
+    const progress: ComposerSendProgress[] = []
+    let submittedMessageId: string | undefined
+    opencodeClient.sendMessage = async (params) => {
+      expect(progress.every((event) => event.type === "session")).toBe(true)
+      submittedMessageId = params.messageId
+      params.beforeSend?.()
+      return submittedMessageId ?? "unexpected"
+    }
+    useSessionUIStore.setState({ newSessionDraft: draft, currentSessionId: null, currentSessionDirectory: null })
+    const sending = useSessionUIStore.getState().sendMessage("hello", "provider", "model", "build", undefined, undefined, undefined, undefined, "normal", {
+      userInitiated: true,
+      draftSnapshot: draft,
+      progress: (event) => { progress.push(event) },
+    })
+    await flush()
+    const sessionId = useSessionUIStore.getState().currentSessionId
+    expect(progress[0]).toEqual({ type: "session", sessionId, directory: DIRECTORY })
+    expect(progress.some((event) => event.type === "dispatch")).toBe(false)
+    creation.resolve()
+    await sending
+    expect(submittedMessageId).toMatch(/^msg_/)
+    expect(progress.at(-1)).toEqual({ type: "dispatch", sessionId, directory: DIRECTORY, messageId: submittedMessageId })
+  })
+
   test("shows in the selected session before the server answers, then goes out on the session's own model", async () => {
     const { sending, sessionId } = await startDraftSend(1)
     const state = useSessionUIStore.getState()

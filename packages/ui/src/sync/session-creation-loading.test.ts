@@ -81,8 +81,12 @@ describe("confirmed session creation", () => {
     }
 
     await createSession(undefined, "/requested")
+    const target = { directory: session.directory, sessionID: session.id }
+    await loader.ensure(target, { reason: "reactive" })
 
     expect(requests).toBe(0)
+    expect(loader.coversHistory(target)).toBe(true)
+    expect(loader.getSnapshot(target).status).toBe("ready")
     expect(store.getState().session).toEqual([newerSession])
     expect(store.getState().message[session.id]).toEqual([record])
   })

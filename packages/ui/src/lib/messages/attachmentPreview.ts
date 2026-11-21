@@ -100,11 +100,21 @@ type AttachmentFile = { mime?: string; url?: string; filename?: string };
 
 const isFileUrl = (url: string): boolean => url.toLowerCase().startsWith('file://');
 
+function hasInlinePdfHeader(url: string): boolean {
+    const prefix = 'data:application/pdf;base64,';
+    if (!url.startsWith(prefix)) return false;
+    try {
+        return atob(url.slice(prefix.length, prefix.length + 8)).startsWith('%PDF-');
+    } catch {
+        return false;
+    }
+}
+
 /**
  * What opening an attachment of a sent message does:
  * - `external`: an issue or PR reference opens its page.
  * - `popup`: an image opens the image viewer with the message's other images,
- *   text sent inline (a pasted text, a picked text file) opens the text dialog.
+ *   inline text or PDFs open in the corresponding dialog.
  * - `file`: a file attached by path (`file://`, VS Code attachments and
  *   `@` mentions) opens in the app's file viewer, or the editor in VS Code.
  */
@@ -122,7 +132,7 @@ const imageGalleryOf = (files: readonly AttachmentFile[]) => files.flatMap((part
 /**
  * Resolves what clicking `file` opens; `files` are the message's attachments,
  * the gallery an image opens in. Null when there is nothing the app can show:
- * a PDF or other binary sent inline, a folder, text that does not decode.
+ * an unsupported binary sent inline, a folder, or invalid text.
  */
 export const resolveAttachmentOpenTarget = (
     file: AttachmentFile | undefined,
@@ -159,6 +169,10 @@ export const resolveAttachmentOpenTarget = (
                 },
             },
         };
+    }
+
+    if (mime === 'application/pdf' && hasInlinePdfHeader(file.url)) {
+        return { kind: 'popup', popup: { open: true, title: filename, content: '', pdf: { dataUrl: file.url } } };
     }
 
     if (!isTextLikeFile(file)) return null;

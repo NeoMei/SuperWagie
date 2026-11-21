@@ -65,7 +65,7 @@ let promptsStatus = 200;
 spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   const url = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/');
   if (url.pathname === '/api/session-warming') return Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] });
-  if (url.pathname === '/api/config') return Response.json([]);
+  if (url.pathname === '/api/config' || url.pathname === '/api/project') return Response.json([]);
   if (url.pathname === '/api/fs/raw') {
     fileReads.push(url);
     const content = rawFileContents.get(url.searchParams.get('path') ?? '');
@@ -106,6 +106,7 @@ plugin({
 const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { EditorView } = await import('@codemirror/view');
+const { isolateHistory, undo } = await import('@codemirror/commands');
 const { I18nProvider } = await import('@/lib/i18n');
 const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
@@ -115,6 +116,8 @@ const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useSessionUIStore, DraftSendError } = await import('@/sync/session-ui-store');
 const { useInputStore } = await import('@/sync/input-store');
+const { getSyncChildStores } = await import('@/sync/sync-refs');
+const { useMessageQueueStore } = await import('@/stores/messageQueueStore');
 const { toast } = await import('@/components/ui');
 const { OpenCode } = await import('@opencode/client');
 
@@ -171,7 +174,7 @@ afterAll(() => {
 });
 
 /** Mounts the composer, types `text`, submits it and returns the editor text afterwards. */
-const submitInComposer = async (text: string): Promise<string> => {
+const submitInComposer = async (text: string, beforeSubmit?: (view: InstanceType<typeof EditorView>, form: HTMLFormElement) => Promise<void>): Promise<string> => {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -199,7 +202,9 @@ const submitInComposer = async (text: string): Promise<string> => {
       // Replaces the whole draft: a draft an earlier send gave back is restored on mount.
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, userEvent: 'input.type' });
     });
+    if (beforeSubmit) await beforeSubmit(view, form);
     await act(async () => {
+      useConfigStore.setState({ isConnected: true, hasEverConnected: true });
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       await new Promise((resolve) => setTimeout(resolve, 300));
     });
@@ -217,6 +222,178 @@ test("sends the command with the prompts that apply in the session's directory",
   expect(sent).toHaveLength(1);
   expect(sent[0].content).toBe('Project review');
   expect(sent[0].synthetic).toContain('Project review rules');
+});
+
+for (const readOutcome of ['loaded', 'failed', 'queued'] as const) {
+  test(`submit during attachment intake handles a ${readOutcome} image`, async () => {
+    const submissions: { via: 'send' | 'queue'; text: string; files: string[] }[] = [];
+    const withImage = { via: readOutcome === 'queued' ? 'queue' : 'send', text: '[review.png] Review this image.', files: ['review.png'] };
+    useSessionUIStore.setState({ sendMessage: async (text, _provider, _model, _agent, attachments) => {
+      submissions.push({ via: 'send', text, files: (attachments ?? []).map((file) => file.filename) });
+    } });
+    const previousQueue = useMessageQueueStore.getState();
+    useMessageQueueStore.setState({
+      followUpBehavior: 'queue',
+      addToQueue: async (_target, { content, text, attachments }) => {
+        submissions.push({ via: 'queue', text: text ?? content, files: (attachments ?? []).map((file) => file.filename) });
+      },
+    });
+    const previousReader = Object.getOwnPropertyDescriptor(globalThis, 'FileReader');
+    let finishRead: (() => void) | undefined;
+    class DeferredImageReader {
+      result = 'data:image/png;base64,AQID';
+      error = new Error('Image could not be read');
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL() {
+        finishRead = () => readOutcome === 'failed' ? this.onerror?.() : this.onload?.();
+      }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: DeferredImageReader });
+    try {
+      await submitInComposer('Review this image.', async (view, form) => {
+        const image = new File([new Uint8Array([1, 2, 3])], 'review.png', { type: 'image/png' });
+        if (readOutcome === 'queued') {
+          await act(async () => {
+            getSyncChildStores().update(WORKTREE, () => ({ session_status: { ses_feature: { type: 'busy' } } }));
+          });
+        }
+        await act(async () => {
+          useConfigStore.setState({ isConnected: true, hasEverConnected: true });
+          const drop = new Event('drop', { bubbles: true, cancelable: true });
+          Object.defineProperty(drop, 'dataTransfer', { value: { types: ['Files'], files: [image], items: [], getData: () => '' } });
+          view.contentDOM.dispatchEvent(drop);
+          form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+          form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        });
+        if (!finishRead) throw new Error('The image did not start reading');
+        expect(submissions).toEqual([]);
+        await act(async () => {
+          finishRead?.();
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+        expect(submissions).toEqual(readOutcome === 'failed' ? [] : [withImage]);
+        if (readOutcome === 'failed') expect(view.state.doc.toString()).toBe('Review this image.');
+      });
+      expect(submissions).toEqual(readOutcome === 'failed'
+        ? [{ via: 'send', text: 'Review this image.', files: [] }]
+        : [withImage]);
+    } finally {
+      useMessageQueueStore.setState({ addToQueue: previousQueue.addToQueue, followUpBehavior: previousQueue.followUpBehavior });
+      if (previousReader) Object.defineProperty(globalThis, 'FileReader', previousReader);
+      else Reflect.deleteProperty(globalThis, 'FileReader');
+      useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() });
+    }
+  });
+}
+
+for (const entry of ['picker', 'drop', 'paste'] as const) {
+  test(`${entry} adds an inline file whose editor deletion and undo control delivery`, async () => {
+    const sentFiles: string[][] = [];
+    useSessionUIStore.setState({ sendMessage: async (_text, _provider, _model, _agent, attachments) => {
+      sentFiles.push((attachments ?? []).map((file) => file.filename));
+    } });
+    const previousReader = Object.getOwnPropertyDescriptor(globalThis, 'FileReader');
+    class AttachmentFileReader {
+      result: string | null = null;
+      onload: (() => void) | null = null;
+      readAsDataURL(file: File) {
+        void file.arrayBuffer().then((bytes) => {
+          this.result = `data:text/plain;base64,${Buffer.from(bytes).toString('base64')}`;
+          this.onload?.();
+        });
+      }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: AttachmentFileReader });
+    try {
+      await submitInComposer('Review this file.', async (view, form) => {
+        const file = new File(['fixture'], 'review.txt', { type: 'text/plain' });
+        await act(async () => {
+          if (entry === 'picker') {
+            const input = form.parentElement?.parentElement?.querySelector('input[type="file"]') ?? document.querySelector('input[type="file"]');
+            if (!input) throw new Error('Missing attachment picker');
+            Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          } else {
+            const transfer = {
+              types: ['Files'], files: [file], items: [{ kind: 'file', type: file.type, getAsFile: () => file }],
+              getData: () => '',
+            };
+            const event = new Event(entry, { bubbles: true, cancelable: true });
+            Object.defineProperty(event, entry === 'paste' ? 'clipboardData' : 'dataTransfer', { value: transfer });
+            view.contentDOM.dispatchEvent(event);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        });
+        const citation = '[review.txt]';
+        const from = view.state.doc.toString().indexOf(citation);
+        expect(from >= 0).toBe(true);
+        expect(view.contentDOM.querySelector('[title="review.txt"]')).not.toBeNull();
+        await act(async () => {
+          view.dispatch({ changes: { from, to: from + citation.length, insert: '' }, userEvent: 'delete.backward', annotations: isolateHistory.of('full') });
+          expect(view.state.doc.toString()).not.toContain(citation);
+          if (entry !== 'drop') expect(undo(view)).toBe(true);
+        });
+      });
+      expect(sentFiles).toEqual([entry === 'drop' ? [] : ['review.txt']]);
+    } finally {
+      if (previousReader) Object.defineProperty(globalThis, 'FileReader', previousReader);
+      else Reflect.deleteProperty(globalThis, 'FileReader');
+      useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() });
+    }
+  });
+}
+
+test('an action command keeps inline attachments and previously saved image links in the draft', async () => {
+  const attachment = { id: 'action-image', file: new File(['fixture'], 'review.png', { type: 'image/png' }), dataUrl: 'data:image/png;base64,Zml4dHVyZQ==', mimeType: 'image/png', filename: 'review.png', composerAnchor: 'review.png', size: 7, source: 'local' as const };
+  useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [attachment], attachmentDrafts: new Map() });
+  try {
+    const context = '[review.png] [saved.png](/tmp/saved.png)';
+    expect(await submitInComposer(`/timeline ${context}`)).toBe(context);
+    expect(sent).toEqual([]);
+    expect(useInputStore.getState().attachedFiles.map((file) => file.id)).toEqual([attachment.id]);
+  } finally {
+    useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() });
+  }
+});
+
+test('a large generic image keeps its desktop path when its inline name changes', async () => {
+  const original = new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'image.png', { type: 'image/png' });
+  const originalPath = `${WORKTREE}/image.png`;
+  const submissions: Array<{ text: string; paths: Array<string | undefined> }> = [];
+  useSessionUIStore.setState({ sendMessage: async (text, _provider, _model, _agent, attachments) => {
+    submissions.push({ text, paths: (attachments ?? []).map(({ agentPath }) => agentPath) });
+  } });
+  const previousReader = Object.getOwnPropertyDescriptor(globalThis, 'FileReader');
+  class ReferenceFileReader {
+    result = 'data:text/plain;base64,AQID';
+    onload: (() => void) | null = null;
+    readAsDataURL() { queueMicrotask(() => this.onload?.()); }
+  }
+  Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: ReferenceFileReader });
+  Object.defineProperty(window, '__OPENCHAMBER_ELECTRON__', { configurable: true, value: { runtime: 'electron' } });
+  Object.defineProperty(window, '__OPENCHAMBER_DESKTOP__', { configurable: true, value: {
+    invoke: async () => undefined,
+    pathForFile: (file: File) => file === original ? originalPath : null,
+  } });
+  try {
+    await submitInComposer('Review this image.', async (view) => {
+      await act(async () => {
+        const drop = new Event('drop', { bubbles: true, cancelable: true });
+        Object.defineProperty(drop, 'dataTransfer', { value: { types: ['Files'], files: [original], items: [], getData: () => '' } });
+        view.contentDOM.dispatchEvent(drop);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+    });
+    expect(submissions).toEqual([{ text: '[image-1.png] Review this image.', paths: [originalPath] }]);
+  } finally {
+    Reflect.deleteProperty(window, '__OPENCHAMBER_ELECTRON__');
+    Reflect.deleteProperty(window, '__OPENCHAMBER_DESKTOP__');
+    if (previousReader) Object.defineProperty(globalThis, 'FileReader', previousReader);
+    else Reflect.deleteProperty(globalThis, 'FileReader');
+    useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() });
+  }
 });
 
 test('a failed prompt read sends nothing and gives the text back', async () => {

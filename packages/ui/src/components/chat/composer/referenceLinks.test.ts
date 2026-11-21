@@ -6,7 +6,7 @@ import { linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { createTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 
 import type { ComposerReference } from './composerReferences';
-import { findReferenceLinks, referenceLinkChip, referenceLinksInText } from './referenceLinks';
+import { findReferenceLinks, referenceLinkChip, referenceLinksInText, selectAnchoredReferences } from './referenceLinks';
 
 const urls = createRepositoryUrlMatcher([githubLikeDescriptor(), gitlabLikeDescriptor()], []);
 const trackers = createTrackerUrlMatcher([linearLikeTrackerDescriptor()]);
@@ -43,6 +43,12 @@ describe('findReferenceLinks', () => {
         const text = 'https://example.com/tickets/12 https://github.com/openchamber/openchamber https://github.com/openchamber/openchamber/discussions/5';
         expect(findReferenceLinks(text, urls, trackers)).toEqual([]);
     });
+});
+
+test('a picker reference leaves with its link and comes back with undo', () => {
+    const picked = { ...issue, composerAnchor: issue.url };
+    expect(selectAnchoredReferences('No link', [picked, issue])).toEqual([issue]);
+    expect(selectAnchoredReferences(`Review ${issue.url}.`, [picked])).toEqual([picked]);
 });
 
 describe('referenceLinksInText', () => {

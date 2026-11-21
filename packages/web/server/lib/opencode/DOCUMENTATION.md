@@ -22,7 +22,7 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Standard engine API contract
 
 The standard runtime pins the official client, schema and packaged CLI to
-2.3.0. External and standalone engines must be 2.2.4 or newer within 2.x;
+2.3.2. External and standalone engines must be 2.2.4 or newer within 2.x;
 `compatibility.js` owns this minimum and the VS Code CLI preflight uses the
 same predicate. The frozen Intel local source retains its separate 2.1.4
 engine and compatibility guard until it is ported independently.

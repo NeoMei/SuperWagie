@@ -246,7 +246,7 @@ export type InputState = {
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null, target?: string | null) => void
   consumePendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
   getPendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
-  addAttachedFile: (file: File) => Promise<boolean>
+  addAttachedFile: (file: File, composerAnchor?: string, displayFilename?: string) => Promise<boolean>
   removeAttachedFile: (id: string) => void
   setAttachedFiles: (files: AttachedFile[], target?: ChatDraftIdentity | null) => void
   clearAttachedFiles: (target?: ChatDraftIdentity | null) => void
@@ -379,11 +379,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
     target === null ? get().pendingSyntheticParts : get().pinnedSyntheticParts.get(target) ?? null
   ),
 
-  addAttachedFile: async (file: File) => {
+  addAttachedFile: async (file: File, composerAnchor?: string, displayFilename?: string) => {
     const generation = attachmentReadGeneration
     const referencePath = INTAKE_REDACTED_FILENAME.test(file.name) ? null : pathForDroppedFile(file)
     const attachReference = async (path: string): Promise<boolean> => {
       const reference = await prepareFileReference(file, path)
+      if (composerAnchor) reference.composerAnchor = composerAnchor
       if (generation !== attachmentReadGeneration) return false
       set((state) => ({ attachedFiles: [...state.attachedFiles, reference] }))
       return true
@@ -409,6 +410,11 @@ export const useInputStore = create<InputState>()((set, get) => ({
       const generatedFilenames = attachedFiles.slice(1).map((attachment) => attachment.filename)
       if (hasGeneratedFilenameCollision(generatedFilenames, get().attachedFiles)) continue
 
+      // Keep the OS File for path lookup. Only the inline image payload's label
+      // changes, and a converted image keeps the extension of its actual bytes.
+      const first = attachedFiles[0]
+      if (displayFilename && first.file === file && !first.agentPath) first.filename = displayFilename
+      if (composerAnchor) for (const attachment of attachedFiles) attachment.composerAnchor = composerAnchor
       set((state) => ({ attachedFiles: [...state.attachedFiles, ...attachedFiles] }))
       return true
     }
@@ -528,6 +534,17 @@ export const useInputStore = create<InputState>()((set, get) => ({
 
 const NO_ATTACHMENTS: AttachedFile[] = []
 
+const draftAttachmentSelector = (target: ChatDraftIdentity | null | undefined) => {
+  const key = target === undefined ? undefined : target ? getChatDraftIdentityKey(target) : null
+  return (state: InputState): AttachedFile[] => {
+    if (key === undefined || key === state.attachmentDraftKey) return state.attachedFiles
+    return key ? state.attachmentDrafts.get(key) ?? NO_ATTACHMENTS : NO_ATTACHMENTS
+  }
+}
+
+export const getDraftAttachedFiles = (target: ChatDraftIdentity | null | undefined): AttachedFile[] =>
+  draftAttachmentSelector(target)(useInputStore.getState())
+
 /**
  * The attachments of one composer draft, whether or not it holds the selected
  * slot. Two composers can be on screen at once (a chat pinned in the side
@@ -537,11 +554,7 @@ const NO_ATTACHMENTS: AttachedFile[] = []
  */
 export const useDraftAttachedFiles = (target: ChatDraftIdentity | null | undefined): AttachedFile[] => {
   // Undefined: no composer named, the selected slot.
-  const key = target === undefined ? undefined : target ? getChatDraftIdentityKey(target) : null
-  return useInputStore((state) => {
-    if (key === undefined || key === state.attachmentDraftKey) return state.attachedFiles
-    return key ? state.attachmentDrafts.get(key) ?? NO_ATTACHMENTS : NO_ATTACHMENTS
-  })
+  return useInputStore(draftAttachmentSelector(target))
 }
 
 subscribeChatDraftDeletion((identity) => {

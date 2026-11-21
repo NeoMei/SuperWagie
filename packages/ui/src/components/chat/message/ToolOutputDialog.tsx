@@ -1,6 +1,6 @@
 import { isShellTool, isSubagentTool, isWriteTool } from '@/lib/opencode/tools';
 import React from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { createPortal } from 'react-dom';
@@ -31,6 +31,7 @@ import { getToolIcon } from './parts/toolPresentation';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
 import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
 
@@ -944,6 +945,47 @@ const MermaidPreviewDialog: React.FC<{
     return createPortal(content, document.body);
 };
 
+const PdfAttachmentDialog: React.FC<{
+    title: string;
+    dataUrl: string;
+    onOpenChange: (open: boolean) => void;
+}> = ({ title, dataUrl, onOpenChange }) => {
+    const { t } = useI18n();
+    const [asset, setAsset] = React.useState<{ dataUrl: string; src: string | null } | null>(null);
+
+    React.useEffect(() => {
+        let src: string;
+        try {
+            const bytes = Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(',') + 1)), (character) => character.charCodeAt(0));
+            // Always hand the browser a PDF Blob, never the original URL.
+            src = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        } catch {
+            setAsset({ dataUrl, src: null });
+            return;
+        }
+        setAsset({ dataUrl, src });
+        return () => URL.revokeObjectURL(src);
+    }, [dataUrl]);
+
+    const preview = asset?.dataUrl === dataUrl ? asset : null;
+    return (
+        <Dialog open onOpenChange={onOpenChange}>
+            <DialogContent className="flex max-w-5xl flex-col gap-3">
+                <DialogTitle className="truncate pe-8">{title}</DialogTitle>
+                {preview?.src && !isVSCodeRuntime() && navigator.pdfViewerEnabled && (
+                    <iframe src={preview.src} title={title} className="h-[70dvh] w-full border-0" />
+                )}
+                {preview?.src && (
+                    <a href={preview.src} download={title} className="self-start typography-ui-label underline">
+                        {t('filesView.editor.saveFile')}
+                    </a>
+                )}
+                {preview && !preview.src && <p role="status">{t('sidebarFilesTree.toast.operationFailed')}</p>}
+            </DialogContent>
+        </Dialog>
+    );
+};
+
 const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, isMobile }) => {
     const { t } = useI18n();
     const defaultDiffViewMode = useDefaultDiffViewMode();
@@ -963,6 +1005,12 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
     if (popup.mermaid) {
         return <MermaidPreviewDialog popup={popup} onOpenChange={onOpenChange} isMobile={isMobile} />;
+    }
+
+    if (popup.pdf) {
+        return popup.open
+            ? <PdfAttachmentDialog title={popup.title} dataUrl={popup.pdf.dataUrl} onOpenChange={onOpenChange} />
+            : null;
     }
 
     return (

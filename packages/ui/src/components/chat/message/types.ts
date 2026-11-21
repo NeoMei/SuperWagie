@@ -28,6 +28,7 @@ export interface ToolPopupContent {
         }>;
         index?: number;
     };
+    pdf?: { dataUrl: string };
     mermaid?: {
         url: string;
         mimeType?: string;

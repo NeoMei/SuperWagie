@@ -37,9 +37,8 @@ const previousFileReader = Object.getOwnPropertyDescriptor(globalThis, 'FileRead
 Object.defineProperty(globalThis, 'window', {
   configurable: true,
   writable: true,
-  value: {
+  value: Object.assign(new EventTarget(), {
     location: { origin, href: `${origin}/` },
-    dispatchEvent: () => true,
     __OPENCHAMBER_ELECTRON__: { runtime: 'electron' },
     __OPENCHAMBER_LOCAL_ORIGIN__: origin,
     __OPENCHAMBER_API_BASE_URL__: origin,
@@ -48,7 +47,7 @@ Object.defineProperty(globalThis, 'window', {
       // Stands in for Electron's `webUtils.getPathForFile`.
       pathForFile: (file: File) => `/Users/me/Documents/${file.name}`,
     },
-  },
+  }),
 });
 Object.defineProperty(globalThis, 'FileReader', { configurable: true, writable: true, value: ImmediateFileReader });
 

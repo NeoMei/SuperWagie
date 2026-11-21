@@ -115,12 +115,12 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
     let accounts = await getGitHubAuthAccountsForHost(GITHUB_COM);
     const cliDisabled = await isGhCliDisabledForHost(GITHUB_COM);
     const cliActive = await isGhCliActiveForHost(GITHUB_COM);
-    const ghToken = await getGhCliToken(GITHUB_COM);
+    const ghToken = cliDisabled ? null : await getGhCliToken(GITHUB_COM);
     const ownToken = Boolean(auth?.accessToken);
     const selectedPersisted = accounts.some((account) => account.current);
     let cliUser = null;
     let cliRejected = false;
-    if (ghToken !== null && !cliDisabled) {
+    if (ghToken !== null) {
       try {
         cliUser = await userSummary(await clientFor(ghToken, '', GITHUB_COM));
       } catch (error) {
@@ -130,8 +130,8 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
     // The user's switch to the gh account is undone only when that account is
     // really gone: gh logged out, disabled here, or its token rejected. A
     // network blip leaves this read without a user but keeps the choice.
-    if (cliActive && (ghToken === null || cliDisabled || cliRejected)) await setGhCliActiveForHost(GITHUB_COM, false);
-    const cliCurrent = ghToken !== null && !cliDisabled && Boolean(cliUser) && cliActive;
+    if (cliActive && (ghToken === null || cliRejected)) await setGhCliActiveForHost(GITHUB_COM, false);
+    const cliCurrent = ghToken !== null && Boolean(cliUser) && cliActive;
     if (cliUser) {
       accounts = accounts.map((account) => ({ ...account, current: cliCurrent ? false : Boolean(account.current) }))
         .concat(hostCliAccount(GITHUB_COM, cliUser, cliCurrent));
@@ -140,7 +140,7 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
       available: ghToken !== null,
       disabled: cliDisabled,
       active: cliCurrent,
-      user: !cliDisabled ? activeUser || cliUser : null,
+      user: activeUser || cliUser,
     });
     // A current-but-invalid saved account means disconnected only while it,
     // not the gh login, is the selected source.

@@ -114,6 +114,30 @@ describe("SessionMessageLoader", () => {
     } finally { loader.dispose(); childStores.disposeAll(); }
   });
 
+  test("loads a fork's earlier history when a live message arrived before navigation", async () => {
+    const target = { directory: "/repo", sessionID: "session-fork" }
+    const early = createRecord(target.sessionID, "msg_early", 10)
+    const live = createRecord(target.sessionID, "msg_live", 20)
+    const { childStores, loader } = createLoader(async () => response([early, live]))
+    const store = childStores.ensureChild(target.directory, { bootstrap: false })
+    try {
+      store.setState({
+        message: { [target.sessionID]: [live.info] },
+        part: { [live.info.id]: live.parts },
+      })
+      await loader.ensure(target, { reason: "navigation" })
+
+      expect(loader.coversHistory(target)).toBe(true)
+      expect(store.getState().message[target.sessionID]?.map((message) => message.id)).toEqual([
+        early.info.id,
+        live.info.id,
+      ])
+    } finally {
+      loader.dispose()
+      childStores.disposeAll()
+    }
+  })
+
   test("covered history does not hide an older missing assistant before a later user", async () => {
     let calls = 0;
     const target = { directory: "/review-history-gap", sessionID: "review-history-gap" };

@@ -1296,6 +1296,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         {visible && mode === 'branch' && (
           <BranchComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])}
             branches={branches?.all ?? []} currentBranch={currentBranch} base={branchComparison.base}
+            defaultBranches={branches?.defaultBranches}
             automatic={branchComparison.source !== 'chosen'}
             onSelect={(base) => { if (currentBranch) setBaseOverride(currentDirectory, currentBranch, base); }}
             onSelectAutomatic={() => { if (currentBranch) clearBaseOverride(currentDirectory, currentBranch); }} />

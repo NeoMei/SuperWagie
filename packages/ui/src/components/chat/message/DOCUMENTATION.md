@@ -7,6 +7,18 @@ owns retained quote marks, their anchors, and dismissal. `ChatQuoteMarkPopover`
 owns the saved comment preview and editor. Message-part renderers and sandboxed
 pages have their own contracts in `parts/DOCUMENTATION.md`.
 
+The full conversation's `MessageList` owns temporary message selection. Shift
+selects exportable records between the anchor and the target from the loaded
+transcript, including rows outside the viewport. The selection is cleared when
+the conversation is hidden or its session or directory changes. If a selected
+record is retired before export, the user must reload it or start a new selection.
+
+Multi-message export shares the on-screen prompt and answer text projection.
+Markdown goes to the clipboard with role headings, and the existing message
+renderer draws the same text into one PNG. PNGs use the existing file flow in
+Web and Electron, the save dialog in VS Code, and the share sheet in Capacitor.
+Tool and reasoning parts and standalone attachments remain in the conversation.
+
 ## Invariants
 
 - A repository or tracker URL in user text becomes an inline chip only when it names a linked context item already carried by that message. The display normalizer keeps that association without changing stored parts; only matched items leave the attachment row. Links in code retain their attachment, and chip clicks use the existing tracker routing and permission boundaries.

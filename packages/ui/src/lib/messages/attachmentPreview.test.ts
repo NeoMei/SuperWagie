@@ -88,6 +88,18 @@ describe('what opening a sent attachment does', () => {
         expect(resolveAttachmentOpenTarget(item, [item])).toEqual({ kind: 'external', url: item.url });
     });
 
+    test('opens an inline PDF in the chat preview without treating remote URLs as documents', () => {
+        const inline = file({ mime: 'application/pdf', filename: 'spec.pdf', url: 'data:application/pdf;base64,JVBERi0xLjcK' });
+        const remote = file({ mime: 'application/pdf', filename: 'spec.pdf', url: 'https://example.test/spec.pdf' });
+        const disguised = file({ mime: 'application/pdf', filename: 'spec.pdf', url: 'data:text/html;base64,JVBERi0xLjcK' });
+        expect(resolveAttachmentOpenTarget(inline, [inline])).toMatchObject({
+            kind: 'popup',
+            popup: { title: 'spec.pdf', pdf: { dataUrl: inline.url } },
+        });
+        expect(resolveAttachmentOpenTarget(remote, [remote])).toBeNull();
+        expect(resolveAttachmentOpenTarget(disguised, [disguised])).toBeNull();
+    });
+
     test('nothing opens for what the app cannot show', () => {
         const pdf = file({ mime: 'application/pdf', filename: 'spec.pdf', url: 'data:application/pdf;base64,JVBERg==' });
         const folder = file({ mime: 'application/x-directory', filename: 'src', url: 'file:///repo/src' });

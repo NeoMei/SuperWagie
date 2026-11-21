@@ -9,7 +9,7 @@ mock.module('vscode', () => ({
   Uri: { file: (fsPath) => ({ fsPath }) },
 }));
 
-const { resolveRepositoryPrefix } = await import('./gitService.ts?repository-prefix-test');
+const { countGitStashFiles, resolveRepositoryPrefix, stashGitChanges } = await import('./gitService.ts?repository-prefix-test');
 
 const tempDirs = [];
 
@@ -52,5 +52,21 @@ describe('VS Code git service repository prefix', () => {
     if (!canRunGit()) return;
 
     await expect(resolveRepositoryPrefix(createTempDir())).rejects.toThrow();
+  });
+
+  it('counts an untracked stash from a nested checkout directory', async () => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    const nested = path.join(repo, 'packages', 'app');
+    fs.mkdirSync(nested, { recursive: true });
+    fs.writeFileSync(path.join(nested, '报价.txt'), 'untracked\n');
+    await stashGitChanges(nested);
+    fs.mkdirSync(nested, { recursive: true });
+
+    await expect(countGitStashFiles(nested, ['stash@{0}'])).resolves.toEqual({ 'stash@{0}': 1 });
   });
 });

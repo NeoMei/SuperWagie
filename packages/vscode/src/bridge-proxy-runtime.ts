@@ -9,6 +9,8 @@ import {
 } from '../../web/server/lib/enterprise-mode.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../../web/server/lib/git/repository-root.js';
 import { isSessionRecordPath, overlaySessionResponseBody, parseJson, type SessionStateStore } from './openchamberSessionState';
+import { OPENCODE_TRUST_ROUTE, type FolderTrustResponse, type OpenCodeTrust } from '../../web/server/lib/opencode-trust/index.js';
+import { createTrustSessionDirectoryResolver } from '../../web/server/lib/opencode-trust/fetch.js';
 
 type BridgeMessageInput = {
   id: string;
@@ -74,6 +76,7 @@ type ProxyRuntimeDeps = {
   sanitizeForwardHeaders: (input: Record<string, string> | undefined) => Record<string, string>;
   collectHeaders: (headers: Headers) => Record<string, string>;
   base64EncodeUtf8: (text: string) => string;
+  openCodeTrust?: OpenCodeTrust;
 };
 
 const proxyAbortControllers = new Map<string, AbortController>();
@@ -239,6 +242,30 @@ const resolveOpenCodePath = (normalizedPath: string): string | null => {
   return `${resolved.pathname}${resolved.search}`;
 };
 
+const trustProxyResponse = ({ status, body }: FolderTrustResponse): ApiProxyResponsePayload => ({
+  status,
+  headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  bodyText: JSON.stringify(body),
+});
+
+const checkFolder = async (
+  trust: OpenCodeTrust,
+  manager: BridgeContext['manager'],
+  apiUrl: string,
+  request: Omit<Parameters<OpenCodeTrust['refusalFor']>[0], 'fallbackDirectory' | 'resolveSessionDirectory'>,
+): Promise<FolderTrustResponse | null> => {
+  const result = await trust.refusalFor({
+    ...request,
+    fallbackDirectory: manager?.getWorkingDirectory?.(),
+    resolveSessionDirectory: createTrustSessionDirectoryResolver({
+      buildOpenCodeUrl: (resource) => new URL(resource.replace(/^\/+/, ''), apiUrl.replace(/\/+$/, '') + '/').toString(),
+      getOpenCodeAuthHeaders: () => manager?.getOpenCodeAuthHeaders() ?? {},
+      fetchImpl: fetch,
+    }),
+  });
+  return manager?.getApiUrl() === apiUrl ? result : { status: 503, body: { error: 'OpenCode changed during folder verification' } };
+};
+
 export async function handleProxyBridgeMessage(
   message: BridgeMessageInput,
   ctx: BridgeContext | undefined,
@@ -286,6 +313,12 @@ export async function handleProxyBridgeMessage(
           bodyText: JSON.stringify({ error: 'Not an OpenCode path' }),
         };
         return { id, type, success: true, data };
+      }
+      const requestUrl = new URL(resolvedPath, RESOLVE_PROBE_BASE);
+      if (deps.openCodeTrust && requestUrl.pathname === OPENCODE_TRUST_ROUTE) {
+        const body = bodyBase64 ? parseJson(Buffer.from(bodyBase64, 'base64').toString('utf8')) : null;
+        const answer = await deps.openCodeTrust.handleRoute({ method: normalizedMethod, query: Object.fromEntries(requestUrl.searchParams), body });
+        return { id, type, success: true, data: trustProxyResponse(answer) };
       }
 
       // Enterprise mode: the same provider-connect routes the web server refuses.
@@ -356,6 +389,13 @@ export async function handleProxyBridgeMessage(
         typeof bodyBase64 === 'string' && bodyBase64.length > 0 && normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD'
           ? Buffer.from(bodyBase64, 'base64')
           : undefined;
+      if (deps.openCodeTrust) {
+        const refusal = await checkFolder(deps.openCodeTrust, ctx?.manager, apiUrl, {
+          method: normalizedMethod, path: resolvedPath, headers: requestHeaders,
+          readBody: async () => requestBody?.toString('utf8') ?? null,
+        });
+        if (refusal) return { id, type, success: true, data: trustProxyResponse(refusal) };
+      }
 
       // Coalesce concurrent identical GET reads to idempotent endpoints so the
       // single OpenCode process serves them once. The shared fetch carries no
@@ -433,6 +473,13 @@ export async function handleProxyBridgeMessage(
         ...deps.sanitizeForwardHeaders(headers),
         ...ctx?.manager?.getOpenCodeAuthHeaders(),
       };
+      if (deps.openCodeTrust) {
+        const refusal = await checkFolder(deps.openCodeTrust, ctx?.manager, apiUrl, {
+          method: 'POST', path: normalizedPath, headers: requestHeaders,
+          readBody: async () => bodyText ?? null,
+        });
+        if (refusal) return { id, type, success: true, data: trustProxyResponse(refusal) };
+      }
       const timeoutSignal = AbortSignal.timeout(45000);
       const abortController = new AbortController();
       proxyAbortControllers.set(id, abortController);

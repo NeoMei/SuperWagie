@@ -17,6 +17,8 @@ test('user center opens outside Settings, navigation stays read-only and explici
     import '@/index.css';
     const user = { id: 'fixture-user', name: 'Fixture reviewer', email: 'reviewer@example.test' };
     const scenario = new URLSearchParams(location.search).get('scenario');
+    const walletScenario = scenario === 'wallet';
+    const productWallet = { version: 'product_v1', account_id: 'fixture-team', cash: { asset: 'CNY/6', available: '13200000' }, can_manage: true, products: [] };
     let keyState = { accountId: 'fixture-team', enterpriseMode: false, fundingMode: 'credits', nativeCredits: { ready: true }, activation: null };
     let runNumber = 0;
     const modelRows = [
@@ -84,8 +86,8 @@ test('user center opens outside Settings, navigation stays read-only and explici
       if (url.pathname === '/api/model-configuration/bootstrap/account-key') return Response.json(keyState);
       if (url.pathname.endsWith('/api/platform-account/session')) return Response.json({ status: 'signed-in', user, expiresAt: '2027-01-01T12:00:00Z' });
       if (url.pathname.endsWith('/api/platform-account/profile')) return Response.json({ id: user.id, username: 'fixture-reviewer', displayName: user.name, email: user.email, avatarAvailable: false, version: '1' });
-      if (url.pathname.endsWith('/api/platform-account')) return Response.json({ status: 'signed-in', user, accounts: [{ id: 'fixture-team', name: 'Fixture team', kind: 'team', role: 'owner' }], accountId: 'fixture-team', expiresAt: '2027-01-01T12:00:00Z', membership: [{ id: 'fixture-membership', product_id: 'superwagie', status: 'active', paid_through: '2027-01-01T00:00:00Z', offer: { name: 'Fixture membership' } }], credits: { available: '240000000', reserved: '8000000' }, consoleUrl: 'https://unihub.example.test/console', modelService: 'available' });
-      if (url.pathname.endsWith('/api/platform-account/commerce')) return Response.json({ accountId: 'fixture-team', role: 'owner', financialAccess: true, missingScopes: [], payments: { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] }, wallets: [{ productId: '', asset: 'CNY/6', amount: '120000000' }, { productId: 'superwagie', asset: 'CNY/6', amount: '30000000' }, { productId: 'llmrouter', asset: 'CNY/6', amount: '86400000' }], offers: [{ id: 'fixture-addon', productId: 'superwagie', kind: 'addon', name: 'Fixture credit pack', accountKind: 'both', period: 'once', price: '9800000', monthlyCredit: '200000000', validityMonths: 12, rank: 1, sandbox: false }], orders: [], intents: [] });
+      if (url.pathname.endsWith('/api/platform-account')) return Response.json({ status: 'signed-in', user, accounts: [{ id: 'fixture-team', name: 'Fixture team', kind: 'team', role: 'owner' }], accountId: 'fixture-team', expiresAt: '2027-01-01T12:00:00Z', membership: [{ id: 'fixture-membership', product_id: 'superwagie', status: 'active', paid_through: '2027-01-01T00:00:00Z', offer: { name: 'Fixture membership' } }], credits: { available: '240000000', reserved: '8000000' }, consoleUrl: walletScenario ? null : 'https://unihub.example.test/console', modelService: 'available', ...(walletScenario && { productCreditWallet: true }) });
+      if (url.pathname.endsWith('/api/platform-account/commerce')) return Response.json({ accountId: 'fixture-team', role: 'owner', financialAccess: true, missingScopes: [], payments: { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] }, wallets: [{ productId: '', asset: 'CNY/6', amount: '120000000' }, { productId: 'superwagie', asset: 'CNY/6', amount: '30000000' }, { productId: 'llmrouter', asset: 'CNY/6', amount: '86400000' }], offers: [{ id: 'fixture-addon', productId: 'superwagie', kind: 'addon', name: 'Fixture credit pack', accountKind: 'both', period: 'once', price: '9800000', monthlyCredit: '200000000', validityMonths: 12, rank: 1, sandbox: false }], orders: [], intents: [], ...(walletScenario && { productCreditWallet: true, productWallet }) });
       if (url.pathname.endsWith('/summary')) return Response.json({ visibility: 'account', calls_total: '47', settled_calls: '46', pending_calls: '1', unknown_calls: '0', missing_usage_calls: '0', unknown_time: '0', usage: {}, usage_complete: false, usage_coverage: { legacy_token_calls: '0', native_metered_calls: '0' }, charges_by_asset: { 'CREDIT/6': '32400000' }, refunds_by_asset: {} });
       if (url.pathname.endsWith('/calls')) return Response.json({ items: [], has_more: false });
       if (url.pathname.endsWith('/api/model-configuration')) return Response.json({ version: 1, revision: 1, enterpriseMode: false, credentialSources: { status: 'available', sources: [] }, purposes: [], presets: [], connections: [], bindings: [] });
@@ -116,7 +118,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
       return <><SidebarFooter onOpenSettings={() => useUIStore.getState().setSettingsDialogOpen(true)} onOpenShortcuts={() => {}} onOpenAbout={() => {}} onOpenUpdate={() => {}} showUpdateButton={false} />
         {entry === 'funding' ? <div data-fixture-funding-notice><ManagedModelFundingNotice /></div> : null}
         {settingsOpen ? <div data-fixture-settings-window style={{ height: '90vh' }}><SettingsView isWindowed forceMobile={false} /></div> : null}
-        {scenario ? <div hidden data-fixture-mounted-model-settings><ModelConfigurationPage /></div> : null}</>;
+        {scenario && !walletScenario ? <div hidden data-fixture-mounted-model-settings><ModelConfigurationPage /></div> : null}</>;
     }
     createRoot(document.getElementById('root')).render(<RuntimeAPIContext.Provider value={createWebAPIs()}><I18nProvider><EntryPoints /></I18nProvider></RuntimeAPIContext.Provider>);
   `);
@@ -251,6 +253,26 @@ test('user center opens outside Settings, navigation stays read-only and explici
         assert.deepEqual(await evaluate('window.settingsNavigationState()'), { isSettingsDialogOpen: false, settingsPage: 'appearance', settingsJumpRequest: null }, 'Closing account funding must preserve Settings navigation');
       }
     }
+    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=wallet' });
+    await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Wallet scenario entry did not render');
+    await click('button[aria-label="User center"]');
+    await until(`!!document.querySelector('[data-platform-account-tab="wallet"]')`, 'Wallet navigation did not render');
+    assert.equal(await evaluate(`!!document.querySelector('[data-platform-account-tab="keys"]')`), true, 'Wallet capability must preserve the API Key navigation');
+    for (const width of [1280, 390]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+      assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`), true, 'Account layout overflows the viewport');
+      await click('[data-platform-account-tab="wallet"]');
+      await until(`document.querySelector('[data-platform-account-tab="wallet"]').getAttribute('aria-current') === 'page' && document.body.innerText.includes('13.20')`, 'Wallet tab did not display the wallet balance');
+      await click('[data-platform-account-tab="keys"]');
+      await until(`document.querySelector('[data-platform-account-tab="keys"]').getAttribute('aria-current') === 'page' && document.body.innerText.includes('Activate and configure')`, 'API Key tab did not display its own content');
+      assert.equal(await evaluate(`document.body.innerText.includes('13.20')`), false, 'Wallet content persisted after navigating to API Key');
+      if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
+        const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+        writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, `account-wallet-and-key-${width}.png`), Buffer.from(screenshot.data, 'base64'));
+      }
+    }
+    assert.deepEqual(await evaluate('window.mutations'), [], 'Wallet and key navigation must remain read-only');
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
     for (const scenario of ['activation', 'retry']) {
       await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=' + scenario });
       await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Sidebar account entry did not render');

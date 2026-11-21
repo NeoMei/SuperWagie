@@ -2,6 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import express from 'express';
 
 import {
   applyForwardProxyResponseHeaders,
@@ -15,6 +16,8 @@ import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/servi
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
 import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
+import { OPENCODE_TRUST_ROUTE } from '../opencode-trust/index.js';
+import { createTrustSessionDirectoryResolver } from '../opencode-trust/fetch.js';
 
 /**
  * The abort signal for one upstream read.
@@ -419,6 +422,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     // the host's own answers go out exactly as before spaces.
     mergeSpaceSessionList = null,
     spaceEventHub = null,
+    openCodeTrust = null,
   } = deps;
 
   /**
@@ -520,6 +524,16 @@ export const registerOpenCodeProxy = (app, deps) => {
     console.log('Setting up OpenCode API gate (OpenCode not started yet)');
   }
   app.set('opencodeProxyConfigured', true);
+
+  const parseTrustBody = express.json({ limit: '64kb' });
+  const parseLocationBody = express.json({ limit: '50mb' });
+  if (openCodeTrust) {
+    app.all(OPENCODE_TRUST_ROUTE, parseTrustBody, async (req, res) => {
+      const result = await openCodeTrust.handleRoute({ method: req.method, query: req.query, body: req.body });
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(result.status).json(result.body);
+    });
+  }
 
   const isAbortError = (error) => error?.name === 'AbortError';
   // What a session route answers when its upstream read fails: 504 when the
@@ -971,6 +985,26 @@ export const registerOpenCodeProxy = (app, deps) => {
   // Hold unsent requests through a short managed-engine start or restart.
   const waitForOpenCodeRequest = createOpenCodeRequestReadiness({ getRuntime, readyGraceMs: OPEN_CODE_READY_GRACE_MS });
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const abandoned = (req, res) => res.destroyed || res.writableEnded || req.aborted;
+  const prepared = new WeakMap();
+  const waitForCheckout = async (directory, req, res) => {
+    const checked = prepared.get(req) || new Set();
+    if (checked.has(directory)) return null;
+    const deadline = Date.now() + WORKTREE_READY_TIMEOUT_MS;
+    while (!abandoned(req, res)) {
+      const status = await readWorktreeBootstrapStatus(directory);
+      if (abandoned(req, res)) break;
+      if (status.status === 'failed') return { status: 503, body: { error: status.error || 'Worktree bootstrap failed' } };
+      if (status.status === 'ready' || status.phase === 'git-ready' || status.phase === 'setup-ready') {
+        checked.add(directory);
+        prepared.set(req, checked);
+        return null;
+      }
+      if (Date.now() >= deadline) return { status: 503, body: { error: 'Timed out waiting for worktree checkout' } };
+      await sleep(75);
+    }
+    return { status: 499, body: { error: 'Request closed while waiting for worktree checkout' } };
+  };
 
   app.use('/api', async (req, res, next) => {
     if (
@@ -1019,28 +1053,48 @@ export const registerOpenCodeProxy = (app, deps) => {
     const directory = url.searchParams.get('directory') || req.get('x-opencode-directory');
     if (!directory) return next();
 
-    const deadline = Date.now() + WORKTREE_READY_TIMEOUT_MS;
     try {
-      while (!res.destroyed && !res.writableEnded && !req.aborted) {
-        const status = await readWorktreeBootstrapStatus(directory);
-        if (res.destroyed || res.writableEnded || req.aborted) return;
-        if (status.status === 'failed') {
-          return res.status(503).json({ error: status.error || 'Worktree bootstrap failed' });
-        }
-        if (status.status === 'ready' || status.phase === 'git-ready' || status.phase === 'setup-ready') {
-          return next();
-        }
-        if (Date.now() >= deadline) {
-          return res.status(503).json({ error: 'Timed out waiting for worktree checkout' });
-        }
-        await sleep(75);
-      }
+      const result = await waitForCheckout(directory, req, res);
+      if (abandoned(req, res)) return;
+      if (result) return res.status(result.status).json(result.body);
+      return next();
     } catch (error) {
       next(error);
     }
   });
 
   // V2 lists sessions across directories on every platform and owns pagination.
+  if (openCodeTrust) {
+    const resolveSessionDirectory = createTrustSessionDirectoryResolver({
+      buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl: (input, init) => fetch(input, init),
+    });
+    app.use('/api', async (req, res, next) => {
+      const target = resolveProxyTarget();
+      const result = await openCodeTrust.refusalFor({
+        method: req.method,
+        path: '/api' + req.url,
+        headers: req.headers,
+        fallbackDirectory: getRuntime().openCodeWorkingDirectory,
+        resolveSessionDirectory,
+        prepareDirectory: (directory) => waitForCheckout(directory, req, res),
+        readBody: async () => {
+          if (req.body === undefined) {
+            const hasBody = req.headers['transfer-encoding'] || Number(req.headers['content-length']) > 0;
+            if (hasBody && !req.is('application/json')) throw new Error('A location request requires JSON');
+            await new Promise((resolve, reject) => parseLocationBody(req, res, (error) => error ? reject(error) : resolve()));
+          }
+          return req.body === undefined ? null : JSON.stringify(req.body);
+        },
+      });
+      if (req.aborted || res.destroyed) return;
+      if (result) return res.status(result.status).json(result.body);
+      if (resolveProxyTarget() !== target) {
+        return res.status(503).json({ error: 'The OpenCode endpoint changed during the folder check' });
+      }
+      return next();
+    });
+  }
+
   app.get('/api/session', (req, res, next) => {
     return forwardSanitizedSessionListRequest(req, res, next);
   });

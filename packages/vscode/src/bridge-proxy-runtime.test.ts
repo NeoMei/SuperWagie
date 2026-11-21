@@ -2,6 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { BridgeContext } from './bridge';
 import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
+import type { OpenCodeTrust } from '../../web/server/lib/opencode-trust/index.js';
 
 const deps = {
   tryHandleLocalFsProxy: async () => null,
@@ -32,6 +33,43 @@ const connectedManager = {
 const asBridgeContext = (manager: typeof connectedManager): BridgeContext => ({ manager } as unknown as BridgeContext);
 
 const ctx = asBridgeContext(connectedManager);
+
+describe('VS Code folder trust', () => {
+  test('returns the local assessment and refuses to forward a paused location', async () => {
+    const assessment = { directory: '/fixture', fingerprint: null, items: [], trusted: false };
+    const openCodeTrust: OpenCodeTrust = {
+      inspect: async () => assessment,
+      answer: async () => ({ ok: false, assessment }),
+      isTrusted: async () => false,
+      refusalFor: async () => ({ status: 403, body: { error: 'Review the folder', code: 'opencode_trust_required' } }),
+      handleRoute: async () => ({ status: 200, body: assessment }),
+    };
+    const originalFetch = globalThis.fetch;
+    const paths: string[] = [];
+    try {
+      globalThis.fetch = async (input) => {
+        paths.push(String(input));
+        return Response.json({});
+      };
+      const bridge = { ...deps, openCodeTrust };
+      const accounted = await handleProxyBridgeMessage({
+        id: 'check-trust', type: 'api:proxy', payload: { path: '/api/opencode/trust?directory=/fixture' },
+      }, ctx, bridge);
+      assert.match(JSON.stringify(accounted), /fingerprint/);
+      const paused = await handleProxyBridgeMessage({
+        id: 'open-agent', type: 'api:proxy', payload: { path: '/api/agent', headers: { 'x-opencode-directory': '/fixture' } },
+      }, ctx, bridge);
+      assert.match(JSON.stringify(paused), /opencode_trust_required/);
+      const prompt = await handleProxyBridgeMessage({
+        id: 'send-prompt', type: 'api:session:message', payload: { path: '/api/session/ses_fixture/prompt', bodyText: '{}' },
+      }, ctx, bridge);
+      assert.match(JSON.stringify(prompt), /opencode_trust_required/);
+      assert.deepEqual(paths, []);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
 
 describe('VS Code API proxy aborts', () => {
   test('aborts non-SSE api:proxy fetches by bridge request id', async () => {

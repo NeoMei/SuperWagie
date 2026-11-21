@@ -259,7 +259,7 @@ describe('PlatformAccountPage', () => {
     useI18nStore.getState().setLocale('en'); useProductWallet = true;
     await render();
     expect(host.textContent).toContain('SuperWagie credits require an active subscription.');
-    expect(host.textContent).toContain(new Date(packExpiry).toLocaleDateString());
+    expect(host.textContent).toContain('Pack · 8 credits · expires 1/9/2070');
     expect(host.textContent).not.toContain('Other shared credits');
   });
 
@@ -272,6 +272,23 @@ describe('PlatformAccountPage', () => {
     await act(async () => button('Enable subscription renewal').click());
     expect(renewalWrites).toEqual([JSON.stringify({ accountId: 'team-a', kind: 'subscription', enabled: true, expectedVersion: 6 })]);
     expect(button('Disable subscription renewal')).toBeDefined();
+  });
+
+  test('keeps the API key page reachable alongside the shared wallet', async () => {
+    useI18nStore.getState().setLocale('en');
+    useProductWallet = true;
+    await render();
+    await tab('Wallet');
+    expect(host.textContent).toContain('13.20');
+    await tab('API Key');
+    expect(host.querySelector('[aria-current="page"]')?.getAttribute('data-platform-account-tab')).toBe('keys');
+    expect(host.textContent).toContain('Activate and configure');
+    expect(host.textContent).not.toContain('13.20');
+    await tab('Wallet');
+    expect(host.textContent).toContain('13.20');
+    expect(rechargeRequests).toBe(0);
+    expect(purchaseRequests).toBe(0);
+    expect(renewalWrites).toHaveLength(0);
   });
 
   test('requires an existing subscription before enabling automatic renewal for a wallet product', async () => {
@@ -1029,7 +1046,7 @@ describe('PlatformAccountPage', () => {
     const membership = signedIn.membership[0];
     const original = { ...membership };
     try {
-      membership.status = 'refunded'; membership.paid_through = '2099-01-01T00:00:00Z';
+      membership.status = 'refunded'; membership.paid_through = '2099-06-15T12:00:00Z';
       await render();
       expect(host.textContent).toContain('Refunded');
       expect(host.textContent).toContain('2099');

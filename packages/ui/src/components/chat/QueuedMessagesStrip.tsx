@@ -16,6 +16,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useInputStore } from '@/sync/input-store';
+import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentColors } from '@/hooks/useAgentColors';
@@ -231,8 +232,8 @@ export const QueuedMessagesStrip = memo(({ target, composerAgentName, onEditMess
         void popToInput(target, message.id).then((popped) => {
             if (!popped) return;
             if (popped.attachments && popped.attachments.length > 0) {
-                const currentAttachments = useInputStore.getState().attachedFiles;
-                useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
+                const identity = createChatDraftIdentity(target.runtimeKey, target.directory, target.sessionId);
+                useInputStore.getState().restoreAttachedFiles(popped.attachments, identity);
             }
             onEditMessage(popped);
         }).catch((error) => {

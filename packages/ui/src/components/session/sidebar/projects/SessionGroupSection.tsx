@@ -45,6 +45,7 @@ import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from '../sessions/SidebarRefLinks';
 import { useI18n } from '@/lib/i18n';
 import { useChildStoreManager } from '@/sync/sync-context';
+import { useOpenCodeTrustPausedDirectory, useReviewOpenCodeFolder } from '@/components/projects/useOpenCodeTrustPause';
 import { canRequestNativeDirectoryAccess, requestDirectoryAccess } from '@/lib/desktop';
 import { CollapsedSessionActivityIndicator } from '../sessions/collapsedActivityIndicator';
 import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityState';
@@ -425,6 +426,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     const state = childStores.getBootstrapState(directory);
     return state === 'queued' || state === 'running';
   });
+  const pausedFolder = useOpenCodeTrustPausedDirectory([group.directory, ...bootstrapDirectories]);
+  const reviewFolder = useReviewOpenCodeFolder();
   const failedBootstrapDirectory = bootstrapDirectories.find(
     (directory) => childStores.getBootstrapState(directory) === 'failed' || childStores.getInitializationState(directory) === 'failed',
   ) ?? null;
@@ -964,7 +967,14 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     url: groupPrSummary.url,
   }] : [];
 
-  const bootstrapFailureNotice = failedBootstrapDirectory ? (
+  const bootstrapFailureNotice = pausedFolder ? (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {t('projects.openCodeTrust.paused')}
+      <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={() => void reviewFolder(pausedFolder)}>
+        {t('projects.openCodeTrust.review')}
+      </Button>
+    </span>
+  ) : failedBootstrapDirectory ? (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       {bootstrapFailure === 'os-permission'
         ? t('sessions.sidebar.group.empty.permissionDenied')

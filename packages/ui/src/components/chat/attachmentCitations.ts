@@ -146,6 +146,19 @@ export const assignImageAttachmentFilenames = (
     });
 };
 
+/** An editor anchor must be unique and fit in one bracket citation. */
+export function allocateAttachmentAnchor(filename: string, reserved: readonly string[]): string {
+    const name = sanitizeFilename(filename) || 'attachment';
+    const used = new Set(reserved.map(normalizeFilenameKey));
+    if (!used.has(normalizeFilenameKey(name))) return name;
+    const dot = name.lastIndexOf('.');
+    if (dot > 0) return nextUniqueFilename(name.slice(0, dot), name.slice(dot + 1), used);
+    for (let index = 2; ; index += 1) {
+        const candidate = `${name}-${index}`;
+        if (!used.has(normalizeFilenameKey(candidate))) return candidate;
+    }
+}
+
 /** Next unused `pasted-context-N.txt` name for a large text paste attachment. */
 export const nextPastedContextFilename = (existingFilenames: string[]): string => {
     const used = new Set(existingFilenames.map(normalizeFilenameKey));
@@ -214,6 +227,17 @@ export const imageSaveModeForModel = (
 export const findImagePathCitationNames = (text: string): string[] => (
     Array.from(text.matchAll(/\[([^\]\n]+)\]\(/g), (match) => match[1])
 );
+
+/** Previously saved images remain atomic, even without a binary attachment. */
+export function findLocalImagePathCitationRanges(text: string): Array<CitationRange & { filename: string }> {
+    if (!text.includes('](')) return [];
+    return Array.from(text.matchAll(/\[([^\]\n]+)\]\((?:<([^>\r\n]+)>|([^()\s]+))\)/g)).flatMap((match) => {
+        const filename = match[1];
+        const path = match[2] ?? match[3];
+        if (!/^(?:\/|[A-Za-z]:\/)/.test(path) || !/\.(?:avif|bmp|gif|hei[cf]|jpe?g|png|svg|tiff?|webp)$/i.test(filename)) return [];
+        return [{ start: match.index, end: match.index + match[0].length, filename }];
+    });
+}
 
 export const findAttachmentCitationRanges = (text: string, filenames: string[]): CitationRange[] => {
     if (!text || !text.includes('[') || filenames.length === 0) {

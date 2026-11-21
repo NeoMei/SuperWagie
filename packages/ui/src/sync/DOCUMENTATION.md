@@ -277,6 +277,11 @@ projects qualify there.
 
 ## Committing a revert
 
+The directory store owner registers a per-session staging operation before
+refreshing history for a revert. Prompts, commands, and explicit commit or
+clear actions wait for any staged cut already in flight. A staging failure
+rejects the send so the composer can restore the unsent draft.
+
 A staged revert is a marker (`session.revert.messageID`); the transcript
 keeps the reverted messages and hides them. Reverting or forking from a user
 message cuts at the first of the synthetic context carriers right before it,
@@ -1202,6 +1207,10 @@ provider subscribes to `message-queue-sync.ts` for control-stream updates and
 requests a queue refresh on every main-stream connection or transport switch,
 including the first connection. The queue store coalesces these requests with
 bootstrap and owns snapshot ordering and legacy-upload lifetime.
+When a WebSocket falls back to SSE, the stream reports a disconnect before
+requesting the gap refresh. The replacement stream reports readiness on its
+first data, independently of the fallback decision. Disconnect or a replay
+reset also clears live tool names whose completion might have been missed.
 
 Chat folders follow the same shape through `session-folders-sync.ts`: the
 provider subscribes for the runtime it mounted with, a
@@ -1615,9 +1624,12 @@ Loader coverage and exact-session status changes notify `useSessionRenderable`;
 
 ### Why renderability does not establish history coverage
 
-A user-only event cache is already renderable and can set the loader's generic
-resolved flag without a history read. Coverage retains its own server-confirmed
-owner, so that cache cannot suppress a later missing-part repair.
+A user-only event cache is already renderable and a prefetch can set the
+loader's generic resolved flag without a history read. Foreground opens
+still fetch a window when that store has never committed history. This
+restores the inherited transcript of a fork even when its first live event
+arrived before navigation. Cached history from the same store remains
+available while a stream gap revalidates it.
 
 ## Session step control events
 
@@ -1626,7 +1638,15 @@ owner, so that cache cannot suppress a later missing-part repair.
 
 ## Live tool names for official result status
 
-`session-live-tool.ts` is a bounded in-memory index fed by the live global event path. It records a running tool's name, call ID and directory, without arguments, output or command text. Terminal events and runtime reset retire entries; history/bootstrap never populates it. The guest workspace projection exposes the name only while authoritative activity is running and its directory matches. Repeated updates of the same call/name preserve the map and publish nothing.
+`session-live-tool.ts` records tool names from the live global event path in a
+bounded in-memory index. In OpenCode v2, a pending part names its tool and a
+separate call transition confirms that execution has started. The index
+publishes the newest running call and falls back to another live call if the
+newest one settles first. Only the name, identifiers, directory and start time
+are retained. Terminal events and runtime reset retire entries. History and
+bootstrap do not populate the index. Work Status and the guest workspace read
+the name only when session activity is running and the directory matches.
+Repeated events that leave the displayed tool unchanged publish nothing.
 
 ## Activity authority for worktree retention
 

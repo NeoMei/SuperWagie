@@ -19,7 +19,7 @@ import type { ComposerContextReference } from './submit/buildOutgoingMessage';
 
 export type ComposerReferenceAuthor = { login: string; avatarUrl?: string };
 
-export type ComposerReference =
+export type ComposerReference = (
     | {
         kind: 'repository-issue';
         /** Absent on issues restored from messages written before GitLab: those are GitHub. */
@@ -74,7 +74,8 @@ export type ComposerReference =
         base?: string;
         /** Opaque guest payload from `attach`; handed back on chip click, never shown. */
         data?: JsonValue;
-    };
+    }
+) & { composerAnchor?: string };
 
 /** One key per item, whichever way it reached the composer. */
 export const composerReferenceKey = (reference: ComposerReference): string => {

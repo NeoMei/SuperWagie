@@ -32,7 +32,15 @@ const sdk = OpenCode.make({
     baseUrl: 'http://localhost',
     fetch: async (request) => {
         const path = new URL(request instanceof Request ? request.url : request.toString()).pathname;
-        if (path.endsWith('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+        if (path.endsWith('/event')) {
+            const connected = { id: 'evt_formdock_ready', type: 'server.connected', data: {} };
+            const stream = new ReadableStream({
+                start(controller) {
+                    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(connected)}\n\n`));
+                },
+            });
+            return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
+        }
         return Response.json([]);
     },
 });
@@ -128,7 +136,7 @@ describe('the question dock interaction', () => {
         resetRecoverableQuestions();
         resetFormDrafts();
         rejectReply = false;
-        useConfigStore.setState({ isConnected: true, hasEverConnected: true });
+        useConfigStore.setState({ isConnected: false, hasEverConnected: false, settingsMessageStreamTransport: 'sse' });
         useUIStore.setState({ isMobile: false });
         useI18nStore.getState().setLocale('en');
         opencodeClient.reconnectToRuntimeBaseUrl();

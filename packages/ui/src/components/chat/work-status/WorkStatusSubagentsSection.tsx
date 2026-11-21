@@ -4,12 +4,14 @@ import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
+import { useSessionLiveToolStore } from '@/sync/session-live-tool';
 import { useI18n } from '@/lib/i18n';
 import { useAllLiveSessions, useAllSessionStatuses, useDirectorySync } from '@/sync/sync-context';
 import { useSessionWorkflowRuns } from '@/lib/workflows/store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
+import { getToolMetadata } from '@/lib/toolHelpers';
 import { normalizePath } from '@/lib/pathNormalization';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
@@ -18,6 +20,7 @@ import { useOpenChildSession } from './useOpenChildSession';
 import { formatCost } from './subagentCost';
 import { computeRollup } from './useSubagentCostRollup';
 import type { State } from '@/sync/types';
+import type { Session } from '@/lib/opencode/model';
 
 type Props = {
   sessionId: string | null;
@@ -29,6 +32,76 @@ const SECTION_ID = 'subagents';
 const SubagentDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const hasDuration = useHasSessionActivityDuration(sessionId, true);
   return hasDuration ? <SessionActivityDuration sessionId={sessionId} running /> : null;
+};
+
+type SubagentRowProps = {
+  child: Session;
+  blocked: boolean;
+  asked: boolean;
+  busy: boolean;
+  retrying: boolean;
+  failed: boolean;
+  done: boolean;
+  childCost: number;
+  modelName: string | null;
+  open?: (childId: string, label: string, childDirectory: string) => void;
+};
+
+const SubagentRow: React.FC<SubagentRowProps> = ({
+  child, blocked, asked, busy, retrying, failed, done, childCost, modelName, open,
+}) => {
+  const { t } = useI18n();
+  const toolDirectory = normalizePath(child.directory);
+  const showTool = busy && !retrying && !blocked && !asked;
+  const toolName = useSessionLiveToolStore((state) => {
+    if (!showTool || !toolDirectory) return undefined;
+    const tool = state.tools.get(child.id);
+    return tool?.directory === toolDirectory ? tool.name : undefined;
+  });
+  const toolLabel = toolName ? getToolMetadata(toolName).displayName : undefined;
+  const detail = toolLabel ? t('chat.workStatus.subagent.currentTool', { tool: toolLabel }) : undefined;
+  const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
+  let icon: IconName = 'time';
+  let iconColor: string | undefined;
+  let statusLabel = '';
+  if (blocked || asked) {
+    icon = 'alert';
+    iconColor = 'var(--status-warning)';
+    statusLabel = t(blocked ? 'chat.workStatus.subagent.needsPermission' : 'chat.workStatus.subagent.askedQuestion');
+  } else if (busy) {
+    icon = 'record-circle';
+    iconColor = 'var(--status-info)';
+    statusLabel = t('chat.workStatus.subagent.working');
+  } else if (failed) {
+    icon = 'close-circle';
+    iconColor = 'var(--status-error)';
+    statusLabel = t('chat.workStatus.subagent.failed');
+  } else if (done) {
+    icon = 'checkbox-circle';
+    iconColor = 'var(--status-success)';
+    statusLabel = t('chat.workStatus.subagent.done');
+  }
+  return (
+    <WorkStatusRow
+      onClick={open ? () => open(child.id, label, child.directory) : undefined}
+      ariaLabel={[t('chat.workStatus.action.openSubagent', { name: label }), statusLabel].filter(Boolean).join('. ')}
+      leading={(
+        <span className="flex size-3.5 shrink-0 items-center justify-center">
+          <Icon name={icon} className="size-3" style={iconColor ? { color: iconColor } : undefined} />
+        </span>
+      )}
+      label={<span dir="auto" className="oc-ui-start-align">{label}</span>}
+      detail={detail}
+      tooltip={modelName ? <><span className="block">{modelName}</span>{detail ? <span dir="auto">{detail}</span> : null}</> : undefined}
+      value={(
+        <>
+          {blocked || asked ? <WorkStatusValue tone="warning">{statusLabel}</WorkStatusValue>
+            : busy ? <SubagentDuration sessionId={child.id} /> : null}
+          {childCost > 0 ? <WorkStatusValue tone="muted">{formatCost(childCost)}</WorkStatusValue> : null}
+        </>
+      )}
+    />
+  );
 };
 
 /**
@@ -80,7 +153,8 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   // stable while nothing about these children changes.
   const observedChildren = useGlobalSessionStatusStore(React.useCallback((state) => children
     .flatMap((child) => {
-      if (state.statusById.has(child.id)) return [`${child.id}\tbusy`];
+      const active = state.statusById.get(child.id);
+      if (active) return [`${child.id}\t${active.status.type}`];
       const observed = state.observedById.get(child.id);
       return observed ? [`${child.id}\t${observed.outcome === 'failed' ? 'failed' : 'settled'}`] : [];
     })
@@ -117,7 +191,8 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     const asked = (forms[child.id]?.length ?? 0) > 0;
     const status = statuses[child.id]?.type;
     const observed = observedById.get(child.id);
-    const busy = status === 'busy' || status === 'retry' || (!status && observed === 'busy');
+    const retrying = status === 'retry' || (!status && observed === 'retry');
+    const busy = retrying || status === 'busy' || (!status && observed === 'busy');
     const failed = !busy && observed === 'failed';
     // The snapshot is the server's list of running sessions: the host's for
     // every host directory, a space's own for that space. So it also speaks
@@ -129,7 +204,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     // Blockers first, then running rows, then rows whose status is not known
     // yet, then finished ones: an unknown row must not push a working one down.
     const rank = blocked || asked ? 0 : busy ? 1 : finished ? 3 : 2;
-    return { child, blocked, asked, busy, failed, done, rank };
+    return { child, blocked, asked, busy, retrying, failed, done, rank };
   });
   // Newest first by creation within each rank, never by last activity: an
   // activity order reshuffled the rows on every step, moving them under the
@@ -148,61 +223,18 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       summary={busyChildren > 0 ? `${busyChildren}/${children.length}` : children.length}
     >
       <div className="max-h-56 overflow-y-auto">
-        {rows.map(({ child, blocked, asked, busy, failed, done }) => {
-          const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
-          let icon: IconName = 'time';
-          let iconColor: string | undefined;
-          let statusLabel = '';
-          if (blocked || asked) {
-            icon = 'alert';
-            iconColor = 'var(--status-warning)';
-            statusLabel = t(blocked ? 'chat.workStatus.subagent.needsPermission' : 'chat.workStatus.subagent.askedQuestion');
-          } else if (busy) {
-            icon = 'record-circle';
-            iconColor = 'var(--status-info)';
-            statusLabel = t('chat.workStatus.subagent.working');
-          } else if (failed) {
-            icon = 'close-circle';
-            iconColor = 'var(--status-error)';
-            statusLabel = t('chat.workStatus.subagent.failed');
-          } else if (done) {
-            icon = 'checkbox-circle';
-            iconColor = 'var(--status-success)';
-            statusLabel = t('chat.workStatus.subagent.done');
-          }
-          const childCost = perChildCost.get(child.id) ?? 0;
-          const modelName = getProviderModelDisplayName(
-            providers.find((provider) => provider.id === child.model?.providerID),
-            child.model?.id,
-          );
-          return (
-            <WorkStatusRow
-              key={child.id}
-              onClick={directory ? () => openChildSession(child.id, label) : undefined}
-              ariaLabel={[t('chat.workStatus.action.openSubagent', { name: label }), statusLabel].filter(Boolean).join('. ')}
-              // The smaller status glyph sits centred in the panel's 14px icon
-              // slot, so it lines up under the section icon and the label
-              // starts where every other row's does.
-              leading={(
-                <span className="flex size-3.5 shrink-0 items-center justify-center">
-                  <Icon name={icon} className="size-3" style={iconColor ? { color: iconColor } : undefined} />
-                </span>
-              )}
-              label={label}
-              tooltip={modelName || undefined}
-              value={(
-                <>
-                  {blocked ? (
-                    <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.needsPermission')}</WorkStatusValue>
-                  ) : asked ? (
-                    <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
-                  ) : busy ? <SubagentDuration sessionId={child.id} /> : null}
-                  {childCost > 0 ? <WorkStatusValue tone="muted">{formatCost(childCost)}</WorkStatusValue> : null}
-                </>
-              )}
-            />
-          );
-        })}
+        {rows.map((row) => (
+          <SubagentRow
+            key={row.child.id}
+            {...row}
+            childCost={perChildCost.get(row.child.id) ?? 0}
+            modelName={getProviderModelDisplayName(
+              providers.find((provider) => provider.id === row.child.model?.providerID),
+              row.child.model?.id,
+            )}
+            open={directory ? openChildSession : undefined}
+          />
+        ))}
       </div>
     </WorkStatusCollapsibleSection>
   );

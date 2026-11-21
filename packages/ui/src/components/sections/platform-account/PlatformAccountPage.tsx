@@ -163,11 +163,11 @@ export const PlatformAccountPage: React.FC = () => {
   const currentMembership = signedIn?.credits.activeMembership === false ? undefined : signedIn?.membership.find((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now());
   const membershipSummary = (actions: Parameters<React.ComponentProps<typeof PlatformAccountCommerce>['membershipSummary']>[0] | null) => signedIn ? <PlatformMembershipSummary account={signedIn} actions={actions} /> : null;
   const hasWallet = signedIn?.productCreditWallet === true;
-  const visibleTab = tab === 'wallet' && !hasWallet || tab === 'keys' && hasWallet ? 'billing' : tab;
+  const visibleTab = tab === 'wallet' && !hasWallet ? 'billing' : tab;
   const tabs: Array<{ id: typeof tab; label: string; icon: IconName }> = [
     { id: 'billing', label: t('platformAccount.billingTab'), icon: 'bank-card' },
     ...(hasWallet ? [{ id: 'wallet' as const, label: t('platformAccount.productWallet.tab'), icon: 'bank-card' as const }] : []),
-    ...(!hasWallet ? [{ id: 'keys' as const, label: t('platformAccount.apiKeysTab'), icon: 'key' as const }] : []),
+    { id: 'keys', label: t('platformAccount.apiKeysTab'), icon: 'key' },
     { id: 'usage', label: t('platformAccount.usageTab'), icon: 'bar-chart' },
     { id: 'orders', label: t('platformAccount.ordersTab'), icon: 'file-list-2' },
     { id: 'profile', label: t('platformAccount.profileTab'), icon: 'user' },

@@ -21,6 +21,8 @@ const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part
 let cursorMessagePages: Array<{ items: Array<{ info: Message; parts: Part[] }>; cursor: { next?: string } }> | null = null
 const sessionRecords = new Map<string, Session>()
 const failingRevertSessionIds = new Set<string>()
+let beforeStageRevert: (() => Promise<void>) | undefined
+let beforeHistoryRead: (() => Promise<void>) | undefined
 let sessionDeleteError: unknown | null = null
 let sessionForkResult: Session | null = null
 let sessionForkError: Error | null = null
@@ -61,6 +63,12 @@ const movedSessionDirectories: Array<{ sessionID: string; directory: string }> =
 const globalArchivedSessions: Session[] = []
 let runtimeKey = "default-runtime"
 const AMBIGUOUS_TRANSPORT_FAILURE = Symbol("ambiguous-transport-failure")
+
+function deferredVoid() {
+  let resolve!: () => void
+  const promise = new Promise<void>((complete) => { resolve = complete })
+  return { promise, resolve }
+}
 
 const notFound = (kind: string) => Object.assign(new Error(`${kind}NotFoundError`), { status: 404 })
 
@@ -130,6 +138,7 @@ mock.module("@/lib/opencode/client", () => ({
         method: "session.revert.stage",
         params: { sessionID: sessionId, messageID: messageId, directory: options?.directory },
       })
+      await beforeStageRevert?.()
       if (failingRevertSessionIds.has(sessionId)) throw new Error("session.revert.stage failed (500): rejected")
       // Mirror the server: staging records the marker on the session, which is
       // what the action re-reads through `getSession` afterwards.
@@ -368,7 +377,7 @@ mock.module("./global-session-status", () => ({
 const messageLoader = {
   invalidateSession: () => {},
   ensure: async () => {},
-  refreshTail: async () => {},
+  refreshTail: async () => { await beforeHistoryRead?.() },
   getSnapshot: () => ({ status: "ready" as const, generation: 0 }),
 }
 mock.module("./session-message-loader", () => ({
@@ -2635,6 +2644,111 @@ describe("revertToMessage passes session directory", () => {
       pendingInputMode: "replace",
       attachedFiles: [],
     })
+  })
+
+  test("holds a new prompt until staging settles, and preserves it when staging fails", async () => {
+    for (const fail of [false, true]) {
+      const session = sessionFixture("session-a")
+      sessionRecords.set(session.id, session)
+      const target: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+      const store = createStore({}, { session: [session], message: { [session.id]: [target] } })
+      const { optimisticSend, revertToMessage, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+      setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+      setOptimisticRefs(() => {}, () => {})
+      const stageStarted = deferredVoid()
+      const stageResponse = deferredVoid()
+      beforeStageRevert = () => {
+        stageStarted.resolve()
+        return stageResponse.promise
+      }
+      if (fail) failingRevertSessionIds.add(session.id)
+      const send = mock(async () => {})
+      try {
+        const reverting = revertToMessage(session.id, target.id)
+        await stageStarted.promise
+        const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "edited", send })
+        const result = Promise.allSettled([reverting, sending])
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(send).not.toHaveBeenCalled()
+        stageResponse.resolve()
+        expect((await result).map((item) => item.status)).toEqual(fail
+          ? ["rejected", "rejected"]
+          : ["fulfilled", "fulfilled"])
+        expect(send).toHaveBeenCalledTimes(fail ? 0 : 1)
+      } finally {
+        stageResponse.resolve()
+        beforeStageRevert = undefined
+        failingRevertSessionIds.delete(session.id)
+      }
+    }
+  })
+
+  test("registers the revert before its history preparation starts", async () => {
+    const session = sessionFixture("ses_refetched_revert")
+    sessionRecords.set(session.id, session)
+    const target: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [target] } })
+    const { optimisticSend, revertToMessage, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    const started = deferredVoid()
+    const history = deferredVoid()
+    beforeHistoryRead = () => {
+      started.resolve()
+      return history.promise
+    }
+    const send = mock(async () => {})
+    try {
+      const reverting = revertToMessage(session.id, target.id, { refreshHistory: true })
+      await started.promise
+      const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "edited", send })
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(send).not.toHaveBeenCalled()
+      history.resolve()
+      await Promise.all([reverting, sending])
+      expect(send).toHaveBeenCalledTimes(1)
+    } finally {
+      history.resolve()
+      beforeHistoryRead = undefined
+    }
+  })
+
+  test("a send already waiting also waits for a newer staged cut", async () => {
+    const session = sessionFixture("ses_two_reverts")
+    sessionRecords.set(session.id, session)
+    const earlier: Message = { id: "msg_1", sessionID: session.id, role: "user", time: { created: 1 } }
+    const later: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [earlier, later] } })
+    const { optimisticSend, revertToMessage, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    const first = { start: deferredVoid(), finish: deferredVoid() }
+    const second = { start: deferredVoid(), finish: deferredVoid() }
+    let calls = 0
+    beforeStageRevert = () => {
+      const stage = calls++ === 0 ? first : second
+      stage.start.resolve()
+      return stage.finish.promise
+    }
+    const send = mock(async () => {})
+    try {
+      const laterCut = revertToMessage(session.id, later.id)
+      await first.start.promise
+      const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "edited", send })
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const earlierCut = revertToMessage(session.id, earlier.id)
+      first.finish.resolve()
+      await second.start.promise
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(send).not.toHaveBeenCalled()
+      second.finish.resolve()
+      await Promise.all([laterCut, earlierCut, sending])
+      expect(send).toHaveBeenCalledTimes(1)
+    } finally {
+      first.finish.resolve()
+      second.finish.resolve()
+      beforeStageRevert = undefined
+    }
   })
 
   test("routes revert through the session directory instead of the current directory", async () => {

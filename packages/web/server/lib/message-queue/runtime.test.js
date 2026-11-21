@@ -41,6 +41,7 @@ const createOpenCode = () => {
     commands: [],
     sent: [],
     switched: [],
+    writes: [],
     failNext: null,
     failStatus: 500,
     htmlNext: null,
@@ -49,8 +50,9 @@ const createOpenCode = () => {
   // `{ data, cursor }` and lists newest first.
   const wrapped = (data) => Response.json({ location: { directory: DIRECTORY }, data });
   const fetchImpl = vi.fn(async (url, init = {}) => {
-    const { pathname } = new URL(url);
-    const method = init.method ?? 'GET';
+    const request = new Request(url, init);
+    const { pathname, searchParams } = new URL(request.url);
+    const { method } = request;
     if (state.failNext && state.failNext.test(pathname)) {
       state.failNext = null;
       return new Response('boom', { status: state.failStatus });
@@ -72,6 +74,12 @@ const createOpenCode = () => {
     }
     if (pathname.endsWith('/message')) return Response.json({ data: state.tail, cursor: {} });
     if (pathname === '/api/command') return wrapped(state.commands);
+    if (pathname === '/api/info') return Response.json({ paths: { tmp: '/kernel/tmp' } });
+    if (method === 'POST' && pathname === '/api/experimental/fs/write') {
+      const target = searchParams.get('path');
+      state.writes.push({ target, directory: request.headers.get('x-opencode-directory'), bytes: [...new Uint8Array(await request.arrayBuffer())] });
+      return wrapped({ path: target });
+    }
     if (method === 'POST' && (pathname.endsWith('/model') || pathname.endsWith('/agent'))) {
       // Kept apart from `sent`: switching the session is not a message.
       state.switched.push({ path: pathname, body: JSON.parse(init.body) });
@@ -910,6 +918,68 @@ describe('message queue runtime', () => {
       text: 'follow up',
       files: [{ uri: 'data:text/plain,hi', name: '/Users/me/Documents/中 %25 report.txt  ' }],
     });
+  });
+
+  it('rebuilds a queued image path from durable bytes in its own directory at delivery', async () => {
+    const dataDir = makeDataDir();
+    const first = createRuntime({ dataDir });
+    const directory = '/spaces/isolated/project folder';
+    const image = { id: 'shot', filename: 'shot.png', mimeType: 'image/png', size: 3, source: 'local',
+      dataUrl: 'data:image/png;base64,AQID', composerAnchor: 'shot.png', deliverAsPath: true };
+    const draft = item({ content: 'Look at [shot.png]', text: 'Look at [shot.png]', attachments: [image] });
+    first.openCode.state.active = { [SESSION]: { type: 'running' } };
+    const { itemId } = await first.runtime.enqueue(SESSION, directory, draft);
+    const taken = await first.runtime.take(SESSION, itemId);
+    expect(taken.item).toMatchObject({ content: draft.content, attachments: [image] });
+    await first.runtime.enqueue(SESSION, directory, draft);
+    await first.runtime.flush();
+    first.runtime.stop();
+
+    const { runtime, openCode, emit } = createRuntime({ dataDir });
+    await runtime.load();
+    runtime.start();
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } }, directory);
+    await settle();
+    expect(openCode.state.writes).toEqual([{
+      target: expect.stringMatching(/^\/kernel\/tmp\/openchamber\/[a-f0-9]+\/image-1\.png$/),
+      directory: encodeURIComponent(directory), bytes: [1, 2, 3],
+    }]);
+    const [{ target }] = openCode.state.writes;
+    expect(openCode.state.sent.at(-1).body).toEqual({ text: `Look at [shot.png]\n\n[shot.png](<${target}>)` });
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('keeps a queued image and its context editable when a kernel cannot prepare its path', async () => {
+    const { runtime, openCode } = createRuntime({ retryDelayMs: () => 200 });
+    const image = { id: 'shot', filename: 'shot.png', mimeType: 'image/png', size: 3, source: 'local',
+      dataUrl: 'data:image/png;base64,AQID', deliverAsPath: true };
+    openCode.state.failNext = /\/api\/experimental\/fs\/write$/;
+    const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item({
+      attachments: [image], context: [{ kind: 'synthetic', text: 'Saved context' }],
+    }));
+    await settle();
+    expect(openCode.state.sent).toEqual([]);
+    expect(openCode.state.switched).toEqual([]);
+    const taken = await runtime.take(SESSION, itemId);
+    expect(taken.item).toMatchObject({ attachments: [image], context: [{ kind: 'synthetic', text: 'Saved context' }] });
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('keeps an image-bearing slash command on the command route even without original arguments', async () => {
+    const { runtime, openCode } = createRuntime();
+    openCode.state.commands = [{ name: 'review' }];
+    const image = { id: 'shot', filename: 'shot.png', mimeType: 'image/png', size: 3, source: 'local',
+      dataUrl: 'data:image/png;base64,AQID', deliverAsPath: true };
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review', text: '/review', attachments: [image] }));
+    await settle();
+    const [{ target }] = openCode.state.writes;
+    expect(openCode.state.sent).toEqual([{
+      path: `/api/session/${SESSION}/command`, body: { name: 'review', text: `[shot.png](<${target}>)` },
+    }]);
+    runtime.stop();
+    await runtime.flush();
   });
 
   it('persists and delivers a large desktop reference as a bounded note', async () => {

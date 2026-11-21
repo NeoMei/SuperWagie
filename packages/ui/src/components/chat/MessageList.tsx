@@ -15,6 +15,8 @@ import { TurnFold, TurnPagesRow } from './components/LiveTurnActivity';
 import { useTurnFoldContexts } from './components/useTurnFold';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './components/liveActivityContext';
 import { MessageSliceContext } from './message/messageSliceContext';
+import { MESSAGE_SELECTION_BAR_HEIGHT, MessageSelectionContext, useTranscriptMessageSelection } from './message/useTranscriptMessageSelection';
+import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { PendingWorkflowApprovals } from './workflows/PendingWorkflowApprovals';
 import { getTurnsWithLaterAssistant, uiPageMessageId } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
@@ -50,6 +52,7 @@ import {
 } from './lib/scroll/messageViewportAnchor';
 
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
+const EMPTY_LIVE_MESSAGES: readonly ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
 const EMPTY_ROW_MESSAGE_IDS: readonly string[] = [];
 
@@ -1012,6 +1015,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const resolveScrollContainer = React.useCallback((): HTMLElement | null => {
         return listRef.current?.getScrollableNode() ?? null;
     }, []);
+    const readExportColumn = React.useCallback(() => resolveScrollContainer()?.querySelector<HTMLElement>('.chat-message-column') ?? null,
+        [resolveScrollContainer]);
+    const [liveTail] = React.useState(createLiveTailStore);
+    const readLiveMessages = React.useCallback(() => {
+        const live = liveTail.get();
+        if (!live) return EMPTY_LIVE_MESSAGES;
+        return live.kind === 'turn' ? live.turn.assistantMessages : [live.message];
+    }, [liveTail]);
+    const chatSurfaceMode = useChatSurfaceMode();
+    const messageSelection = useTranscriptMessageSelection(chatSurfaceMode === 'default', sessionKey, directory, baseDisplayMessages, readLiveMessages, readExportColumn);
+    const hasMessageSelection = Boolean(messageSelection.toolbar);
+    const selectionScrollProps = React.useMemo(() => hasMessageSelection ? {
+        ...scrollContainerProps,
+        style: { ...scrollContainerProps?.style, top: MESSAGE_SELECTION_BAR_HEIGHT },
+    } : scrollContainerProps, [hasMessageSelection, scrollContainerProps]);
 
     const displayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.retry_overlay_ms', () => {
         return applyRetryOverlay(baseDisplayMessages, {
@@ -1142,8 +1160,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
         return indices.length > 0 ? indices : undefined;
     }, [rows, stickyUserHeader]);
-
-    const [liveTail] = React.useState(createLiveTailStore);
 
     // Stable identities: these reach the list, where a changing callback would
     // re-render every mounted row.
@@ -1581,6 +1597,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // list's point of view, so fade-in is disabled for them — content
         // arriving inside the streaming tail keeps its own animations.
         <ChatTranscriptDirectoryContext.Provider value={directory ?? null}>
+        <MessageSelectionContext.Provider value={messageSelection.context}>
         <FadeInDisabledProvider disabled>
             <LiveTailSource entry={trailingStreamingEntry} directory={directory}
                 showTurnChangedFiles={showTurnChangedFiles} store={liveTail} />
@@ -1595,13 +1612,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     onTimelineDataChange={stableTimelineDataChange}
                     listHeader={listHeader}
                     listFooter={footerWithApprovals}
-                    scrollContainerProps={scrollContainerProps}
+                    scrollContainerProps={selectionScrollProps}
                     rowContext={rowContext}
                     endPinningReleased={endPinningReleased}
                     showReasoningTraces={showReasoningTraces}
                     collapsibleThinkingBlocks={collapsibleThinkingBlocks}
                 />
+            {messageSelection.toolbar}
         </FadeInDisabledProvider>
+        </MessageSelectionContext.Provider>
         </ChatTranscriptDirectoryContext.Provider>
     );
 });

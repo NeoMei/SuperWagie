@@ -12,25 +12,23 @@ type JsonStorageOptions = {
     replacer?: (key: string, value: unknown) => unknown;
 };
 
+export const flushDeferredStorage = (): void => {
+    for (const flush of deferredFlushers) flush();
+};
+
 const registerDeferredFlusher = (flush: () => void) => {
     deferredFlushers.add(flush);
     if (deferredFlushListenersRegistered || typeof window === 'undefined') return;
 
     deferredFlushListenersRegistered = true;
-    const flushAll = () => {
-        for (const flushDeferredStorage of deferredFlushers) {
-            flushDeferredStorage();
-        }
-    };
-
     try {
-        window.addEventListener('pagehide', flushAll, { capture: true });
-        window.addEventListener('beforeunload', flushAll, { capture: true });
+        window.addEventListener('pagehide', flushDeferredStorage, { capture: true });
+        window.addEventListener('beforeunload', flushDeferredStorage, { capture: true });
         if (typeof document !== 'undefined') {
             document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'hidden') flushAll();
+                if (document.visibilityState === 'hidden') flushDeferredStorage();
             });
-            document.addEventListener('freeze', flushAll);
+            document.addEventListener('freeze', flushDeferredStorage);
         }
     } catch {
         // Restricted environments can reject listeners; timers still flush.

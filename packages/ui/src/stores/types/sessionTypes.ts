@@ -26,6 +26,10 @@ export interface AttachedFile {
     /** Shared ID linking entries extracted from the same document (PPTX, DOCX, etc.).
      *  Removing any entry with this ID cascades to all entries in the group. */
     sourceDocumentId?: string;
+    /** The editor citation that owns this file, including extracted parts of a document. */
+    composerAnchor?: string;
+    /** A queued item already carries this image's path in its delivery text. */
+    deliverAsPath?: boolean;
 }
 
 export type EditPermissionMode = 'allow' | 'ask' | 'deny' | 'full';

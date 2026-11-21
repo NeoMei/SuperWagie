@@ -44,6 +44,7 @@ export interface ComposerLanguageContext {
     knownSnippetTriggers: ReadonlySet<string>;
     /** Filenames of the currently attached files, cited inline as `[name]`. */
     attachmentFilenames: readonly string[];
+    attachmentOpen?: ReadonlyMap<string, () => void>;
     /**
      * Names cited before their file finished attaching. A live set, like
      * `confirmedMentions`: filled before the citation text is inserted, so the

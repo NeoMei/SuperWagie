@@ -13,6 +13,9 @@
 
 import fs from 'fs';
 import path from 'path';
+import { randomBytes } from 'node:crypto';
+import { OpenCode } from '@opencode/client';
+import { z } from 'zod';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
@@ -62,6 +65,38 @@ const asText = (value) => (typeof value === 'string' ? value : '');
 const asRecord = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : null);
 const asList = (value) => (Array.isArray(value) ? value : null);
 const asCount = (value) => (Number.isFinite(value) && value >= 0 ? Math.floor(value) : null);
+
+const queueImagePath = z.string().refine((value) => (path.posix.isAbsolute(value) || path.win32.isAbsolute(value))
+  && !/[<>\p{Cc}]/u.test(value));
+const queueImageKernelPaths = z.object({ paths: z.object({ tmp: queueImagePath }) });
+
+async function prepareQueuedImageLinks(client, images) {
+  const prepared = images.map((image, index) => {
+    const data = /^data:image\/([a-z\d.+-]+);base64,([a-z\d+/]+={0,2})$/i.exec(image.dataUrl);
+    const bytes = data && data[2].length % 4 === 0 && Buffer.from(data[2], 'base64');
+    if (!bytes?.length) throw new Error('Queued image bytes are unavailable. Edit the message to reattach the image.');
+    const extension = data[1].toLowerCase().split('+')[0];
+    const filename = `image-${index + 1}.${extension}`;
+    const label = path.win32.basename(image.filename).replace(/[\r\n<>[\]\\]/g, '-').trim() || filename;
+    return { bytes, filename, label };
+  });
+
+  const info = queueImageKernelPaths.safeParse(await client.server.info());
+  if (!info.success) throw new Error('OpenCode did not provide a temporary directory for the queued images.');
+  const folder = `${info.data.paths.tmp.replace(/[\\/]+$/, '')}/openchamber/${randomBytes(8).toString('hex')}`;
+
+  const links = [];
+  for (const { bytes, filename, label } of prepared) {
+    const destination = `${folder}/${filename}`;
+    const written = await client.experimental.file.write({ path: destination, payload: bytes });
+    const saved = queueImagePath.safeParse(written.data?.path);
+    if (!saved.success || saved.data.replaceAll('\\', '/') !== destination.replaceAll('\\', '/')) {
+      throw new Error('OpenCode did not confirm a queued image write.');
+    }
+    links.push(`[${label}](<${saved.data.replaceAll('\\', '/')}>)`);
+  }
+  return links.join(' ');
+}
 
 const isValidSessionId = (value) => SESSION_ID_PATTERN.test(asNonEmptyString(value));
 
@@ -113,6 +148,9 @@ const parseAttachment = (value) => {
   if (serverPath) attachment.serverPath = serverPath;
   const agentPath = asText(raw.agentPath);
   if (agentPath) attachment.agentPath = agentPath;
+  const composerAnchor = asNonEmptyString(raw.composerAnchor);
+  if (composerAnchor) attachment.composerAnchor = composerAnchor;
+  if (raw.deliverAsPath === true && mimeType.toLowerCase().startsWith('image/')) attachment.deliverAsPath = true;
   attachment.dataUrl = dataUrl;
   return attachment;
 };
@@ -535,8 +573,18 @@ export function createMessageQueueRuntime({
     const { providerID, modelID, variant } = item.sendConfig;
     let agent = item.sendConfig.agent;
     let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
-    const promptFiles = item.attachments.map(toPromptFile);
+    const queuedImages = item.attachments.filter((file) => file.deliverAsPath);
+    const promptFiles = item.attachments.filter((file) => !file.deliverAsPath).map(toPromptFile);
     const contextMessages = item.context.flatMap(toContextMessages);
+    // Queue records retain the image bytes. Rebuild their paths in this
+    // kernel before any prompt, synthetic context, or goal can be admitted.
+    const links = queuedImages.length === 0 ? '' : await prepareQueuedImageLinks(OpenCode.make({
+      baseUrl: buildOpenCodeUrl('/', '').replace(/\/+$/, ''),
+      headers: { ...getOpenCodeAuthHeaders(), 'x-opencode-directory': encodeURIComponent(directory) },
+      fetch: (input, init) => fetchImpl(input, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }),
+    }), queuedImages);
+    const withImageLinks = (text) => [text, links].filter(Boolean).join('\n\n');
+    const text = withImageLinks(item.text);
 
     // Jev routing, when the queued send named the Auto sentinel. A failure
     // inside resolves to the fallback model; only a missing fallback throws.
@@ -545,7 +593,7 @@ export function createMessageQueueRuntime({
       directory,
       model,
       agent,
-      requestText: `${item.text}${attachmentHint({ files: promptFiles })}`.trim(),
+      requestText: `${text}${attachmentHint({ files: promptFiles })}`.trim(),
     }) : null;
     if (routed) {
       model = routed.model;
@@ -573,7 +621,7 @@ export function createMessageQueueRuntime({
 
     // Standing project context is written into the session first, exactly as
     // a UI send does it; a failed write sends without it rather than not at all.
-    if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory, item.text);
+    if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory, text);
 
     // A message queued as a goal starts it now, as a direct send would. The
     // goal is saved before anything is admitted, so a failed save leaves
@@ -620,7 +668,7 @@ export function createMessageQueueRuntime({
         body: {
           // OpenCode 2.0.8 renamed the command body field `command` to `name`.
           name: command.name,
-          text: command.arguments,
+          text: withImageLinks(command.arguments),
           ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
         },
       });
@@ -629,7 +677,7 @@ export function createMessageQueueRuntime({
         directory,
         method: 'POST',
         body: {
-          text: item.text,
+          text,
           ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
           ...(item.agentMention ? { agents: [{ name: item.agentMention }] } : {}),
         },

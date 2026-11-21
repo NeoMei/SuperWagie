@@ -1,4 +1,5 @@
 import React from 'react';
+import { toast } from 'sonner';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { DiffViewIcon } from '@/components/icons/DiffIcon';
@@ -29,7 +30,11 @@ import { KnowledgeLibraryPanel } from './panels/KnowledgeLibraryPanel';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
-import { cn } from '@/lib/utils';
+import { cn, getRevealLabelKey } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { isDesktopLocalOriginActive } from '@/lib/desktop';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { clampContextEditorTreeWidth, isTrackerBranchTab, useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
@@ -422,6 +427,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const layoutAnimationMs = useLayoutAnimationMs();
   const isVertical = geometry.axis === 'y';
   const { t, direction } = useI18n();
+  const { files } = useRuntimeAPIs();
   const isRtl = direction === 'rtl';
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const changeRequestTerm = useChangeRequestTerm(useRepositoryReferenceProvider(effectiveDirectory || null));
@@ -860,6 +866,10 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         return null;
       }
       const { id, index, allIds, close } = args;
+      const tab = tabs.find((entry) => entry.id === id);
+      const filePath = tab?.mode === 'file' ? tab.targetPath : null;
+      const revealFile = files.revealPath;
+      const canRevealLocalFile = () => getRuntimeKey() === 'local' && isDesktopLocalOriginActive();
       const closeOthers = () => closeContextPanelTabs(directoryKey, allIds.filter((tabId) => tabId !== id));
       // "Left" and "right" name the screen sides; in RTL the earlier tabs are on the right.
       const before = allIds.slice(0, index);
@@ -872,6 +882,34 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       const nothingToRight = isRtl ? index === 0 : index === allIds.length - 1;
       return (
         <>
+          {filePath && (
+            <>
+              <ContextMenuItem onClick={(event) => {
+                event.stopPropagation();
+                void copyTextToClipboard(filePath).then((result) => {
+                  if (result.ok) toast.success(t('sidebarFilesTree.toast.pathCopied'));
+                  else toast.error(t('sidebarFilesTree.toast.copyFailed'));
+                });
+              }}>
+                <Icon name="file-copy" className="me-2 size-4" />
+                {t('sidebarFilesTree.menu.copyPath')}
+              </ContextMenuItem>
+              {revealFile && canRevealLocalFile() && (
+                <ContextMenuItem onClick={(event) => {
+                  event.stopPropagation();
+                  if (!canRevealLocalFile()) return;
+                  const showFailure = () => toast.error(t('sidebarFilesTree.toast.revealFailed'));
+                  void revealFile(filePath).then(({ success }) => {
+                    if (!success) showFailure();
+                  }, showFailure);
+                }}>
+                  <Icon name="folder-received" className="me-2 size-4" />
+                  {t(getRevealLabelKey())}
+                </ContextMenuItem>
+              )}
+              <ContextMenuSeparator />
+            </>
+          )}
           <ContextMenuItem onClick={close}>
             <Icon name="close" className="me-2 size-4" />
             {t('contextPanel.tab.menu.close')}
@@ -904,7 +942,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         </>
       );
     },
-    [activeTab, closeContextPanelTabs, directoryKey, isRtl, t],
+    [activeTab, closeContextPanelTabs, directoryKey, files, isRtl, t, tabs],
   );
 
   // A tab dragged out of the strip moves its whole surface to a zone.
