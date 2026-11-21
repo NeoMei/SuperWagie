@@ -26,6 +26,11 @@ test('production updater feed is immutable GitHub configuration', () => {
   });
 });
 
+test('electron-builder declares the runtime updater feed for packaged downloads', () => {
+  const packageManifest = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+  assert.deepEqual(packageManifest.build?.publish, [PRODUCTION_UPDATER_FEED]);
+});
+
 test('requires the complete E2E environment and embedded build-marker conjunction', () => {
   const cases = [
     {},
