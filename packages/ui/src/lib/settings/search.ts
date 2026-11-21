@@ -907,6 +907,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.agent-secret-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentSecretTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentSecretToolSummary',
+    keywords: ['agent', 'tool', 'secret', 'token', 'api key', 'password', 'credential', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.agent-knowledge-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentKnowledgeTool',

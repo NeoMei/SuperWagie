@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.124",
+  "version": "2.7.125",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
@@ -17,7 +17,13 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@effect/platform-node": "4.1.0",
     "@electron/rebuild": "^4.2.0",
+    "@opencode/plugin": "2.3.2",
+    "@opencode/schema": "2.3.2",
+    "@opencode/server": "2.3.2",
+    "@opencode/util": "2.3.2",
+    "effect": "4.1.0",
     "electron": "^44.9.3",
     "electron-builder": "^26.0.0",
     "node-abi": "^4.33.0"
@@ -38,11 +44,14 @@
     "build": "bun -e \"process.exit(0)\"",
     "ensure:electron": "node ./scripts/ensure-electron.mjs",
     "prepare:opencode-cli": "node ./scripts/prepare-opencode-cli.mjs",
+    "prepare:opencode-server": "bun ./scripts/prepare-opencode-server.mjs",
     "prepare:ripgrep": "node ./scripts/prepare-ripgrep.mjs",
     "prepare:embedded-knowledge": "node ./scripts/prepare-embedded-knowledge.mjs",
     "prepare:hy-memory": "node ./scripts/prepare-hy-memory.mjs",
     "verify:opencode-cli": "node ./scripts/verify-opencode-cli.mjs --staged",
     "verify:opencode-cli:packaged": "node ./scripts/verify-opencode-cli.mjs --packaged",
+    "verify:opencode-server": "node ./scripts/verify-opencode-server.mjs --staged",
+    "verify:opencode-server:packaged": "node ./scripts/verify-opencode-server.mjs --packaged",
     "verify:linux-appimage": "node ./scripts/verify-linux-appimage.mjs",
     "bundle:main": "bun ./scripts/bundle-main.mjs",
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
@@ -55,7 +64,7 @@
     "test:linux-desktop": "node --test ./linux-autostart.test.mjs ./linux-desktop-entry.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
-    "package": "bun run prepare:presentation && bun run prepare:superweb && bun run build:web-assets && bun run prepare:opencode-cli && bun run prepare:ripgrep && bun run prepare:embedded-knowledge && bun run prepare:hy-memory && bun run bundle:main && bun run rebuild:native && bun run prepare:macos-speech && node ./scripts/package.mjs",
+    "package": "bun run prepare:presentation && bun run prepare:superweb && bun run build:web-assets && bun run prepare:opencode-server && bun run prepare:opencode-cli && bun run prepare:ripgrep && bun run prepare:embedded-knowledge && bun run prepare:hy-memory && bun run bundle:main && bun run rebuild:native && bun run prepare:macos-speech && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./entry.mjs && node --check ./early-startup.mjs && node --check ./main.mjs && node --check ./preload.mjs && node --check ./browser-panel-preload.cjs",
     "lint": "node -e \"process.exit(0)\"",
@@ -65,6 +74,12 @@
   "build": {
     "appId": "com.quukk.superwagie",
     "productName": "犇马",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://github.com/NeoMei/SuperWagie/releases/latest/download/"
+      }
+    ],
     "asarUnpack": [
       "node_modules/@openchamber/web/server/generated/model-resolver.mjs",
       "node_modules/@openchamber/web/server/built-in-extensions/**/*",
@@ -126,6 +141,10 @@
       {
         "from": "resources/opencode-cli",
         "to": "opencode-cli"
+      },
+      {
+        "from": "resources/opencode-server",
+        "to": "opencode-server"
       },
       {
         "from": "resources/ripgrep",

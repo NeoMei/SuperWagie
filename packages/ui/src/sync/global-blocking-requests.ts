@@ -55,8 +55,11 @@ export const useGlobalBlockingRequestsStore = create<GlobalBlockingRequestsState
 }));
 
 /** Whether a page or a secret card in this session waits for the user's answer. */
-export const useIsPageWaiting = (sessionId: string | null | undefined): boolean => (
-  useGlobalBlockingRequestsStore((state) => Boolean(sessionId && state.bySession.get(sessionId)?.pages.length))
+export const useIsPageWaiting = (sessionId: string | null | undefined, pageId?: string): boolean => (
+  useGlobalBlockingRequestsStore((state) => {
+    const pages = sessionId ? state.bySession.get(sessionId)?.pages ?? EMPTY : EMPTY;
+    return pageId ? pages.some((page) => page.id === pageId) : pages.length > 0;
+  })
 );
 
 /**

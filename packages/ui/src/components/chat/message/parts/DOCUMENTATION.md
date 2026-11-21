@@ -9,7 +9,7 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
 - `ShownPage` selects `UiPageFrame` for a recorded `ui` program and keeps the existing sandboxed HTML frame for an HTML page. Native UI programs use the app-owned block catalog; extension component contracts are not enabled by this renderer.
 - A waiting native page answers through the existing `/api/openchamber/render/answer` contract, with only the session, call, summary and answer data. Settled pages restore recorded choices when their answer matches the native block contract and keep controls disabled.
 - A program that cannot be parsed or drawn retains its errors and source. This runtime does not send unsupported `notDrawn` or decline requests, or add later-answer protocols to its backend.
-- Unsupported generated-image and secret-card capabilities retain the ordinary tool row and its full result. They are not hoisted into a card that this runtime cannot serve.
+- Generated-image calls retain the ordinary tool row. Secret requests and secret runs use private cards when the managed server capability is available. Secret values never enter ordinary transcript answers, and command output is redacted before disclosure.
 
 ## High-level flow
 

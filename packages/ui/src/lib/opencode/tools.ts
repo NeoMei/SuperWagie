@@ -699,6 +699,39 @@ function secretDetail(action: string | undefined, input: ToolInput | undefined):
   return undefined
 }
 
+export type RequestedSecret = { label: string; reason: string; placeholder: string | undefined }
+export type RequestedSecretRun = {
+  reason: string
+  command: string
+  program: string
+  fields: { env: string; label: string; placeholder: string | undefined }[]
+}
+
+const isSecretRun = (action: string | undefined) => action === "secret.run" || action === "run"
+
+export function requestedSecretRun(toolName: ToolName, state: ToolState): RequestedSecretRun | null {
+  if (normalizeToolName(toolName) !== OPENCHAMBER_SECRET_TOOL || state.status !== "running") return null
+  const parsed = secretRunInputSchema.parse(state.input ?? {})
+  if (!isSecretRun(parsed.action)) return null
+  const program = parsed.parameters?.program ?? parsed.program
+  const reason = parsed.parameters?.reason ?? parsed.reason
+  const inputs = parsed.parameters?.inputs ?? parsed.inputs
+  if (!program || !reason || !inputs) return null
+  const args = parsed.parameters?.args ?? parsed.args ?? []
+  return { reason, program, command: secretRunCommandLine(program, args), fields: inputs.map((field) => ({ env: field.env, label: field.label, placeholder: field.placeholder })) }
+}
+
+export function requestedSecret(toolName: ToolName, state: ToolState): RequestedSecret | null {
+  if (normalizeToolName(toolName) !== OPENCHAMBER_SECRET_TOOL || state.status !== "running") return null
+  const parsed = secretRunInputSchema.parse(state.input ?? {})
+  if (isSecretRun(parsed.action) || isSecretForget(parsed.action)) return null
+  const request = secretRequestInputSchema.parse(state.input ?? {})
+  const label = request.parameters?.label ?? request.label
+  const reason = request.parameters?.reason ?? request.reason
+  if (!label || !reason) return null
+  return { label, reason, placeholder: request.parameters?.placeholder ?? request.placeholder }
+}
+
 export function subagentAgent(input: ToolInput | undefined): string | undefined {
   return readInput(input).agent
 }
@@ -782,12 +815,12 @@ export function proposedWorkflowRunId(toolName: ToolName, state: ToolState): str
 }
 
 /**
- * The cards this runtime can draw instead of an ordinary tool row. Secret
- * requests and generated-image calls need server capabilities not provided by
- * this runtime, so their input and results remain in the normal disclosure.
+ * The cards this runtime can draw instead of an ordinary tool row.
  */
 export const isShownInPlace = (toolName: ToolName, state: ToolState): boolean => (
   renderedPage(toolName, state) !== null
+  || requestedSecret(toolName, state) !== null
+  || requestedSecretRun(toolName, state) !== null
   || proposedWorkflowRunId(toolName, state) !== null
 )
 

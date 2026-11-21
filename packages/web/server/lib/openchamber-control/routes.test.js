@@ -6,9 +6,9 @@ import { BrowserControlError } from '../browser-control/broker.js';
 import { OpenChamberControlError } from './error.js';
 import { registerOpenChamberControlRoutes } from './routes.js';
 
-const createApp = (execute, answerPage = vi.fn()) => {
+const createApp = (execute, answerPage = vi.fn(), answerSecret = vi.fn(), secretFields = vi.fn()) => {
   const app = express();
-  registerOpenChamberControlRoutes(app, { controlService: { execute, answerPage } });
+  registerOpenChamberControlRoutes(app, { controlService: { execute, answerPage, answerSecret, secretFields } });
   return app;
 };
 
@@ -78,5 +78,29 @@ describe('page answer route', () => {
       .send({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })
       .expect(404);
     expect(response.body).toEqual({ error: 'This page is no longer waiting for an answer' });
+  });
+});
+
+describe('secret answer routes', () => {
+  it('hands a private secret answer to the waiting call', async () => {
+    const answerSecret = vi.fn(() => ({ status: 'saved' }));
+    const body = { sessionId: 'ses_1', callId: 'call_1', value: 'private-value' };
+    const response = await request(createApp(vi.fn(), vi.fn(), answerSecret))
+      .post('/api/openchamber/secret/answer')
+      .send(body)
+      .expect(200);
+    expect(response.body).toEqual({ status: 'saved' });
+    expect(answerSecret).toHaveBeenCalledWith(body);
+  });
+
+  it('returns secret run fields for the private card', async () => {
+    const secretFields = vi.fn(() => ({ fields: ['TOKEN'], reused: [] }));
+    const body = { sessionId: 'ses_1', callId: 'call_1' };
+    const response = await request(createApp(vi.fn(), vi.fn(), vi.fn(), secretFields))
+      .post('/api/openchamber/secret/fields')
+      .send(body)
+      .expect(200);
+    expect(response.body).toEqual({ fields: ['TOKEN'], reused: [] });
+    expect(secretFields).toHaveBeenCalledWith(body);
   });
 });

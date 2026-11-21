@@ -81,6 +81,12 @@ the user can want independently:
   `session.prompt` hook: a prompt for the session, from any sender, aborts the
   waiting call, which returns `{ answered: false, reason: "chat" }`, and the
   agent reads the message next.
+- `openchamber_secret` — `secret.request`, `secret.run` and `secret.forget`.
+  The managed server owns the wait registry and private temporary files. A
+  secret request is answered through the dedicated route, while `secret.run`
+  injects values for one command and redacts stdout, stderr and errors before
+  the tool result is stored. Remembered values are in-memory leases scoped to
+  the calling session and are cleared on expiry or forget.
 - `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
   many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Off until
   `agentWorkflowToolEnabled` is explicitly `true`. How to write a script is the `script`

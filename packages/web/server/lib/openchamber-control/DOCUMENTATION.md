@@ -108,6 +108,18 @@ other.
   against `budgetMB` when the budget cut it) and a note telling the agent to
   split the page or use smaller images. A page whose images all show answers
   as before.
+- `secret-request.js` and `secret-run.js` own the private credential boundary for
+  `openchamber_secret`. A request is keyed by session and tool call, and a user
+  steer already present in the session cancels the wait before any credential is
+  accepted. Values travel only through the dedicated answer route. Remembered
+  values live in a session-scoped, expiring in-memory lease; command execution
+  receives them in a one-call environment and redacts stdout, stderr and errors
+  before the tool result is returned. File-backed requests use a separate
+  `0700` directory with `0600` files, sweep files after 24 hours, and never put
+  the value in transcript answers, ordinary tool disclosure, or export data.
+  `secret.request`, `secret.run` and `secret.forget` are disabled together by
+  `agentSecretToolEnabled`, and callers reaching `secret.run` outside the
+  managed agent tool are refused.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.

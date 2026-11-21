@@ -331,7 +331,7 @@ test('remote clients require their mode and UI, and refuse local native payloads
   fs.writeFileSync(mode, JSON.stringify({ mode: 'local' }));
   assert.throws(() => verifyPackagedAppContents(resources, { remoteClient: true }), /fixed desktop-mode/);
   fs.writeFileSync(mode, JSON.stringify({ mode: 'remote-client' }));
-  for (const resource of ['opencode-cli', 'embedded-knowledge', 'hy-memory', 'presentation-runtime', 'superweb', 'ripgrep', 'windows-diagnostics']) {
+  for (const resource of ['opencode-cli', 'opencode-server', 'embedded-knowledge', 'hy-memory', 'presentation-runtime', 'superweb', 'ripgrep', 'windows-diagnostics']) {
     fs.mkdirSync(path.join(resources, resource));
     assert.throws(() => verifyPackagedAppContents(resources, { remoteClient: true }), new RegExp(`must not bundle ${resource}`));
     fs.rmSync(path.join(resources, resource), { recursive: true });

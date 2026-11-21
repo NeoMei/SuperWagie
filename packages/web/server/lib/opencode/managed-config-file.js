@@ -117,14 +117,15 @@ export const createManagedConfigRuntime = ({
     const includeLibrary = settings?.agentLibraryToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;
+    const includeSecret = settings?.agentSecretToolEnabled !== false;
     // On by default wherever the build has workflows: the build flag is the opt-in.
     const includeWorkflow = isWorkflowAvailable() && settings?.agentWorkflowToolEnabled === true;
     const codeMode = settings?.agentToolsCodeMode === true;
 
     let permissions = [];
     const directories = [];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeLibrary || includeNotify || includeRender || includeWorkflow)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeLibrary, includeNotify, includeRender, includeWorkflow, codeMode }));
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeLibrary || includeNotify || includeRender || includeSecret || includeWorkflow)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeLibrary, includeNotify, includeRender, includeSecret, includeWorkflow, codeMode }));
       permissions = managedPermissionRules({ includeWorkflow });
     }
     // Only while an option is on: otherwise every limit error would cost the

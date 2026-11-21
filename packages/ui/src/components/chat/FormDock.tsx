@@ -15,7 +15,7 @@ import type { RecoveredQuestion } from '@/sync/recoverable-questions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useScopedBlockingForms, useRecoveredQuestions, useSessions } from '@/sync/sync-context';
-import { useRequestReveal } from '@/sync/request-reveal';
+import { revealWaitingPage, useRequestReveal } from '@/sync/request-reveal';
 import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
@@ -25,6 +25,7 @@ import { FormMarkdown } from './FormMarkdown';
 import { serializeFormAnswerAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
 import { formDraftScope, loadFormDraft, saveFormDraft, dropFormDraft } from './formDrafts';
 import { noteLocalFormCancelled } from '@/sync/recoverable-questions';
+import { FormDockModeContext } from './formsInChat';
 import {
     type FormValues,
     buildFormAnswer,
@@ -62,6 +63,8 @@ interface FormDockProps {
 }
 
 const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden }) => {
+    const mode = React.useContext(FormDockModeContext);
+    const readingHistory = mode === 'reading';
     const forms = useScopedBlockingForms(sessionId, directory);
     // The session's own forms come first; a location-scoped form (an MCP
     // elicitation, owned by no session) follows and shows in every session
@@ -72,6 +75,21 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden })
     // answering it starts a new turn instead of replying to a form.
     const recovered = useRecoveredQuestions(sessionId, directory);
     const recoveredFirst = form ? undefined : recovered[0];
+    if (mode === 'in-chat') {
+        const first = form ?? recoveredFirst?.form;
+        return (
+            <AnimatePresence>
+                {hidden || !first ? null : (
+                    <FormDockPointer
+                        key="in-chat"
+                        sessionId={sessionId}
+                        form={first}
+                        formIds={[...forms.map((item) => item.id), ...recovered.map((item) => item.form.id)]}
+                    />
+                )}
+            </AnimatePresence>
+        );
+    }
     // Keyed on the form id so a different request starts from a clean slate
     // (and the panels cross-fade instead of swapping content in place).
     return (
@@ -79,17 +97,56 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden })
             {hidden ? null : form ? (
                 webSearchConsent
                     ? <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />
-                    : <FormDockPanel key={form.id} form={form} forms={forms} directory={directory} />
+                    : <FormDockPanel key={form.id} form={form} forms={forms} directory={directory} readingHistory={readingHistory} />
             ) : recoveredFirst ? (
                 <FormDockPanel
                     key={recoveredFirst.form.id}
                     form={recoveredFirst.form}
                     forms={forms}
                     directory={directory}
+                    readingHistory={readingHistory}
                     recovered={recoveredFirst}
                 />
             ) : null}
         </AnimatePresence>
+    );
+};
+
+const FormDockPointer: React.FC<{
+    sessionId: string | null;
+    form: FormRequest;
+    formIds: string[];
+}> = ({ sessionId, form, formIds }) => {
+    const { t } = useI18n();
+    const reveal = React.useCallback((formId: string) => {
+        if (sessionId) revealWaitingPage(sessionId, formId);
+    }, [sessionId]);
+    useRequestReveal(formIds, reveal);
+    const title = form.title?.trim() || t('chat.formCard.inputNeeded');
+    const waiting = Math.max(0, formIds.length - 1);
+    return (
+        <ComposerFloatingPanel
+            role="region"
+            ariaLabel={title}
+            compact
+            header={(
+                <button
+                    type="button"
+                    onClick={() => reveal(form.id)}
+                    aria-label={t('chat.formDock.showInChatAria')}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
+                >
+                    <Icon name="question" className="size-3.5 shrink-0 text-primary" />
+                    <Icon name="arrow-up-s" className="size-4 shrink-0" />
+                    <span className="typography-ui-label min-w-0 truncate text-foreground">{title}</span>
+                    {waiting > 0 ? (
+                        <span className="typography-micro shrink-0 text-muted-foreground">
+                            {t('chat.formDock.waiting', { count: String(waiting) })}
+                        </span>
+                    ) : null}
+                </button>
+            )}
+        />
     );
 };
 
@@ -104,9 +161,10 @@ const FormDockPanel: React.FC<{
     form: FormRequest;
     forms: FormRequest[];
     directory?: string;
+    readingHistory: boolean;
     /** Set when this card re-asks a question whose turn died before it was answered. */
     recovered?: RecoveredQuestion;
-}> = ({ form, forms, directory, recovered }) => {
+}> = ({ form, forms, directory, readingHistory, recovered }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     // The sessions of the chat this dock belongs to, which may be a chat of
@@ -125,7 +183,8 @@ const FormDockPanel: React.FC<{
     });
     const [values, setValues] = React.useState<FormValues>(() => restored?.values ?? initialFormValues(fields));
     const [step, setStep] = React.useState(restored?.step ?? 0);
-    const [collapsed, setCollapsed] = React.useState(false);
+    const [collapsed, setCollapsed] = React.useState(readingHistory);
+    const previousReadingHistoryRef = React.useRef(readingHistory);
     const [isResponding, setIsResponding] = React.useState(false);
     const [showErrors, setShowErrors] = React.useState(false);
     const waiting = Math.max(0, forms.length - 1);
@@ -133,6 +192,12 @@ const FormDockPanel: React.FC<{
     // question queued behind the one shown.
     const formIds = React.useMemo(() => forms.map((item) => item.id), [forms]);
     useRequestReveal(formIds, React.useCallback(() => setCollapsed(false), []));
+
+    React.useEffect(() => {
+        if (previousReadingHistoryRef.current === readingHistory) return;
+        previousReadingHistoryRef.current = readingHistory;
+        setCollapsed(readingHistory);
+    }, [readingHistory]);
 
     const draftIdentity = `${JSON.stringify(draftScope)}\u0000${fieldsSignature}`;
     const identityRef = React.useRef(draftIdentity);

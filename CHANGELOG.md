@@ -2,6 +2,21 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.125] - 2026-11-21
+
+### New
+
+- **Chat:** Ask for API keys, tokens and passwords in a private card that keeps values out of the conversation and runs commands with redacted output.
+
+### Improvements
+
+- **Chat:** Waiting forms now appear beside the messages that asked for them, with drafts, recovery and reading-history navigation preserved.
+- **Desktop:** The bundled OpenCode server starts directly with the app, with a smaller embedded runtime and the existing private workspace protection.
+
+### Fixes
+
+- **Settings:** The agent secret tool can be enabled or disabled from OpenChamber Tools and keeps its setting across sessions.
+
 ## [2.7.117] - 2026-11-17
 
 ### Fixes

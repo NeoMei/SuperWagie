@@ -9,6 +9,7 @@ import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createLibraryActions } from './library.js';
 import { createTask } from './tasks.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createSecretRequests } from './secret-request.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
@@ -239,6 +240,8 @@ export const createOpenChamberControlService = (dependencies) => {
     conversationMemoryRuntime = null,
     isLibraryToolEnabled = async () => true,
     isRenderToolEnabled = async () => true,
+    isSecretToolEnabled = async () => true,
+    secretFiles = null,
     // Hears when a page an agent shows starts and stops waiting for the
     // user's answer (render.page with awaitAnswer).
     onPageWaitChange = () => {},
@@ -304,6 +307,23 @@ export const createOpenChamberControlService = (dependencies) => {
     createError: (message, status) => new OpenChamberControlError(message, status),
   }) : null;
 
+  const isAgentPrompt = (metadata) => Boolean(
+    metadata?.openchamber?.promptedBy?.sessionID
+      || metadata?.openchamber?.promptedBy?.sessionId
+      || metadata?.schedule?.id,
+  );
+
+  const hasUnreadChat = async (sessionID) => {
+    try {
+      const client = await getClient();
+      const items = await client.session.inbox.list({ sessionID });
+      return items.some((item) => item?.type === 'user' && item?.delivery === 'steer' && !isAgentPrompt(item?.payload?.metadata));
+    } catch (error) {
+      console.warn('[secret] could not read the session inbox:', asControlError(error, 'inbox read failed').message);
+      return false;
+    }
+  };
+
   // OpenCode holds archive state; the archive file holds it for sessions whose
   // directory is gone, and its entry wins: a timestamp archives, null restores.
   const withArchiveEntry = async (session) => {
@@ -360,6 +380,12 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers });
+  const secretRequests = createSecretRequests({
+    isEnabled: isSecretToolEnabled,
+    files: secretFiles,
+    onWaitChange: onPageWaitChange,
+    hasUnreadChat,
+  });
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -922,6 +948,15 @@ export const createOpenChamberControlService = (dependencies) => {
           signal: options.signal,
         });
       }
+      if (action.startsWith('secret.')) {
+        if (!secretRequests) throw new OpenChamberControlError('Secret input is not available on this server', 503);
+        const sessionId = asNonEmptyString(options.contextSessionId);
+        const callId = asNonEmptyString(options.contextCallId);
+        const directory = asNonEmptyString(contextDirectory);
+        if (action === 'secret.request') return await secretRequests.request(input, { sessionId, callId, directory, signal: options.signal });
+        if (action === 'secret.run') return await secretRequests.run(input, { sessionId, callId, directory, signal: options.signal, authorized: options.authorized === true });
+        if (action === 'secret.forget') return await secretRequests.forget(sessionId);
+      }
       if (action === 'file.open') {
         if (!fileOpen) {
           throw new OpenChamberControlError('The file viewer is not available on this server', 503);
@@ -1113,5 +1148,11 @@ export const createOpenChamberControlService = (dependencies) => {
   // id and the directory is resolved here, where it is authoritative.
   // `answerPage` is the chat's side of a page that waits (render.page with
   // awaitAnswer).
-  return { execute, resolveSessionDirectory, answerPage: pageAnswers.answer };
+  return {
+    execute,
+    resolveSessionDirectory,
+    answerPage: pageAnswers.answer,
+    answerSecret: secretRequests?.answer ?? (() => { throw new OpenChamberControlError('Secret input is not available on this server', 503); }),
+    secretFields: secretRequests?.fields ?? (() => { throw new OpenChamberControlError('Secret input is not available on this server', 503); }),
+  };
 };
