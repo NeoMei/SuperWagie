@@ -11,6 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 const electronDir = path.join(repoRoot, 'packages/electron');
+const bundledOpenCodeServerDir = path.join(electronDir, 'resources', 'opencode-server');
 const preferredHmrUiPort = Number(process.env.OPENCHAMBER_HMR_UI_PORT || '5173');
 const preferredHmrApiPort = Number(process.env.OPENCHAMBER_HMR_API_PORT || '3901');
 
@@ -47,6 +48,18 @@ function spawnProcess(command, args, options = {}) {
     windowsVerbatimArguments: isWindowsCommandScript,
     ...options,
   });
+}
+
+function resolveBundledOpenCodeServerEnv() {
+  const entry = path.join(bundledOpenCodeServerDir, 'serve.mjs');
+  if (!fs.existsSync(entry)) {
+    console.warn(
+      `[electron:dev] bundled OpenCode server missing at ${entry}; falling back to the configured CLI. `
+        + 'Run `bun run --cwd packages/electron prepare:opencode-server` to stage it.',
+    );
+    return {};
+  }
+  return { OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR: bundledOpenCodeServerDir };
 }
 
 function ensureElectronInstalled() {
@@ -242,6 +255,7 @@ async function main() {
   let hmrUiPort = '';
   ensureElectronInstalled();
   const desktopEnv = resolveElectronDevEnvironment({ env: process.env, electronDir });
+  Object.assign(desktopEnv, resolveBundledOpenCodeServerEnv());
   if (!startHmr) {
     await runProcess('bun', ['run', '--cwd', 'packages/electron', 'build:web-assets']);
   }

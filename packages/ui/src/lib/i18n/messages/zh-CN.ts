@@ -3916,6 +3916,7 @@ const baseDict = {
   'chat.formCard.tryAgain': '请重试。',
   'chat.formDock.progress': '第 {current} / {total}',
   'chat.formDock.waiting': '还有 {count} 个等待中',
+  'chat.formDock.showInChatAria': '在聊天中显示问题',
   'chat.formDock.back': '上一步',
   'chat.formDock.expandAria': '展开问题',
   'chat.formDock.collapseAria': '收起问题',

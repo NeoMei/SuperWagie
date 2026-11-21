@@ -158,6 +158,17 @@ export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(
   OPENCHAMBER_RENDER_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
+/** Secret input is kept in its own tool so values never enter normal answers. */
+export const OPENCHAMBER_SECRET_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'secret.request', title: 'Ask for a secret', description: 'Requires label and reason, with optional placeholder. The value is kept out of chat history' },
+  { action: 'secret.run', title: 'Run a command with secrets', description: 'Requires program, args, reason and inputs with env and label. Output is redacted' },
+  { action: 'secret.forget', title: 'Forget remembered secrets', description: 'Forget secrets remembered for this session' },
+]);
+
+export const OPENCHAMBER_SECRET_ACTIONS = Object.freeze(
+  OPENCHAMBER_SECRET_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
 /**
  * Workflows are their own tool: fanning a large task out to many agents is a
  * distinct intent with its own scripting guidance, and it ships dark behind
@@ -214,6 +225,7 @@ const ACTIONS_BY_TOOL = Object.freeze({
   openchamber_library: OPENCHAMBER_LIBRARY_ACTIONS,
   openchamber_notify: OPENCHAMBER_NOTIFY_ACTIONS,
   openchamber_render: OPENCHAMBER_RENDER_ACTIONS,
+  openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
   openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
   [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 });
@@ -266,6 +278,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_LIBRARY_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
   ...OPENCHAMBER_RENDER_ACTIONS,
+  ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);

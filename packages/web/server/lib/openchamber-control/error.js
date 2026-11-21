@@ -7,6 +7,8 @@ export class OpenChamberControlError extends Error {
   }
 }
 
+export const controlErrorFields = (cause) => (cause == null ? undefined : Object(cause));
+
 export const asControlError = (error, fallbackMessage, fallbackStatus = 500) => {
   if (error instanceof OpenChamberControlError) return error;
   const message = error instanceof Error ? error.message : fallbackMessage;

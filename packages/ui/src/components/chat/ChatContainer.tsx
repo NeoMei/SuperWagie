@@ -117,6 +117,8 @@ import { buildPromptPreviewsByTurnId } from './lib/promptPreviews';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { PermissionDock } from './PermissionDock';
 import { FormDock } from './FormDock';
+import { FormDockModeContext, resolveFormDockMode, resolveFormsInChat } from './formsInChat';
+import { TranscriptForms } from './TranscriptForms';
 import { ensureSpaceArchives, useSpaceArchiveOf } from '@/lib/spaces/space-archives';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -255,6 +257,7 @@ type ChatViewportProps = {
     activeTurnId: string | null;
     onSelectTurn: (turnId: string) => void;
     showPromptNavigator: boolean;
+    formsInChat: boolean;
     canLoadEarlierPrompts: boolean;
     isLoadingOlderPrompts: boolean;
     onLoadEarlierPrompts: () => void;
@@ -300,6 +303,7 @@ const ChatViewport = React.memo(({
     activeTurnId,
     onSelectTurn,
     showPromptNavigator,
+    formsInChat,
     canLoadEarlierPrompts,
     isLoadingOlderPrompts,
     onLoadEarlierPrompts,
@@ -393,6 +397,9 @@ const ChatViewport = React.memo(({
 
     const listFooter = React.useMemo(() => (
         <>
+            {resolveFormsInChat({ enabled: formsInChat, pinned: false, transcriptShown: showingTranscript }) && currentSessionId ? (
+                <TranscriptForms sessionId={currentSessionId} directory={directory} />
+            ) : null}
             {/* Permissions and forms dock above the composer (`PermissionDock`, `FormDock`). */}
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
 
@@ -422,7 +429,7 @@ const ChatViewport = React.memo(({
                 aria-hidden="true"
             />
         </>
-    ), [currentSessionId, directory, floatingComposer, isMobile, sessionIsWorking]);
+    ), [currentSessionId, directory, floatingComposer, formsInChat, isMobile, sessionIsWorking, showingTranscript]);
 
     const endFadeStyle: React.CSSProperties & Record<'--chat-status-row-clearance', string> = {
         '--chat-status-row-clearance': `${statusRowClearance}px`,
@@ -653,6 +660,7 @@ const ChatViewport = React.memo(({
         && prev.activeTurnId === next.activeTurnId
         && prev.onSelectTurn === next.onSelectTurn
         && prev.showPromptNavigator === next.showPromptNavigator
+        && prev.formsInChat === next.formsInChat
         && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts
         && prev.isLoadingOlderPrompts === next.isLoadingOlderPrompts
         && prev.onLoadEarlierPrompts === next.onLoadEarlierPrompts;
@@ -1135,6 +1143,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const chatSurfaceMode = useChatSurfaceMode();
     // The new-session draft is the main chat's; a pinned column never shows it.
     const draftOpen = !pinned && Boolean(newSessionDraft?.open);
+    // Keep active questions in the transcript for the main chat. The dock
+    // remains as a compact pointer so users can jump back to a waiting card.
+    const formsInChat = !pinned && !draftOpen && Boolean(currentSessionId);
     const isManagedChatContext = draftOpen
         ? newSessionDraft?.target === 'chat'
         : isChatDirectoryPath(effectiveSessionDirectory);
@@ -1859,6 +1870,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             activeTurnId={timelineController.activeTurnId}
             onSelectTurn={handlePromptNavigatorSelect}
             showPromptNavigator={showPromptNavigator}
+            formsInChat={formsInChat}
             canLoadEarlierPrompts={canLoadEarlierPrompts}
             isLoadingOlderPrompts={timelineController.isLoadingOlder}
             onLoadEarlierPrompts={handleLoadOlderClick}
@@ -1875,6 +1887,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			data-chat-working={pinned && sessionIsWorking ? 'true' : undefined}
 			className="flex h-full min-h-0 bg-background"
 		>
+        <FormDockModeContext.Provider value={resolveFormDockMode(formsInChat, showScrollButton)}>
 		<ChatColumnSessionContext.Provider value={chatColumnSession}>
 		<ChatColumnActionsContext.Provider value={columnActions}>
 		{/* One mobile comment controller per column: selections in this column
@@ -2057,7 +2070,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         </ChatQuoteHighlightContext.Provider>
         </MobileCommentComposerContext.Provider>
         </ChatColumnActionsContext.Provider>
-        </ChatColumnSessionContext.Provider>
+		</ChatColumnSessionContext.Provider>
+		</FormDockModeContext.Provider>
         {/* Kept mounted while it could ever show, so it can fade out and back
             in; `visible` drives that, and `reserved` keeps its column in the
             right slot while the context panel covers it. */}

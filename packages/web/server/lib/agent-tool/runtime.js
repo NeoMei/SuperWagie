@@ -15,6 +15,8 @@ import {
   OPENCHAMBER_NOTIFY_ACTIONS,
   OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
   OPENCHAMBER_RENDER_ACTIONS,
+  OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
+  OPENCHAMBER_SECRET_ACTIONS,
   OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS,
   OPENCHAMBER_SCHEDULE_ACTIONS,
   resolveAgentToolAction,
@@ -48,6 +50,7 @@ const ACTIONS = new Set([
   ...OPENCHAMBER_LIBRARY_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
   ...OPENCHAMBER_RENDER_ACTIONS,
+  ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);
@@ -60,6 +63,7 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
     ...OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
     ...OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
     ...OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
   ].map(({ action, title }) => [action, title]),
@@ -261,6 +265,20 @@ const RENDER_PARAMETER_PROPERTIES = {
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
 };
 
+const SECRET_PARAMETER_PROPERTIES = {
+  label: { type: 'string', description: 'What the secret is, shown above the field' },
+  reason: { type: 'string', description: 'What the command or next step will do with the secret' },
+  placeholder: { type: 'string', description: 'Optional hint shown inside the input' },
+  program: { type: 'string', description: 'Executable to run without a shell' },
+  args: { type: 'array', items: { type: 'string' } },
+  inputs: { type: 'array', items: { type: 'object', properties: { env: { type: 'string' }, label: { type: 'string' }, placeholder: { type: 'string' } }, required: ['env', 'label'], additionalProperties: false } },
+  timeoutMs: { type: 'integer', minimum: 1, maximum: 600000 },
+  value: { type: 'string', description: 'Secret value, supplied only by the user card' },
+  values: { type: 'object', additionalProperties: { type: 'string' }, description: 'Secret values, supplied only by the user card' },
+  remember: { type: 'array', items: { type: 'string' } },
+  declined: { type: 'boolean' },
+};
+
 // How to write a script lives on `script`, read while the agent writes it,
 // for the same reason the page rules live on render's `html`.
 const WORKFLOW_SCRIPT_DESCRIPTION = [
@@ -334,6 +352,8 @@ const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, a
   + "The page is part of your reply and sits on the chat's background: leave html, body and the outermost element without a background, add no outer card, border or banner title, and set boxes apart by tone. Style with the theme variables listed under html. "
   + "Read html before writing a page and awaitAnswer before asking on one.";
 
+const SECRET_TOOL_DESCRIPTION = "Ask the user for a secret or run one command with it. Secret values are collected in a private card, kept out of chat history, injected for one command, and redacted from output. Use secret.request for one saved file, secret.run for environment-only command use, and secret.forget when the user asks to clear remembered values.";
+
 const WORKFLOW_TOOL_DESCRIPTION = 'Workflows: a script that fans a large task out to many agents, which SuperWagie runs in the background while you stay free. '
   + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one: do it yourself or with a subagent. '
   + 'One action per call. Check a script with workflow.check, then workflow.run: the user approves the plan in the chat, and the report arrives as a message when the run ends. Read script before writing one.';
@@ -347,6 +367,7 @@ const BOOLEAN_PARAMETER_NAMES = [...new Set([
   KNOWLEDGE_PARAMETER_PROPERTIES,
   NOTIFY_PARAMETER_PROPERTIES,
   RENDER_PARAMETER_PROPERTIES,
+  SECRET_PARAMETER_PROPERTIES,
   WORKFLOW_PARAMETER_PROPERTIES,
 ].flatMap((properties) => Object.entries(properties)
   .filter(([, schema]) => schema.type === 'boolean')
@@ -643,7 +664,7 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
  */
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeLibrary, includeNotify, includeRender, includeWorkflow, codeMode }) => {
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeLibrary, includeNotify, includeRender, includeSecret, includeWorkflow, codeMode }) => {
   const entries = [];
   if (includeControl) {
     entries.push(`    for (const id of ${JSON.stringify(OPENCODE_TOOLS_REPLACED_BY_CONTROL)}) tools.remove(id)
@@ -726,6 +747,16 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       answers: true,
     }));
   }
+  if (includeSecret) {
+    entries.push(createToolEntry({
+      name: 'openchamber_secret',
+      description: SECRET_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
+      parameters: SECRET_PARAMETER_PROPERTIES,
+      codeMode: false,
+      answers: true,
+    }));
+  }
   if (includeWorkflow) {
     entries.push(createToolEntry({
       name: 'openchamber_workflow',
@@ -770,7 +801,7 @@ export default {
   setup: async (ctx) => {
     exemptCallbackFromProxy()
     await ctx.tool.transform((tools) => {
-${entries.join('')}    })${includeRender ? `
+${entries.join('')}    })${includeRender || includeSecret ? `
     await ctx.session.hook("prompt", (event) => {
       for (const controller of pagesWaitingForChat.get(event.sessionID) ?? []) controller.abort()
     })` : ''}
@@ -817,13 +848,13 @@ export const createAgentToolRuntime = (dependencies) => {
    * change while it runs, so the source on disk always matches the settings —
    * the running OpenCode reloads the directory it already has configured.
    */
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeLibrary = false, includeNotify = false, includeRender = false, includeWorkflow = false, codeMode = false } = {}) => {
-    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeLibrary && !includeNotify && !includeRender && !includeWorkflow) {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeLibrary = false, includeNotify = false, includeRender = false, includeSecret = false, includeWorkflow = false, codeMode = false } = {}) => {
+    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeLibrary && !includeNotify && !includeRender && !includeSecret && !includeWorkflow) {
       throw new Error('At least one SuperWagie managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeLibrary, includeNotify, includeRender, includeWorkflow, codeMode }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeLibrary, includeNotify, includeRender, includeSecret, includeWorkflow, codeMode }), { mode: 0o600 });
     return pluginDirectory;
   };
 
@@ -898,6 +929,7 @@ export const createAgentToolRuntime = (dependencies) => {
       const actionOptions = { ...options };
       if (contextSessionId) actionOptions.contextSessionId = contextSessionId;
       if (contextCallId) actionOptions.contextCallId = contextCallId;
+      if (asNonEmptyString(payload.tool) === 'openchamber_secret') actionOptions.authorized = true;
       const data = await executeAction(action, { ...payload.input, action }, contextDirectory, actionOptions);
       return createResult({ ok: true, action, data });
     } catch (error) {

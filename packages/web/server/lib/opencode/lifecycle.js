@@ -398,13 +398,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // OpenCode 2.2.6 checks browser fetch origins even behind the authenticated proxy.
     if (desktopPrivateDataDir) args.push('--cors', 'openchamber-ui://app');
     let launchWrapperType = null;
+    let launchSpec = null;
 
     if (process.platform === 'win32' && state.useWslForOpencode) {
       throw new Error('Launching OpenCode through WSL is no longer supported. Install OpenCode natively on Windows and configure opencode.cmd or opencode.exe.');
     }
 
-    if (process.platform === 'win32' && !state.useWslForOpencode) {
-      const launchSpec = resolveManagedOpenCodeLaunchSpec(binary);
+    if (!state.useWslForOpencode) {
+      launchSpec = resolveManagedOpenCodeLaunchSpec(binary);
       if (launchSpec?.binary) {
         if (launchSpec.wrapperType) {
           console.log(`Launching OpenCode via ${launchSpec.wrapperType}: ${launchSpec.binary}`);
@@ -434,7 +435,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     const child = spawn(binary, args, {
       cwd,
-      env: processEnv,
+      env: launchSpec?.env ? { ...processEnv, ...launchSpec.env } : processEnv,
       detached: process.platform !== 'win32',
       windowsHide: true,
       // The managed plugin uses this private parent channel for its in-memory

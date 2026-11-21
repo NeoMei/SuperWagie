@@ -119,7 +119,7 @@ test('an interrupted foreground shell retains partial output and removes the mod
 });
 
 
-for (const tool of ['openchamber_secret', 'openchamber_image']) test(`an unsupported ${tool} card retains a readable tool row and result`, async () => {
+for (const tool of ['openchamber_image']) test(`an unsupported ${tool} card retains a readable tool row and result`, async () => {
   const output = 'The recorded result remains available';
   await withPart(part(tool, { status: 'completed', input: { action: 'request' }, output, metadata: {}, time: { start: 1, end: 2 } }), false, async (container) => {
     const toggle = container.querySelector<HTMLElement>('[role="button"]');
@@ -127,5 +127,18 @@ for (const tool of ['openchamber_secret', 'openchamber_image']) test(`an unsuppo
     await act(async () => toggle?.click());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 80)); });
     expect(container.textContent).toContain(output);
+  }, true);
+});
+
+test('a waiting secret request renders a private input card in the transcript', async () => {
+  await withPart(part('openchamber_secret', {
+    status: 'running',
+    input: { action: 'request', label: 'API token', reason: 'Use it for this command', placeholder: 'Paste token' },
+    metadata: {},
+    time: { start: 1 },
+  }), false, (container) => {
+    expect(container.querySelector('[data-secret-request-status="waiting"]') !== null).toBe(true);
+    expect(container.textContent).toContain('API token');
+    expect(container.querySelector('input[type="password"]') !== null).toBe(true);
   }, true);
 });

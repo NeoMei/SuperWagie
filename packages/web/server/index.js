@@ -226,6 +226,7 @@ import { createPluginNotificationEmitter } from './lib/notifications/emit-route.
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
 import { createFileOpenRequester } from './lib/openchamber-control/file-open.js';
+import { createSecretFiles } from './lib/openchamber-control/secret-request.js';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
 import { applySystemCertificates } from './lib/system-ca.js';
@@ -2266,6 +2267,9 @@ const pluginNotificationEmitter = createPluginNotificationEmitter({
 });
 scheduledNotificationEmitter = pluginNotificationEmitter;
 
+const secretFiles = createSecretFiles({ directory: path.join(OPENCHAMBER_DATA_DIR, 'secret-files') });
+void secretFiles.sweep().catch((error) => console.warn('[secret] cleanup failed:', error?.message ?? error));
+
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -2312,6 +2316,11 @@ const openChamberControlService = createOpenChamberControlService({
   isRenderToolEnabled: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     return settings?.agentRenderToolEnabled !== false;
+  },
+  secretFiles,
+  isSecretToolEnabled: async () => {
+      const settings = await readSettingsFromDiskMigrated().catch(() => null);
+      return settings?.agentSecretToolEnabled !== false;
   },
   // A page that waits for the user's answer shows the session as waiting
   // the way a form does: the pending list the clients seed from, a live event

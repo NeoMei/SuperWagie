@@ -3903,6 +3903,7 @@ const baseDict = {
   'chat.formCard.tryAgain': 'Try again.',
   'chat.formDock.progress': '{current} of {total}',
   'chat.formDock.waiting': '{count} more waiting',
+  'chat.formDock.showInChatAria': 'Show the question in the chat',
   'chat.formDock.back': 'Back',
   'chat.formDock.expandAria': 'Expand the question',
   'chat.formDock.collapseAria': 'Collapse the question',

@@ -33,6 +33,9 @@ interface FormCardProps {
     form: FormRequest;
     /** Set when this card re-asks a question whose turn died before it was answered. */
     recovered?: RecoveredQuestion;
+    /** Rendered in the transcript instead of the composer dock. */
+    inChat?: boolean;
+    directory?: string;
 }
 
 /**
@@ -44,13 +47,13 @@ interface FormCardProps {
  * renders every visible field at once and submits one answer. Fields gated by
  * a `when` clause appear and disappear as their controlling field changes.
  */
-export const FormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
+export const FormCard: React.FC<FormCardProps> = ({ form, recovered, inChat, directory }) => {
     const webSearchConsent = readWebSearchConsent(form);
     if (webSearchConsent) return <WebSearchConsentCard form={form} consent={webSearchConsent} />;
-    return <GenericFormCard form={form} recovered={recovered} />;
+    return <GenericFormCard form={form} recovered={recovered} inChat={inChat} directory={directory} />;
 };
 
-const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
+const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = false, directory }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
@@ -66,7 +69,10 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
     // The card shows every field at once, so an external link is on screen
     // from the start and its acknowledgement travels with the reply.
     const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
-    const draftScope = React.useMemo(() => formDraftScope(form, recovered?.directory ?? currentSessionDirectory ?? undefined), [currentSessionDirectory, form, recovered?.directory]);
+    const draftScope = React.useMemo(
+        () => formDraftScope(form, recovered?.directory ?? directory ?? currentSessionDirectory ?? undefined),
+        [currentSessionDirectory, directory, form, recovered?.directory],
+    );
     const [values, setValues] = React.useState<FormValues>(() => {
         const draft = loadFormDraft(draftScope);
         return draft?.fieldsSignature === fieldsSignature ? draft.values : initialFormValues(fields, { acknowledgeExternal: true });
@@ -202,7 +208,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
     if (hasResponded || fields.length === 0) return null;
 
     return (
-        <div className="group w-full pt-0 pb-2">
+        <div className="group w-full pt-0 pb-2" data-form-surface={inChat ? 'transcript' : 'dock'}>
             <div className="chat-column">
                 <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
                     <div className="px-2 py-1.5 border-b border-border/20">

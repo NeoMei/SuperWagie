@@ -1,5 +1,30 @@
 [
   {
+    "version": "2.7.125",
+    "date": "2026-11-21",
+    "title": "Private credentials and inline forms",
+    "intro": null,
+    "app": {
+      "new": [
+        "**Chat:** Ask for API keys, tokens and passwords in a private card that keeps values out of the conversation and runs commands with redacted output."
+      ],
+      "improvements": [
+        "**Chat:** Waiting forms now appear beside the messages that asked for them, with drafts, recovery and reading-history navigation preserved.",
+        "**Desktop:** The bundled OpenCode server starts directly with the app, with a smaller embedded runtime and the existing private workspace protection."
+      ],
+      "fixes": [
+        "**Settings:** The agent secret tool can be enabled or disabled from OpenChamber Tools and keeps its setting across sessions."
+      ],
+      "misc": []
+    },
+    "vscode": {
+      "new": [],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.117",
     "date": "2026-11-17",
     "title": "Refunded orders release the purchase panel",

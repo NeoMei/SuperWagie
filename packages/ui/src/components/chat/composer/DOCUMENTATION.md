@@ -45,10 +45,11 @@ place of Next on the last step; `when`-gated fields join or leave the steps
 as answers change, an `external` field is an information step, Enter in a
 text box moves to the next step and Cmd/Ctrl+Enter submits. Submit is
 enabled only once every question is answered; a submit with a required
-question still open jumps to it. It shows the
-oldest pending form and counts the rest in its header. The BTW sheet keeps
-the inline `FormCard` for its child session's forms; both render a field
-through `FormFieldControl`.
+question still open jumps to it. The main chat places pending forms in the
+transcript with `TranscriptForms` and keeps a compact FormDock pointer for
+navigation. Reading history folds the dock to keep it out of the way, while
+pinned chats and child-session BTW surfaces retain the docked `FormCard`.
+All surfaces render fields through `FormFieldControl`.
 
 Interrupted question tools retain their captured text and choices when the
 engine records turn death. Live forms stay first. A recovered answer uses the
