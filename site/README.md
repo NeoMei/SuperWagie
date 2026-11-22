@@ -10,8 +10,7 @@ The website targets the 2.7.126 release candidate for Apple silicon Mac and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
-Windows installer is unsigned. Precise installer sizes are added to the public
-site after the final artifacts are verified.
+Windows installer is unsigned.
 
 Version 2.7.124 bundles OpenCode 2.3.2, restores independent access to Wallet and API Keys in the user center, and improves chat recovery and attachments.
 
