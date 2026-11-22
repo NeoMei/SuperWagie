@@ -1,7 +1,20 @@
 <section class="section-tight">
   <div class="wrap prose">
     <h1>Release notes</h1>
-    <p class="lead">Current version 2.7.124 · 21 November 2026</p>
+    <p class="lead">Current public release candidate 2.7.126 · 22 November 2026</p>
+    <h2>2.7.126 · production payment capability, whole points and bundled OpenCode detection</h2>
+    <ul>
+      <li>Expose WeChat Pay and Alipay recharge channels only when UniHub reports that real merchant payments are configured, avoiding orders that cannot complete in production.</li>
+      <li>Display spendable credit balances as whole points instead of exposing fractional values in the UI.</li>
+      <li>Fix the desktop runtime probe for the bundled OpenCode version so its launch environment is passed through.</li>
+      <li>This public candidate provides Apple silicon Mac and Windows x64 installers. The Mac package is ad-hoc signed and not notarised by Apple.</li>
+    </ul>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.126">View the full 2.7.126 release information</a></p>
+
+    <h2>2.7.125 · Private credentials and inline forms</h2>
+    <p>Enter credentials in a private card that keeps their values out of the conversation. Waiting forms appear beside the messages that requested them. The desktop app starts the bundled OpenCode server directly.</p>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.125">View the full 2.7.125 release information</a></p>
+
     <h2>2.7.124 · OpenCode 2.3.2, chat and user center improvements</h2>
     <ul>
       <li>Updates the bundled OpenCode to 2.3.2. Projects with executable OpenCode configuration prompt for review, and changes to that configuration prompt for another review.</li>
