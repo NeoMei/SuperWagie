@@ -94,7 +94,7 @@ const parseListedCheckouts = (raw, schema, accountId) => {
 };
 const segment = (value) => encodeURIComponent(value);
 const pathFor = (accountId, suffix) => `/v1/accounts/${segment(accountId)}/${suffix}`;
-const checkoutProviders = (capabilities) => (capabilities.payment_providers ?? [])
+const checkoutProviders = (capabilities) => (capabilities.real_payments_configured !== true ? [] : capabilities.payment_providers ?? [])
   .filter((provider) => provider !== 'alipay' || capabilities.alipay_checkout_qr === true);
 const requestCheckout = (ctx, suffix, init, useProductWallet) => versionRequest(ctx, pathFor(ctx.account.id, suffix),
   ctx.capabilities.alipay_checkout_qr === true ? { ...init, headers: { ...init?.headers, 'X-UniHub-Alipay-QR': '1' } } : init, useProductWallet);

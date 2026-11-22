@@ -20,14 +20,14 @@ const sandboxOffer = { ...membership, id: 'sandbox', name: 'Sandbox membership',
 const fixture = async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-commerce-test-'));
   cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
-  const state = { actor: 'actor-a', account: 'personal-a', service: 'service-a', role: 'owner', scopes: [...scopes], sandbox: true, creditsReady: true, failRead: false, loseResponse: false, blockPost: null, rejectOrder: '', calls: [], wallet: 10_000_000n, credits: 0n, now: Date.now(), offers: [membership, addon], activeMembership: false, pendingFulfillment: false, quoteAccount: undefined };
+  const state = { actor: 'actor-a', account: 'personal-a', service: 'service-a', role: 'owner', scopes: [...scopes], sandbox: true, creditsReady: true, failRead: false, loseResponse: false, blockPost: null, rejectOrder: '', calls: [], wallet: 10_000_000n, credits: 0n, now: Date.now(), offers: [membership, addon], activeMembership: false, pendingFulfillment: false, quoteAccount: undefined, reportedProviders: undefined };
   const cashCheckouts = new Map();
   const checkoutRecords = new Map();
   const orders = new Map(); const quotes = new Map(); const byKey = new Map();
   const upstream = async (route, init = {}) => {
     state.calls.push({ walletVersion: init.headers?.['X-UniHub-Product-Credit-Wallet'], netUpgrade: init.headers?.['X-UniHub-Legacy-Net-Upgrade'], route, method: init.method ?? 'GET', body: init.body, key: init.headers?.['Idempotency-Key'] });
     if (route === '/v1/accounts') return [{ id: state.account, kind: 'personal', role: state.role }];
-    if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: state.scopes, product_credit_wallet: state.productCreditWallet, sandbox: state.sandbox, product_wallet_recharge: state.sandbox, real_payments_configured: state.cashPayments ?? false, payment_providers: state.cashPayments ? ['wechat'] : [], native_credits: { ready: state.creditsReady } };
+    if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: state.scopes, product_credit_wallet: state.productCreditWallet, sandbox: state.sandbox, product_wallet_recharge: state.sandbox, real_payments_configured: state.cashPayments ?? false, payment_providers: state.reportedProviders ?? (state.cashPayments ? ['wechat'] : []), native_credits: { ready: state.creditsReady } };
     if (route.endsWith('/product-wallet') || route.endsWith('/product-wallet/superwagie/renewal')) return { version: 'product_v1', account_id: state.account, cash: { asset: 'CNY/6', available: String(state.wallet) }, can_manage: true, products: [{ product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 0 }, addon_renewal: { enabled: false, version: 1 }, orders: [], addon_offers: [] }, ...(state.otherWalletProducts ?? [])] };
     if (route === '/v1/catalog') return [...state.offers, sandboxOffer].map((item) => ({ ...item, sales_readiness: item.sandbox ? undefined : { ready: true } }));
     if (route.endsWith('/resources')) {
@@ -143,6 +143,13 @@ const fixture = async () => {
 const purchaseBody = (f, offerId = membership.id) => ({ accountId: f.state.account, offerId, idempotencyKey: crypto.randomUUID() });
 
 describe('UniHub commerce without sandbox funding', () => {
+  it('does not expose stale payment channels when the server says real payments are unavailable', async () => {
+    const f = await fixture();
+    f.state.reportedProviders = ['wechat', 'alipay'];
+    const view = await f.runtime.overview(identity);
+    expect(view.payments).toEqual({ mode: 'unconfigured', providers: [], canPurchase: true });
+  });
+
   it('never exposes sandbox offers or sandbox funding controls', async () => {
     const f = await fixture();
     const view = await f.runtime.overview(identity);
