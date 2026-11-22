@@ -1,7 +1,20 @@
 <section class="section-tight">
   <div class="wrap prose">
     <h1>更新说明</h1>
-    <p class="lead">当前版本 2.7.124 · 2026年11月21日</p>
+    <p class="lead">当前公开候选版本 2.7.126 · 2026年11月22日</p>
+    <h2>2.7.126 · 生产支付能力、整数积分与内置 OpenCode 检测</h2>
+    <ul>
+      <li>只有 UniHub 报告真实商户支付已配置时才显示微信或支付宝充值渠道，避免在未配置生产商户时生成不可完成的订单。</li>
+      <li>积分余额按可消费的整数积分显示，不再在界面暴露小数。</li>
+      <li>修复桌面运行时探测内置 OpenCode 版本时没有合并启动环境的问题。</li>
+      <li>本公开候选版本提供 Apple 芯片 Mac 和 Windows x64 安装包。Mac 包使用临时签名，未做 Apple 公证。</li>
+    </ul>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.126">查看 2.7.126 的完整发布信息</a></p>
+
+    <h2>2.7.125 · 私密凭证与对话内表单</h2>
+    <p>在对话中通过私密卡片输入凭证，值不会写入会话。等待填写的表单显示在对应消息旁。桌面版启动时直接拉起内置 OpenCode。</p>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.125">查看 2.7.125 的完整发布信息</a></p>
+
     <h2>2.7.124 · OpenCode 2.3.2、会话与用户中心改进</h2>
     <ul>
       <li>内置 OpenCode 升级至 2.3.2。打开含可执行 OpenCode 配置的项目时会提示审核，相关配置变化后会再次提示。</li>

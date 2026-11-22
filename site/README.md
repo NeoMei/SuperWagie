@@ -6,7 +6,7 @@ The HTTPS site and GitHub homepage use this origin. The old host,
 `https://superwagie.quukk.com`, remains available with HTTP 200 as a compatibility
 entry point; its pages also identify the www origin as canonical.
 
-The website targets release 2.7.124 for macOS Apple silicon and
+The website targets the 2.7.126 release candidate for Apple silicon Mac and
 Windows x64. Optional architectures are not part of the unified release. The
 Apple silicon build requires macOS 13 or later. Its complete app bundle uses
 ad-hoc signing and has no Apple notarization; the
@@ -237,7 +237,8 @@ background and indexed for project retrieval. The Experiences checkbox can pause
 or resume learning. Sessions from before enablement require explicit processing.
 Methodology candidates require confirmation.
 
-Installer links point to the v2.7.124 GitHub Release assets. The unified release
+Installer links point to the v2.7.126 GitHub prerelease assets. The download
+page also links to the v2.7.125 regular release. The unified release
 ships Apple silicon Mac and Windows x64 only; other architectures stay out of the
 public download page until a separately validated release is requested.
 
