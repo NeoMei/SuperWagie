@@ -23,11 +23,11 @@ describe('platform commerce transport', () => {
     expect(formatPlatformMoney('9007199254740993')).toBe('9007199254.740993');
     expect(formatPlatformMoney('1000000')).toBe('1.00'); expect(formatPlatformMoney('1')).toBe('0.000001');
   });
-  test('formats point summaries exactly without trailing fractional zeros', () => {
+  test('formats point summaries as whole spendable points', () => {
     expect(formatPlatformPoints('1000000000')).toBe('1000');
-    expect(formatPlatformPoints('1234567')).toBe('1.234567');
-    expect(formatPlatformPoints('1000001')).toBe('1.000001');
-    expect(formatPlatformPoints('9007199254740993')).toBe('9007199254.740993');
+    expect(formatPlatformPoints('1234567')).toBe('1');
+    expect(formatPlatformPoints('1000001')).toBe('1');
+    expect(formatPlatformPoints('9007199254740993')).toBe('9007199254');
     expect(formatPlatformPoints('0')).toBe('0');
     expect(() => formatPlatformPoints('-1')).toThrow('platform_response_invalid');
   });

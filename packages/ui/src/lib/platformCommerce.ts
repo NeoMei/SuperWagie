@@ -106,11 +106,9 @@ export const formatPlatformMoney = (value: string): string => {
   return `${amount / 1_000_000n}.${fraction}`;
 };
 
-/** Point summaries retain micro-point precision without padding whole values. */
+/** Point summaries show whole spendable points without overstating a balance. */
 export const formatPlatformPoints = (value: string): string => {
   if (!units.safeParse(value).success) throw new PlatformAccountError('platform_response_invalid');
-  const amount = BigInt(value);
-  const fraction = String(amount % 1_000_000n).padStart(6, '0').replace(/0+$/, '');
-  return `${amount / 1_000_000n}${fraction ? `.${fraction}` : ''}`;
+  return String(BigInt(value) / 1_000_000n);
 };
 
