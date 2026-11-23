@@ -71,6 +71,7 @@ test('treats missing update feed (404) as no update available', async () => {
     compareVersions,
   });
   assert.equal(result.available, false);
+  assert.equal(result.upToDate, false);
   assert.equal(result.pendingUpdate, null);
   assert.equal(result.nextVersion, '1.15.0');
 });
@@ -83,6 +84,7 @@ test('authoritative no-update result clears pending update', async () => {
     compareVersions,
   });
   assert.equal(result.available, false);
+  assert.equal(result.upToDate, true);
   assert.equal(result.pendingUpdate, null);
 });
 
@@ -196,6 +198,7 @@ test('macOS check reports no update for the same version', async () => {
     fetchImpl: async () => macFeed(),
   });
   assert.equal(result.available, false);
+  assert.equal(result.upToDate, true);
   assert.equal(result.version, null);
   assert.equal(result.installBlocked, undefined);
 });
@@ -208,6 +211,7 @@ test('macOS check treats a missing feed as no update', async () => {
     fetchImpl: async () => ({ status: 404, ok: false, json: async () => null }),
   });
   assert.equal(result.available, false);
+  assert.notEqual(result.upToDate, true);
 });
 
 test('macOS check rejects a malformed feed', async () => {

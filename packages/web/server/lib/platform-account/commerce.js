@@ -53,6 +53,7 @@ const checkoutSession = z.object({ kind: z.enum(['qr', 'redirect']), url: z.stri
 const checkoutSchema = z.object({
   id, account_id: id, product_id: product, provider: z.enum(['wechat', 'alipay']), offer_name: z.string(), walletTopUp: z.literal(true).optional(), amount: units, currency: z.literal('CNY'),
   payment_status: z.enum(['CREATED', 'PENDING', 'UNKNOWN', 'PAID', 'CLOSED', 'REVIEW']), fulfillment_status: z.enum(['NOT_STARTED', 'PENDING', 'FULFILLED', 'REVIEW']), refund_status: z.enum(['', 'PENDING', 'SUCCEEDED', 'REVIEW', 'REJECTED']).default(''),
+  close_pending: z.boolean().optional(),
   expires_at: z.string().datetime(), created_at: z.string().datetime(), order_id: id.optional(), error_code: z.string().optional(),
   subscription_id: id.optional(), product_credit_upgrade: upgradeSourceSchema.optional(),
   upgrade_return_status: z.enum(['UPGRADE_PENDING', 'UPGRADE_RELEASING', 'UPGRADE_RETURNED', 'UPGRADE_REVIEW']).optional(), upgrade_refund_amount: units.optional(),

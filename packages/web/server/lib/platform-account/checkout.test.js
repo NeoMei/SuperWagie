@@ -110,12 +110,19 @@ it('fails closed when native point readiness is false', async () => {
 });
 it('keeps an uncertain close pending until the original checkout confirms closure', async () => {
   const f = await setup(); f.state.lose = false;
+  f.body.provider = 'alipay';
+  f.state.url = 'https://qr.alipay.com/fixture';
   await f.runtime.createCheckout({}, f.body);
   f.state.checkout.payment_status = 'UNKNOWN';
-  await f.runtime.checkoutAction({}, 'check1', 'close', { accountId: 'acct' });
+  f.state.checkout.close_pending = true;
+  delete f.state.checkout.session;
+  expect(await f.runtime.checkoutAction({}, 'check1', 'close', { accountId: 'acct' })).toMatchObject({ close_pending: true });
   await expect(f.runtime.createCheckout({}, { ...f.body, idempotencyKey: crypto.randomUUID() })).rejects.toMatchObject({ code: 'platform_operation_pending' });
-  expect((await f.runtime.overview({})).intents[0].status).toBe('PENDING');
+  const pending = await f.runtime.overview({});
+  expect(pending.intents[0].status).toBe('PENDING');
+  expect(pending.checkouts[0]).toMatchObject({ id: 'check1', close_pending: true });
   f.state.checkout.payment_status = 'CLOSED';
+  delete f.state.checkout.close_pending;
   await f.runtime.checkoutAction({}, 'check1', 'reconcile', { accountId: 'acct' });
   expect((await f.runtime.overview({})).intents[0]).toMatchObject({ resourceId: 'check1', status: 'FAILED', idempotencyKey: f.body.idempotencyKey });
   expect(f.state.calls.filter((call) => call.init?.method === 'POST').map((call) => call.route)).toEqual([

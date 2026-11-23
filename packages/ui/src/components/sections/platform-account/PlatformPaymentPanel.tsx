@@ -47,6 +47,7 @@ const statusKey = (checkout: PlatformCheckout): I18nKey => {
   if (checkout.refund_status === 'REVIEW' || checkout.payment_status === 'REVIEW' || checkout.fulfillment_status === 'REVIEW') return 'platformAccount.checkoutReview';
   if (checkout.payment_status === 'CLOSED') return 'platformAccount.checkoutClosed';
   if (checkout.payment_status === 'PAID') return checkout.fulfillment_status === 'FULFILLED' ? 'platformAccount.purchaseApplied' : 'platformAccount.checkoutActivating';
+  if (checkout.close_pending) return 'platformAccount.checkoutClosePending';
   if (checkout.payment_status === 'UNKNOWN') return 'platformAccount.paymentConfirming';
   return 'platformAccount.paymentWaiting';
 };
@@ -68,6 +69,7 @@ const shortStateKey = (checkout: PlatformCheckout): I18nKey => {
   if (checkout.refund_status === 'REVIEW' || checkout.payment_status === 'REVIEW' || checkout.fulfillment_status === 'REVIEW') return 'platformAccount.shortState.review';
   if (checkout.payment_status === 'CLOSED') return 'platformAccount.shortState.closed';
   if (checkout.payment_status === 'PAID') return checkout.fulfillment_status === 'FULFILLED' ? 'platformAccount.shortState.active' : 'platformAccount.shortState.activating';
+  if (checkout.close_pending) return 'platformAccount.checkoutClosePending';
   return 'platformAccount.shortState.unpaid';
 };
 
@@ -111,8 +113,9 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const waiting = WAITING.includes(checkout.payment_status) && !checkout.refund_status;
   const refundable = !checkout.upgrade_return_status && !checkout.walletTopUp && checkout.payment_status === 'PAID' && !checkout.refund_status;
   const checkable = checkout.upgrade_return_status === 'UPGRADE_PENDING' || checkout.upgrade_return_status === 'UPGRADE_RELEASING' || waiting || checkout.refund_status === 'PENDING' || (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'PENDING');
-  const session = waiting ? checkout.session : undefined;
-  const remaining = useCountdown(waiting ? session?.expires_at ?? checkout.expires_at : undefined);
+  const showPaymentSession = waiting && !checkout.close_pending;
+  const session = showPaymentSession ? checkout.session : undefined;
+  const remaining = useCountdown(showPaymentSession ? session?.expires_at ?? checkout.expires_at : undefined);
   const expired = waiting && remaining === 0;
   const codeUrl = session?.kind === 'qr' && !expired && !compact ? session.url : null;
   const qr = codeUrl && codeImage?.source === codeUrl ? codeImage : null;
@@ -135,7 +138,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   }, [codeUrl]);
 
   const actions = <>
-    {!compact && waiting && onRenew && (expired || session?.kind !== 'qr') && <Button size="sm" disabled={busy} onClick={onRenew}>{t('platformAccount.renewPaymentCode')}</Button>}
+    {!compact && showPaymentSession && onRenew && (expired || session?.kind !== 'qr') && <Button size="sm" disabled={busy} onClick={onRenew}>{t('platformAccount.renewPaymentCode')}</Button>}
     {onDismiss && <Button size="sm" variant="ghost" disabled={busy} onClick={onDismiss}>{t('platformAccount.returnToPurchase')}</Button>}
     {checkable && <Button size="sm" variant="ghost" disabled={busy} onClick={onRefresh}>{t('platformAccount.refreshPaymentStatus')}</Button>}
     {waiting && <Button size="sm" variant="ghost" disabled={busy} onClick={onClose}>{t('platformAccount.closeCheckout')}</Button>}
