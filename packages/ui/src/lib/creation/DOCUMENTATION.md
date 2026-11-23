@@ -14,6 +14,11 @@
 - If the native folder open is unavailable, the internal tree can open only when the source equals the captured actual content root (using existing Windows path equivalence). Its tab uses the captured panel key, including ready space drafts. Open the tab idempotently and reveal the tree; do not toggle an already-open panel closed. A different root remains unopened with the overlay intact: file tabs and the tree have no independent root override, and changing navigation or pretending the current tree shows another folder would violate their contract.
 - No new outside-workspace grant, HTML CSP exception, or containment bypass is introduced.
 - Every creation intent enqueued while another creation is starting runs once, in order, after the active start completes.
+- The host routes document, presentation, video and website entries to
+  `superwriter`, `superppt`, `supervideo` and `superweb`. It checks project
+  skill policy and records the skill in the new session before sending the
+  opening prompt or opening the chat. Failed activation stops the start.
+  A failed first prompt after activation leaves the user in the prepared chat.
 
 ## Decisions
 
@@ -36,3 +41,9 @@ Both used to return false, so SourceBoard opened a folder even when the artifact
 ### Why creation intents are queued
 
 The UI clears the consumed intent before the network and session work completes. Keeping later intents in a small in-memory queue preserves clicks during that interval and avoids starting multiple creation projects concurrently.
+
+### Why the skill is recorded before the prompt
+
+The entry determines the skill. OpenCode stores the explicit invocation as a
+skill message before the editable user message, allowing the user to replace
+the first prompt without changing the workflow loaded in the session.

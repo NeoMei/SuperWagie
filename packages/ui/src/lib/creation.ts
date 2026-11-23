@@ -14,6 +14,16 @@ export type CreationIntent = (typeof CREATION_INTENTS)[number];
 export const isCreationIntent = (value: unknown): value is CreationIntent =>
   CREATION_INTENTS.some((intent) => intent === value);
 
+export const creationIntentFromWorkUrl = (url: string): CreationIntent | undefined =>
+  CREATION_INTENTS.find((kind) => url === `${CREATION_WORK_URL_PREFIX}${kind}`);
+
+export const CREATION_SKILL_ID = {
+  doc: 'superwriter',
+  deck: 'superppt',
+  video: 'supervideo',
+  page: 'superweb',
+} as const satisfies Record<CreationIntent, string>;
+
 /** The five top-level groups the session sidebar shows, in order. */
 export type WorkCategory = 'chat' | CreationIntent;
 

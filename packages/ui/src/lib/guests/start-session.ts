@@ -11,6 +11,9 @@ import type {
 import { HostRequestError, clampPromptRequest, clampStartSessionRequest } from '@openchamber/sdk';
 
 import type { I18nKey, I18nParams } from '@/lib/i18n';
+import { CREATION_SKILL_ID, type CreationIntent } from '@/lib/creation';
+import { opencodeClient } from '@/lib/opencode/client';
+import { isIntegrationDenied } from '@/lib/opencode/projection';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { buildLinkedGuestIssue, type LinkedGuestIssue } from '@/lib/linkedIssues';
 import { captureDefaultSendSelection } from '@/lib/defaultSendSelection';
@@ -20,7 +23,7 @@ import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { resolveWorktreeStartDirectory } from '@/lib/worktrees/worktreeStartDirectory';
 import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
-import { guestProject, guestProjectWorktrees } from './workspace';
+import { guestProject, guestProjectWorktrees, openGuestSession } from './workspace';
 import { syncDesktopSettings } from '@/lib/persistence';
 import { normalizePath } from '@/lib/pathNormalization';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -311,6 +314,8 @@ const resolveGuestProject = async (projectId: string): Promise<ReturnType<typeof
 
 export const startGuestSession = async (args: {
   request: StartSessionRequest;
+  /** Set by the host for its own creation entries, never from the SDK request. */
+  creationIntent?: CreationIntent;
   directory: string | null;
   t: TranslateFn;
   assertAuthorized: () => void;
@@ -335,12 +340,21 @@ export const startGuestSession = async (args: {
   }
 
   const navigation = args.request.navigation ?? 'preserve';
+  const creationSkill = args.creationIntent ? CREATION_SKILL_ID[args.creationIntent] : null;
   const sendSelection = captureDefaultSendSelection();
   let cancelled = false;
   const unsubscribe = subscribeRuntimeEndpointChanged(() => { cancelled = true; });
   const assertCurrent = () => {
     if (cancelled) throw new HostRequestError('DISCONNECTED', 'The connected server changed.');
     args.assertAuthorized();
+  };
+  const requireCreationSkillEnabled = async (skillId: string, directory: string): Promise<void> => {
+    const policies = await opencodeClient.getIntegrationPolicies(directory).catch(() => null);
+    assertCurrent();
+    if (!policies) throw new HostRequestError('HOST_UNAVAILABLE', args.t('creation.start.skillUnavailable', { skill: skillId }));
+    if (isIntegrationDenied(policies, `skill:${skillId}`)) {
+      throw new HostRequestError('NOT_GRANTED', args.t('creation.start.skillDisabled', { skill: skillId }));
+    }
   };
   let failure: 'bootstrap-failed' | 'session-create-failed' = 'session-create-failed';
   let linked = true;
@@ -363,6 +377,7 @@ export const startGuestSession = async (args: {
       directory = await resolveWorktreeStartDirectory(project, metadata.path);
     }
     assertCurrent();
+    if (creationSkill) await requireCreationSkillEnabled(creationSkill, directory);
     failure = 'session-create-failed';
     // v2 creates the session on a selection, so the first prompt runs on the
     // model the extension asked for without a switch message in the transcript.
@@ -377,11 +392,22 @@ export const startGuestSession = async (args: {
             agent: sendSelection.agentName,
           }
         : undefined,
-      navigation,
+      creationSkill ? 'preserve' : navigation,
     );
     assertCurrent();
     if (!session) return null;
     createdDirectory = session.directory ?? directory;
+    if (creationSkill) {
+      if (createdDirectory !== directory) await requireCreationSkillEnabled(creationSkill, createdDirectory);
+      assertCurrent();
+      try {
+        await opencodeClient.activateSessionSkill(session.id, creationSkill, createdDirectory);
+      } catch {
+        assertCurrent();
+        throw new HostRequestError('NOT_FOUND', args.t('creation.start.skillUnavailable', { skill: creationSkill }));
+      }
+      assertCurrent();
+    }
     if (metadata) {
       const latest = project ? guestProjectWorktrees(project.path).find((entry) => entry.path === metadata?.path) : undefined;
       metadata = { ...metadata, worktreeStatus: latest?.worktreeStatus ?? metadata.worktreeStatus };
@@ -419,7 +445,7 @@ export const startGuestSession = async (args: {
         return sendGuestFirstMessage(sessionId, directory, text, sendSelection);
       },
       closeSurfaces: () => {
-        if (navigation === 'open') useUIStore.getState().closeMainSurfaces();
+        if (navigation === 'open' && !creationSkill) useUIStore.getState().closeMainSurfaces();
       },
     });
 
@@ -430,6 +456,7 @@ export const startGuestSession = async (args: {
       toast.error(args.t('contextPanel.plugin.startSession.failed'));
       return null;
     }
+    if (creationSkill && navigation === 'open') openGuestSession(result.sessionId);
     if (result.sent === 'no-model') toast.error(args.t('contextPanel.plugin.startSession.noModel'));
     else if (result.sent === 'failed') toast.error(args.t('contextPanel.plugin.startSession.sendFailed'));
     else toast.success(args.t('contextPanel.plugin.startSession.created'));

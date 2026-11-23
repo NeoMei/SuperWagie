@@ -86,7 +86,7 @@ import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/g
 import { useGuestsStore } from '@/lib/guests/store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { CREATION_GUEST_ID, isCreationIntent } from '@/lib/creation';
+import { CREATION_GUEST_ID, creationIntentFromWorkUrl, isCreationIntent } from '@/lib/creation';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
 import { observeGuestShells, readGuestShellOutput } from '@/lib/guests/shells';
 import { guestStorageOperation } from '@/lib/guests/storage';
@@ -796,6 +796,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           }
           const started = await startGuestSession({
             request,
+            creationIntent: requestingGuestId === CREATION_GUEST_ID && installation?.source === 'bundled'
+              ? creationIntentFromWorkUrl(request.url)
+              : undefined,
             directory: directoryRef.current || null,
             t: translateRef.current,
             assertAuthorized: () => {
