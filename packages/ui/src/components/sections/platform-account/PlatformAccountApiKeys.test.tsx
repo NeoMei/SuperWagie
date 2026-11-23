@@ -111,12 +111,13 @@ const expectStep = (label: string, status: string) => {
   expect(step?.textContent).toContain(status);
   expect(step?.getAttribute('aria-current')).toBe(status === 'In progress' ? 'step' : null);
 };
-const waitForRead = async (previousCount: number) => {
+const waitForRead = async (previousCount: number, rendered?: () => boolean) => {
+  const readComplete = () => requests.filter(request => request.method === 'GET').length > previousCount && (!rendered || rendered());
   const deadline = Date.now() + 2000;
-  while (requests.filter(request => request.method === 'GET').length <= previousCount && Date.now() < deadline) {
+  while (!readComplete() && Date.now() < deadline) {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
   }
-  expect(requests.filter(request => request.method === 'GET').length).toBeGreaterThan(previousCount);
+  expect(readComplete()).toBe(true);
 };
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined; host?.remove(); host = undefined;
@@ -192,7 +193,7 @@ test('server progress distinguishes pending, active and completed stages without
 
   const issuedReads = requests.filter(request => request.method === 'GET').length;
   readPayload = runningState('configure');
-  await waitForRead(issuedReads);
+  await waitForRead(issuedReads, () => setupPanel().textContent?.includes('•••• A7q9') === true);
   expectStep('Activate key', 'Completed');
   expectStep('Configure models', 'In progress');
   expectStep('Test connection', 'Pending');
@@ -200,7 +201,8 @@ test('server progress distinguishes pending, active and completed stages without
 
   const configuredReads = requests.filter(request => request.method === 'GET').length;
   readPayload = runningState('test');
-  await waitForRead(configuredReads);
+  await waitForRead(configuredReads, () => [...setupPanel().querySelectorAll('li[aria-current="step"]')]
+    .some(step => step.textContent?.includes('Test connection')));
   expectStep('Activate key', 'Completed');
   expectStep('Configure models', 'Completed');
   expectStep('Test connection', 'In progress');

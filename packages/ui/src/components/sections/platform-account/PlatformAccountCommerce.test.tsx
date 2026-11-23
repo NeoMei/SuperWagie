@@ -269,6 +269,22 @@ test('a failed payment operation keeps the last authoritative purchase entries a
   expect(button('Subscribe').disabled).toBe(false);
 });
 
+test('shows a confirmed order and its date without repeating the matching request', async () => {
+  const createdAt = '2026-11-14T10:00:00Z';
+  const order = commerce.orders?.[0];
+  if (!order) throw new Error('Missing purchase fixture');
+  order.createdAt = createdAt;
+  commerce.intents = [
+    { accountId: 'team-a', idempotencyKey: 'applied', kind: 'purchase', status: 'APPLIED', productId: 'superwagie', resourceId: order.id, amount: order.amount, createdAt },
+    { accountId: 'team-a', idempotencyKey: 'unknown', kind: 'purchase', status: 'UNKNOWN', productId: 'superwagie', amount: order.amount, createdAt },
+  ];
+  await render('orders');
+  expect(host?.querySelector('time')?.dateTime).toBe(createdAt);
+  expect(host?.textContent).not.toContain('Past payment attempts');
+  expect([...(host?.querySelectorAll('button') ?? [])].filter((item) => item.textContent === 'Submit this payment again')).toHaveLength(1);
+  expect(host?.textContent).not.toContain('No purchase orders.');
+});
+
 test('a failed order read keeps one refresh action on the orders page', async () => {
   commerceReadFailures = 1;
   await render('orders');

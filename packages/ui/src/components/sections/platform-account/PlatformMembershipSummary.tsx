@@ -33,7 +33,7 @@ export const PlatformMembershipSummary: React.FC<{
 
   if (memberships.length === 0 && !showPoints && (!actions || actions.membershipOpen)) return null;
 
-  return <SettingsSection className="min-w-0 space-y-4 py-2 @xl:col-span-2" divider={false} contentClassName="space-y-5">
+  return <SettingsSection className="min-w-0 py-0 @xl:col-span-2" divider={false} contentClassName="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 space-y-1">
         {memberships.length === 0 ? <div>
@@ -44,35 +44,40 @@ export const PlatformMembershipSummary: React.FC<{
           <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.paidThrough', { date: displayDate(membership.paid_through) })}{` · ${membership.status === 'refunded' ? t('platformAccount.membershipStatusRefunded') : membership.status === 'active' && Date.parse(membership.paid_through) > now ? t('platformAccount.membershipStatusActive') : Date.parse(membership.paid_through) <= now ? t('platformAccount.membershipExpired') : t('platformAccount.membershipStatusOther', { status: membership.status })}`}</p>
         </div>)}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">
+      {actions && <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" disabled={actions.disabled} aria-pressed={actions.membershipOpen} onClick={actions.openMembership}>{t(active ? 'platformAccount.manageMembership' : 'platformAccount.membershipPlans')}</Button>
         {showPoints && <Button size="sm" disabled={actions.disabled} aria-pressed={actions.addonOpen} onClick={actions.openAddon}>{t('platformAccount.addonPlans')}</Button>}
       </div>}
     </div>
     {showPoints && <>
-    <dl className={`grid gap-3 ${availableBatches === undefined ? 'grid-cols-1' : 'grid-cols-2 @3xl:grid-cols-4'}`} aria-label={t('platformAccount.remainingPoints')}>
-      <div className="oc-tile flex min-h-36 min-w-0 flex-col rounded-lg p-4">
+    <dl className={`grid gap-3 ${availableBatches === undefined ? 'grid-cols-1' : account.productCreditWallet ? 'grid-cols-2 @xl:grid-cols-3' : 'grid-cols-2 @3xl:grid-cols-4'}`} aria-label={t('platformAccount.remainingPoints')}>
+      <div className={`oc-tile flex min-h-24 min-w-0 flex-col rounded-lg p-4 ${account.productCreditWallet && availableBatches !== undefined ? 'col-span-2 @xl:col-span-1' : ''}`}>
         <dt className="typography-ui-label text-muted-foreground">{t('platformAccount.remainingPoints')}</dt>
-        <dd dir="auto" className="mt-3 break-all text-3xl font-semibold tracking-tight tabular-nums">{formatPlatformPoints(account.credits.available)}</dd>
-        <dd className={`mt-auto pt-3 ${SETTINGS_HELPER_CLASS}`}>{t(account.productCreditWallet ? 'platformAccount.productWallet.pointsUseOrder' : 'platformAccount.pointsUseOrder')}</dd>
+        <dd dir="auto" className="mt-1 break-words text-3xl font-semibold tracking-tight tabular-nums">{formatPlatformPoints(account.credits.available)}</dd>
+        <dd className={`mt-auto pt-2 ${SETTINGS_HELPER_CLASS}`}>{t(account.productCreditWallet ? 'platformAccount.productWallet.pointsUseOrder' : 'platformAccount.pointsUseOrder')}</dd>
       </div>
       {availableBatches !== undefined && kinds.map((kind) => {
         const relevantBatches = hasRetainedPacks && kind === 'addon' ? ownedBatches ?? [] : availableBatches;
         const batches = relevantBatches.filter((batch) => batch.kind === kind);
         const available = batches.reduce((sum, batch) => sum + BigInt(batch.available), 0n);
         const nextExpiry = batches.filter((batch) => BigInt(batch.available) > 0n).map((batch) => batch.expiresAt).sort((a, b) => Date.parse(a) - Date.parse(b))[0];
-        return <div key={kind} className="oc-tile flex min-h-36 min-w-0 flex-col rounded-lg p-4">
+        return <div key={kind} className="oc-tile flex min-h-24 min-w-0 flex-col rounded-lg p-4">
           <dt className="typography-ui-label text-muted-foreground">{t(hasRetainedPacks && kind === 'addon' ? 'platformAccount.productWallet.retainedPackCredits' : `platformAccount.pointsSource.${kind}`)}</dt>
-          <dd dir="auto" className="mt-3 break-all text-2xl font-medium tracking-tight tabular-nums">{formatPlatformPoints(available.toString())}</dd>
-          {nextExpiry && <dd className={`mt-auto pt-3 ${SETTINGS_HELPER_CLASS}`}>{t('platformAccount.pointsExpire', { date: displayDate(nextExpiry) })}</dd>}
+          <dd dir="auto" className="mt-1 break-words text-2xl font-medium tracking-tight tabular-nums">{formatPlatformPoints(available.toString())}</dd>
+          {nextExpiry && <dd className={`mt-auto pt-2 ${SETTINGS_HELPER_CLASS}`}>{t('platformAccount.pointsExpire', { date: displayDate(nextExpiry) })}</dd>}
         </div>;
       })}
     </dl>
     {availableBatches === undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.batchDetailsUnavailable')}</p>}
-    {ownedBatches?.filter((batch) => BigInt(batch.available) > 0n).map((batch) => <p key={batch.id} className={SETTINGS_HELPER_CLASS}>{t(batch.kind === 'addon' ? 'platformAccount.productWallet.packExpiry' : 'platformAccount.productWallet.subscriptionCreditExpiry', {
-      points: formatPlatformPoints(batch.available), date: displayDate(batch.expiresAt),
-    })}</p>)}
     {!active && (hasRetainedPacks || BigInt(account.credits.available) > 0n) && <p role="status" className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]">{t('platformAccount.pointsNeedSubscription')}</p>}
+    {ownedBatches?.some((batch) => BigInt(batch.available) > 0n) && <details className="rounded-lg border border-border/60 px-4 py-2.5">
+      <summary className="cursor-pointer typography-ui-label">{t('platformAccount.creditExpiryDetails')}</summary>
+      <ul className="mt-2 space-y-1.5">
+        {ownedBatches.filter((batch) => BigInt(batch.available) > 0n).map((batch) => <li key={batch.id} className={SETTINGS_HELPER_CLASS}>{t(batch.kind === 'addon' ? 'platformAccount.productWallet.packExpiry' : 'platformAccount.productWallet.subscriptionCreditExpiry', {
+          points: formatPlatformPoints(batch.available), date: displayDate(batch.expiresAt),
+        })}</li>)}
+      </ul>
+    </details>}
     </>}
   </SettingsSection>;
 };

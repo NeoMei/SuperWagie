@@ -40,16 +40,12 @@ export const PlatformAccountIdentity: React.FC<{
   const name = profile
     ? profile.displayName || profile.username || profile.email || t('platformAccount.signedIn')
     : user.name || user.email || t('platformAccount.signedIn');
-  return <div className="flex min-w-0 items-center gap-4 @3xl/account:flex-col @3xl/account:items-start @3xl/account:gap-5" data-settings-item="platform-account.login">
+  return <div className="flex min-w-0 items-center gap-2" data-platform-account-identity data-settings-item="platform-account.login">
     {avatarURL
-      ? <img src={avatarURL} alt={t('platformAccount.avatar')} className="size-20 shrink-0 rounded-full object-cover @3xl/account:aspect-square @3xl/account:size-auto @3xl/account:w-full" />
-      : <div className="oc-tile-inset flex size-20 shrink-0 items-center justify-center rounded-full @3xl/account:aspect-square @3xl/account:size-auto @3xl/account:w-full" aria-label={t('platformAccount.avatar')}>
-        <Icon name="user" className="size-9 text-muted-foreground @3xl/account:size-20" />
+      ? <img src={avatarURL} alt={t('platformAccount.avatar')} className="size-8 shrink-0 rounded-full object-cover" />
+      : <div className="oc-tile-inset flex size-8 shrink-0 items-center justify-center rounded-full" aria-label={t('platformAccount.avatar')}>
+        <Icon name="user" className="size-4 text-muted-foreground" />
       </div>}
-    <div className="min-w-0 w-full space-y-1">
-      <p dir="auto" title={name} className="break-words text-xl font-semibold tracking-tight @3xl/account:text-2xl" data-platform-account-name>{name}</p>
-      {profile?.username && <p dir="auto" title={profile.username} className="truncate text-base text-muted-foreground">{profile.username}</p>}
-      {(profile?.email || user.email) && <p dir="auto" title={profile?.email || user.email} className="flex min-w-0 items-center gap-2 pt-2 typography-meta text-muted-foreground"><Icon name="mail" className="size-4 shrink-0" /><span className="truncate">{profile?.email || user.email}</span></p>}
-    </div>
+    <span dir="auto" title={name} className="truncate typography-meta font-medium" data-platform-account-name>{name}</span>
   </div>;
 };

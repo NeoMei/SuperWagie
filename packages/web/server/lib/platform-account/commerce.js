@@ -40,6 +40,7 @@ const upgradeSourceSchema = z.object({
 const orderSchema = z.object({
   id, account_id: id, actor_id: id, product_id: z.string(), offer: offerSchema, amount: units,
   payment_status: z.string(), fulfillment_status: z.string(), refund_status: z.string().optional(),
+  created_at: z.string().datetime({ offset: true }).optional().catch(undefined),
   kind: z.string().optional(), subscription_id: id.optional(), product_credit_upgrade: upgradeSourceSchema.optional(),
 });
 const quoteSchema = z.object({
@@ -109,7 +110,7 @@ const supportedOffer = (offer, useProductWallet) => useProductWallet
   : offer.credit_scope !== PRODUCT_WALLET_VERSION && (offer.product_id === 'superwagie' || (offer.product_id === 'llmrouter' && offer.kind === 'addon'));
 const pointsRuntimeUnavailable = (pricingProgram, capabilities) => pricingProgram === 'superwagie-ai-points-v1' && capabilities?.native_credits?.ready !== true;
 const publicOffer = (offer, capabilities) => ({ id: offer.id, productId: offer.product_id, name: offer.name, accountKind: offer.account_kind, kind: offer.kind, period: offer.period, price: offer.price, monthlyCredit: offer.monthly_credit, validityMonths: offer.validity_months, rank: offer.rank, sandbox: offer.sandbox, salesReadiness: offer.sales_readiness, pricingProgram: offer.entitlements?.pricing_program, purchaseReadiness: pointsRuntimeUnavailable(offer.entitlements?.pricing_program, capabilities) ? { ready: false, reason: 'points_runtime_unavailable' } : { ready: true } });
-const publicOrder = (order) => ({ id: order.id, productId: order.product_id, offerName: order.offer.name, amount: order.amount, paymentStatus: order.payment_status, fulfillmentStatus: order.fulfillment_status, refundStatus: order.refund_status ?? '' });
+const publicOrder = (order) => ({ id: order.id, productId: order.product_id, offerName: order.offer.name, amount: order.amount, paymentStatus: order.payment_status, fulfillmentStatus: order.fulfillment_status, refundStatus: order.refund_status ?? '', ...(order.created_at && { createdAt: order.created_at }) });
 const publicIntent = (intent) => ({ idempotencyKey: intent.idempotencyKey, kind: intent.kind, accountId: intent.accountId, productId: intent.productId, amount: intent.amount, offerId: intent.offerId, resourceId: intent.resourceId, quoteId: intent.quoteId, provider: intent.provider, walletTopUp: intent.walletTopUp, subscriptionId: intent.subscriptionId, status: intent.status, errorCode: intent.errorCode, createdAt: intent.createdAt, checkout: intent.checkout });
 const intentId = (session, accountId, idempotencyKey) => crypto.createHash('sha256').update(JSON.stringify([session.serviceId, session.actingUserId, accountId, idempotencyKey])).digest('hex');
 const safeError = (error) => error instanceof PlatformAccountError && /^[a-z][a-z0-9_]{0,100}$/.test(error.code) ? error.code : 'platform_commerce_unavailable';

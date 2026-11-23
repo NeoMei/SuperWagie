@@ -23,6 +23,19 @@ test('user center opens outside Settings, navigation stays read-only and explici
     const productWallet = { version: 'product_v1', account_id: 'fixture-team', cash: { asset: 'CNY/6', available: '13200000' }, can_manage: true,
       products: [{ product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 1 },
         addon_renewal: { enabled: false, version: 1 }, addon_offers: [], orders: [walletOrder] }] };
+    const recordedOrder = { id: walletOrder.id, productId: 'superwagie', offerName: walletOrder.offer_name, amount: walletOrder.amount,
+      paymentStatus: walletOrder.payment_status, fulfillmentStatus: walletOrder.fulfillment_status, refundStatus: walletOrder.refund_status, createdAt: walletOrder.created_at };
+    const creditBatches = [['subscription', '180000000', '2027-01-01T00:00:00Z'], ['addon', '60000000', '2027-11-01T00:00:00Z']]
+      .map(([kind, available, expiresAt]) => ({ id: kind, kind, productId: 'superwagie', sourceScope: 'product', available, expiresAt, reserved: '0', startsAt: '2026-11-01T00:00:00Z', frozen: false }));
+    const activityStart = '2025-11-25T00:00:00Z';
+    const activityAsOf = '2026-11-24T12:00:00Z';
+    const activity = { visibility: 'account', from: activityStart, to: activityAsOf, asOf: activityAsOf, savedAt: activityAsOf,
+      sync: { status: 'synced', lastSuccessAt: activityAsOf }, total: '47', complete: true, unknownTime: '0',
+      days: Array.from({ length: 365 }, (_, day) => ({
+        date: new Date(Date.parse(activityStart) + day * 86400000).toISOString().slice(0, 10),
+        calls: day === 364 ? '20' : day === 361 ? '16' : day === 350 ? '11' : '0', coverage: 'complete',
+      })),
+    };
     let walletCheckout;
     let walletSequence = 0;
     window.confirmWalletClosure = () => { walletCheckout = { ...walletCheckout, close_pending: undefined, payment_status: 'CLOSED' }; };
@@ -126,8 +139,10 @@ test('user center opens outside Settings, navigation stays read-only and explici
       if (url.pathname === '/api/model-configuration/bootstrap/account-key') return Response.json(keyState);
       if (url.pathname.endsWith('/api/platform-account/session')) return Response.json({ status: 'signed-in', user, expiresAt: '2027-01-01T12:00:00Z' });
       if (url.pathname.endsWith('/api/platform-account/profile')) return Response.json({ id: user.id, username: 'fixture-reviewer', displayName: user.name, email: user.email, avatarAvailable: false, version: '1' });
-      if (url.pathname.endsWith('/api/platform-account')) return Response.json({ status: 'signed-in', user, accounts: [{ id: 'fixture-team', name: 'Fixture team', kind: 'team', role: 'owner' }], accountId: 'fixture-team', expiresAt: '2027-01-01T12:00:00Z', membership: [{ id: 'fixture-membership', product_id: 'superwagie', status: 'active', paid_through: '2027-01-01T00:00:00Z', offer: { name: 'Fixture membership' } }], credits: { available: '240000000', reserved: '8000000' }, consoleUrl: walletScenario ? null : 'https://unihub.example.test/console', modelService: 'available', ...(walletScenario && { productCreditWallet: true }) });
+      if (url.pathname.endsWith('/api/platform-account')) return Response.json({ status: 'signed-in', user, accounts: [{ id: 'fixture-team', name: 'Fixture team', kind: 'team', role: 'owner' }], accountId: 'fixture-team', expiresAt: '2027-01-01T12:00:00Z', membership: [{ id: 'fixture-membership', product_id: 'superwagie', status: 'active', paid_through: '2027-01-01T00:00:00Z', offer: { name: 'Fixture membership' } }], credits: { available: '240000000', reserved: '8000000', ...(walletScenario && { batches: creditBatches }) }, consoleUrl: walletScenario ? null : 'https://unihub.example.test/console', modelService: 'available', ...(walletScenario && { productCreditWallet: true }) });
       if (url.pathname.endsWith('/api/platform-account/commerce')) return Response.json({ accountId: 'fixture-team', role: 'owner', financialAccess: true, missingScopes: [], payments: { mode: 'external', canPurchase: true, canTopUp: walletScenario, providers: ['wechat', 'alipay'] }, wallets: [{ productId: '', asset: 'CNY/6', amount: '120000000' }, { productId: 'superwagie', asset: 'CNY/6', amount: '30000000' }, { productId: 'llmrouter', asset: 'CNY/6', amount: '86400000' }], offers: [{ id: 'fixture-addon', productId: 'superwagie', kind: 'addon', name: 'Fixture credit pack', accountKind: 'both', period: 'once', price: '9800000', monthlyCredit: '200000000', validityMonths: 12, rank: 1, sandbox: false }], orders: [], intents: [], ...(walletScenario && { productCreditWallet: true, productWallet, checkouts: walletCheckout ? [walletCheckout] : [] }) });
+      if (url.pathname.endsWith('/api/platform-account/commerce/orders')) return Response.json(walletScenario ? [recordedOrder] : []);
+      if (url.pathname.endsWith('/activity')) return Response.json(activity);
       if (url.pathname.endsWith('/summary')) return Response.json({ visibility: 'account', calls_total: '47', settled_calls: '46', pending_calls: '1', unknown_calls: '0', missing_usage_calls: '0', unknown_time: '0', usage: {}, usage_complete: false, usage_coverage: { legacy_token_calls: '0', native_metered_calls: '0' }, charges_by_asset: { 'CREDIT/6': '32400000' }, refunds_by_asset: {} });
       if (url.pathname.endsWith('/calls')) return Response.json({ items: [], has_more: false });
       if (url.pathname.endsWith('/api/model-configuration')) return Response.json({ version: 1, revision: 1, enterpriseMode: false, credentialSources: { status: 'available', sources: [] }, purposes: [], presets: [], connections: [], bindings: [] });
@@ -309,6 +324,37 @@ test('user center opens outside Settings, navigation stays read-only and explici
       if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
         const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
         writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, `account-wallet-and-key-${width}.png`), Buffer.from(screenshot.data, 'base64'));
+      }
+    }
+    const sixPages = [
+      ['billing', 'document.body.innerText.includes("Fixture membership")'],
+      ['wallet', '!!document.querySelector("[data-wallet-recharge] form")'],
+      ['keys', 'document.body.innerText.includes("开通并配置")'],
+      ['usage', 'document.querySelectorAll("[role=group] button[tabindex]").length >= 365 && document.querySelector("dl dd")?.textContent.includes("32")'],
+      ['orders', 'document.querySelector("time")?.dateTime === "2026-11-14T10:00:00Z"'],
+      ['profile', 'document.querySelector("#unihub-profile-username")?.textContent === "fixture-reviewer"'],
+    ];
+    for (const width of [1280, 390]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 780, deviceScaleFactor: 1, mobile: false });
+      await evaluate('window.setAppearance(false, "zh-CN")');
+      await until(`document.querySelector('[data-platform-account-tab="wallet"]')?.textContent.trim() === '钱包'`, 'Panel locale did not load');
+      assert.equal(await evaluate(`(() => {
+        const tabs = [...document.querySelectorAll('[data-platform-account-tab]')];
+        const nav = tabs[0].closest('nav');
+        const bounds = nav.getBoundingClientRect();
+        return tabs.length === 6 && nav.scrollWidth <= nav.clientWidth && tabs.every(tab => {
+          const rect = tab.getBoundingClientRect();
+          return rect.width >= 44 && rect.height >= 36 && rect.left >= bounds.left && rect.right <= bounds.right;
+        });
+      })()`), true, 'All six destinations must be reachable without horizontal scrolling');
+      for (const [tab, content] of sixPages) {
+        await click('[data-platform-account-tab="' + tab + '"]');
+        await until(`document.querySelector('[data-platform-account-tab="${tab}"]')?.getAttribute('aria-current') === 'page' && (${content})`, 'Expected content did not appear for ' + tab);
+        assert.equal(await evaluate(`document.querySelector('[role="dialog"] .overlay-scrollbar-container').scrollTop`), 0, 'Switching destinations should start at the top');
+        if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
+          const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+          writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, `${tab}-${width}.png`), Buffer.from(shot.data, 'base64'));
+        }
       }
     }
     assert.deepEqual(await evaluate('window.mutations'), [], 'Wallet and key navigation must remain read-only');

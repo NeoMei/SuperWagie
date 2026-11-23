@@ -5,7 +5,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { SettingsChipGroup, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
-import { formatPlatformMoney, formatProductBillingDate, type PlatformCheckout } from '@/lib/platformCommerce';
+import { formatPlatformMoney, formatProductBillingDate, isRefundableCheckout, type PlatformCheckout } from '@/lib/platformCommerce';
 
 type Provider = 'wechat' | 'alipay';
 
@@ -113,7 +113,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const [codeImage, setCodeImage] = React.useState<{ source: string; image: string } | null>(null);
   const [refundConfirmation, setRefundConfirmation] = React.useState(false);
   const waiting = WAITING.includes(checkout.payment_status) && !checkout.refund_status;
-  const refundable = !checkout.upgrade_return_status && !checkout.walletTopUp && checkout.payment_status === 'PAID' && !checkout.refund_status;
+  const refundable = isRefundableCheckout(checkout);
   const checkable = checkout.upgrade_return_status === 'UPGRADE_PENDING' || checkout.upgrade_return_status === 'UPGRADE_RELEASING' || waiting || checkout.refund_status === 'PENDING' || (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'PENDING');
   const showPaymentSession = waiting && !checkout.close_pending;
   const session = showPaymentSession ? checkout.session : undefined;
@@ -159,7 +159,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
         <span className="shrink-0 tabular-nums text-muted-foreground">¥{formatPlatformMoney(checkout.amount)}</span>
         <span className={`${SETTINGS_HELPER_CLASS} shrink-0`}>{providerName}</span>
         <span className={`${SETTINGS_HELPER_CLASS} shrink-0`}>{t(shortStateKey(checkout))}</span>
-        {walletHistory && <time dateTime={checkout.created_at} className={SETTINGS_HELPER_CLASS}>{formatProductBillingDate(checkout.created_at, locale)}</time>}
+        <time dateTime={checkout.created_at} className={SETTINGS_HELPER_CLASS}>{formatProductBillingDate(checkout.created_at, locale)}</time>
         {(refundable || checkable) && <div className="flex items-center gap-1">{actions}</div>}
       </div>
       {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
