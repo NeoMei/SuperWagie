@@ -13,6 +13,13 @@ import { captureRuntimeInstance } from '@/lib/runtime-switch';
 type SetupStage = NonNullable<PlatformAccountKeySetupState['activation']>['stage'];
 type StepStatus = 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'unconfirmed';
 const stages: SetupStage[] = ['issue', 'configure', 'test'];
+const managedGuidanceKey = (code: string | null | undefined) => {
+  if (code === 'product_membership_expired') return 'platformAccount.productWallet.modelMembershipExpired';
+  if (code === 'platform_model_credits_required' || code === 'platform_insufficient_funds') return 'platformAccount.keySetup.managedCredits';
+  if (code === 'model_configuration_test_invalid_response' || code === 'native_media_invalid_response') return 'modelConfiguration.overview.error.response';
+  if (code === 'account_key_checks_stopped') return 'platformAccount.keySetup.managedStopped';
+  return null;
+};
 const runtimeGuidanceKey = (code: string | null | undefined) => code === 'native_credits_unavailable' ? 'platformAccount.keySetup.creditsUnavailable' : code === 'model_configuration_account_runtime_required' || code === 'platform_runtime_unsupported'
   ? 'platformAccount.keySetup.runtimeRequired'
   : code === 'model_configuration_account_runtime_unavailable' ? 'platformAccount.keySetup.runtimeUnavailable' : null;
@@ -119,12 +126,13 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     }
   };
   const busy = acting || Boolean(working);
+  const managed = state?.mode === 'managed';
   const creditsUnavailable = state?.nativeCredits?.ready !== true;
   const tests = activation?.stage === 'test' && !awaitingRun ? activation.tests : [];
   const ready = !busy && !error && !awaitingRun && activation?.status === 'ready' && activation.test?.status === 'verified';
-  const verified = ready && tests.length > 0 && tests.every((test) => test.status === 'verified' && test.applied);
+  const verified = ready && tests.length > 0 && tests.every((test) => test.status === 'verified' && (managed || test.applied));
   const partial = ready && !verified;
-  const visibleTests = tests.filter((test) => test.status !== 'queued' && (test.status !== 'skipped' || !busy && activation?.status !== 'testing'));
+  const visibleTests = managed ? tests : tests.filter((test) => test.status !== 'queued' && (test.status !== 'skipped' || !busy && activation?.status !== 'testing'));
   const testCount = tests.length;
   const passedCount = tests.filter((test) => test.status === 'verified').length;
   const applicationIncomplete = !busy && !error && !awaitingRun && activation?.status === 'failed'
@@ -144,13 +152,14 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     return 'unconfirmed';
   };
   const stageLabel = (stage: SetupStage) => t(stage === 'issue' ? 'platformAccount.keySetup.issue' : stage === 'configure' ? 'platformAccount.keySetup.configure' : 'platformAccount.keySetup.test');
-  return <SettingsSection description={t('platformAccount.keySetup.description')} divider={false} contentClassName="space-y-4" headerAction={<Button size="sm" variant="outline" disabled={reading || acting} onClick={() => void read()}>{t('platformAccount.refresh')}</Button>}>
-    <SettingsFieldRow label={t('platformAccount.keySetup.fundingMode')} info={t('platformAccount.keySetup.fundingSwitchHint')}>
+  const title = t(managed ? 'platformAccount.keySetup.managedTitle' : 'platformAccount.keySetup.panelTitle');
+  return <SettingsSection description={t(managed ? 'platformAccount.keySetup.managedDescription' : 'platformAccount.keySetup.description')} divider={false} contentClassName="space-y-4" headerAction={<Button size="sm" variant="outline" disabled={reading || acting} onClick={() => void read()}>{t('platformAccount.refresh')}</Button>}>
+    <SettingsFieldRow label={t('platformAccount.keySetup.fundingMode')} info={managed ? undefined : t('platformAccount.keySetup.fundingSwitchHint')}>
       <span className="typography-ui-label text-foreground">{t('platformAccount.keySetup.credits')}</span>
     </SettingsFieldRow>
-    {creditsUnavailable && !reading && <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.creditsUnavailable')}</p>}
-    <ModelTestMotion><section role="region" aria-label={t('platformAccount.keySetup.panelTitle')} className="oc-tile min-w-0 space-y-4 rounded-lg p-4">
-      <h3 className="typography-ui-label text-foreground">{t('platformAccount.keySetup.panelTitle')}</h3>
+    {state?.nativeCredits?.ready === false && !reading && !error && <p role="status" className={SETTINGS_HELPER_CLASS}>{t(managed ? 'platformAccount.keySetup.managedUnavailable' : 'platformAccount.keySetup.creditsUnavailable')}</p>}
+    <ModelTestMotion><section role="region" aria-label={title} className="oc-tile min-w-0 space-y-4 rounded-lg p-4">
+      <h3 className="typography-ui-label text-foreground">{title}</h3>
       <div className="space-y-2" aria-live="polite">
         {error && <p className="text-[var(--status-error)]" role="alert">{t(error)}</p>}
         {reading && !state && !error && !acting && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.loading')}</p>}
@@ -158,11 +167,11 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
         {verified && <p role="status" className="flex items-start gap-2 font-medium text-[var(--status-success)]"><RiCheckLine aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{t('platformAccount.keySetup.verified')}</p>}
         {partial && <p role="alert" className="text-[var(--status-warning)]">{t('platformAccount.keySetup.partial')}</p>}
         {applicationIncomplete && <p role="alert" className="text-[var(--status-warning)]">{t('platformAccount.keySetup.applicationIncomplete')}</p>}
-        {!busy && !error && !awaitingRun && !applicationIncomplete && activation?.status === 'failed' && <p role="alert" className="text-[var(--status-error)]">{t(runtimeGuidanceKey(activation.errorCode) ?? (activation.errorCode === 'account_key_scope_limit' ? 'platformAccount.keySetup.scopeLimit' : activation.errorCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueFailed' : activation.stage === 'configure' ? 'platformAccount.keySetup.configureFailed' : 'platformAccount.keySetup.testFailed'))}</p>}
-        {!busy && !error && !awaitingRun && (activation?.status === 'unknown' || activation?.status === 'interrupted') && <p role="alert" className="text-[var(--status-warning)]">{t(runtimeGuidanceKey(activation.errorCode) ?? (activation.errorCode === 'account_key_apply_required' ? 'platformAccount.keySetup.applyRequired' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueUnknown' : activation.stage === 'test' ? 'platformAccount.keySetup.testUnknown' : 'platformAccount.keySetup.configureInterrupted'))}</p>}
+        {!busy && !error && !awaitingRun && !applicationIncomplete && activation?.status === 'failed' && <p role="alert" className="text-[var(--status-error)]">{t(runtimeGuidanceKey(activation.errorCode) ?? (activation.errorCode === 'account_key_scope_limit' ? 'platformAccount.keySetup.scopeLimit' : activation.errorCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueFailed' : activation.stage === 'configure' ? 'platformAccount.keySetup.configureFailed' : managed ? 'platformAccount.keySetup.managedFailed' : 'platformAccount.keySetup.testFailed'))}</p>}
+        {!busy && !error && !awaitingRun && (!managed || activation?.testRunId) && (activation?.status === 'unknown' || activation?.status === 'interrupted') && <p role="alert" className="text-[var(--status-warning)]">{t(runtimeGuidanceKey(activation.errorCode) ?? (activation.errorCode === 'account_key_apply_required' ? 'platformAccount.keySetup.applyRequired' : activation.stage === 'issue' ? 'platformAccount.keySetup.issueUnknown' : activation.stage === 'test' ? 'platformAccount.keySetup.testUnknown' : 'platformAccount.keySetup.configureInterrupted'))}</p>}
         {state?.enterpriseMode && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.keySetup.enterprise')}</p>}
       </div>
-      <ol className="grid grid-cols-3 gap-3" aria-label={t('platformAccount.keySetup.progress')} aria-busy={busy}>
+      {!managed && <ol className="grid grid-cols-3 gap-3" aria-label={t('platformAccount.keySetup.progress')} aria-busy={busy}>
         {stages.map((stage, index) => {
           const status = stepStatus(index);
           const statusColor = status === 'completed' ? 'text-[var(--status-success)]' : status === 'failed' ? 'text-[var(--status-error)]' : status === 'unconfirmed' || status === 'partial' ? 'text-[var(--status-warning)]' : status === 'running' ? 'text-foreground' : 'text-muted-foreground';
@@ -174,12 +183,16 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
             <p className="break-words typography-meta">{t(`platformAccount.keySetup.step.${status}`)}</p>
           </li>;
         })}
-      </ol>
+      </ol>}
       {state && !activation && !error && (!awaitingRun || acting) && <>
         <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.offer')}</p>
         <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.cost')}</p>
         <Button disabled={busy || reading || creditsUnavailable || state.enterpriseMode} onClick={() => void run('activate')}>{t('platformAccount.keySetup.activate')}</Button>
       </>}
+      {managed && activation && <div className="space-y-2">
+        <Button disabled={busy || reading || creditsUnavailable || Boolean(error) || state?.enterpriseMode || !activation.actions.includes('retest')} onClick={() => void run('retest')}>{t('platformAccount.keySetup.managedCheck')}</Button>
+        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.managedCost')}</p>
+      </div>}
       {activation && <>
         {activation.key && <div className="space-y-1">
           <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.apiKeysTab')}</p>
@@ -194,7 +207,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
               const color = test.applicationError ? 'text-[var(--status-warning)]' : status === 'verified' ? 'text-[var(--status-success)]' : status === 'failed' ? 'text-[var(--status-error)]' : status === 'unknown' ? 'text-[var(--status-warning)]' : 'text-muted-foreground';
               const feedbackStatus = test.applicationError?.status ?? status;
               const feedbackCode = test.applicationError?.errorCode ?? test.errorCode;
-              const runtimeGuidance = runtimeGuidanceKey(feedbackCode);
+              const runtimeGuidance = runtimeGuidanceKey(feedbackCode) ?? (managed ? managedGuidanceKey(feedbackCode) : null);
               const guidance = runtimeGuidance ? t(runtimeGuidance) : feedbackStatus === 'skipped' ? t(feedbackCode === 'account_key_existing_configuration_unknown' || feedbackCode === 'model_configuration_account_provider_unavailable' ? 'platformAccount.keySetup.existingConfigurationUnknown'
                 : feedbackCode === 'account_key_existing_configuration' ? 'platformAccount.keySetup.existingConfiguration'
                   : feedbackCode === 'account_key_model_unavailable' || feedbackCode === 'account_key_model_unconfigured' ? 'platformAccount.keySetup.modelUnavailable'
@@ -208,7 +221,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
                       : feedbackCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable'
                         : feedbackCode === 'account_key_configuration_conflict' || feedbackCode === 'account_key_configuration_changed' ? 'modelConfiguration.revisionConflict'
                           : test.applicationError ? 'platformAccount.keySetup.applyFailed' : modelTestErrorKey(feedbackCode ?? 'test_failed')) : null;
-              const statusLabel = t(test.applicationError ? 'platformAccount.keySetup.modelUnapplied' : status === 'verified' && test.applied ? 'platformAccount.keySetup.modelApplied' : `platformAccount.keySetup.modelStatus.${status}`);
+              const statusLabel = t(managed && status === 'queued' ? 'platformAccount.keySetup.managedQueued' : test.applicationError ? 'platformAccount.keySetup.modelUnapplied' : status === 'verified' && test.applied ? 'platformAccount.keySetup.modelApplied' : `platformAccount.keySetup.modelStatus.${status}`);
               const testedAt = test.testedAt && status !== 'testing' && status !== 'queued' ? t('platformAccount.keySetup.testedAt', { time: new Date(test.testedAt).toLocaleString(locale) }) : undefined;
               return <li key={`${activation.testRunId}:${test.id}`} data-account-model-test={test.purpose} data-test-status={status} aria-label={t('modelConfiguration.testFeedback.region', { purpose: t(MODEL_PURPOSE_LABELS[test.purpose]) })} className="min-w-0 space-y-1 border-b border-border/40 py-2 last:border-b-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-200">
                 <div className="flex min-w-0 items-start gap-3">
@@ -228,7 +241,7 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
           {!tests.length && !awaitingRun && !busy && !error && activation.test?.testedAt && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.testedAt', { time: new Date(activation.test.testedAt).toLocaleString(locale) })}</p>}
           {activation.connectionId && activation.stage === 'test' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.configured')}</p>}
         </div>
-        {activation.actions.length > 0 && <div className="space-y-2">
+        {!managed && activation.actions.length > 0 && <div className="space-y-2">
           {activation.actions.includes('retest') && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.cost')}</p>}
           <div className="flex flex-wrap gap-2">
             {activation.actions.includes('resume') && <Button disabled={busy || reading || creditsUnavailable || Boolean(error) || awaitingRun || state?.enterpriseMode} onClick={() => void run('resume')}>{t('platformAccount.keySetup.resume')}</Button>}

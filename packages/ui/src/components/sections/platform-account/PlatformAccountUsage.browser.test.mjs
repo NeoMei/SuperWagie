@@ -6,7 +6,7 @@ import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, 
 
 const repo = path.resolve(import.meta.dirname, '../../../../../..');
 
-test('SuperWagie usage preserves exact measurements, independent reads and account/runtime isolation', { timeout: 180_000 }, async () => {
+test('SuperWagie usage keeps summary and measurement details without a recent-call list', { timeout: 180_000 }, async () => {
   const { createServer } = await import('vite');
   mkdirSync(path.join(repo, 'tmp'), { recursive: true });
   const fixture = mkdtempSync(path.join(repo, 'tmp/platform-account-usage-'));
@@ -141,13 +141,7 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
         if (scenario === 'empty') return Response.json({ ...summary, visibility: 'account', calls_total: '0', settled_calls: '0', native_usage: [], charges_by_asset: {}, refunds_by_asset: {} });
         return Response.json({ ...summary, visibility: scenario === 'actor-hidden' ? 'actor' : 'account' });
       }
-      if (url.pathname.endsWith('/calls')) {
-        if (oldOwner) await new Promise(resolve => { window.releaseOldCalls = resolve; });
-        if (scenario === 'calls-failed') return Response.json({ error: 'service_unavailable' }, { status: 503 });
-        const call = { call_id: oldOwner ? 'old' : 'current', model: oldOwner ? 'Previous account model' : 'Current account model', status: 'SETTLED', asset: scenario?.startsWith('credit') || scenario === 'actor-hidden' ? 'CREDIT/6' : 'CNY/6', created_at: '2026-11-06T10:20:00Z' };
-        if (scenario === 'actor-hidden') return Response.json({ has_more: false, items: [call] });
-        return Response.json({ has_more: false, items: scenario === 'empty' ? [] : [{ ...call, charged: '600000', refunded: scenario === 'credit-refunds' ? '250000' : '0' }] });
-      }
+      if (url.pathname.endsWith('/calls')) return Response.json({ error: 'fixture_call_list_unsupported' }, { status: 503 });
       return Response.json([]);
     };
     useI18nStore.getState().setLocale(params.get('locale') === 'zh-CN' ? 'zh-CN' : 'en');
@@ -232,6 +226,8 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
     const assertProductBoundary = async () => {
       assert.equal(await evaluate(`/unihub|llmrouter|model[ _-]*pool/i.test(document.body.innerText)`), false, 'User-visible usage must not expose backend brands');
       assert.equal(await evaluate(`window.reads.some(path => /llmrouter|model[ _-]*pool/i.test(path))`), false, 'User usage must not request another product or model pool');
+      assert.equal(await evaluate(`window.reads.some(path => path.endsWith('/calls'))`), false, 'The usage report must not request a recent-call list');
+      assert.equal(await evaluate(`!!document.querySelector('table') || /Recent SuperWagie calls|近期 SuperWagie 调用/.test(document.body.innerText)`), false, 'The recent-call section must not render');
       assert.deepEqual(await evaluate('window.mutations'), []);
     };
     for (const scenario of ['request', 'mixed', 'unknown', 'literal']) {
@@ -249,7 +245,7 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
         await clickLabel(billingLabel);
         await until(`(${panelExpression(billingLabel)})?.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'CNY 0.000073' : '人民币 0.000073 元')})`, 'Historical CNY billing details did not expand');
         const text = await evaluate('document.body.innerText');
-        assert.equal(text.includes(appearance.locale === 'en' ? 'Confirmed refund' : '已确认退款'), false, 'Zero refunds must not add summary or per-call rows');
+        assert.equal(text.includes(appearance.locale === 'en' ? 'Confirmed refund' : '已确认退款'), false, 'Zero refunds must not add summary rows');
         await assertHeadline(appearance.locale, '0');
         if (scenario === 'request') {
           assert.ok(text.includes(appearance.locale === 'en' ? 'CNY 0.000073' : '人民币 0.000073 元'), text);
@@ -285,8 +281,8 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
         await cdp.send('Emulation.setDeviceMetricsOverride', { width: appearance.width, height: 1000, deviceScaleFactor: 1, mobile: false });
         await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario + '&locale=' + appearance.locale + '&theme=' + appearance.theme });
         const headlineLabel = appearance.locale === 'en' ? 'Credits used' : '积分消耗';
-        await until(`document.querySelector('dl dt')?.textContent === ${JSON.stringify(headlineLabel)} && document.body.innerText.includes('Current account model')`, 'Credit usage and its locale did not load');
-        const amount = ['credits-unavailable', 'actor-hidden'].includes(scenario) ? null : ['credit-zero', 'empty-assets'].includes(scenario) ? '0' : scenario === 'credit-whole' ? '42' : '9007199254740993.1234';
+        await until(`document.querySelector('dl dt')?.textContent === ${JSON.stringify(headlineLabel)}`, 'Credit usage and its locale did not load');
+        const amount = ['credits-unavailable', 'actor-hidden'].includes(scenario) ? null : ['credit-zero', 'empty-assets'].includes(scenario) ? '0' : scenario === 'credit-whole' ? '42' : '9007199254740993';
         await assertHeadline(appearance.locale, amount);
         const billingLabel = appearance.locale === 'en' ? 'Billing details' : '费用明细';
         const measurementsLabel = appearance.locale === 'en' ? 'Measurement details' : '计量详情';
@@ -299,11 +295,10 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
           await clickLabel(billingLabel);
           await until(`(${panelExpression(billingLabel)})?.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'CNY 73.00' : '人民币 73.00 元')})`, 'Mixed-asset billing did not expand');
           const billingText = await evaluate(`(${panelExpression(billingLabel)}).innerText`);
-          for (const amount of appearance.locale === 'en' ? ['0.25 credits', 'CNY 1.25', '19 quota units', '3 quota units'] : ['0.25 积分', '人民币 1.25 元', '19 配额单位', '3 配额单位']) assert.ok(billingText.includes(amount), billingText);
-          assert.equal(billingText.includes('9007199254740993.1234'), false, 'Primary CREDIT settlement must not be duplicated in secondary billing');
+          for (const amount of appearance.locale === 'en' ? ['0 credits', 'CNY 1.25', '19 quota units', '3 quota units'] : ['0 积分', '人民币 1.25 元', '19 配额单位', '3 配额单位']) assert.ok(billingText.includes(amount), billingText);
+          assert.equal(billingText.includes('9007199254740993'), false, 'Primary CREDIT settlement must not be duplicated in secondary billing');
           await assertHeadline(appearance.locale, amount);
           await captureEvidence(scenario + '-expanded-' + appearance.width + '-' + appearance.theme + '-' + appearance.locale);
-          assert.ok(await evaluate(`document.querySelector('tbody').innerText.includes(${JSON.stringify(appearance.locale === 'en' ? '0.25 credits' : '0.25 积分')})`), 'A real nonzero per-call refund remains visible');
           if (appearance.locale === 'en') {
             await clickLabel(measurementsLabel);
             await until(`document.body.innerText.includes('Billing completeness describes settlement.')`, 'Measurement disclosure did not remain independent');
@@ -317,9 +312,8 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
             assert.equal(await evaluate('window.reads.length'), readCount, 'Locale switching must not refetch accounting data');
           }
         } else {
-          assert.equal(await evaluate(`document.querySelector('tbody').innerText.includes('Confirmed refund')`), false, 'Zero or unavailable call refunds must stay hidden');
           if (scenario === 'actor-hidden') {
-            assert.equal(await evaluate(`document.body.innerText.includes('9007199254740993.1234') || document.body.innerText.includes('CNY 73.00') || document.body.innerText.includes('19 quota units')`), false, 'Actor-scoped summary financial fields must not leak');
+            assert.equal(await evaluate(`document.body.innerText.includes('9007199254740993') || document.body.innerText.includes('CNY 73.00') || document.body.innerText.includes('19 quota units')`), false, 'Actor-scoped summary financial fields must not leak');
             await clickLabel(measurementsLabel);
             await until(`document.body.innerText.includes('1 requests')`, 'Actor usage measurements became hidden with financial details');
           }
@@ -338,40 +332,36 @@ test('SuperWagie usage preserves exact measurements, independent reads and accou
     await assertProductBoundary();
     await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=credit-refunds&view=summary' });
     await until(`!!document.querySelector('dl')`, 'Credit overview summary did not load');
-    await assertHeadline('en', '9007199254740993.1234');
+    await assertHeadline('en', '9007199254740993');
     assert.deepEqual(await evaluate('window.reads'), ['/api/platform-account/usage/fixture-account/summary']);
     assert.equal(await evaluate(`!!document.querySelector('table') || !!(${buttonExpression('Billing details')}) || document.body.innerText.includes('CNY 73.00')`), false, 'Overview must keep secondary billing and call tables out of the summary');
     await assertProductBoundary();
 
     for (const scenario of ['switch', 'runtime']) {
       await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario });
-      await until(`typeof window.releaseOldSummary === 'function' && typeof window.releaseOldCalls === 'function'`, 'Old owner requests were not in flight');
+      await until(`typeof window.releaseOldSummary === 'function'`, 'Old owner summary was not in flight');
       await click('#change-owner');
-      await until(`document.body.innerText.includes('Current account model') && document.body.innerText.includes('12 credits')`, 'Current owner report did not render');
-      await evaluate(`window.releaseOldSummary(); window.releaseOldCalls()`);
+      await until(`document.body.innerText.includes('12 credits')`, 'Current owner report did not render');
+      await evaluate(`window.releaseOldSummary()`);
       await wait(100);
       assert.equal(await evaluate(`document.body.innerText.includes('91 credits')`), false, 'An old owner summary must not replace the current report');
-      assert.equal(await evaluate(`document.body.innerText.includes('Previous account model')`), false, 'An old owner call list must not replace the current report');
       assert.equal(await evaluate(`document.body.innerText.includes('12 credits')`), true);
       assert.equal(await evaluate('window.authRequests'), scenario === 'runtime' ? 1 : 0, 'Runtime switching refreshes URL authentication once');
       await assertProductBoundary();
     }
 
     await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=denied' });
-    await until(`document.body.innerText.includes('You do not have permission') && document.body.innerText.includes('Current account model')`, 'Denied summary blocked the independent call list');
+    await until(`document.body.innerText.includes('You do not have permission')`, 'Summary authorization error was not visible');
     assert.equal(await evaluate(`document.body.innerText.includes('No calls are recorded')`), false);
     await evaluate(`window.allowSummary = true; [...document.querySelectorAll('button')].find(button => button.textContent === 'Refresh usage').click()`);
     await until(`document.body.innerText.includes('Settled calls')`, 'Explicit refresh did not restore the authorized summary');
     assert.equal(await evaluate(`document.body.innerText.includes('You do not have permission')`), false);
     await assertProductBoundary();
 
-    for (const scenario of ['summary-failed', 'calls-failed']) {
-      await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario });
-      await until(`document.body.innerText.includes('Could not read this consumption report')`, 'Read failure was not visible');
-      assert.equal(await evaluate(`document.body.innerText.includes(${JSON.stringify(scenario === 'summary-failed' ? 'Current account model' : 'Settled calls')})`), true, 'One failed read must not erase the independent report');
-      assert.equal(await evaluate(`document.body.innerText.includes('No calls are recorded')`), false, 'Failure must not appear as an empty report');
-      await assertProductBoundary();
-    }
+    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=summary-failed' });
+    await until(`document.body.innerText.includes('Could not read this consumption report')`, 'Summary read failure was not visible');
+    assert.equal(await evaluate(`document.body.innerText.includes('No calls are recorded')`), false, 'Failure must not appear as an empty report');
+    await assertProductBoundary();
     await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=empty' });
     await until(`document.body.innerText.includes('No calls are recorded')`, 'Authoritative empty result did not render');
     assert.equal(await evaluate(`document.body.innerText.includes('Could not read')`), false);

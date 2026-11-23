@@ -1045,6 +1045,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     isMediaOperationConfigured,
     admitMediaTask,
     historyAvailable: () => Boolean(store && config && !closed && isManaged() && !enterprise()),
+    modelCheckConfig: () => config ?? {},
     enabled: () => Boolean(!suspended && config && store && !closed && isManaged() && !enterprise()),
     createChildEnv: () => {
       if (suspended || !config || !store || closed || !base) return {};

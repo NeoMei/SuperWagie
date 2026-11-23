@@ -324,6 +324,7 @@ test('an unknown issuance outcome cannot claim readiness or automatically issue 
 test('an HTTP read failure remains an error until an explicit refresh recovers authoritative state', async () => {
   readStatus = 503; await render();
   expect(host?.querySelector('[role="alert"]')).not.toBeNull();
+  expect(host?.textContent).not.toContain('Credits are not available for model calls yet.');
   expect(findButton('Activate and configure')).toBeUndefined();
   readStatus = 200; readPayload = readyState(); await click('Refresh');
   expect(host?.querySelector('[role="alert"]')).toBeNull();

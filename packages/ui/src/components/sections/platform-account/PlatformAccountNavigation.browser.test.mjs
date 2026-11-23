@@ -18,6 +18,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
     const user = { id: 'fixture-user', name: 'Fixture reviewer', email: 'reviewer@example.test' };
     const scenario = new URLSearchParams(location.search).get('scenario');
     const walletScenario = scenario === 'wallet';
+    const managedScenario = scenario === 'managed';
     const productWallet = { version: 'product_v1', account_id: 'fixture-team', cash: { asset: 'CNY/6', available: '13200000' }, can_manage: true, products: [] };
     let keyState = { accountId: 'fixture-team', enterpriseMode: false, fundingMode: 'credits', nativeCredits: { ready: true }, activation: null };
     let runNumber = 0;
@@ -40,6 +41,20 @@ test('user center opens outside Settings, navigation stays read-only and explici
       errorCode: verified ? null : 'model_configuration_provider_unreachable', actions: ['retest'],
       testRunId: 'fixture-test-run-' + runNumber, tests: testRows(verified),
     } });
+    const managedKeyState = (started) => {
+      const result = keyResult(false);
+      const tests = testRows(false).map((row) => ({
+        ...row, applied: false, status: started ? row.status : 'queued',
+        testedAt: started ? row.testedAt : null, errorCode: started ? row.errorCode : null,
+      }));
+      return { ...result, mode: 'managed', activation: { ...result.activation, tests,
+        operationId: started ? 'managed-test-run' : 'managed-initial',
+        status: started ? 'failed' : 'unknown', key: null, connectionId: null, providerId: null,
+        test: started ? result.activation.test : null, errorCode: started ? result.activation.errorCode : null,
+        testRunId: started ? 'managed-test-run' : null,
+      } };
+    };
+    if (managedScenario) keyState = managedKeyState(false);
     let finishKeyMutation;
     window.setKeyProgress = (stage) => {
       if (stage === 'test') runNumber += 1;
@@ -69,6 +84,10 @@ test('user center opens outside Settings, navigation stays read-only and explici
       if (method !== 'GET') {
         const body = init?.body ? JSON.parse(String(init.body)) : null;
         window.mutations.push({ path: url.pathname, method, body });
+        if (url.pathname === '/api/model-configuration/bootstrap/account-key' && method === 'POST' && managedScenario && body?.accountId === 'fixture-team' && body.action === 'retest') {
+          keyState = managedKeyState(true);
+          return Response.json(keyState);
+        }
         if (url.pathname === '/api/model-configuration/bootstrap/account-key' && method === 'POST' && scenario === 'progress' && body?.accountId === 'fixture-team' && ['activate', 'retest'].includes(body.action)) {
           if (finishKeyMutation) throw new Error('Overlapping fixture key requests');
           // A retest can still read the previous receipt while the server
@@ -118,7 +137,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
       return <><SidebarFooter onOpenSettings={() => useUIStore.getState().setSettingsDialogOpen(true)} onOpenShortcuts={() => {}} onOpenAbout={() => {}} onOpenUpdate={() => {}} showUpdateButton={false} />
         {entry === 'funding' ? <div data-fixture-funding-notice><ManagedModelFundingNotice /></div> : null}
         {settingsOpen ? <div data-fixture-settings-window style={{ height: '90vh' }}><SettingsView isWindowed forceMobile={false} /></div> : null}
-        {scenario && !walletScenario ? <div hidden data-fixture-mounted-model-settings><ModelConfigurationPage /></div> : null}</>;
+        {scenario && !walletScenario && !managedScenario ? <div hidden data-fixture-mounted-model-settings><ModelConfigurationPage /></div> : null}</>;
     }
     createRoot(document.getElementById('root')).render(<RuntimeAPIContext.Provider value={createWebAPIs()}><I18nProvider><EntryPoints /></I18nProvider></RuntimeAPIContext.Provider>);
   `);
@@ -272,6 +291,32 @@ test('user center opens outside Settings, navigation stays read-only and explici
       }
     }
     assert.deepEqual(await evaluate('window.mutations'), [], 'Wallet and key navigation must remain read-only');
+    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=managed' });
+    await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Managed account entry did not render');
+    await click('button[aria-label="User center"]');
+    await until(`!!document.querySelector('[data-platform-account-tab="keys"]')`, 'Managed API Key navigation did not render');
+    await click('[data-platform-account-tab="keys"]');
+    for (const { width, dark, locale, label } of [
+      { width: 1280, dark: false, locale: 'zh-CN', label: '测试全部模型' },
+      { width: 390, dark: true, locale: 'en', label: 'Test all models' },
+    ]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+      await evaluate(`window.setAppearance(${dark}, ${JSON.stringify(locale)})`);
+      await until(`document.body.innerText.includes(${JSON.stringify(label)})`, 'Managed model test entry did not render');
+      assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+      assert.equal(await evaluate(`/Activate and configure|Connection test passed|开通并配置|暂未开通/.test(document.body.innerText)`), false);
+      if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
+        await wait(150);
+        const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+        writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, `account-key-managed-${width}-${locale}.png`), Buffer.from(screenshot.data, 'base64'));
+      }
+    }
+    assert.equal(await evaluate(`window.reads.includes('/api/model-configuration/bootstrap/account-key')`), true);
+    assert.equal(await evaluate(`document.querySelectorAll('[data-test-status="queued"]').length`), 7);
+    assert.deepEqual(await evaluate('window.mutations'), []);
+    await evaluate(`[...document.querySelectorAll('button')].find((button) => button.textContent === 'Test all models').click()`);
+    await until(`document.querySelectorAll('[data-test-status="verified"]').length === 6 && !!document.querySelector('[data-test-status="failed"]')`, 'The managed model results did not render individually');
+    assert.deepEqual(await evaluate('window.mutations'), [{ path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', action: 'retest', fundingMode: 'credits' } }]);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
     for (const scenario of ['activation', 'retry']) {
       await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=' + scenario });

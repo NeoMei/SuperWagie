@@ -44,7 +44,7 @@ const parse = (schema, value) => {
   if (!result.success) return fail('model_configuration_invalid_provider_response');
   return result.data;
 };
-const sampleImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAZElEQVR4nO3PAQ2AMAADwUlBGtLnZGgghPyW3KcCemMd3qgPfA2gDqAOoA6gDqAOoA6g7jXguuevAwAAAAAAAAAAAAAAAAAAAAAAAAAAAADYD7BbAHUAdQB1AHUAdQB1AHXHAx4qbV5oZOqstQAAAABJRU5ErkJggg==';
+export const sampleImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAZElEQVR4nO3PAQ2AMAADwUlBGtLnZGgghPyW3KcCemMd3qgPfA2gDqAOoA6gDqAOoA6g7jXguuevAwAAAAAAAAAAAAAAAAAAAAAAAAAAAADYD7BbAHUAdQB1AHUAdQB1AHXHAx4qbV5oZOqstQAAAABJRU5ErkJggg==';
 
 // A 200 x 80 grayscale PNG with the word TEST, generated locally from a bitmap.
 const ocrSample = 'iVBORw0KGgoAAAANSUhEUgAAAMgAAABQCAAAAAB5BmVsAAAAtElEQVR4nO3PQQ7CMBAEQf//03COhJIdixWLVX2N7Umt1yGtX//AtwKZFsi0QKYFMi2QaYFM62zIei4+Wbiw+yYICAjIKZCP2/G33ZN790CyGRCQ8CmQciDZUyDlQLKnQMqBZE+tm+oXQEBAQED2IM+PtC+AZDP9CyDZTP8CSDbTvwCSzfQvgGQz/Qsg2Uz/Asjl212Fk7vrICAgIEdD/iOQaYFMC2RaINMCmRbItECmdQzkDZDoyAWTgCxHAAAAAElFTkSuQmCC';
@@ -57,9 +57,9 @@ const ocrDocument = z.object({ id: taskIdentifier, pages: z.array(z.object({ tex
 // LLMRouter's strict ASR validator accepts only model, response_format and a
 // PCM WAV file. A tiny 1 kHz sine is a valid positive-duration WAV, and the
 // probe checks only that the endpoint returns a transcript-shaped response.
-const sttProbeWav = () => {
+export const sttProbeWav = (seconds = 0.1) => {
   const sampleRate = 16000;
-  const samples = sampleRate / 10;
+  const samples = Math.round(sampleRate * seconds);
   const pcm = Buffer.alloc(samples * 2);
   for (let i = 0; i < samples; i += 1) pcm.writeInt16LE(Math.round(Math.sin((i / sampleRate) * 1000 * 2 * Math.PI) * 2000), i * 2);
   const wav = Buffer.alloc(44 + pcm.length);

@@ -19,6 +19,7 @@ const modelTestSchema = z.object({
 const setupStateSchema = z.object({
   accountId: z.string().min(1),
   enterpriseMode: z.boolean(),
+  mode: z.literal('managed').optional(),
   fundingMode: fundingModeSchema.optional(),
   nativeCredits: z.object({ ready: z.boolean(), reason: z.string().optional() }).optional(),
   activation: z.object({

@@ -63,6 +63,7 @@ import { createModelBootstrapRuntime } from './lib/model-configuration/bootstrap
 import { createAccountKeyProvider } from './lib/model-configuration/account-key-provider.js';
 import { readAccountKeyLegacyModels } from './lib/model-configuration/account-key-legacy-models.js';
 import { createUniHubBootstrapClient } from './lib/model-configuration/bootstrap-client.js';
+import { createManagedModelChecks } from './lib/platform-model/model-checks.js';
 import { createModelBootstrapStore } from './lib/model-configuration/bootstrap-store.js';
 import { excalidrawChildEnvironment } from './lib/builtin-skills/excalidraw-runtime.js';
 import { modelConfigurationChildEnvironment } from './lib/opencode/model-configuration-env.js';
@@ -3213,6 +3214,13 @@ async function main(options = {}) {
     knowledgeLibraryRuntime,
     modelConfigurationRuntime,
     modelBootstrapRuntime: productModelProxy ? null : modelBootstrapRuntime,
+    managedAccountKey: productModelProxy ? createManagedModelChecks({
+      platformAccount: platformAccountRuntime,
+      store: modelBootstrapStore,
+      models: () => platformModelRuntime.modelCheckConfig(),
+      isAvailable: () => platformModelRuntime.enabled(),
+    }) : undefined,
+    isRequestOriginAllowed,
     resolvePlatformIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
     resolveAuthContext: (req, res, options) => uiAuthController.resolveAuthContext(req, res, options),
     sessionWarmingRuntime,

@@ -164,18 +164,9 @@ const usageSummarySchema = z.object({
   charges_by_asset: z.partialRecord(usageAsset, usageCount).optional(),
   refunds_by_asset: z.partialRecord(usageAsset, usageCount).optional(),
 });
-const usageCallsSchema = z.object({
-  items: z.array(z.object({
-    call_id: z.string(), model: z.string(), status: z.string(), asset: usageAsset,
-    held: usageCount.optional(), charged: usageCount.optional(), refunded: usageCount.optional(),
-    usage_status: z.string().optional(), created_at: z.iso.datetime({ offset: true }).nullable(),
-  })).max(20),
-  has_more: z.boolean(),
-});
 type UsageProduct = 'superwagie' | 'llmrouter';
 const platformUsagePath = (accountId: string, product: UsageProduct) => `/api/platform-account/usage/${encodeURIComponent(accountId)}${product === 'llmrouter' ? '/llmrouter' : ''}`;
 export const readPlatformUsageSummary = (accountId: string, product: UsageProduct) => requestPlatformAccount(`${platformUsagePath(accountId, product)}/summary`, usageSummarySchema);
-export const readPlatformUsageCalls = (accountId: string, product: UsageProduct) => requestPlatformAccount(`${platformUsagePath(accountId, product)}/calls`, usageCallsSchema);
 
 const modelTaskSchema = z.object({
   sessionID: z.string(), taskID: z.string(), actorID: z.string(), accountID: z.string(), model: z.string(), blocked: z.boolean(),

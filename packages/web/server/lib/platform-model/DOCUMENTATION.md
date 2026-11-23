@@ -123,6 +123,16 @@ the suspended factory until that option is present.
 - Gateway receipt and video status metadata are read from bounded streams;
   oversized, interrupted, malformed or refused responses leave the original
   call's accounting state unresolved and never trigger another dispatch.
+- The managed account API Key checks use the configured product chat and media
+  catalog plus the fixed managed OCR and knowledge models. An explicit
+  same-origin request uses the signed-in actor's selected payer and the same
+  private product proxy as ordinary model calls. The server sends only fixed
+  samples, reads bounded outputs, and requires the matching settled product
+  receipt before marking a model as passed. No model credentials, sample
+  results or prompts are exposed in the receipt. Each batch runs up to three
+  probes at once. The current batch and its logical call IDs are written to
+  the private bootstrap store and expire after 24 hours. Refresh performs
+  no model IO, and an interrupted probe remains unconfirmed without replay.
 - GET `/api/platform-model/sessions/:sessionID` returns payer/model and call states to the bound runtime identity. POST `/reconcile` additionally requires a trusted request origin. An unresolved status is visible to the UI; no response claims a successful refund or free generation without a gateway receipt. Terminal receipts persist the optional original charge asset without reinterpreting legacy amounts. After an interrupted stream the runtime checks the original receipt once so a confirmed release or settlement can unblock the conversation without submitting another call.
 - GET `/api/platform-model/media-tasks` lists independently admitted media tasks
   with calls for the currently authenticated device, actor and selected payer.

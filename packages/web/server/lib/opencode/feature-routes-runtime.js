@@ -218,6 +218,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       knowledgeLibraryRuntime,
       modelConfigurationRuntime,
       modelBootstrapRuntime,
+      managedAccountKey,
+      isRequestOriginAllowed,
       resolvePlatformIdentity,
       resolveAuthContext,
       sessionWarmingRuntime,
@@ -823,7 +825,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerMessageSearchRoutes(app, { messageSearchRuntime });
     registerKnowledgeLibraryRoutes(app, { runtime: knowledgeLibraryRuntime });
     registerConversationMemoryRoutes(app, { runtime: conversationMemoryRuntime });
-    registerModelConfigurationRoutes(app, { runtime: modelConfigurationRuntime, bootstrapRuntime: modelBootstrapRuntime, resolveIdentity: resolvePlatformIdentity, resolveOwner: resolveAuthContext });
+    registerModelConfigurationRoutes(app, {
+      runtime: modelConfigurationRuntime, bootstrapRuntime: modelBootstrapRuntime, managedAccountKey,
+      resolveIdentity: resolvePlatformIdentity, resolveOwner: resolveAuthContext, isRequestOriginAllowed,
+    });
     registerSessionTodosRoutes(app, { sessionTodosRuntime });
     registerSessionWarmingRoutes(app, {
       sessionWarmingRuntime,
