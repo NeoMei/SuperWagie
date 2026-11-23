@@ -635,7 +635,7 @@ test('a source-unavailable account keeps its authoritative total without inventi
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   useI18nStore.getState().setLocale('en');
   await act(async () => root?.render(<I18nProvider><PlatformMembershipSummary account={account} actions={null} /></I18nProvider>));
-  expect(Array.from(host.querySelectorAll('dl > div > dd:first-of-type')).map((element) => element.textContent)).toEqual(['9007199254.740993']);
+  expect(Array.from(host.querySelectorAll('dl > div > dd:first-of-type')).map((element) => element.textContent)).toEqual(['9007199254']);
   expect(host.textContent).toContain('This server has not provided credit sources');
   expect(host.textContent).not.toContain('Subscription credits remaining');
   expect(host.textContent).not.toContain('Reserved credits');
@@ -681,6 +681,34 @@ test('switching a restored waiting checkout uses its checkout intent to recreate
     '/api/platform-account/commerce/checkouts',
   ]);
   expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
+});
+
+test('an Alipay close awaiting confirmation hides the code and keeps the original payment in view', async () => {
+  const checkout = { id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'alipay', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z', session: { kind: 'qr', url: 'https://qr.alipay.com/fixture', expires_at: '2099-01-01T00:00:00Z' } } as const;
+  commerce.checkouts = [checkout];
+  commerce.intents = [{ idempotencyKey: 'restored-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '10000000', offerId: 'membership-a', resourceId: checkout.id, provider: 'alipay', status: 'PENDING', createdAt: checkout.created_at }];
+  await render('orders');
+  expect(host?.querySelector('[data-payment-checkout]')?.textContent).toContain('Open Alipay on your phone and scan the code to pay');
+
+  checkoutCloseStatus = 'UNKNOWN';
+  commerce.checkouts = [{ ...checkout, payment_status: 'UNKNOWN', close_pending: true, session: undefined }];
+  await act(async () => button('Close payment attempt').click());
+  expect(host?.querySelector('[data-payment-checkout]')?.textContent).toContain('Waiting for closure confirmation');
+  expect(host?.querySelector('[role="alert"]')).toBeNull();
+  expect(host?.querySelector('[data-payment-checkout] img')).toBeNull();
+  expect(host?.textContent).not.toContain('Generate a new payment code');
+  expect(paymentMutations().map((item) => item.path)).toEqual(['/api/platform-account/commerce/checkouts/waiting-checkout/close']);
+
+  await act(async () => root?.unmount());
+  root = undefined;
+  host?.remove();
+  await render('overview');
+  expect(host?.querySelector('[data-payment-checkout]')?.textContent).toContain('Waiting for closure confirmation');
+  commerce.checkouts = [{ ...checkout, payment_status: 'CLOSED', session: undefined }];
+  commerce.intents = [];
+  await act(async () => button('Refresh status').click());
+  expect(host?.querySelector('[data-payment-checkout]')?.textContent).toContain('Payment attempt closed.');
+  expect(button('Subscribe').disabled).toBe(false);
 });
 
 for (const closeStatus of ['PENDING', 'UNKNOWN']) test(`a ${closeStatus} close keeps the original checkout and lets the user retry the channel switch`, async () => {

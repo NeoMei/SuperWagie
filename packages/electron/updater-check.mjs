@@ -19,6 +19,7 @@ export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendi
     if (isMissingUpdateFeedError(error) && !pendingUpdate) {
       return {
         available: false,
+        upToDate: false,
         updateInfo: null,
         updateResult: null,
         nextVersion: currentVersion,
@@ -30,9 +31,8 @@ export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendi
   }
 
   const updateInfo = updateResult?.updateInfo;
-  const nextVersion =
-    (typeof updateInfo?.version === 'string' && updateInfo.version) ||
-    currentVersion;
+  const publishedVersion = typeof updateInfo?.version === 'string' ? updateInfo.version : '';
+  const nextVersion = publishedVersion || currentVersion;
   const available = compareVersions(nextVersion, currentVersion) > 0;
   let nextPendingUpdate = null;
   if (available) {
@@ -41,7 +41,14 @@ export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendi
       Object.assign(nextPendingUpdate, pendingUpdate, { electronUpdate: updateResult });
     }
   }
-  return { available, updateInfo, updateResult, nextVersion, pendingUpdate: nextPendingUpdate };
+  return {
+    available,
+    upToDate: Boolean(publishedVersion) && !available,
+    updateInfo,
+    updateResult,
+    nextVersion,
+    pendingUpdate: nextPendingUpdate,
+  };
 };
 
 export const markDesktopUpdateDownloaded = (pendingUpdate, info) => {
@@ -231,6 +238,7 @@ export const checkForMacUpdate = async ({
   const available = compareVersions(version, currentVersion) > 0;
   return {
     available,
+    upToDate: !available,
     currentVersion,
     version: available ? version : null,
     body: parsed.data.notes?.trim() ? parsed.data.notes : null,

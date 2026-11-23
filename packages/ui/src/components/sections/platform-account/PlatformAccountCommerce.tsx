@@ -316,7 +316,7 @@ export const PlatformAccountCommerce: React.FC<{
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
       applyCheckout(result, id);
       if (settledCheckout(result)) onAccountRefresh();
-      if (action === 'close' && waitingCheckout(result)) setError('platformAccount.error.operationPending');
+      if (action === 'close' && waitingCheckout(result) && !result.close_pending) setError('platformAccount.error.operationPending');
       readStarted = true; const next = await readPlatformCommerce(true);
       if (version !== generation.current || runtimeKey !== getRuntimeKey()) return;
       if (next.accountId !== accountId) throw new PlatformAccountError('platform_account_changed');

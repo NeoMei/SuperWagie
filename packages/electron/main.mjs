@@ -5135,7 +5135,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
-      const { available, updateInfo, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
+      const { available, upToDate, updateInfo, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
         pendingUpdate: state.pendingUpdate,
@@ -5148,6 +5148,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         (available ? await fetchDesktopUpdateNotes({ version: nextVersion }) : null);
       return {
         available,
+        upToDate,
         currentVersion,
         version: available ? nextVersion : null,
         body: body || null,
