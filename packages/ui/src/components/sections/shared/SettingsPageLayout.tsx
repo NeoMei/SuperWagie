@@ -34,6 +34,7 @@ interface SettingsPageLayoutProps {
   className?: string;
   /** Additional className for the outer ScrollableOverlay */
   outerClassName?: string;
+  scrollRef?: React.Ref<HTMLElement>;
 }
 
 /**
@@ -44,6 +45,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   children,
   className,
   outerClassName,
+  scrollRef,
   title,
   titleLeading,
   titleAccessory,
@@ -59,6 +61,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
 
   return (
     <ScrollableOverlay
+      ref={scrollRef}
       outerClassName={cn('h-full overlay-scrollbar-wrapper--stable-gutter', outerClassName)}
       className="w-full @container"
       verticalTrackStart={scrollbarTopClearance}

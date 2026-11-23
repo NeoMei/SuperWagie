@@ -265,8 +265,10 @@ describe('UniHub commerce without sandbox funding', () => {
     const result = await f.runtime.purchase(identity, purchaseBody(f));
     expect(result).toMatchObject({ kind: 'purchase', status: 'APPLIED' });
     expect(f.state.wallet).toBe(9_000_000n); expect(f.state.credits).toBe(2_000_000n);
+    const createdAt = '2026-11-14T18:00:00+08:00';
+    f.orders.get(result.resourceId).created_at = createdAt;
     const view = await f.runtime.overview(identity);
-    expect(view.orders).toEqual([expect.objectContaining({ paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED' })]);
+    expect(view.orders).toEqual([expect.objectContaining({ paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', createdAt })]);
   });
 
   it('reuses an idempotency key and rejects a different payload', async () => {

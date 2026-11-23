@@ -37,6 +37,8 @@ const assets = ['CREDIT/6', 'CNY/6', 'LR_QUOTA/0'] as const;
 
 const UsageReport = ({ accountId, details }: { accountId: string; details: boolean }) => {
   const { t } = useI18n();
+  const metricClass = "oc-tile min-w-0 space-y-1 rounded-lg px-4 py-3";
+  const metricValueClass = "break-words text-xl font-semibold tabular-nums";
   const [revision, setRevision] = React.useState(0);
   const [summary, setSummary] = React.useState<Report<Summary>>({ status: 'loading' });
   React.useEffect(() => {
@@ -96,17 +98,17 @@ const UsageReport = ({ accountId, details }: { accountId: string; details: boole
       {summary.status !== 'ready' ? message(summary.status) : <>
         {summary.data.visibility === 'actor' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageActorScope')}</p>}
         {summary.data.calls_total === '0' ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageEmpty')}</p> : <>
-          <dl className="grid min-w-0 grid-cols-2 gap-x-5 gap-y-4 @xl:grid-cols-3">
-            <div className="min-w-0 space-y-1"><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCreditsUsed')}</dt><dd dir="auto" className="break-all text-lg font-medium tabular-nums">{creditsUsed === undefined ? t('platformAccount.usageAmountUnavailable') : charge('CREDIT/6', creditsUsed)}</dd></div>
-            <div className="min-w-0 space-y-1"><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCalls')}</dt><dd dir="auto" className="break-all text-lg font-medium tabular-nums">{summary.data.calls_total}</dd></div>
-            <div className="min-w-0 space-y-1"><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageSettledCalls')}</dt><dd dir="auto" className="break-all text-lg font-medium tabular-nums">{summary.data.settled_calls}</dd></div>
+          <dl className="grid min-w-0 grid-cols-2 gap-2.5 @xl:grid-cols-3">
+            <div className={`${metricClass} col-span-2 @xl:col-span-1`}><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCreditsUsed')}</dt><dd dir="auto" className={metricValueClass}>{creditsUsed === undefined ? t('platformAccount.usageAmountUnavailable') : charge('CREDIT/6', creditsUsed)}</dd></div>
+            <div className={metricClass}><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageCalls')}</dt><dd dir="auto" className={metricValueClass}>{summary.data.calls_total}</dd></div>
+            <div className={metricClass}><dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageSettledCalls')}</dt><dd dir="auto" className={metricValueClass}>{summary.data.settled_calls}</dd></div>
           </dl>
           {(!summary.data.usage_complete || summary.data.pending_calls !== '0' || summary.data.missing_usage_calls !== '0' || summary.data.unknown_calls !== '0') && <>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageIncomplete')}</p>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageUnconfirmedCalls', { pending: summary.data.pending_calls, missing: summary.data.missing_usage_calls, unknown: summary.data.unknown_calls })}</p>
           </>}
           {details && billingAssets.length > 0 && <Collapsible>
-            <CollapsibleTrigger className="w-auto typography-meta">{t('platformAccount.usageBillingDetails')}</CollapsibleTrigger>
+            <CollapsibleTrigger className="rounded-md border border-border/60 px-3 py-2 typography-ui-label">{t('platformAccount.usageBillingDetails')}</CollapsibleTrigger>
             <CollapsibleContent className="pt-3">
               {billingAssets.map((asset) => {
                 const amount = summary.data.charges_by_asset?.[asset];
@@ -119,7 +121,7 @@ const UsageReport = ({ accountId, details }: { accountId: string; details: boole
             </CollapsibleContent>
           </Collapsible>}
           {details && <Collapsible>
-            <CollapsibleTrigger className="w-auto typography-meta">{t('platformAccount.usageMeasurements')}</CollapsibleTrigger>
+            <CollapsibleTrigger className="rounded-md border border-border/60 px-3 py-2 typography-ui-label">{t('platformAccount.usageMeasurements')}</CollapsibleTrigger>
             <CollapsibleContent className="space-y-3 pt-3">
               <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.usageRecordingHint')}</p>
               {summary.data.usage_coverage ? <>

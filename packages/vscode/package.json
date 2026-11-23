@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "%extension.description%",
-  "version": "2.7.131",
+  "version": "2.7.132",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {

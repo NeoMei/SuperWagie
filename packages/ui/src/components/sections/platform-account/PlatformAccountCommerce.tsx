@@ -5,7 +5,7 @@ import { SettingsSection, SettingsFieldRow, SettingsControlGroup, SettingsChipGr
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { PlatformAccountError, type PlatformAccountState } from '@/lib/platformAccount';
-import { readPlatformCommerce, readPlatformOrders, createPlatformCheckout, updatePlatformCheckout, purchasePlatformOffer, createPlatformUpgradeQuote, acceptPlatformUpgradeQuote, reconcilePlatformIntent, formatPlatformMoney, formatPlatformPoints, formatProductBillingDate, type PlatformCommerceState, type PlatformCommerceIntent, type PlatformUpgradeQuote, type PlatformCheckout } from '@/lib/platformCommerce';
+import { readPlatformCommerce, readPlatformOrders, createPlatformCheckout, updatePlatformCheckout, purchasePlatformOffer, createPlatformUpgradeQuote, acceptPlatformUpgradeQuote, reconcilePlatformIntent, formatPlatformMoney, formatPlatformPoints, formatProductBillingDate, isRefundableCheckout, type PlatformCommerceState, type PlatformCommerceIntent, type PlatformUpgradeQuote, type PlatformCheckout } from '@/lib/platformCommerce';
 import { PlatformProductWallet } from './PlatformProductWallet';
 import { PlatformPaymentPanel } from './PlatformPaymentPanel';
 import { platformAccountErrorKey } from './platformAccountErrors';
@@ -61,17 +61,16 @@ const orderStatusKey = (status: string): I18nKey | null => {
 export const PlatformAccountCommerce: React.FC<{
   accountId: string;
   payer: string;
-  walletAccountPicker?: React.ReactNode;
   view: 'overview' | 'orders' | 'wallet';
   hasActiveMembership: boolean;
   currentMembership?: Extract<PlatformAccountState, { status: 'signed-in' }>['membership'][number];
   membershipSummary: (actions: { openMembership: () => void; openAddon: () => void; membershipOpen: boolean; addonOpen: boolean; disabled: boolean }) => React.ReactNode;
   onAccountRefresh: () => void;
-}> = ({ accountId, payer, walletAccountPicker, view, hasActiveMembership, currentMembership, membershipSummary, onAccountRefresh }) => {
+}> = ({ accountId, payer, view, hasActiveMembership, currentMembership, membershipSummary, onAccountRefresh }) => {
   const { t, locale } = useI18n();
   const [state, setState] = React.useState<PlatformCommerceState | null>(null);
   const [orderHistory, setOrderHistory] = React.useState<PlatformCommerceState['orders']>(null);
-  const [ordersLoading, setOrdersLoading] = React.useState(false);
+  const [orderReadStatus, setOrderReadStatus] = React.useState<'loading' | 'ready' | 'denied' | 'failed'>('loading');
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<I18nKey | null>(null);
   const [commerceReadFailed, setCommerceReadFailed] = React.useState(false);
@@ -84,6 +83,8 @@ export const PlatformAccountCommerce: React.FC<{
   const [quote, setQuote] = React.useState<PlatformUpgradeQuote | null>(null);
   const [purchaseApplied, setPurchaseApplied] = React.useState(false);
   const [visibleCheckoutId, setVisibleCheckoutId] = React.useState('');
+  const catalogRegion = React.useRef<HTMLDivElement>(null);
+  const scrollToCatalog = React.useRef(false);
   const checkoutRegion = React.useRef<HTMLDivElement>(null);
   const walletPaymentRegion = React.useRef<HTMLDivElement>(null);
   const [command, setCommand] = React.useState<PendingCommand | null>(null);
@@ -130,13 +131,17 @@ export const PlatformAccountCommerce: React.FC<{
   React.useEffect(() => {
     if (view !== 'orders' || !canReadOrderHistory || busy) return undefined;
     let current = true;
-    setOrdersLoading(true);
+    setOrderReadStatus('loading');
     void readPlatformOrders(accountId).then((orders) => {
-      if (current && runtimeKey === getRuntimeKey()) setOrderHistory(orders);
-    }).catch(() => {
-      if (current && runtimeKey === getRuntimeKey()) setOrderHistory(null);
-    }).finally(() => {
-      if (current && runtimeKey === getRuntimeKey()) setOrdersLoading(false);
+      if (current && runtimeKey === getRuntimeKey()) {
+        setOrderHistory(orders);
+        setOrderReadStatus('ready');
+      }
+    }).catch((cause) => {
+      if (current && runtimeKey === getRuntimeKey()) {
+        setOrderHistory(null);
+        setOrderReadStatus(cause instanceof PlatformAccountError && cause.status === 403 ? 'denied' : 'failed');
+      }
     });
     return () => { current = false; };
   }, [accountId, view, canReadOrderHistory, busy, runtimeKey]);
@@ -386,9 +391,20 @@ export const PlatformAccountCommerce: React.FC<{
   const selectOffer = (id: string | null) => {
     setOfferId(id ?? ''); setQuote(null); setError(null); setPurchaseApplied(false);
   };
+  React.useLayoutEffect(() => {
+    if (!scrollToCatalog.current || !catalogRegion.current) return;
+    scrollToCatalog.current = false;
+    catalogRegion.current.scrollIntoView?.({ block: 'start' });
+  }, [buyingTask]);
+  const toggleCatalog = (task: 'membership' | 'addon') => {
+    if (!state || commerceReadFailed) return;
+    const next = task === buyingTask ? null : task;
+    scrollToCatalog.current = next !== null;
+    setBuyingTask(next);
+  };
   const summary = () => membershipSummary({
-    openMembership: () => { if (state && !commerceReadFailed) setBuyingTask((task) => task === 'membership' ? null : 'membership'); },
-    openAddon: () => { if (state && !commerceReadFailed) setBuyingTask((task) => task === 'addon' ? null : 'addon'); },
+    openMembership: () => toggleCatalog('membership'),
+    openAddon: () => toggleCatalog('addon'),
     membershipOpen: buyingTask === 'membership',
     addonOpen: buyingTask === 'addon',
     disabled: !state || busy || commerceReadFailed,
@@ -430,14 +446,14 @@ export const PlatformAccountCommerce: React.FC<{
     </div>;
   };
   const collapsedOverview = view === 'overview' && buyingTask === null;
-  const commerceTitle = view === 'orders' ? t('platformAccount.history') : view === 'wallet' ? t('platformAccount.productWallet.tab') : undefined;
+  const commerceTitle = view === 'orders' ? t('platformAccount.history') : undefined;
   const refreshAction = <Button size="sm" variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>;
   const commerceUnavailable = !state || commerceReadFailed;
   const channelSwitchPending = error === 'platformAccount.error.channelSwitchPending';
   const summaryError = channelSwitchPending ? null : error;
   const statusRow = (summaryError || busy || purchaseApplied || collapsedOverview) && <div className="flex items-center justify-between gap-3">
     <p className={`min-h-5 min-w-0 flex-1 ${summaryError ? 'text-[var(--status-error-text)]' : SETTINGS_HELPER_CLASS}`} role={summaryError ? 'alert' : 'status'}>{summaryError ? t(summaryError) : busy ? t('platformAccount.loading') : purchaseApplied ? t('platformAccount.purchaseApplied') : null}</p>
-    {view === 'overview' && (collapsedOverview || commerceUnavailable || Boolean(summaryError)) && refreshAction}
+    {view === 'overview' && (collapsedOverview || commerceUnavailable) && refreshAction}
   </div>;
   if (!state) return <>{view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">{summary()}</SettingsTwoColumn>}<SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={collapsedOverview ? undefined : refreshAction} contentClassName="space-y-3">
     {statusRow}
@@ -450,9 +466,22 @@ export const PlatformAccountCommerce: React.FC<{
   const checkouts = state.checkouts ?? [];
   const inlinePayment = view === 'overview' && buyingTask === selectedOffer?.kind && !commerceReadFailed && (!selectedOfferRestriction || !!payment);
   const pastPayments = checkouts.filter((item) => item.id !== payment?.id);
-  const recoverableIntents = state.intents.filter((intent) => intent.status !== 'APPLIED' && intent.status !== 'FAILED' && (!payment || intent.resourceId !== payment.id));
-  const historyIntents = state.intents.filter((intent) => intent.productId === 'superwagie' || intent.productId === 'llmrouter' || (intent.status !== 'APPLIED' && intent.status !== 'FAILED'));
-  const orders = orderHistory?.filter((order) => order.productId === 'superwagie' || order.productId === 'llmrouter') ?? [];
+  const orders = canReadOrderHistory ? orderHistory?.filter((order) => order.productId === 'superwagie' || order.productId === 'llmrouter') ?? [] : [];
+  let orderNotice: I18nKey | null = null;
+  if (!canReadOrderHistory || orderReadStatus === 'denied') orderNotice = 'platformAccount.ordersUnavailable';
+  else if (orderReadStatus === 'failed') orderNotice = 'platformAccount.ordersReadFailed';
+  else if (orderHistory === null) orderNotice = 'platformAccount.loading';
+  else if (orders.length === 0) orderNotice = 'platformAccount.noOrders';
+  const needsPaymentFollowUp = (checkout: PlatformCheckout) => unresolvedPayment(checkout) || isRefundableCheckout(checkout)
+    || checkout.upgrade_return_status === 'UPGRADE_PENDING' || checkout.upgrade_return_status === 'UPGRADE_RELEASING';
+  const activeOrderPayments = view === 'orders' ? pastPayments.filter(needsPaymentFollowUp) : [];
+  const archivedPayments = view === 'orders' ? pastPayments.filter((checkout) => !needsPaymentFollowUp(checkout)) : [];
+  const recoverableIntents = state.intents.filter((intent) => intent.status !== 'APPLIED' && intent.status !== 'FAILED'
+    && intent.idempotencyKey !== command?.idempotencyKey && (!payment || intent.resourceId !== payment.id));
+  const recordedResources = new Set([...checkouts.map((item) => item.id), ...orders.map((item) => item.id)]);
+  const historyIntents = state.intents.filter((intent) => (intent.productId === 'superwagie' || intent.productId === 'llmrouter')
+    && (intent.status === 'APPLIED' || intent.status === 'FAILED')
+    && (!intent.resourceId || !recordedResources.has(intent.resourceId)));
   const intentRow = (intent: PlatformCommerceIntent) => {
     const errorKey = intentErrorKey(intent.errorCode);
     return <SettingsFieldRow key={intent.idempotencyKey} label={t('platformAccount.purchaseRecord', { product: purchaseName(intent.productId, intent.walletTopUp), amount: money(intent.amount) })} description={<>{t(`platformAccount.intent.${intent.status}`)}{errorKey ? ` · ${t(errorKey)}` : ''}</>}>
@@ -475,16 +504,12 @@ export const PlatformAccountCommerce: React.FC<{
     const showTopUp = state.payments.canTopUp && channels.length > 0;
     const topUps = pastPayments.filter((item) => item.walletTopUp);
     return <section className="@container/wallet space-y-6" data-wallet-page>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold">{t('platformAccount.productWallet.tab')}</h2>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          {walletAccountPicker}
-          {refreshAction}
-        </div>
-      </div>
       <div className="grid items-start gap-4 @2xl/wallet:grid-cols-[minmax(12rem,2fr)_minmax(0,3fr)]">
         <section className="oc-tile min-w-0 space-y-2 rounded-xl p-4 @2xl/wallet:p-5">
-          <h3 className="typography-ui-label font-medium">{t('platformAccount.productWallet.cash')}</h3>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <h3 className="typography-ui-label font-medium">{t('platformAccount.productWallet.cash')}</h3>
+            {refreshAction}
+          </div>
           {state.productWallet
             ? <p className="break-all text-3xl leading-tight font-semibold tabular-nums"><bdi dir="ltr">¥{formatPlatformMoney(state.productWallet.cash.available)}</bdi></p>
             : <p className={SETTINGS_HELPER_CLASS}>{t(finance ? 'platformAccount.commerceFailed' : 'platformAccount.memberRestricted')}</p>}
@@ -541,13 +566,12 @@ export const PlatformAccountCommerce: React.FC<{
         <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId, command.kind === 'checkout' ? command.walletTopUp : undefined), amount: money(command.amount) })}</p>
       <Button variant="outline" disabled={busy || commerceUnavailable} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
       </SettingsControlGroup>}
-      {buyingTask !== null && !commerceReadFailed && state.payments.mode === 'unconfigured' && <p className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]" role="status">{t('platformAccount.paymentUnconfigured')}</p>}
+      {view === 'overview' && buyingTask !== null && !commerceReadFailed && state.payments.mode === 'unconfigured' && <p className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]" role="status">{t('platformAccount.paymentUnconfigured')}</p>}
       {!finance && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.memberRestricted')}</p>}
       {state.missingScopes.length > 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.missingScopes')}</p>}
       {finance && recoverableIntents.length > 0 && <SettingsControlGroup title={t('platformAccount.pendingCommand')}>{recoverableIntents.map(intentRow)}</SettingsControlGroup>}
       {payment && !inlinePayment && paymentPanel(payment, true)}
-      {view === 'orders' && pastPayments.map((item) => paymentPanel(item, false))}
-      {view === 'overview' && !commerceReadFailed && buyingTask !== null && <>
+      {view === 'overview' && !commerceReadFailed && buyingTask !== null && <div ref={catalogRegion} className="scroll-mt-4 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SettingsChipGroup value={buyingTask} onChange={(task) => { setBuyingTask(task); setQuote(null); }} aria-label={t('platformAccount.buyingTask')} options={[
           { value: 'membership', label: t('platformAccount.membershipPlans') },
@@ -614,7 +638,7 @@ export const PlatformAccountCommerce: React.FC<{
           </div>
         </div>
       </SettingsControlGroup>}</div>}
-      </>}
+      </div>}
       {view === 'overview' && pastPayments.length > 0 && <details className="group">
         <summary className="cursor-pointer list-none typography-meta text-muted-foreground select-none">
           {t('platformAccount.pastPayments', { count: pastPayments.length })}
@@ -622,10 +646,32 @@ export const PlatformAccountCommerce: React.FC<{
         <div className="mt-2 space-y-1.5">{pastPayments.map((item) => paymentPanel(item, false))}</div>
       </details>}
     </SettingsSection>
-    {finance && view === 'orders' && <SettingsSection description={t('platformAccount.historyScope')} divider={false} className="pt-0" contentClassName="space-y-4">
-      {historyIntents.length === 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noIntents')}</p>}
-      {historyIntents.map(intentRow)}
-      {(ordersLoading || busy) && orderHistory === null ? <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.loading')}</p> : orderHistory === null ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.ordersUnavailable')}</p> : orders.length === 0 ? <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.noOrders')}</p> : orders.map((order) => <SettingsFieldRow key={order.id} label={order.productId === 'llmrouter' ? t('platformAccount.addonPlans') : order.offerName} description={t('platformAccount.orderStates', { payment: orderStatus(order.paymentStatus), fulfillment: orderStatus(order.fulfillmentStatus), refund: order.refundStatus ? orderStatus(order.refundStatus) : t('platformAccount.noRefund') })}><span dir="auto">{money(order.amount)}</span></SettingsFieldRow>)}
+    {finance && view === 'orders' && <SettingsSection divider={false} className="pt-0" contentClassName="space-y-4">
+      {orderNotice
+        ? <p role={orderReadStatus === 'failed' ? 'alert' : 'status'} className="oc-tile rounded-lg p-4 typography-ui-label">{t(orderNotice)}</p>
+        : <ul className="divide-y divide-border/50 rounded-lg border border-border/60">
+          {orders.map((order) => <li key={order.id} className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2 px-4 py-3">
+            <div className="min-w-0 flex-1 basis-56 space-y-1">
+              <p dir="auto" className="break-words typography-ui-label font-semibold">{order.productId === 'llmrouter' ? t('platformAccount.addonPlans') : order.offerName}</p>
+              <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.orderStates', { payment: orderStatus(order.paymentStatus), fulfillment: orderStatus(order.fulfillmentStatus), refund: order.refundStatus ? orderStatus(order.refundStatus) : t('platformAccount.noRefund') })}</p>
+            </div>
+            <div className="space-y-1 @xl:text-end">
+              <p dir="auto" className="typography-ui-label font-medium tabular-nums">{money(order.amount)}</p>
+              {order.createdAt && <time dateTime={order.createdAt} className={SETTINGS_HELPER_CLASS}>{formatProductBillingDate(order.createdAt, locale)}</time>}
+            </div>
+          </li>)}
+        </ul>}
+      {activeOrderPayments.length > 0 && <SettingsControlGroup title={t('platformAccount.paymentActions')}>
+        {activeOrderPayments.map((item) => paymentPanel(item, false))}
+      </SettingsControlGroup>}
+      {(archivedPayments.length > 0 || historyIntents.length > 0) && <details className="rounded-lg border border-border/60 px-4 py-3">
+        <summary className="cursor-pointer typography-ui-label font-medium">{t('platformAccount.pastPayments', { count: archivedPayments.length + historyIntents.length })}</summary>
+        <div className="mt-3 space-y-2">
+          <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.historyScope')}</p>
+          {archivedPayments.map((item) => paymentPanel(item, false))}
+          {historyIntents.map(intentRow)}
+        </div>
+      </details>}
     </SettingsSection>}
   </>;
 };

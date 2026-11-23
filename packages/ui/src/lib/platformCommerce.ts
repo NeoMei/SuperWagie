@@ -18,6 +18,7 @@ const offerSchema = z.object({
 const orderSchema = z.object({
   id: z.string().min(1), productId: z.string(), offerName: z.string(), amount: units,
   paymentStatus: z.string(), fulfillmentStatus: z.string(), refundStatus: z.string(),
+  createdAt: z.string().datetime({ offset: true }).optional().catch(undefined),
 });
 const intentSchema = z.object({
   idempotencyKey: z.string().min(1), kind: z.enum(['purchase', 'upgrade', 'checkout']),
@@ -106,6 +107,9 @@ export const formatPlatformMoney = (value: string): string => {
   const fraction = String(amount % 1_000_000n).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
   return `${amount / 1_000_000n}.${fraction}`;
 };
+
+export const isRefundableCheckout = (checkout: PlatformCheckout) => !checkout.upgrade_return_status && !checkout.walletTopUp
+  && checkout.payment_status === 'PAID' && !checkout.refund_status;
 
 /** Point summaries show whole spendable points without overstating a balance. */
 export const formatPlatformPoints = (value: string): string => {

@@ -152,17 +152,27 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
     return 'unconfirmed';
   };
   const stageLabel = (stage: SetupStage) => t(stage === 'issue' ? 'platformAccount.keySetup.issue' : stage === 'configure' ? 'platformAccount.keySetup.configure' : 'platformAccount.keySetup.test');
+  const refreshAction = <Button size="sm" variant="outline" disabled={reading || acting} onClick={() => void read()}>{t('platformAccount.refresh')}</Button>;
+  if (!state) return <SettingsSection divider={false} contentClassName="space-y-3">
+    {error
+      ? <p className="text-[var(--status-error-text)]" role="alert">{t(error)}</p>
+      : <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.loading')}</p>}
+    {error && refreshAction}
+  </SettingsSection>;
   const title = t(managed ? 'platformAccount.keySetup.managedTitle' : 'platformAccount.keySetup.panelTitle');
-  return <SettingsSection description={t(managed ? 'platformAccount.keySetup.managedDescription' : 'platformAccount.keySetup.description')} divider={false} contentClassName="space-y-4" headerAction={<Button size="sm" variant="outline" disabled={reading || acting} onClick={() => void read()}>{t('platformAccount.refresh')}</Button>}>
-    <SettingsFieldRow label={t('platformAccount.keySetup.fundingMode')} info={managed ? undefined : t('platformAccount.keySetup.fundingSwitchHint')}>
+  return <SettingsSection description={t(managed ? 'platformAccount.keySetup.managedDescription' : 'platformAccount.keySetup.description')} divider={false} className="py-0" contentClassName="space-y-3" headerAction={refreshAction}>
+    {!managed && <SettingsFieldRow label={t('platformAccount.keySetup.fundingMode')} info={t('platformAccount.keySetup.fundingSwitchHint')}>
       <span className="typography-ui-label text-foreground">{t('platformAccount.keySetup.credits')}</span>
-    </SettingsFieldRow>
+    </SettingsFieldRow>}
     {state?.nativeCredits?.ready === false && !reading && !error && <p role="status" className={SETTINGS_HELPER_CLASS}>{t(managed ? 'platformAccount.keySetup.managedUnavailable' : 'platformAccount.keySetup.creditsUnavailable')}</p>}
-    <ModelTestMotion><section role="region" aria-label={title} className="oc-tile min-w-0 space-y-4 rounded-lg p-4">
+    <ModelTestMotion><section role="region" aria-label={title} className="oc-tile min-w-0 space-y-3 rounded-lg p-4">
       <h3 className="typography-ui-label text-foreground">{title}</h3>
+      {managed && activation && <div className="space-y-2">
+        <Button disabled={busy || reading || creditsUnavailable || Boolean(error) || state?.enterpriseMode || !activation.actions.includes('retest')} onClick={() => void run('retest')}>{t('platformAccount.keySetup.managedCheck')}</Button>
+        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.managedCost')}</p>
+      </div>}
       <div className="space-y-2" aria-live="polite">
         {error && <p className="text-[var(--status-error)]" role="alert">{t(error)}</p>}
-        {reading && !state && !error && !acting && <p className={SETTINGS_HELPER_CLASS} role="status">{t('platformAccount.loading')}</p>}
         {busy && <p role="status" className="flex items-start gap-2 text-foreground"><Spinner aria-hidden="true" className="mt-0.5" /><span>{working && activation ? t('platformAccount.keySetup.working', { stage: stageLabel(activation.stage) }) : t(pendingAction === 'retest' ? 'platformAccount.keySetup.testPending' : 'platformAccount.keySetup.requestPending')}</span></p>}
         {verified && <p role="status" className="flex items-start gap-2 font-medium text-[var(--status-success)]"><RiCheckLine aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{t('platformAccount.keySetup.verified')}</p>}
         {partial && <p role="alert" className="text-[var(--status-warning)]">{t('platformAccount.keySetup.partial')}</p>}
@@ -189,17 +199,13 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
         <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.cost')}</p>
         <Button disabled={busy || reading || creditsUnavailable || state.enterpriseMode} onClick={() => void run('activate')}>{t('platformAccount.keySetup.activate')}</Button>
       </>}
-      {managed && activation && <div className="space-y-2">
-        <Button disabled={busy || reading || creditsUnavailable || Boolean(error) || state?.enterpriseMode || !activation.actions.includes('retest')} onClick={() => void run('retest')}>{t('platformAccount.keySetup.managedCheck')}</Button>
-        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.managedCost')}</p>
-      </div>}
       {activation && <>
         {activation.key && <div className="space-y-1">
           <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.apiKeysTab')}</p>
           <p dir="ltr" className="break-all font-mono text-xl">•••• {activation.key.last4}</p>
           <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.secretHint')}</p>
         </div>}
-        <div className="space-y-2">
+        <div className="border-t border-border/50 pt-3">
           {testCount > 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.keySetup.testSummary', { passed: passedCount, total: testCount })}</p>}
           {visibleTests.length > 0 && <ul aria-label={t('platformAccount.keySetup.modelTests')}>
             {visibleTests.map((test) => {
@@ -221,15 +227,15 @@ export const PlatformAccountApiKeys: React.FC<{ accountId: string; onConfigured?
                       : feedbackCode === 'account_key_scope_unavailable' ? 'platformAccount.keySetup.scopeUnavailable'
                         : feedbackCode === 'account_key_configuration_conflict' || feedbackCode === 'account_key_configuration_changed' ? 'modelConfiguration.revisionConflict'
                           : test.applicationError ? 'platformAccount.keySetup.applyFailed' : modelTestErrorKey(feedbackCode ?? 'test_failed')) : null;
-              const statusLabel = t(managed && status === 'queued' ? 'platformAccount.keySetup.managedQueued' : test.applicationError ? 'platformAccount.keySetup.modelUnapplied' : status === 'verified' && test.applied ? 'platformAccount.keySetup.modelApplied' : `platformAccount.keySetup.modelStatus.${status}`);
+              const statusLabel = t(managed && status === 'queued' ? 'platformAccount.keySetup.managedQueued' : test.applicationError ? 'platformAccount.keySetup.modelUnapplied' : !managed && status === 'verified' && test.applied ? 'platformAccount.keySetup.modelApplied' : `platformAccount.keySetup.modelStatus.${status}`);
               const testedAt = test.testedAt && status !== 'testing' && status !== 'queued' ? t('platformAccount.keySetup.testedAt', { time: new Date(test.testedAt).toLocaleString(locale) }) : undefined;
               return <li key={`${activation.testRunId}:${test.id}`} data-account-model-test={test.purpose} data-test-status={status} aria-label={t('modelConfiguration.testFeedback.region', { purpose: t(MODEL_PURPOSE_LABELS[test.purpose]) })} className="min-w-0 space-y-1 border-b border-border/40 py-2 last:border-b-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-200">
                 <div className="flex min-w-0 items-start gap-3">
-                  <div className="flex min-w-0 flex-1 flex-col gap-x-2 @sm:flex-row @sm:flex-wrap @sm:items-baseline">
-                    <p className="break-words typography-ui-label">{t(MODEL_PURPOSE_LABELS[test.purpose])}</p>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="break-words typography-ui-label font-medium">{t(MODEL_PURPOSE_LABELS[test.purpose])}</p>
                     {test.modelId && <p className={`${SETTINGS_HELPER_CLASS} min-w-0 break-all`}><bdi dir="auto">{test.modelId}</bdi></p>}
                   </div>
-                  <span title={testedAt} aria-label={testedAt ? `${statusLabel}, ${testedAt}` : undefined} className={`inline-flex shrink-0 items-center gap-1.5 typography-meta ${color}`}>
+                  <span title={testedAt} aria-label={testedAt ? `${statusLabel}, ${testedAt}` : undefined} className={`inline-flex shrink-0 items-center gap-1.5 whitespace-normal typography-meta ${color}`}>
                     {status === 'testing' ? <Spinner aria-hidden="true" /> : status === 'verified' ? <RiCheckLine aria-hidden="true" className="size-4" /> : status === 'failed' ? <RiCloseLine aria-hidden="true" className="size-4" /> : status === 'unknown' ? <RiQuestionLine aria-hidden="true" className="size-4" /> : null}
                     {statusLabel}
                   </span>

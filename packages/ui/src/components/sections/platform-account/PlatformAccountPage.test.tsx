@@ -208,7 +208,7 @@ afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); 
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
 
 const button = (text: string) => {
-  const found = [...host.querySelectorAll('button')].find((item) => item.textContent === text);
+  const found = [...host.querySelectorAll('button')].find((item) => item.textContent === text || item.getAttribute('aria-label') === text);
   if (!found) throw new Error(`Missing button ${text}`);
   return found;
 };
@@ -216,6 +216,10 @@ const tab = async (text: string) => {
   const found = [...host.querySelectorAll<HTMLButtonElement>('[data-platform-account-tab]')].find((item) => item.textContent?.includes(text));
   if (!found) throw new Error(`Missing tab ${text}`);
   await act(async () => found.click());
+};
+const signOut = async () => {
+  await tab('Personal details');
+  await act(async () => button('Sign out').click());
 };
 const fill = async (id: string, value: string, scope: ParentNode = host) => {
   if (id === 'unihub-recharge-amount' && !scope.querySelector('#unihub-recharge-amount')) await act(async () => preparePlatformAccountTarget('platform-account.recharge'));
@@ -476,7 +480,7 @@ describe('PlatformAccountPage', () => {
     await render(); await act(async () => button('Buy extra credits').click());
     const option = host.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Buy extra credits"]');
     expect(option?.disabled).toBe(true); expect(host.textContent).toContain('complete its model credit rates');
-    expect(host.textContent).toContain('9007199254.740993');
+    expect(host.textContent).toContain('9007199254');
     expect(purchaseRequests).toBe(0);
   });
   for (const failure of ['intent', 'http', 'uncertain'] as const) test(`handles stale-catalog purchase ${failure} without treating every 409 as definitive`, async () => {
@@ -493,7 +497,7 @@ describe('PlatformAccountPage', () => {
     } else {
       expect(host.textContent).toContain('complete its model credit rates');
       expect(host.textContent).not.toContain('Submit this payment again');
-      expect(host.textContent).toContain('9007199254.740993');
+      expect(host.textContent).toContain('9007199254');
       await tab('Orders');
       expect(host.textContent).toContain('Buy extra credits');
       expect(host.textContent).toContain('CNY 1.00');
@@ -662,7 +666,7 @@ describe('PlatformAccountPage', () => {
     switchRuntimeEndpoint({ apiBaseUrl: 'http://remembered-runtime.test', runtimeKey: 'test-remembered-runtime' });
     await render();
     await fill('unihub-username', ' alice@example.test '); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
-    await act(async () => button('Sign out').click());
+    await signOut();
     expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('alice@example.test');
     expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
     await act(async () => root.unmount()); host.remove(); await render();
@@ -677,7 +681,7 @@ describe('PlatformAccountPage', () => {
     switchRuntimeEndpoint({ apiBaseUrl: 'http://failed-login-runtime.test', runtimeKey: 'test-failed-login-runtime' });
     await render();
     await fill('unihub-username', 'alice'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
-    await act(async () => button('Sign out').click());
+    await signOut();
     passwordLoginFailed = true;
     await fill('unihub-username', 'mistyped-account'); await fill('unihub-password', 'WrongSyntheticPassword9!'); await submit();
     expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
@@ -690,13 +694,13 @@ describe('PlatformAccountPage', () => {
     switchRuntimeEndpoint({ apiBaseUrl: 'http://username-a.test', runtimeKey: 'test-username-a' });
     await render();
     await fill('unihub-username', 'alice'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
-    await act(async () => button('Sign out').click());
+    await signOut();
     await fill('unihub-password', 'UnsubmittedPassword9!');
     await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://username-b.test', runtimeKey: 'test-username-b' }));
     expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('');
     expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
     await fill('unihub-username', 'bob'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
-    await act(async () => button('Sign out').click());
+    await signOut();
     await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://username-a.test', runtimeKey: 'test-username-a' }));
     expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('alice');
     expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
@@ -723,7 +727,7 @@ describe('PlatformAccountPage', () => {
     await render();
     expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('');
     await fill('unihub-username', 'alice'); await fill('unihub-password', 'SyntheticPassword9!'); await submit();
-    await act(async () => button('Sign out').click());
+    await signOut();
     expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('alice');
   });
   test('discards a successful login response from a previous runtime', async () => {
@@ -740,12 +744,23 @@ describe('PlatformAccountPage', () => {
     await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://late-login-a.test', runtimeKey: 'test-late-login-a' }));
     expect(host.querySelector<HTMLInputElement>('#unihub-username')?.value).toBe('');
   });
+  test('does not use a previous identity’s payer or membership', async () => {
+    useI18nStore.getState().setLocale('en');
+    identityUser = { id: 'actor-b', name: 'Bob', email: 'bob@example.test' };
+    await render();
+    expect(host.querySelector('[data-platform-account-name]')?.textContent).toBe('Bob');
+    expect(host.querySelector('[aria-label="Billing account"]')).toBeNull();
+    expect(host.textContent).not.toContain('Fixture plan');
+    await tab('Personal details');
+    expect(host.querySelector('#unihub-profile-username')).toBeNull();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('Could not read');
+  });
   test('shows personal details while a financial account read fails', async () => {
     useI18nStore.getState().setLocale('en'); failed = true; await render(false, 'profile');
     expect(host.querySelector('#unihub-profile-username')?.textContent).toBe('alice');
     expect(host.querySelector('input#unihub-profile-username')).toBeNull();
     expect(host.querySelector('#unihub-new-password')).not.toBeNull();
-    expect(host.textContent).not.toContain('9007199254.740993');
+    expect(host.textContent).not.toContain('9007199254');
   });
   test('updates only the display name while the login username stays fixed', async () => {
     useI18nStore.getState().setLocale('en'); await render(false, 'profile');
@@ -776,7 +791,7 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).toContain('new passwords do not match');
     for (const id of ['unihub-current-password', 'unihub-new-password', 'unihub-confirm-password']) expect(host.querySelector<HTMLInputElement>(`#${id}`)?.value).toBe('');
   });
-  test('sends the current and new password once and clears credential inputs', async () => {
+  test('sends the current and new password once and returns to sign-in', async () => {
     useI18nStore.getState().setLocale('en'); await render(false, 'profile');
     await fill('unihub-current-password', 'OriginalPassword123');
     await fill('unihub-new-password', 'DifferentPassword123');
@@ -784,7 +799,9 @@ describe('PlatformAccountPage', () => {
     const form = host.querySelector('#unihub-new-password')?.closest('form');
     await act(async () => form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(passwordWrites).toEqual([{ currentPassword: 'OriginalPassword123', newPassword: 'DifferentPassword123' }]);
-    for (const id of ['unihub-current-password', 'unihub-new-password', 'unihub-confirm-password']) expect(host.querySelector<HTMLInputElement>(`#${id}`)?.value).toBe('');
+    expect(host.querySelector('#unihub-new-password')).toBeNull();
+    expect(host.querySelector<HTMLInputElement>('#unihub-password')?.value).toBe('');
+    expect(host.textContent).toContain('Sign in');
   });
   test('rejects oversized or non-image avatars before an upload request', async () => {
     useI18nStore.getState().setLocale('en'); await render(false, 'profile');
@@ -812,11 +829,11 @@ describe('PlatformAccountPage', () => {
       const objectURL = image?.src;
       await tab('Membership and usage');
       expect(revoke.mock.calls.some(([value]) => value === objectURL)).toBe(true);
-      const portrait = host.querySelector<HTMLImageElement>('aside img[alt="Avatar"]');
+      const portrait = host.querySelector<HTMLImageElement>('[data-platform-account-identity] img[alt="Avatar"]');
       expect(portrait?.src.startsWith('blob:')).toBe(true);
       const portraitURL = portrait?.src;
       expect(revoke.mock.calls.some(([value]) => value === portraitURL)).toBe(false);
-      await act(async () => button('Sign out').click());
+      await signOut();
       expect(revoke.mock.calls.some(([value]) => value === portraitURL)).toBe(true);
     } finally { revoke.mockRestore(); }
   });
@@ -846,11 +863,10 @@ describe('PlatformAccountPage', () => {
 
   test('renders membership and integer credit units and signs out independently', async () => {
     useI18nStore.getState().setLocale('en'); await render();
-    expect(host.textContent).toContain('Alice'); expect(host.textContent).toContain('Fixture plan'); expect(host.textContent).toContain('9007199254.740993');
+    expect(host.textContent).toContain('Alice'); expect(host.textContent).toContain('Fixture plan'); expect(host.textContent).toContain('9007199254');
     expect(host.querySelector('[data-settings-item="platform-account.account"]')).not.toBeNull();
-    const logout = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Sign out');
-    expect(logout).toBeDefined(); await act(async () => logout?.click());
-    expect(logoutCount).toBe(1); expect(host.textContent).not.toContain('9007199254.740993'); expect(host.textContent).toContain('Sign in');
+    await signOut();
+    expect(logoutCount).toBe(1); expect(host.textContent).not.toContain('9007199254'); expect(host.textContent).toContain('Sign in');
   });
   test('shows a signed-in identity label when session details are empty and the profile is unavailable', async () => {
     useI18nStore.getState().setLocale('en');
@@ -859,25 +875,25 @@ describe('PlatformAccountPage', () => {
     nextAccountResponse = Promise.resolve(Response.json({ ...signedIn, user: identityUser }));
     await render();
     expect(host.querySelector('[data-settings-item="platform-account.login"]')?.textContent).toContain('Signed in');
+    await tab('Personal details');
     expect(button('Sign out')).toBeDefined();
   });
   test('clears prior account data after a failed refresh', async () => {
     useI18nStore.getState().setLocale('en'); await render(); failed = true;
-    const refresh = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Refresh');
-    await act(async () => refresh?.click());
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('Could not read'); expect(host.textContent).not.toContain('9007199254.740993');
+    await act(async () => button('Refresh account').click());
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('Could not read'); expect(host.textContent).not.toContain('9007199254');
   });
   test('recovers from a lost logout request without reporting that the account is signed out', async () => {
     useI18nStore.getState().setLocale('en'); await render(); lostLogoutResponse = true;
-    await act(async () => button('Sign out').click());
+    await signOut();
     expect(host.textContent).not.toContain('Alice'); expect(host.querySelector('[data-settings-item="platform-account.login"]')?.textContent).toContain('Could not read');
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Could not read');
     await act(async () => button('Refresh').click()); expect(host.textContent).toContain('Alice');
-    await act(async () => button('Sign out').click()); expect(host.textContent).toContain('Sign in'); expect(logoutCount).toBe(1);
+    await signOut(); expect(host.textContent).toContain('Sign in'); expect(logoutCount).toBe(1);
   });
   test('formats CREDIT/6 exactly and renders the selected account name and kind', async () => {
     useI18nStore.getState().setLocale('en'); signedIn.credits.available = '2999920'; await render();
-    expect(host.textContent).toContain('2.99992'); expect(host.textContent).not.toContain('0.000007');
+    expect(host.querySelector('dl dd')?.textContent).toBe('2'); expect(host.textContent).not.toContain('0.000007');
     const picker = host.querySelector('[aria-label="Billing account"]');
     expect(picker?.textContent).toContain('Team A'); expect(picker?.textContent).toContain('Team'); expect(picker?.textContent).not.toContain('team-a');
   });
@@ -888,7 +904,7 @@ describe('PlatformAccountPage', () => {
     const reconcile = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Check settlement status');
     expect(reconcile).toBeDefined(); await act(async () => reconcile?.click());
     expect(reconcileCount).toBe(1); expect(host.textContent).toContain('Settled'); expect(host.textContent).not.toContain('Outcome unknown');
-    expect(host.textContent).toContain('0.08 credits');
+    expect(host.textContent).toContain('0 credits');
     expect(host.textContent).toContain('CNY 1.25');
     expect(host.textContent).toContain('33 quota units');
     expect(host.textContent).toContain('The original billing unit is unavailable.');
@@ -1041,7 +1057,7 @@ describe('PlatformAccountPage', () => {
   });
   test('keeps financial controls restricted while members can read credits', async () => {
     useI18nStore.getState().setLocale('en'); await render();
-    expect(host.textContent).toContain('billing administrator'); expect(host.textContent).toContain('9007199254.740993');
+    expect(host.textContent).toContain('billing administrator'); expect(host.textContent).toContain('9007199254');
     expect(host.querySelector('#unihub-recharge-amount')).toBeNull(); expect(rechargeRequests).toBe(0); expect(settlementRequests).toBe(0);
   });
   test('shows authoritative refunded and unknown membership states even with a future paid-through date', async () => {
@@ -1057,7 +1073,7 @@ describe('PlatformAccountPage', () => {
       await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
       expect(host.textContent).toContain('已退款');
       membership.status = 'future_membership_state';
-      await act(async () => button('刷新').click());
+      await act(async () => button('刷新账户').click());
       expect(host.textContent).toContain('状态：future_membership_state');
       expect(host.textContent).not.toContain(' · 生效中');
       expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
@@ -1082,7 +1098,7 @@ describe('PlatformAccountPage', () => {
     try {
       signedIn.accountId = 'team-b'; commerce.accountId = 'team-b';
       signedIn.accounts.push({ id: 'team-b', kind: 'team', name: 'Team B', role: 'member' });
-      await act(async () => button('Refresh').click());
+      await act(async () => button('Refresh account').click());
       expect(host.textContent).not.toContain('Buy Buy extra credits for CNY 10.00');
       expect(host.querySelector('[aria-label="Billing account"]')?.textContent).toContain('Team B');
       await act(async () => button('Buy extra credits').click());
@@ -1102,7 +1118,7 @@ describe('PlatformAccountPage', () => {
     await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'http://other-runtime.test', runtimeKey: 'test-other-runtime' }));
     expect(host.textContent).toContain('Sign in');
     await act(async () => resolveOld(Response.json(signedIn)));
-    expect(host.textContent).not.toContain('Alice'); expect(host.textContent).not.toContain('9007199254.740993');
+    expect(host.textContent).not.toContain('Alice'); expect(host.textContent).not.toContain('9007199254');
   });
   test('separates monthly and annual memberships from addons and clears hidden purchase selections', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true;
