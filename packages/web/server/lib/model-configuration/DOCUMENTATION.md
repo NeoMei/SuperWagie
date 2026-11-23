@@ -28,6 +28,11 @@ Web, Electron, hosted mobile and Capacitor mobile use the authenticated active s
 - Bootstrap discovery publishes the normalized catalog in both `models` and `catalog`, including nullable `dimensions`. The strict UI parser accepts missing or null dimensions and integers from 1 to 65536, matching binding parameters; malformed dimensions and unrecognized model fields remain errors.
 - Account activation uses `GET/POST /api/model-configuration/bootstrap/account-key` with an authenticated runtime owner and the selected platform account. GET is read-only and returns only the actor/account/service-owned receipt. POST accepts explicit `activate`, `resume` or `retest`. Managed web and Electron provide the native helper; unsupported runtimes refuse setup before issuing a key. Enterprise policy is checked before issuance, every configuration boundary and every dispatched model probe.
 
+When the private product proxy is configured, the same account-key route delegates
+to the managed model checks in `platform-model`. This mode accepts only an
+explicit same-origin `retest`. Legacy discovery, key issuance and binding
+mutations remain unavailable in this mode.
+
 ## Account-key activation
 
 `account-key-activation.js` owns one durable workflow per issuer, service, actor

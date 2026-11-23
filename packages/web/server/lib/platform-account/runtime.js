@@ -677,7 +677,14 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const consoleUrl = !productCreditWallet && c.console ? new URL(c.console) : null;
     if (account) consoleUrl?.searchParams.set('account', account.id);
     consoleUrl?.searchParams.set('product', 'superwagie');
-    return { status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership, ...(productCredits && { productCreditWallet: true }), credits: { available, reserved, batches, ...(productCredits && { activeMembership: productCredits.active_membership, membershipPaidThrough: productCredits.membership_paid_through ?? undefined }) }, consoleUrl: consoleUrl?.toString() ?? null, modelService: isModelAvailable() ? 'available' : 'unavailable', modelRecoveryAvailable: isModelHistoryAvailable() };
+    return {
+      status: 'signed-in', user: session.user, accounts, accountId, expiresAt: new Date(session.expiresAt).toISOString(), membership,
+      ...(productCredits && { productCreditWallet: true }),
+      credits: { available, reserved, batches, ...(productCredits && { activeMembership: productCredits.active_membership, membershipPaidThrough: productCredits.membership_paid_through ?? undefined }) },
+      consoleUrl: consoleUrl?.toString() ?? null,
+      modelService: isModelAvailable() ? 'available' : 'unavailable',
+      modelRecoveryAvailable: isModelHistoryAvailable(),
+    };
   };
   const readApiKeys = async (identity, accountId) => {
     if (!apiKeysAccountSchema.safeParse(accountId).success) reject('invalid_request', 400);

@@ -231,7 +231,9 @@ export const PlatformAccountPage: React.FC = () => {
       <PlatformAccountUsageSummary key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} />
       <Button size="sm" variant="ghost" onClick={() => setTab('usage')}>{t('platformAccount.viewUsage')}</Button>
     </>}
-    {signedInIdentity && visibleTab === 'keys' && !unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountApiKeys key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} onConfigured={refreshModelConfiguration} />}
+    {signedInIdentity && visibleTab === 'keys' && !unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && (
+      <PlatformAccountApiKeys key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} onConfigured={refreshModelConfiguration} />
+    )}
     {signedInIdentity && tab === 'usage' && <>
       {!unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountUsageChart key={`activity:${JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])}`} accountId={signedIn.accountId} />}
       {!unsupported && signedIn?.accountId && signedIn.user.id === signedInIdentity.user.id && <PlatformAccountUsage

@@ -156,9 +156,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     days: Array.from({ length: 365 }, (_, index) => ({ date: new Date(Date.parse('2025-11-09T00:00:00Z') + index * 86_400_000).toISOString().slice(0, 10), calls: index === 364 ? '3' : '0' })),
     total: '3', complete: true, unknownTime: '0',
   }) : Response.json({ error: 'forbidden' }, { status: usageStatus });
-  if (path.endsWith('/api/platform-account/usage/team-a/calls')) return Response.json({
-    has_more: false, items: [{ call_id: 'call-a', model: 'Central model', status: 'SETTLED', created_at: null, asset: 'CREDIT/6' }],
-  });
+  if (path.endsWith('/api/platform-account/usage/team-a/calls')) return Response.json({ error: 'service_unavailable' }, { status: 503 });
   if (path.includes('/api/platform-account/usage/team-a/llmrouter/')) {
     nativeReportRequests++;
     return Response.json({ error: 'unexpected_native_report' }, { status: 403 });
@@ -470,7 +468,6 @@ describe('PlatformAccountPage', () => {
     await render(false, 'usage');
     expect(host.textContent).toContain('Could not read this consumption report');
     expect(host.textContent).not.toContain('01 requests');
-    expect(host.textContent).toContain('Central model');
   });
   test('disables only unavailable offers while retaining balances and recovery history', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true;
@@ -503,10 +500,11 @@ describe('PlatformAccountPage', () => {
       expect(host.textContent).toContain('Payment: Paid · Fulfillment: Fulfilled');
     }
   });
-  test('keeps account call history visible when its summary fails and omits other product reports', async () => {
+  test('loads and refreshes the SuperWagie summary without requesting recent calls', async () => {
     useI18nStore.getState().setLocale('en'); usageStatus = 403;
+    const firstRead = fetchFixture.mock.calls.length;
     await render(false, 'usage');
-    expect(host.textContent).toContain('Central model');
+    expect(host.textContent).not.toContain('Recent SuperWagie calls');
     expect(host.textContent).toContain('do not have permission');
     expect(host.textContent).not.toContain('9007199254740993');
     expect(host.textContent).not.toContain('Native Router model');
@@ -524,6 +522,11 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).not.toContain('0.000017 credits');
     expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Billing details')).toBe(false);
     expect(host.textContent).toContain('still incomplete');
+    expect(host.textContent).not.toContain('Recent SuperWagie calls');
+    expect(host.textContent).not.toContain('Could not read this consumption report');
+    const usageReads = fetchFixture.mock.calls.slice(firstRead).map(([path]) => String(path));
+    expect(usageReads.some((path) => path.endsWith('/usage/team-a/activity'))).toBe(true);
+    expect(usageReads.some((path) => path.endsWith('/usage/team-a/calls'))).toBe(false);
     expect(nativeReportRequests).toBe(0);
     expect(/UniHub|LLMRouter/i.test(host.textContent ?? '')).toBe(false);
   });
@@ -888,7 +891,7 @@ describe('PlatformAccountPage', () => {
     expect(host.textContent).toContain('0.08 credits');
     expect(host.textContent).toContain('CNY 1.25');
     expect(host.textContent).toContain('33 quota units');
-    expect(host.textContent).toContain('See consumption records for the billing amount.');
+    expect(host.textContent).toContain('The original billing unit is unavailable.');
     expect(host.textContent).not.toContain('{points}');
   });
   test('keeps an existing task visible and reconcilable while new model calls are unavailable', async () => {

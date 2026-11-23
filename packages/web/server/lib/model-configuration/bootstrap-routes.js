@@ -20,7 +20,7 @@ const body = (schema, value) => {
   return parsed.data;
 };
 
-export const registerModelBootstrapRoutes = (app, { bootstrapRuntime, resolveIdentity, resolveOwner } = {}) => {
+export const registerModelBootstrapRoutes = (app, { bootstrapRuntime, managedAccountKey, resolveIdentity, resolveOwner, isRequestOriginAllowed = () => false } = {}) => {
   const parseBody = express.json({ limit: '64kb' });
   app.use('/api/model-configuration/bootstrap', (request, response, next) => parseBody(request, response, (error) => {
     if (error) return response.status(error.type === 'entity.too.large' ? 413 : 400).json({ error: 'model_configuration_invalid_input', code: 'model_configuration_invalid_input' });
@@ -42,18 +42,20 @@ export const registerModelBootstrapRoutes = (app, { bootstrapRuntime, resolveIde
   const optionalIdentity = async (request) => {
     try { return await identity(request, null); } catch { return undefined; }
   };
+  const accountKey = managedAccountKey ?? bootstrapRuntime?.accountKey;
   const accountKeyInput = z.object({ accountId: z.string().min(1).max(200).regex(/^[A-Za-z0-9_-]+$/), fundingMode: fundingModeSchema.optional() }).strict();
   app.get('/api/model-configuration/bootstrap/account-key', route(async (request, response) => {
     response.set('Cache-Control', 'no-store');
     response.set('Referrer-Policy', 'no-referrer');
-    if (!bootstrapRuntime?.accountKey) return unsupported();
-    return bootstrapRuntime.accountKey.read({ ...body(accountKeyInput, request.query), identity: await requiredIdentity(request, response), owner: await requiredOwner(request, response) });
+    if (!accountKey) return unsupported();
+    return accountKey.read({ ...body(accountKeyInput, request.query), identity: await requiredIdentity(request, response), owner: await requiredOwner(request, response) });
   }));
   app.post('/api/model-configuration/bootstrap/account-key', route(async (request, response) => {
     response.set('Cache-Control', 'no-store');
     response.set('Referrer-Policy', 'no-referrer');
-    if (!bootstrapRuntime?.accountKey) return unsupported();
-    return bootstrapRuntime.accountKey.activate({ ...body(accountKeyInput.extend({ action: z.enum(['activate', 'resume', 'retest']) }), request.body), identity: await requiredIdentity(request, response), owner: await requiredOwner(request, response) });
+    if (!accountKey) return unsupported();
+    if (managedAccountKey && !await isRequestOriginAllowed(request)) throw new ModelConfigurationError('platform_origin_forbidden', 403);
+    return accountKey.activate({ ...body(accountKeyInput.extend({ action: z.enum(['activate', 'resume', 'retest']) }), request.body), identity: await requiredIdentity(request, response), owner: await requiredOwner(request, response) });
   }));
   app.post('/api/model-configuration/bootstrap/discover', route(async (request, response) => {
     if (!bootstrapRuntime) return unsupported();
