@@ -5,7 +5,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { SettingsChipGroup, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
-import { formatPlatformMoney, type PlatformCheckout } from '@/lib/platformCommerce';
+import { formatPlatformMoney, formatProductBillingDate, type PlatformCheckout } from '@/lib/platformCommerce';
 
 type Provider = 'wechat' | 'alipay';
 
@@ -97,6 +97,8 @@ type PlatformPaymentPanelProps = {
   onRefund: () => void;
   /** Compact one-line rendering used by payment history. */
   compact?: boolean;
+  walletLayout?: boolean;
+  walletHistory?: boolean;
 };
 
 /**
@@ -105,9 +107,9 @@ type PlatformPaymentPanelProps = {
  * field list or hunting for a QR elsewhere on the page. The commerce owner polls and reconciles the original order.
  */
 export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
-  checkout, busy, channels = [], onSwitchChannel, channelSwitchPending, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false,
+  checkout, busy, channels = [], onSwitchChannel, channelSwitchPending, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false, walletLayout = false, walletHistory = false,
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [codeImage, setCodeImage] = React.useState<{ source: string; image: string } | null>(null);
   const [refundConfirmation, setRefundConfirmation] = React.useState(false);
   const waiting = WAITING.includes(checkout.payment_status) && !checkout.refund_status;
@@ -137,22 +139,27 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
     return () => { current = false; };
   }, [codeUrl]);
 
+  const cancel = waiting && !checkout.close_pending && <Button size={walletLayout ? 'default' : 'sm'} variant={walletLayout ? 'outline' : 'ghost'} disabled={busy} onClick={onClose}>
+    {t(walletLayout ? 'platformAccount.productWallet.cancelPayment' : 'platformAccount.closeCheckout')}
+  </Button>;
   const actions = <>
+    {walletLayout && cancel}
     {!compact && showPaymentSession && onRenew && (expired || session?.kind !== 'qr') && <Button size="sm" disabled={busy} onClick={onRenew}>{t('platformAccount.renewPaymentCode')}</Button>}
-    {onDismiss && <Button size="sm" variant="ghost" disabled={busy} onClick={onDismiss}>{t('platformAccount.returnToPurchase')}</Button>}
-    {checkable && <Button size="sm" variant="ghost" disabled={busy} onClick={onRefresh}>{t('platformAccount.refreshPaymentStatus')}</Button>}
-    {waiting && <Button size="sm" variant="ghost" disabled={busy} onClick={onClose}>{t('platformAccount.closeCheckout')}</Button>}
+    {onDismiss && <Button size="sm" variant="ghost" disabled={busy} onClick={onDismiss}>{t(walletLayout ? 'platformAccount.productWallet.backToRecharge' : 'platformAccount.returnToPurchase')}</Button>}
+    {checkable && <Button size={walletLayout ? 'default' : 'sm'} variant="ghost" disabled={busy} onClick={onRefresh}>{t('platformAccount.refreshPaymentStatus')}</Button>}
+    {!walletLayout && cancel}
     {refundable && <Button size="sm" variant="outline" disabled={busy} onClick={() => setRefundConfirmation(true)}>{t('platformAccount.requestRefund')}</Button>}
   </>;
 
   if (compact) {
-    return <div className="oc-tile rounded-lg px-3 py-2">
+    return <div className={walletHistory ? 'py-2.5' : 'oc-tile rounded-lg px-3 py-2'}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <StatusDot tone={toneFor(checkout)} />
         <span className="min-w-0 flex-1 truncate" dir="auto">{offerName}</span>
         <span className="shrink-0 tabular-nums text-muted-foreground">¥{formatPlatformMoney(checkout.amount)}</span>
         <span className={`${SETTINGS_HELPER_CLASS} shrink-0`}>{providerName}</span>
         <span className={`${SETTINGS_HELPER_CLASS} shrink-0`}>{t(shortStateKey(checkout))}</span>
+        {walletHistory && <time dateTime={checkout.created_at} className={SETTINGS_HELPER_CLASS}>{formatProductBillingDate(checkout.created_at, locale)}</time>}
         {(refundable || checkable) && <div className="flex items-center gap-1">{actions}</div>}
       </div>
       {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
@@ -169,8 +176,10 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   return <div className="oc-tile rounded-xl p-4" data-payment-checkout={checkout.id}>
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
       <div className="min-w-0">
-        <p className="typography-micro uppercase tracking-wide text-muted-foreground">{t(waiting ? 'platformAccount.activePayment' : 'platformAccount.recentPayment')}</p>
-        <p className="truncate typography-ui-label font-medium" dir="auto">{offerName}</p>
+        {walletLayout
+          ? <h3 className="typography-ui-label font-semibold" dir="auto">{offerName}</h3>
+          : <><p className="typography-micro uppercase tracking-wide text-muted-foreground">{t(waiting ? 'platformAccount.activePayment' : 'platformAccount.recentPayment')}</p>
+              <p className="truncate typography-ui-label font-medium" dir="auto">{offerName}</p></>}
       </div>
       <span className="flex items-center gap-1.5 text-muted-foreground">
         <StatusDot tone={toneFor(checkout)} />
@@ -180,8 +189,8 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
 
     {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
     {upgrade && waiting && appliedCreditAmount === undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.estimatedRefund')} {t('platformAccount.cny', { amount: formatPlatformMoney(upgrade.estimated_refund_amount) })} · {t(upgrade.refund_payment_source === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}</p>}
-    <div className="mt-3 flex flex-col gap-4 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6">
-      <div className="min-w-0 space-y-3">
+    <div className={walletLayout ? 'mt-3 grid justify-items-center gap-3 text-center' : 'mt-3 flex flex-col gap-4 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6'}>
+      <div className={walletLayout ? 'grid min-w-0 justify-items-center gap-2' : 'min-w-0 space-y-3'}>
         <div className="space-y-1">
           {waiting && appliedCreditAmount !== undefined && <>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.netPlanPrice')} {t('platformAccount.cny', { amount: formatPlatformMoney(String(BigInt(checkout.amount) + BigInt(appliedCreditAmount))) })}</p>
@@ -194,12 +203,12 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
           </p>
         </div>
         {waiting && appliedCreditAmount !== undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.resetUpgrade')}</p>}
-        {channels.length > 1 && onSwitchChannel && waiting && <div className="space-y-1">
+        {channels.length > 1 && onSwitchChannel && showPaymentSession && <div className="space-y-1">
           <p className="typography-micro text-muted-foreground">{t('platformAccount.paymentChannel')}</p>
           <SettingsChipGroup value={paymentProvider} onChange={(next) => { if (next !== paymentProvider && !busy) onSwitchChannel(next); }} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy }))} />
           {channelSwitchPending && <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.error.channelSwitchPending')}</p>}
         </div>}
-        {codeUrl && <p className={`${SETTINGS_HELPER_CLASS} max-w-[22rem]`}>{scanHint}</p>}
+        {codeUrl && !walletLayout && <p className={`${SETTINGS_HELPER_CLASS} max-w-[22rem]`}>{scanHint}</p>}
         {session?.kind === 'redirect' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.legacyCheckoutHint')}</p>}
         {waiting && remaining !== null && <p className={`${SETTINGS_HELPER_CLASS} flex items-center gap-1.5`}>
           <Icon name="time" className="size-3.5" />
@@ -210,14 +219,15 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
       </div>
       {codeUrl && <div className="flex shrink-0 flex-col items-center gap-2 self-center">
         {qr?.image
-          ? <img src={qr.image} width={224} height={224} className="rounded-lg bg-white" alt={scanHint} />
+          ? <img src={qr.image} width={224} height={224} className={walletLayout ? 'h-auto w-48 max-w-full rounded-lg bg-white' : 'rounded-lg bg-white'} alt={scanHint} />
           : <p className={SETTINGS_HELPER_CLASS} role={qr ? 'alert' : 'status'}>{t(qr ? 'platformAccount.commerceFailed' : 'platformAccount.loading')}</p>}
+        {walletLayout && <p className={SETTINGS_HELPER_CLASS}>{scanHint}</p>}
       </div>}
     </div>
 
     {checkout.refund_status === 'REJECTED' && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.checkoutRefundRejected')}</p>}
-    {codeUrl && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.paymentAutoConfirm')}</p>}
-    <div className="mt-2 flex flex-wrap items-center gap-2">{actions}</div>
+    {codeUrl && !walletLayout && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.paymentAutoConfirm')}</p>}
+    <div className={walletLayout ? 'mt-4 flex flex-wrap justify-center gap-2' : 'mt-2 flex flex-wrap items-center gap-2'}>{actions}</div>
     {refundConfirmation && refundable && <div className="mt-3 space-y-2">
       <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.refundConfirmation')}</p>
       <div className="flex flex-wrap gap-2">

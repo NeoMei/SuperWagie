@@ -51,6 +51,7 @@ const orderStatusKey = (status: string): I18nKey | null => {
     case 'UPGRADE_RETURNED': return 'platformAccount.productWallet.upgradeRefundReturned';
     case 'UPGRADE_REVIEW': return 'platformAccount.productWallet.upgradeRefundReview';
     case 'PROCESSING': return 'platformAccount.order.processing';
+    case 'CANCELED':
     case 'CANCELLED': return 'platformAccount.order.cancelled';
     case 'REJECTED': return 'platformAccount.order.rejected';
     default: return null;
@@ -60,18 +61,18 @@ const orderStatusKey = (status: string): I18nKey | null => {
 export const PlatformAccountCommerce: React.FC<{
   accountId: string;
   payer: string;
+  walletAccountPicker?: React.ReactNode;
   view: 'overview' | 'orders' | 'wallet';
   hasActiveMembership: boolean;
   currentMembership?: Extract<PlatformAccountState, { status: 'signed-in' }>['membership'][number];
   membershipSummary: (actions: { openMembership: () => void; openAddon: () => void; membershipOpen: boolean; addonOpen: boolean; disabled: boolean }) => React.ReactNode;
   onAccountRefresh: () => void;
-}> = ({ accountId, payer, view, hasActiveMembership, currentMembership, membershipSummary, onAccountRefresh }) => {
+}> = ({ accountId, payer, walletAccountPicker, view, hasActiveMembership, currentMembership, membershipSummary, onAccountRefresh }) => {
   const { t, locale } = useI18n();
   const [state, setState] = React.useState<PlatformCommerceState | null>(null);
   const [orderHistory, setOrderHistory] = React.useState<PlatformCommerceState['orders']>(null);
   const [ordersLoading, setOrdersLoading] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const [checkingPayment, setCheckingPayment] = React.useState(false);
   const [error, setError] = React.useState<I18nKey | null>(null);
   const [commerceReadFailed, setCommerceReadFailed] = React.useState(false);
   const [topUp, setTopUp] = React.useState('');
@@ -84,6 +85,7 @@ export const PlatformAccountCommerce: React.FC<{
   const [purchaseApplied, setPurchaseApplied] = React.useState(false);
   const [visibleCheckoutId, setVisibleCheckoutId] = React.useState('');
   const checkoutRegion = React.useRef<HTMLDivElement>(null);
+  const walletPaymentRegion = React.useRef<HTMLDivElement>(null);
   const [command, setCommand] = React.useState<PendingCommand | null>(null);
   const generation = React.useRef(0);
   const lastCommerceState = React.useRef<PlatformCommerceState | null>(null);
@@ -91,6 +93,7 @@ export const PlatformAccountCommerce: React.FC<{
   accountRefresh.current = onAccountRefresh;
   const observedBenefits = React.useRef('');
   const mutationActive = React.useRef(false);
+  const paymentPollActive = React.useRef(false);
   const runtimeKey = getRuntimeKey();
   React.useEffect(() => {
     if (!purchaseTarget) return;
@@ -147,6 +150,12 @@ export const PlatformAccountCommerce: React.FC<{
   React.useEffect(() => {
     if (payment?.id && view === 'overview') checkoutRegion.current?.scrollIntoView?.({ block: 'nearest' });
   }, [payment?.id, view]);
+  React.useEffect(() => {
+    if (!payment?.id || view !== 'wallet') return;
+    const region = walletPaymentRegion.current;
+    region?.focus({ preventScroll: true });
+    region?.scrollIntoView?.({ block: 'nearest' });
+  }, [payment?.id, view]);
 
   const applyCheckout = React.useCallback((checkout: PlatformCheckout, id: string, intent?: PlatformCommerceIntent) => {
     if (checkout.account_id !== accountId || checkout.id !== id) throw new PlatformAccountError('platform_response_invalid');
@@ -174,17 +183,17 @@ export const PlatformAccountCommerce: React.FC<{
     if (!activeCheckoutId) return undefined;
     let stopped = false;
     const tick = async () => {
-      if (stopped || mutationActive.current || document.hidden) return;
+      if (stopped || mutationActive.current || paymentPollActive.current || document.hidden) return;
       if (activeCheckoutStatus !== 'PAID' && Number.isFinite(activeCheckoutDeadline) && Date.now() > activeCheckoutDeadline + 120_000) return;
-      mutationActive.current = true;
-      setCheckingPayment(true);
+      const version = generation.current;
+      paymentPollActive.current = true;
       try {
         const result = await updatePlatformCheckout(accountId, activeCheckoutId, 'reconcile');
-        if (stopped || runtimeKey !== getRuntimeKey()) return;
+        if (stopped || version !== generation.current || runtimeKey !== getRuntimeKey()) return;
         applyCheckout(result, activeCheckoutId);
         if (!pollableCheckout(result)) void refresh();
       } catch { /* the next tick asks again; a manual refresh stays available */ }
-      finally { mutationActive.current = false; if (runtimeKey === getRuntimeKey()) setCheckingPayment(false); }
+      finally { paymentPollActive.current = false; }
     };
     const timer = window.setInterval(() => void tick(), PAYMENT_POLL_MS);
     return () => { stopped = true; window.clearInterval(timer); };
@@ -452,39 +461,64 @@ export const PlatformAccountCommerce: React.FC<{
   };
   const paymentPanel = (checkout: PlatformCheckout, active: boolean) => {
     const canReplace = active && !command && state.intents.some((intent) => intent.kind === 'checkout' && intent.resourceId === checkout.id && (intent.offerId || intent.quoteId || intent.walletTopUp));
-    return <PlatformPaymentPanel key={checkout.id} checkout={checkout} busy={busy || checkingPayment} compact={!active}
+    const walletLayout = active && view === 'wallet';
+    return <PlatformPaymentPanel key={checkout.id} checkout={checkout} busy={busy} compact={!active} walletLayout={walletLayout}
+      walletHistory={!active && view === 'wallet'}
       channels={canReplace ? channels : []} onSwitchChannel={canReplace ? (provider) => void switchChannel(checkout, provider) : undefined}
       channelSwitchPending={active && channelSwitchPending}
       onRenew={canReplace && channels.includes(checkout.provider) ? () => void switchChannel(checkout, checkout.provider) : undefined}
-      onDismiss={active && view === 'overview' && !unresolvedPayment(checkout) ? () => { setVisibleCheckoutId(''); setPurchaseApplied(false); } : undefined}
+      onDismiss={active && view !== 'orders' && !unresolvedPayment(checkout) ? () => { setVisibleCheckoutId(''); setPurchaseApplied(false); } : undefined}
       onRefresh={() => void checkoutAction(checkout.id, 'reconcile')} onClose={() => void checkoutAction(checkout.id, 'close')} onRefund={() => void checkoutAction(checkout.id, 'refund')} />;
   };
-  return <>
-    {view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">
-      {summary()}
-    </SettingsTwoColumn>}
-    <SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={view !== 'overview' ? refreshAction : undefined} contentClassName="space-y-3">
-      {statusRow}
-      {command && !busy && <SettingsControlGroup title={t('platformAccount.pendingCommand')} description={t('platformAccount.commandUnknown')}>
-        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId, command.kind === 'checkout' ? command.walletTopUp : undefined), amount: money(command.amount) })}</p>
-      <Button variant="outline" disabled={busy || commerceUnavailable} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
-      </SettingsControlGroup>}
-      {buyingTask !== null && !commerceReadFailed && state.payments.mode === 'unconfigured' && <p className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]" role="status">{t('platformAccount.paymentUnconfigured')}</p>}
-      {!finance && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.memberRestricted')}</p>}
-      {view === 'wallet' && state.payments.canTopUp && channels.length > 0 && <SettingsControlGroup title={t('platformAccount.productWallet.topUp')}>
-        <SettingsFieldRow label={t('platformAccount.productWallet.topUpAmount')}>
-          <Input dir="ltr" inputMode="decimal" aria-label={t('platformAccount.productWallet.topUpAmount')} value={topUp} onChange={(event) => setTopUp(event.target.value)} disabled={busy || unresolved || commerceUnavailable} />
-        </SettingsFieldRow>
-        <SettingsFieldRow label={t('platformAccount.paymentChannel')}>
-          <SettingsChipGroup value={effectiveChannel} onChange={setPaymentChannel} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({
-            value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy || unresolved || commerceUnavailable,
-          }))} />
-        </SettingsFieldRow>
-        <Button disabled={busy || unresolved || commerceUnavailable || !topUpAmount} onClick={() => {
-          if (topUpAmount) void submitCommand({ kind: 'checkout', walletTopUp: true, provider: effectiveChannel, productId: 'superwagie', amount: topUpAmount, idempotencyKey: crypto.randomUUID() });
-        }}>{topUpAmount ? t('platformAccount.productWallet.confirmTopUp', { amount: money(topUpAmount) }) : t('platformAccount.productWallet.topUp')}</Button>
-      </SettingsControlGroup>}
-      {view === 'wallet' && state.productWallet && <PlatformProductWallet accountId={accountId} wallet={state.productWallet} orderStatus={orderStatus} disabled={busy || commerceUnavailable}
+  if (view === 'wallet') {
+    const topUpDisabled = busy || unresolved || commerceUnavailable;
+    const showTopUp = state.payments.canTopUp && channels.length > 0;
+    const topUps = pastPayments.filter((item) => item.walletTopUp);
+    return <section className="@container/wallet space-y-6" data-wallet-page>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-semibold">{t('platformAccount.productWallet.tab')}</h2>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {walletAccountPicker}
+          {refreshAction}
+        </div>
+      </div>
+      <div className="grid items-start gap-4 @2xl/wallet:grid-cols-[minmax(12rem,2fr)_minmax(0,3fr)]">
+        <section className="oc-tile min-w-0 space-y-2 rounded-xl p-4 @2xl/wallet:p-5">
+          <h3 className="typography-ui-label font-medium">{t('platformAccount.productWallet.cash')}</h3>
+          {state.productWallet
+            ? <p className="break-all text-3xl leading-tight font-semibold tabular-nums"><bdi dir="ltr">¥{formatPlatformMoney(state.productWallet.cash.available)}</bdi></p>
+            : <p className={SETTINGS_HELPER_CLASS}>{t(finance ? 'platformAccount.commerceFailed' : 'platformAccount.memberRestricted')}</p>}
+        </section>
+        <div ref={walletPaymentRegion} tabIndex={-1} className="min-w-0 scroll-my-4 space-y-3 outline-none" data-wallet-recharge>
+          {statusRow}
+          {payment ? paymentPanel(payment, true) : showTopUp ? (
+            <form className="oc-tile grid min-w-0 gap-3 rounded-xl p-4 @2xl/wallet:p-5" onSubmit={(event) => {
+              event.preventDefault();
+              if (!topUpAmount || topUpDisabled) return;
+              void submitCommand({ kind: 'checkout', walletTopUp: true, provider: effectiveChannel, productId: 'superwagie', amount: topUpAmount, idempotencyKey: crypto.randomUUID() });
+            }}>
+              <h3 className="typography-ui-label font-semibold">{t('platformAccount.productWallet.topUp')}</h3>
+              <label className="grid gap-1.5 typography-meta">
+                {t('platformAccount.productWallet.topUpAmount')}
+                <Input dir="ltr" inputMode="decimal" value={topUp} onChange={(event) => setTopUp(event.target.value)} disabled={topUpDisabled} />
+              </label>
+              <SettingsChipGroup className="justify-self-start" value={effectiveChannel} onChange={setPaymentChannel} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({
+                value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: topUpDisabled,
+              }))} />
+              <Button type="submit" className="h-auto min-h-9 whitespace-normal" disabled={topUpDisabled || !topUpAmount}>
+                {topUpAmount ? t('platformAccount.productWallet.confirmTopUp', { amount: money(topUpAmount) }) : t('platformAccount.productWallet.topUp')}
+              </Button>
+            </form>
+          ) : finance && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.paymentUnconfigured')}</p>}
+          {command && !busy && <SettingsControlGroup title={t('platformAccount.pendingCommand')} description={t('platformAccount.commandUnknown')}>
+            <Button variant="outline" disabled={commerceUnavailable} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
+          </SettingsControlGroup>}
+          {finance && recoverableIntents.length > 0 && <SettingsControlGroup title={t('platformAccount.pendingCommand')}>{recoverableIntents.map(intentRow)}</SettingsControlGroup>}
+          {state.missingScopes.length > 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.missingScopes')}</p>}
+        </div>
+      </div>
+      {state.productWallet && <PlatformProductWallet accountId={accountId} wallet={state.productWallet} orderStatus={orderStatus} disabled={busy || commerceUnavailable}
+        topUps={topUps.map((item) => paymentPanel(item, false))}
         onSaving={(saving) => {
           mutationActive.current = saving;
           if (saving) ++generation.current;
@@ -495,10 +529,24 @@ export const PlatformAccountCommerce: React.FC<{
           setState(value);
           lastCommerceState.current = value;
         }} />}
+    </section>;
+  }
+  return <>
+    {view === 'overview' && <SettingsTwoColumn className="gap-4 @xl:grid-cols-2 @3xl:gap-4">
+      {summary()}
+    </SettingsTwoColumn>}
+    <SettingsSection title={commerceTitle} className={collapsedOverview ? 'space-y-2 py-2' : 'space-y-3 py-4'} headerAction={view === 'orders' ? refreshAction : undefined} contentClassName="space-y-3">
+      {statusRow}
+      {command && !busy && <SettingsControlGroup title={t('platformAccount.pendingCommand')} description={t('platformAccount.commandUnknown')}>
+        <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.purchaseRecord', { product: purchaseName(command.productId, command.kind === 'checkout' ? command.walletTopUp : undefined), amount: money(command.amount) })}</p>
+      <Button variant="outline" disabled={busy || commerceUnavailable} onClick={() => void submitCommand(command)}>{t('platformAccount.retryOriginal')}</Button>
+      </SettingsControlGroup>}
+      {buyingTask !== null && !commerceReadFailed && state.payments.mode === 'unconfigured' && <p className="rounded-md bg-[var(--status-warning-background)] px-3 py-2 text-[var(--status-warning-text)]" role="status">{t('platformAccount.paymentUnconfigured')}</p>}
+      {!finance && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.memberRestricted')}</p>}
       {state.missingScopes.length > 0 && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.missingScopes')}</p>}
       {finance && recoverableIntents.length > 0 && <SettingsControlGroup title={t('platformAccount.pendingCommand')}>{recoverableIntents.map(intentRow)}</SettingsControlGroup>}
       {payment && !inlinePayment && paymentPanel(payment, true)}
-      {(view === 'orders' || view === 'wallet') && pastPayments.filter((item) => view === 'orders' || item.walletTopUp).map((item) => paymentPanel(item, false))}
+      {view === 'orders' && pastPayments.map((item) => paymentPanel(item, false))}
       {view === 'overview' && !commerceReadFailed && buyingTask !== null && <>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SettingsChipGroup value={buyingTask} onChange={(task) => { setBuyingTask(task); setQuote(null); }} aria-label={t('platformAccount.buyingTask')} options={[

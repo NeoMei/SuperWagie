@@ -74,7 +74,7 @@ const cashCheckoutSchema = z.object({
   id: z.string().regex(/^ct_[A-Za-z0-9]{1,32}$/), account_id: id, product_id: z.literal('superwagie'), wallet_target: z.string().optional(),
   provider: z.enum(['wechat', 'alipay']), amount: units, currency: z.literal('CNY'), payment_status: z.string(),
   expires_at: z.string().datetime(), created_at: z.string().datetime(), session: checkoutSession.optional(),
-  credit_status: z.string().optional(), error_code: z.string().optional(),
+  credit_status: z.string().optional(), error_code: z.string().optional(), close_pending: z.boolean().optional(),
 });
 const checkoutListSchema = z.array(z.object({ account_id: id, product_id: walletProductId }).passthrough());
 const cashToCheckout = (record) => ({
@@ -450,7 +450,15 @@ export const createPlatformCommerceRuntime = ({ accountRuntime, dataDir, now = D
         if (intent) await mutateIntent(journal, storageId, checkoutValues(intent, checkout));
         return checkout;
       };
-      return exclusive(storageId ?? `checkout:${ctx.session.serviceId}:${ctx.account.id}:${checkoutId}`, run);
+      const key = storageId ?? `checkout:${ctx.session.serviceId}:${ctx.account.id}:${checkoutId}`;
+      const signature = `checkout:${action}`;
+      // Reconciliation and cancellation have distinct effects. A background
+      // status request must not absorb a close command for the same order.
+      for (;;) {
+        const existing = active.get(key);
+        if (!existing || existing.signature === signature) return exclusive(key, run, signature);
+        await existing.promise.catch(() => {});
+      }
     },
     purchase: async (identity, rawBody) => {
       const body = parse(purchaseInput, rawBody, 'platform_request_invalid');

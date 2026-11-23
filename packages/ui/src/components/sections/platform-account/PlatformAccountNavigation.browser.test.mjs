@@ -19,7 +19,13 @@ test('user center opens outside Settings, navigation stays read-only and explici
     const scenario = new URLSearchParams(location.search).get('scenario');
     const walletScenario = scenario === 'wallet';
     const managedScenario = scenario === 'managed';
-    const productWallet = { version: 'product_v1', account_id: 'fixture-team', cash: { asset: 'CNY/6', available: '13200000' }, can_manage: true, products: [] };
+    const walletOrder = { id: 'past-purchase', offer_name: 'Existing purchase', payment_status: 'PAID', fulfillment_status: 'FULFILLED', refund_status: '', amount: '9800000', created_at: '2026-11-14T10:00:00Z' };
+    const productWallet = { version: 'product_v1', account_id: 'fixture-team', cash: { asset: 'CNY/6', available: '13200000' }, can_manage: true,
+      products: [{ product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 1 },
+        addon_renewal: { enabled: false, version: 1 }, addon_offers: [], orders: [walletOrder] }] };
+    let walletCheckout;
+    let walletSequence = 0;
+    window.confirmWalletClosure = () => { walletCheckout = { ...walletCheckout, close_pending: undefined, payment_status: 'CLOSED' }; };
     let keyState = { accountId: 'fixture-team', enterpriseMode: false, fundingMode: 'credits', nativeCredits: { ready: true }, activation: null };
     let runNumber = 0;
     const modelRows = [
@@ -84,6 +90,21 @@ test('user center opens outside Settings, navigation stays read-only and explici
       if (method !== 'GET') {
         const body = init?.body ? JSON.parse(String(init.body)) : null;
         window.mutations.push({ path: url.pathname, method, body });
+        if (walletScenario && url.pathname === '/api/platform-account/commerce/checkouts') {
+          const expires = new Date(Date.now() + 900000).toISOString();
+          walletCheckout = { id: 'ct_wallet' + (++walletSequence), account_id: 'fixture-team', product_id: 'superwagie',
+            provider: body.provider, offer_name: '', walletTopUp: true, amount: body.amount, currency: 'CNY', payment_status: 'CREATED',
+            fulfillment_status: 'NOT_STARTED', refund_status: '', created_at: new Date().toISOString(), expires_at: expires,
+            session: { kind: 'qr', url: 'https://qr.alipay.com/wallet-fixture', expires_at: expires } };
+          return Response.json({ status: 'PENDING', kind: 'checkout', walletTopUp: true, provider: body.provider, accountId: 'fixture-team',
+            productId: 'superwagie', amount: body.amount, idempotencyKey: body.idempotencyKey, resourceId: walletCheckout.id, checkout: walletCheckout,
+            createdAt: walletCheckout.created_at });
+        }
+        if (walletScenario && url.pathname.endsWith('/close')) {
+          walletCheckout = { ...walletCheckout, close_pending: true, session: undefined };
+          return Response.json(walletCheckout);
+        }
+        if (walletScenario && url.pathname.endsWith('/reconcile')) return Response.json(walletCheckout);
         if (url.pathname === '/api/model-configuration/bootstrap/account-key' && method === 'POST' && managedScenario && body?.accountId === 'fixture-team' && body.action === 'retest') {
           keyState = managedKeyState(true);
           return Response.json(keyState);
@@ -106,7 +127,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
       if (url.pathname.endsWith('/api/platform-account/session')) return Response.json({ status: 'signed-in', user, expiresAt: '2027-01-01T12:00:00Z' });
       if (url.pathname.endsWith('/api/platform-account/profile')) return Response.json({ id: user.id, username: 'fixture-reviewer', displayName: user.name, email: user.email, avatarAvailable: false, version: '1' });
       if (url.pathname.endsWith('/api/platform-account')) return Response.json({ status: 'signed-in', user, accounts: [{ id: 'fixture-team', name: 'Fixture team', kind: 'team', role: 'owner' }], accountId: 'fixture-team', expiresAt: '2027-01-01T12:00:00Z', membership: [{ id: 'fixture-membership', product_id: 'superwagie', status: 'active', paid_through: '2027-01-01T00:00:00Z', offer: { name: 'Fixture membership' } }], credits: { available: '240000000', reserved: '8000000' }, consoleUrl: walletScenario ? null : 'https://unihub.example.test/console', modelService: 'available', ...(walletScenario && { productCreditWallet: true }) });
-      if (url.pathname.endsWith('/api/platform-account/commerce')) return Response.json({ accountId: 'fixture-team', role: 'owner', financialAccess: true, missingScopes: [], payments: { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] }, wallets: [{ productId: '', asset: 'CNY/6', amount: '120000000' }, { productId: 'superwagie', asset: 'CNY/6', amount: '30000000' }, { productId: 'llmrouter', asset: 'CNY/6', amount: '86400000' }], offers: [{ id: 'fixture-addon', productId: 'superwagie', kind: 'addon', name: 'Fixture credit pack', accountKind: 'both', period: 'once', price: '9800000', monthlyCredit: '200000000', validityMonths: 12, rank: 1, sandbox: false }], orders: [], intents: [], ...(walletScenario && { productCreditWallet: true, productWallet }) });
+      if (url.pathname.endsWith('/api/platform-account/commerce')) return Response.json({ accountId: 'fixture-team', role: 'owner', financialAccess: true, missingScopes: [], payments: { mode: 'external', canPurchase: true, canTopUp: walletScenario, providers: ['wechat', 'alipay'] }, wallets: [{ productId: '', asset: 'CNY/6', amount: '120000000' }, { productId: 'superwagie', asset: 'CNY/6', amount: '30000000' }, { productId: 'llmrouter', asset: 'CNY/6', amount: '86400000' }], offers: [{ id: 'fixture-addon', productId: 'superwagie', kind: 'addon', name: 'Fixture credit pack', accountKind: 'both', period: 'once', price: '9800000', monthlyCredit: '200000000', validityMonths: 12, rank: 1, sandbox: false }], orders: [], intents: [], ...(walletScenario && { productCreditWallet: true, productWallet, checkouts: walletCheckout ? [walletCheckout] : [] }) });
       if (url.pathname.endsWith('/summary')) return Response.json({ visibility: 'account', calls_total: '47', settled_calls: '46', pending_calls: '1', unknown_calls: '0', missing_usage_calls: '0', unknown_time: '0', usage: {}, usage_complete: false, usage_coverage: { legacy_token_calls: '0', native_metered_calls: '0' }, charges_by_asset: { 'CREDIT/6': '32400000' }, refunds_by_asset: {} });
       if (url.pathname.endsWith('/calls')) return Response.json({ items: [], has_more: false });
       if (url.pathname.endsWith('/api/model-configuration')) return Response.json({ version: 1, revision: 1, enterpriseMode: false, credentialSources: { status: 'available', sources: [] }, purposes: [], presets: [], connections: [], bindings: [] });
@@ -291,6 +312,53 @@ test('user center opens outside Settings, navigation stays read-only and explici
       }
     }
     assert.deepEqual(await evaluate('window.mutations'), [], 'Wallet and key navigation must remain read-only');
+    for (const width of [1280, 390]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: width === 390 ? 680 : 740, deviceScaleFactor: 1, mobile: false });
+      await evaluate('window.setAppearance(false, "zh-CN")');
+      await until(`innerWidth === ${width} && document.querySelector('[data-platform-account-tab="wallet"]')?.textContent.trim() === '钱包'`, 'Wallet tab did not finish resizing and localizing');
+      await click('[data-platform-account-tab="wallet"]');
+      await until(`!!document.querySelector('[data-wallet-recharge] form')`, 'Wallet recharge did not render');
+      assert.equal(await evaluate(`document.querySelector('[data-wallet-recharge]').compareDocumentPosition(document.querySelector('details')) & Node.DOCUMENT_POSITION_FOLLOWING`), 4);
+      await evaluate(`(() => {
+        const field = document.querySelector('[data-wallet-recharge] input');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, '1.00');
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        [...document.querySelectorAll('[data-wallet-recharge] button')].find(button => button.textContent === '支付宝').click();
+      })()`);
+      await until(`document.querySelector('[data-wallet-recharge] button[type="submit"]')?.disabled === false`, 'Recharge amount was not accepted');
+      if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
+        const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+        writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, `wallet-layout-${width}.png`), Buffer.from(shot.data, 'base64'));
+      }
+      await click('[data-wallet-recharge] button[type="submit"]');
+      await until(`document.querySelector('[data-wallet-recharge] img')?.naturalWidth > 0`, 'QR did not render inside recharge');
+      assert.equal(await evaluate(`document.querySelectorAll('[role="dialog"]').length`), 1, 'QR opened a second dialog');
+      assert.equal(await evaluate(`(() => {
+        const card = document.querySelector('[data-payment-checkout]');
+        const qr = card.querySelector('img').getBoundingClientRect();
+        const cancel = [...card.querySelectorAll('button')].find(button => button.textContent === '取消支付').getBoundingClientRect();
+        const dialog = card.closest('[role="dialog"]').getBoundingClientRect();
+        return qr.width >= 180 && qr.left >= dialog.left && qr.right <= dialog.right
+          && qr.top >= dialog.top && cancel.bottom <= dialog.bottom;
+      })()`), true, 'QR and cancel must be usable together within the account dialog');
+      if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
+        const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+        writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, `wallet-qr-${width}.png`), Buffer.from(shot.data, 'base64'));
+      }
+      await until(`[...document.querySelectorAll('[data-payment-checkout] button')].some(node => node.textContent === '取消支付' && !node.disabled)`, 'Cancel was disabled');
+      await evaluate(`[...document.querySelectorAll('[data-payment-checkout] button')].find(button => button.textContent === '取消支付').click()`);
+      await until(`document.querySelector('[data-payment-checkout]')?.textContent.includes('等待支付宝确认关闭')`, 'Pending confirmation did not render');
+      assert.equal(await evaluate(`document.querySelector('[data-wallet-recharge] img')`), null);
+      assert.equal(await evaluate(`document.querySelector('[data-payment-checkout]').textContent.includes('取消支付')`), false);
+      await evaluate('window.confirmWalletClosure()');
+      await evaluate(`[...document.querySelectorAll('[data-payment-checkout] button')].find(button => button.textContent === '刷新状态').click()`);
+      await until(`document.querySelector('[data-payment-checkout]')?.textContent.includes('本次支付已关闭')`, 'Closure was not confirmed');
+      await evaluate(`[...document.querySelectorAll('[data-payment-checkout] button')].find(button => button.textContent === '返回充值').click()`);
+      await until(`!!document.querySelector('[data-wallet-recharge] form')`, 'Wallet did not return to recharge');
+      await click('[data-platform-account-tab="keys"]');
+    }
+    assert.equal(await evaluate(`window.mutations.filter(({path})=>path.endsWith('/close')).length`), 2);
+
     await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=managed' });
     await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Managed account entry did not render');
     await click('button[aria-label="User center"]');

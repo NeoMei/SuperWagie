@@ -184,7 +184,15 @@ destination never starts a payment or replays the model request.
 
 When the verified account reports product-credit billing, the Wallet tab
 shows shared cash, top-ups, product orders and versioned renewal settings.
+The Wallet tab places the payer, cash balance and recharge first inside the
+existing account dialog. The checkout replaces the recharge form in place.
+Its QR, amount, method and cancellation controls stay together on wide and
+narrow screens. Renewals are available in a disclosure, and transaction
+history follows the payment controls.
 Changing a selection has no financial effect until the user confirms it.
+Background status checks do not disable cancellation. A confirmed
+closure request hides the QR and waits for authoritative closure before
+allowing another payment.
 Enabling subscription renewal requires the product's current subscription
 offer and price. A reported enabled renewal can always be turned off by a
 user with billing access.
