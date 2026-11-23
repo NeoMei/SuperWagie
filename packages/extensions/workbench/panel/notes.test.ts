@@ -54,6 +54,11 @@ const mount = async (saved = JSON.stringify(notes), device?: DeviceNotes) => {
     messages.push(message);
     if (!('id' in message)) return;
     if (message.type === 'storage') {
+      if (message.payload.op === 'get' && message.payload.key !== notesKey) {
+        queueMicrotask(() => send({ channel: 'openchamber.sdk', v: 1, type: 'result', id: message.id, ok: true,
+          payload: { storage: true, op: 'get', found: false } }));
+        return;
+      }
       const failed = message.payload.op === 'get' ? device?.failRead : device?.failWrite;
       // The device host commits accepted writes in receive order. Holding an
       // acknowledgement must not make the fixture commit an old write later.
@@ -115,7 +120,7 @@ test('sandboxed notes restore and save order through device storage without serv
   expect(requests.every((message) => message.payload.scope === 'device')).toBe(true);
   page.setLocale('zh-CN');
   await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(page.messages.filter((message) => message.type === 'storage' && message.payload.op === 'get')).toHaveLength(1);
+  expect(page.messages.filter((message) => message.type === 'storage' && message.payload.op === 'get' && message.payload.key === notesKey)).toHaveLength(1);
   const reloaded = await mount('[]', device);
   expect([...reloaded.document.querySelectorAll('.notes-list .note-body')].map((node) => node.textContent)).toEqual(['First note', 'Second note', 'Third note']);
 });

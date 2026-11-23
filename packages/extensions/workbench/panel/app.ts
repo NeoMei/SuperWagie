@@ -30,6 +30,7 @@ interface WorkbenchNote {
 }
 
 const WORKBENCH_NOTES_KEY = 'oc.workbench.notes';
+const WORKBENCH_COMPOSER_KEY = 'oc.workbench.composerDraft';
 const workbenchNotesSchema = z.array(z.object({
   id: z.string().min(1),
   body: z.string().min(1),
@@ -160,6 +161,39 @@ const state: State = {
   noteEdits: new Map(),
 };
 
+let composerDraftRevision = 0;
+let composerComposing = false;
+let composerSubmitting = false;
+let deferredRedraw: 'page' | 'form' | null = null;
+
+const composerInput = (): HTMLInputElement | null => root.querySelector<HTMLInputElement>('#wb-composer');
+
+const restoreComposerDraft = async (): Promise<void> => {
+  try {
+    const stored = z.string().safeParse(await host.storage.get(WORKBENCH_COMPOSER_KEY, { scope: 'device' }));
+    if (!stored.success || composerDraftRevision !== 0 || composerComposing) return;
+    state.composerDraft = stored.data;
+    const input = composerInput();
+    if (input) input.value = stored.data;
+  } catch {
+    // The draft remains editable when device storage is unavailable.
+  }
+};
+
+const updateComposerDraft = async (value: string): Promise<void> => {
+  if (value === state.composerDraft) return;
+  state.composerDraft = value;
+  composerDraftRevision++;
+  if (!state.ready?.features?.deviceStorage) return;
+  try {
+    // Send edits before the host can unmount this page. Device storage orders the writes.
+    if (value) await host.storage.set(WORKBENCH_COMPOSER_KEY, value, { scope: 'device' });
+    else await host.storage.delete(WORKBENCH_COMPOSER_KEY, { scope: 'device' });
+  } catch {
+    // Keep the current text in the page if a device write fails.
+  }
+};
+
 const hostNotice = notice();
 let noticeCopy: (() => string) | null = null;
 const showNotice = (copy: () => string, tone: 'info' | 'warn' | 'error' = 'info'): void => {
@@ -184,7 +218,7 @@ const restoreDeviceNotes = async (): Promise<void> => {
     notesPersistence = 'failed';
     showNotice(() => t('notesLoadFailed'), 'error');
   }
-  preserveFormState(root, render);
+  render(true);
 };
 
 let calendarMonth = new Date();
@@ -773,7 +807,7 @@ const moveWorkbenchNote = (activeId: string, targetId: string): void => {
   state.notes = notes;
   saveWorkbenchNotes(notes);
   const scrollTop = document.querySelector('.notes-list')?.scrollTop ?? 0;
-  preserveFormState(root, render);
+  render(true);
   const list = document.querySelector('.notes-list');
   if (list) list.scrollTop = scrollTop;
   for (const row of document.querySelectorAll<HTMLElement>('.notes-list .note')) {
@@ -935,6 +969,40 @@ const renderNotes = (): HTMLElement => {
   return panel;
 };
 
+const submitComposer = async (text: string, action: 'task' | 'start'): Promise<void> => {
+  if (composerSubmitting) return;
+  composerSubmitting = true;
+  const revision = composerDraftRevision;
+  try {
+    const result = await host.startSession({
+      providerId: 'workbench',
+      id: t('taskLabel'),
+      title: text.split('\n')[0].slice(0, 80),
+      url: `https://superwagie.local/${action}`,
+      text: (action === 'task' ? t('taskPrompt', { text }) : text).slice(0, 16_000),
+      projectId: state.projectId || undefined,
+      navigation: 'preserve',
+    });
+    if (!result.sessionId) {
+      showNotice(() => t('sessionNeedsProject'), 'warn');
+      void host.toast({ kind: 'error', message: t('sessionNeedsProject') });
+      return;
+    }
+    // The draft must be cleared before navigation unmounts the guest.
+    if (result.sent === 'sent' && revision === composerDraftRevision && !composerComposing) {
+      const input = composerInput();
+      if (input) input.value = '';
+      await updateComposerDraft('');
+    }
+    await host.openSession(result.sessionId);
+  } catch {
+    showNotice(() => t('sessionFailed'), 'error');
+    void host.toast({ kind: 'error', message: t('sessionFailed') });
+  } finally {
+    composerSubmitting = false;
+  }
+};
+
 const renderHome = (): HTMLElement => {
   const wrap = el('div', 'home');
   const today = todayISO();
@@ -955,7 +1023,20 @@ const renderHome = (): HTMLElement => {
   input.placeholder = t('composerPlaceholder');
   input.setAttribute('aria-label', t('composerLabel'));
   input.value = state.composerDraft;
-  input.addEventListener('input', () => { state.composerDraft = input.value; });
+  input.addEventListener('input', () => {
+    if (!composerComposing) void updateComposerDraft(input.value);
+  });
+  input.addEventListener('compositionstart', () => { composerComposing = true; });
+  input.addEventListener('compositionend', () => {
+    composerComposing = false;
+    void updateComposerDraft(input.value);
+    // Let the browser deliver the final input event before replacing its field.
+    if (deferredRedraw) {
+      setTimeout(() => {
+        if (deferredRedraw) render();
+      }, 0);
+    }
+  });
   composer.append(input);
 
   const row = el('div', 'composer-row');
@@ -998,35 +1079,11 @@ const renderHome = (): HTMLElement => {
       showNotice(() => t('taskInputRequired'), 'warn');
       return;
     }
-    startTaskSession(text);
+    void submitComposer(text, 'task');
   });
   chips.append(taskChip);
   row.append(startButton, chips);
   composer.append(row);
-
-  // 创建任务 opens a session whose agent files the task with the OpenChamber
-  // task.create action; the workbench only hands over what the user wrote.
-  const startTaskSession = (text: string): void => {
-    const title = text.split('\n')[0].slice(0, 80);
-    const instruction = t('taskPrompt', { text });
-    void host.startSession({
-      providerId: 'workbench',
-      id: t('taskLabel'),
-      title,
-      url: 'https://superwagie.local/task',
-      text: instruction.slice(0, 16_000),
-      projectId: state.projectId || undefined,
-      navigation: 'open',
-    }).then((result) => {
-      if (!result.sessionId) {
-        showNotice(() => t('sessionNeedsProject'), 'warn');
-        void host.toast({ kind: 'error', message: t('sessionNeedsProject') });
-      }
-    }).catch(() => {
-      showNotice(() => t('sessionFailed'), 'error');
-      void host.toast({ kind: 'error', message: t('sessionFailed') });
-    });
-  };
 
   const startWork = (): void => {
     const text = input.value.trim();
@@ -1034,32 +1091,15 @@ const renderHome = (): HTMLElement => {
       showNotice(() => t('workInputRequired'), 'warn');
       return;
     }
-    const title = text.split('\n')[0].slice(0, 80);
-    void host.startSession({
-      providerId: 'workbench',
-      id: t('taskLabel'),
-      title,
-      url: 'https://superwagie.local/start',
-      text: text.slice(0, 16_000),
-      projectId: state.projectId || undefined,
-      navigation: 'open',
-    }).then((result) => {
-      if (!result.sessionId) {
-        showNotice(() => t('sessionNeedsProject'), 'warn');
-        void host.toast({ kind: 'error', message: t('sessionNeedsProject') });
-      }
-    }).catch(() => {
-      showNotice(() => t('sessionFailed'), 'error');
-      void host.toast({ kind: 'error', message: t('sessionFailed') });
-    });
+    void submitComposer(text, 'start');
   };
 
   startButton.addEventListener('click', startWork);
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      startWork();
-    }
+    // Some engines report the IME candidate confirmation with key code 229.
+    if (event.key !== 'Enter' || event.shiftKey || composerComposing || event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    startWork();
   });
 
   // Count helper for the side column.
@@ -1419,7 +1459,7 @@ const greeting = (): HTMLElement => {
   return head;
 };
 
-const render = (): void => {
+const drawPage = (): void => {
   if (!root) return;
   const directory = state.ready?.directory;
   if (directory && state.ready?.features?.resultCards) {
@@ -1453,7 +1493,7 @@ const render = (): void => {
       input.scrollTop = noteFocus.scrollTop;
     }
     if (composerFocus) {
-      const composer = root.querySelector<HTMLInputElement>('#wb-composer');
+      const composer = composerInput();
       if (composer) {
         composer.focus({ preventScroll: true });
         composer.setSelectionRange(composerFocus.start, composerFocus.end);
@@ -1462,6 +1502,17 @@ const render = (): void => {
   } finally {
     redrawing = false;
   }
+};
+
+const render = (preserve = false): void => {
+  const preserveDrafts = preserve || deferredRedraw === 'form';
+  if (composerComposing) {
+    deferredRedraw = preserveDrafts ? 'form' : 'page';
+    return;
+  }
+  deferredRedraw = null;
+  if (preserveDrafts) preserveFormState(root, drawPage);
+  else drawPage();
 };
 
 let stopSessions: (() => void) | null = null;
@@ -1583,12 +1634,15 @@ host.onReady((ready) => {
   state.ready = ready;
   setWorkbenchLocale(ready.locale);
   document.title = t('title');
-  if (firstReady && ready.features?.deviceStorage) void restoreDeviceNotes();
+  if (firstReady && ready.features?.deviceStorage) {
+    void restoreDeviceNotes();
+    void restoreComposerDraft();
+  }
   if (contextDirectory !== ready.directory) {
     lastSession = ready.session;
     updateDirectory(ready.directory);
   } else if (!firstReady && languageChanged) {
-    preserveFormState(root, render);
+    render(true);
   }
 });
 
