@@ -476,6 +476,10 @@ permissions; adding a pilot cookie neither creates nor removes those permissions
 
 ## Product-credit wallet
 
+Cash checkout reads and actions preserve UniHub's `close_pending` receipt.
+Identical concurrent checkout actions may share a result. Different actions
+for the same checkout run in order, so a reconciliation cannot consume a close.
+
 - The backend sends `X-UniHub-Product-Credit-Wallet: product_v1` when a
   managed product model proxy is configured, the managed model runtime is ready,
   and enterprise mode permits the hosted transport. UniHub decides capability

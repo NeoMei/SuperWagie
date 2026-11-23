@@ -27,7 +27,7 @@ const fixture = async () => {
   const upstream = async (route, init = {}) => {
     state.calls.push({ walletVersion: init.headers?.['X-UniHub-Product-Credit-Wallet'], netUpgrade: init.headers?.['X-UniHub-Legacy-Net-Upgrade'], route, method: init.method ?? 'GET', body: init.body, key: init.headers?.['Idempotency-Key'] });
     if (route === '/v1/accounts') return [{ id: state.account, kind: 'personal', role: state.role }];
-    if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: state.scopes, product_credit_wallet: state.productCreditWallet, sandbox: state.sandbox, product_wallet_recharge: state.sandbox, real_payments_configured: state.cashPayments ?? false, payment_providers: state.reportedProviders ?? (state.cashPayments ? ['wechat'] : []), native_credits: { ready: state.creditsReady } };
+    if (route === '/v1/capabilities') return { product_id: 'superwagie', scopes: state.scopes, product_credit_wallet: state.productCreditWallet, sandbox: state.sandbox, product_wallet_recharge: state.sandbox, real_payments_configured: state.cashPayments ?? false, alipay_checkout_qr: state.alipayCheckoutQR, payment_providers: state.reportedProviders ?? (state.cashPayments ? ['wechat'] : []), native_credits: { ready: state.creditsReady } };
     if (route.endsWith('/product-wallet') || route.endsWith('/product-wallet/superwagie/renewal')) return { version: 'product_v1', account_id: state.account, cash: { asset: 'CNY/6', available: String(state.wallet) }, can_manage: true, products: [{ product_id: 'superwagie', name: 'SuperWagie', subscription_renewal: { enabled: false, version: 0 }, addon_renewal: { enabled: false, version: 1 }, orders: [], addon_offers: [] }, ...(state.otherWalletProducts ?? [])] };
     if (route === '/v1/catalog') return [...state.offers, sandboxOffer].map((item) => ({ ...item, sales_readiness: item.sandbox ? undefined : { ready: true } }));
     if (route.endsWith('/resources')) {
@@ -46,10 +46,17 @@ const fixture = async () => {
     }
     if (route.endsWith('/cash-checkouts/ct_one/reconcile')) {
       const pending = cashCheckouts.get('ct_one');
+      if (state.blockCashReconcile) { await state.blockCashReconcile(); return pending; }
       const paid = { ...pending, payment_status: 'PAID', credit_status: 'APPLIED' };
       cashCheckouts.set(paid.id, paid);
       return paid;
     }
+    if (route.endsWith('/cash-checkouts/ct_one/close')) {
+      const pending = { ...cashCheckouts.get('ct_one'), close_pending: true };
+      cashCheckouts.set('ct_one', pending);
+      return pending;
+    }
+    if (route.endsWith('/cash-checkouts/ct_one') && !init.method) return cashCheckouts.get('ct_one');
     if (route.endsWith('/orders') && !init.method) return [...orders.values()];
     if (route.endsWith('/checkouts') && !init.method) return [...checkoutRecords.values()];
     if (route.endsWith('/checkouts/co-old') && !init.method) {
@@ -188,6 +195,30 @@ describe('UniHub commerce without sandbox funding', () => {
     const state = await f.runtime.overview(identity);
     expect(state.intents).toContainEqual(expect.objectContaining({ resourceId: 'ct_one', status: 'APPLIED' }));
     expect(f.state.calls.filter((call) => call.method === 'POST' && call.route.endsWith('/cash-checkouts'))).toHaveLength(1);
+  });
+
+  it('runs cash cancellation after an in-flight status check and preserves closure confirmation', async () => {
+    const f = await fixture();
+    f.state.productCreditWallet = true;
+    f.state.cashPayments = true;
+    f.state.alipayCheckoutQR = true;
+    f.state.reportedProviders = ['alipay'];
+    f.state.scopes.push('recharges:read', 'recharges:write');
+    const body = { accountId: f.state.account, provider: 'alipay', amount: '1000000', idempotencyKey: crypto.randomUUID() };
+    await f.runtime.createCheckout(identity, body);
+    const polling = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    f.state.blockCashReconcile = () => { entered.resolve(); return polling.promise; };
+    const status = f.runtime.checkoutAction(identity, 'ct_one', 'reconcile', { accountId: f.state.account });
+    await entered.promise;
+    const close = f.runtime.checkoutAction(identity, 'ct_one', 'close', { accountId: f.state.account });
+    await new Promise(setImmediate);
+    expect(f.state.calls.some(({ route }) => route.endsWith('/cash-checkouts/ct_one/close'))).toBe(false);
+    polling.resolve();
+    await expect(status).resolves.not.toHaveProperty('close_pending');
+    await expect(close).resolves.toMatchObject({ walletTopUp: true, close_pending: true, payment_status: 'CREATED' });
+    expect((await f.runtime.overview(identity)).checkouts).toContainEqual(expect.objectContaining({ id: 'ct_one', close_pending: true }));
+    expect(f.state.calls.filter(({ route }) => route.endsWith('/cash-checkouts/ct_one/close'))).toHaveLength(1);
   });
 
   it('keeps reported wallet orders and renewal settings available with other products in checkout history', async () => {
