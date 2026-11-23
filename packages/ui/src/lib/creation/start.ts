@@ -4,6 +4,7 @@ import { CREATION_PROMPT_KEY, CREATION_TITLE_KEY, CREATION_WORK_URL_PREFIX, type
 import { startGuestSession } from '@/lib/guests/start-session';
 import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 
 type Translate = (key: I18nKey, params?: I18nParams) => string;
 
@@ -63,6 +64,7 @@ export const createCreationIntentQueue = (start: CreationStarter) => {
  * guide page stands between the user and the assistant.
  */
 export const startCreationChat = async (kind: CreationIntent): Promise<void> => {
+  const isCurrent = captureRuntimeInstance();
   const { dictionary } = useI18nStore.getState();
   const t: Translate = (key, params) => formatMessage(dictionary, key, params);
   const title = t(CREATION_TITLE_KEY[kind]);
@@ -78,6 +80,7 @@ export const startCreationChat = async (kind: CreationIntent): Promise<void> => 
     // checked on the next line and treated as a failed start.
     const created = await response.json() as { projectId?: string };
     if (!created.projectId) throw new Error(t('creation.start.missingProject'));
+    if (!isCurrent()) throw new Error(t('creation.start.connectionFailed'));
     const session = await startGuestSession({
       request: {
         providerId: 'creation',
@@ -88,11 +91,18 @@ export const startCreationChat = async (kind: CreationIntent): Promise<void> => 
         projectId: created.projectId,
         navigation: 'open',
       },
+      creationIntent: kind,
       directory: null,
       t: (key, params) => formatMessage(useI18nStore.getState().dictionary, key, params),
-      assertAuthorized: () => {},
+      assertAuthorized: () => {
+        if (!isCurrent()) throw new Error(t('creation.start.connectionFailed'));
+      },
     });
     if (!session?.sessionId) throw new Error(t('creation.start.sessionFailed'));
+    if (session.sent !== 'sent') {
+      toast.error(t('creation.start.firstMessageFailed'), { id: 'creation-start' });
+      return;
+    }
     toast.success(t('creation.start.success'), { id: 'creation-start' });
   } catch (error) {
     const reason = error instanceof Error ? error.message : t('creation.start.connectionFailed');

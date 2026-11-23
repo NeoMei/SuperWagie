@@ -2,6 +2,7 @@ import { afterEach, expect, mock, spyOn, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import { createRuntimeOpencodeClient, opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -19,11 +20,12 @@ const created: Session = {
   time: { created: 1, updated: 1 },
 };
 afterEach(() => mock.restore());
+const realSendMessage = useSessionUIStore.getState().sendMessage;
 const setup = () => {
   const create = spyOn(opencodeClient, 'createSession').mockImplementation(async (_input, directory) => ({ ...created, directory: directory ?? created.directory }));
   spyOn(sessionActions, 'setLinkedIssue').mockResolvedValue(created);
   useProjectsStore.setState({ hasServerSnapshot: true, projects: [{ id: 'a', path: '/project-a', addedAt: 1 }, { id: 'b', path: '/project-b', addedAt: 1 }], activeProjectId: 'a' });
-  useSessionUIStore.setState({ currentSessionId: 'existing-chat', currentSessionDirectory: '/project-a' });
+  useSessionUIStore.setState({ currentSessionId: 'existing-chat', currentSessionDirectory: '/project-a', sendMessage: realSendMessage });
   useUIStore.getState().setOpenGuestPage('board');
   return create;
 };
@@ -39,6 +41,74 @@ test('a guest session in another project registers without changing the open pag
   expect(useProjectsStore.getState().activeProjectId).toBe('a');
   expect(useUIStore.getState().openGuestPageId).toBe('board');
   expect(useGlobalSessionsStore.getState().entityById.get(created.id)?.directory).toBe('/project-b');
+});
+
+test('a disabled required creation skill stops the entry before opening or sending a plain chat', async () => {
+  const create = setup();
+  const readPolicy = spyOn(opencodeClient, 'getIntegrationPolicies').mockResolvedValue([
+    { resource: 'skill:superweb', effect: 'deny', path: null },
+  ]);
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+  const options = {
+    directory: '/project-a', t: (key: string) => key, assertAuthorized: () => {},
+    request: { providerId: 'creation', id: 'Work', title: 'Website', url: 'https://superwagie.local/work/page', projectId: 'b', navigation: 'open' as const, text: 'Build a small website.' },
+    creationIntent: 'page' as const,
+  };
+  await expect(startGuestSession(options)).rejects.toMatchObject({ code: 'NOT_GRANTED' });
+  expect(readPolicy).toHaveBeenCalledWith('/project-b');
+  expect(create).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+  expect(useSessionUIStore.getState().currentSessionId).toBe('existing-chat');
+  expect(useUIStore.getState().openGuestPageId).toBe('board');
+});
+
+test.each([
+  ['deck', 'superppt'],
+  ['doc', 'superwriter'],
+  ['video', 'supervideo'],
+  ['page', 'superweb'],
+] as const)('%s activates %s before sending editable text or opening the chat', async (kind, skill) => {
+  setup();
+  spyOn(opencodeClient, 'getIntegrationPolicies').mockResolvedValue([]);
+  const config = useConfigStore.getState();
+  useConfigStore.setState({ currentProviderId: 'fixture', currentModelId: 'fixture' });
+  const stages: string[] = [];
+  const activate = spyOn(opencodeClient, 'activateSessionSkill').mockImplementation(async () => {
+    expect(useSessionUIStore.getState().currentSessionId).toBe('existing-chat');
+    stages.push('activate');
+  });
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockImplementation(async () => {
+    expect(useSessionUIStore.getState().currentSessionId).toBe('existing-chat');
+    stages.push('prompt');
+  });
+  const text = 'The user completely replaced the draft.';
+  try {
+    const result = await startGuestSession({
+      directory: '/project-a', creationIntent: kind, t: (key) => key, assertAuthorized: () => {},
+      request: { providerId: 'creation', id: 'Work', title: 'Draft', url: `https://superwagie.local/work/${kind}`, projectId: 'b', navigation: 'open', text },
+    });
+    expect(result).toMatchObject({ sessionId: created.id, sent: 'sent' });
+    expect(activate).toHaveBeenCalledWith(created.id, skill, '/project-b');
+    expect(send.mock.calls[0]?.[0]).toBe(text);
+    expect(stages).toEqual(['activate', 'prompt']);
+    expect(useSessionUIStore.getState().currentSessionId).toBe(created.id);
+  } finally {
+    useConfigStore.setState({ currentProviderId: config.currentProviderId, currentModelId: config.currentModelId });
+  }
+});
+
+test('a failed native creation skill activation does not send or open the unprepared chat', async () => {
+  setup();
+  spyOn(opencodeClient, 'getIntegrationPolicies').mockResolvedValue([]);
+  spyOn(opencodeClient, 'activateSessionSkill').mockRejectedValue(new Error('Skill not found'));
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+  await expect(startGuestSession({
+    directory: '/project-a', creationIntent: 'video', t: (key) => key, assertAuthorized: () => {},
+    request: { providerId: 'creation', id: 'Work', title: 'Video', url: 'https://superwagie.local/work/video', projectId: 'b', navigation: 'open', text: 'Make a video.' },
+  })).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'creation.start.skillUnavailable' });
+  expect(send).not.toHaveBeenCalled();
+  expect(useSessionUIStore.getState().currentSessionId).toBe('existing-chat');
+  expect(useUIStore.getState().openGuestPageId).toBe('board');
 });
 
 test('named worktrees forward the base ref through existing creation and keep bootstrap failures explicit', async () => {

@@ -413,11 +413,7 @@ const reload = async (): Promise<boolean> => {
   return true;
 };
 
-const firstMessage = (kind: Kind): string => {
-  if (kind === 'page') return t('prompt.startWeb');
-  const skill = { doc: 'superwriter', deck: 'superppt', video: 'supervideo' }[kind];
-  return t('prompt.start', { skill });
-};
+const firstMessage = (kind: Kind): string => t(kind === 'page' ? 'prompt.startWeb' : 'prompt.start');
 
 const readError = (body: string | null): string => {
   try {
@@ -504,7 +500,9 @@ const startWork = async (): Promise<void> => {
     state.forceNew = false;
     await reload();
   } catch (error) {
-    if (projectId) {
+    if (projectId && error instanceof HostRequestError && ['NOT_FOUND', 'NOT_GRANTED', 'HOST_UNAVAILABLE'].includes(error.code)) {
+      hostNotice.show(() => t('skillUnavailable'), 'error');
+    } else if (projectId) {
       hostNotice.show(() => t('sessionFailed'), 'error');
     } else if (error instanceof HostRequestError && error.code === 'NO_DIRECTORY') {
       hostNotice.show(() => t('permissionMissing'), 'error');

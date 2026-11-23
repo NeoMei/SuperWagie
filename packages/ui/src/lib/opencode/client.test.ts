@@ -727,6 +727,15 @@ describe("managed model scope refusal", () => {
 
 })
 
+test("records a creation skill on the target session without resuming it", async () => {
+  responses.push(new Response(null, { status: 204 }))
+  await opencodeClient.activateSessionSkill("ses_1", "superweb", "/repo/app")
+  expect(requests.map((request) => `${request.method} ${request.url.pathname}`)).toEqual([
+    "POST /api/experimental/session/ses_1/skill",
+  ])
+  expect(requests[0].body).toEqual({ id: "superweb", resume: false })
+})
+
 describe("sendMessage with inline skills", () => {
   const skillInfo = (id: string, name = id) => ({ id, name, path: `/skills/${id}/SKILL.md`, content: "body" })
   const instructionFor = (names: readonly string[]) => (names.length ? `use: ${names.join(",")}` : null)

@@ -36,8 +36,9 @@ renderer. The guest never reads binary bytes itself.
 
 `creation` (`openchamber-builtin-creation`) is the guided creation panel: one rail
 panel, no page. A four-step wizard (content, audience, shape, confirm) creates a
-project under `文稿/SuperWagie/<category>/<title> <date>` and starts a session that
-loads the matching skill. It declares `files`, `prompt` and `sessions`; its only
+project under `文稿/SuperWagie/<category>/<title> <date>` and starts a session.
+The host loads the matching skill in that session before the first prompt.
+The panel declares `files`, `prompt` and `sessions`; its only
 allowlisted request is `POST /api/creation/projects`, and everything else it
 reads goes through the files API. The panel
 reads the skills' state files (`superppt.json`, `协作状态.json`, `project.json`,

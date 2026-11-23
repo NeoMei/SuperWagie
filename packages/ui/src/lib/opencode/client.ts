@@ -2176,6 +2176,15 @@ class OpencodeService {
     return call("skill.list", () => this.clientFor(directory).skill.list().then((r) => r.data))
   }
 
+  /** Record an explicit skill invocation ahead of the first editable user message. */
+  async activateSessionSkill(sessionId: string, skillId: string, directory: string): Promise<void> {
+    await call("session.skill", () => this.clientFor(directory).experimental.session.skill({
+      sessionID: sessionId,
+      id: skillId,
+      resume: false,
+    }))
+  }
+
   /**
    * Maps the names the composer knows to OpenCode skill ids. The composer's
    * registry is keyed by name, while a prompt attaches skills by id (the

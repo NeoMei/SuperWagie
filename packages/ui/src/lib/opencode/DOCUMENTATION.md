@@ -33,6 +33,9 @@ and execution state.
 - Resource availability reads `skill.use`, `mcp.use` and `plugin.use`, plus
   legacy `integration.use` rules with their exact kind prefix. Bare integration
   patterns remain account/provider policy and cannot deny unrelated resources.
+- Explicit creation skill activation uses OpenCode's session skill endpoint
+  with `resume: false`. Its skill record precedes the first user prompt, so
+  replacing that prompt retains the skill.
 - Policy documents are reversed and statements retain their order. The last
   matching resource statement decides availability.
 - Destructive worktree retention reads current agent activity, pending permissions,
