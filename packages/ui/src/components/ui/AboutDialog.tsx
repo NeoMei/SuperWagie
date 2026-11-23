@@ -35,11 +35,10 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   const { t } = useI18n();
   const hasGuide = useProductHelpGuidanceStore(state => state.session?.target === 'updates');
   const showDiagnostics = import.meta.env.DEV;
-  // The desktop app updates itself, so the check belongs next to the version.
-  // It uses the same window event as the menu item: one handler, one set of
-  // toasts, and the update store opens the dialog when something is found.
+  // The manual button uses the same event and toasts as the menu item.
   const canCheckUpdates = DESKTOP_SELF_UPDATES_ENABLED && isElectronShell();
   const checking = useUpdateStore((state) => state.checking);
+  const upToDate = useUpdateStore((state) => !state.checking && !state.error && state.info?.upToDate === true);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const autoCheckInitiatedRef = React.useRef(false);
   // undefined while the first lookup runs, null once it finished without a version.
@@ -199,6 +198,9 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             <div className="space-y-0.5 typography-meta text-muted-foreground">
               {renderVersionRow('aboutDialog.openChamberVersionLabel', version)}
               {renderVersionRow('aboutDialog.openCodeVersionLabel', openCodeVersion)}
+              {canCheckUpdates && (
+                <p role="status">{upToDate ? t('update.toast.upToDate') : null}</p>
+              )}
             </div>
           </div>
 

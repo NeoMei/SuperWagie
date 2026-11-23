@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
+import type { UpdateInfo } from '@/lib/desktop';
 
 const browser = new Window({ url: 'http://localhost/' });
 const savedGlobals = new Map<string, PropertyDescriptor | undefined>();
@@ -51,6 +52,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  Reflect.deleteProperty(window, '__OPENCHAMBER_DESKTOP__');
   useUpdateStore.getState().reset();
   useProductHelpGuidanceStore.getState().stop();
 });
@@ -91,6 +93,41 @@ test('checks for updates once when About opens', async () => {
   } finally {
     checkForUpdates.mockRestore();
   }
+});
+
+test('shows the latest-version status inside About after the automatic check completes', async () => {
+  let resolveUpdate: (result: UpdateInfo) => void = () => undefined;
+  const result = new Promise<UpdateInfo>((resolve) => { resolveUpdate = resolve; });
+  Object.assign(window, {
+    __OPENCHAMBER_DESKTOP__: { invoke: () => result },
+  });
+
+  await act(async () => root.render(<I18nProvider><AboutDialog open onOpenChange={() => {}} /></I18nProvider>));
+  const statusText = () => document.querySelector('[data-product-help-target="about"] [role="status"]')?.textContent;
+  expect(statusText()).not.toBe('You are on the latest version');
+
+  await act(async () => {
+    resolveUpdate({ available: false, upToDate: true, currentVersion: '2.7.127' });
+  });
+  expect(statusText()).toBe('You are on the latest version');
+
+  Object.assign(window, {
+    __OPENCHAMBER_DESKTOP__: { invoke: async () => { throw new Error('Network unavailable'); } },
+  });
+  await act(async () => useUpdateStore.getState().checkForUpdates());
+  expect(statusText()).not.toBe('You are on the latest version');
+});
+
+test.each([
+  { label: 'no published feed', result: { available: false, currentVersion: '2.7.127' } },
+  { label: 'a newer release', result: { available: true, currentVersion: '2.7.127', version: '2.7.127' } },
+])('does not show the latest-version status for $label', async ({ result }) => {
+  Object.assign(window, {
+    __OPENCHAMBER_DESKTOP__: { invoke: async () => result },
+  });
+
+  await act(async () => root.render(<I18nProvider><AboutDialog open onOpenChange={() => {}} /></I18nProvider>));
+  expect(document.querySelector('[data-product-help-target="about"]')?.textContent).not.toContain('You are on the latest version');
 });
 
 test('shows check progress in the About button and restores retry after a failed check', async () => {

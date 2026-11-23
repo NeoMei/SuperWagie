@@ -778,8 +778,10 @@ Linux updates are supported when the packaged app runs from a writable AppImage 
 Updater checks preserve downloaded payloads for the same version. Feed errors
 preserve an existing pending record; a missing feed with no pending record
 keeps the first-release "no update" behavior. An authoritative no-update
-response clears the record. Downloads for the same version share one process-wide
-promise until the payload is on disk, including cached downloads without an event.
+response clears the record. The desktop check sets `upToDate` when it reads
+a published release and confirms the current build needs no update. Downloads
+for the same version share one process-wide promise until the payload is on disk,
+including cached downloads without an event.
 A request for another version fails as busy until that promise settles. Both the
 download event and promise completion mark readiness only for their own version,
 so an intervening check for a newer release cannot attach the old installer to it.

@@ -11,6 +11,8 @@ import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
 
 export type UpdateInfo = {
   available: boolean;
+  /** A published desktop release was checked and is no newer than this build. */
+  upToDate?: boolean;
   version?: string;
   currentVersion: string;
   body?: string;
