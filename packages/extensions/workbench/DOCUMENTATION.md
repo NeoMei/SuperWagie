@@ -18,10 +18,14 @@ locales to the page, rail and background action.
 - A language redraw retains composer text, sticky-note drafts, unsaved task
   fields, segmented choices, selection, focus and scroll position. It does not
   write tasks, notes, schedules or sessions.
-- The composer draft lives in page state and survives every redraw, including
-  session and task refreshes that rebuild the page. Create task and Start read
-  that draft, so a background refresh cannot empty what the user typed before
-  execution. A redraw while the composer is focused keeps its caret and focus.
+- The composer keeps its text in page state across redraws and saves committed
+  edits in SDK device storage for the next visit. A late restore cannot replace
+  fresh edits. Hosts without device storage retain the in-page draft.
+  Redraws preserve focus and caret and wait for active IME composition to end.
+  Enter during composition only acts on the input method.
+- Create task and Start clear a draft only after its prompt is sent and only
+  when the user has not edited it during submission. The page stays mounted
+  until it can clear the saved draft and open the new session.
 - Task titles, notes, session titles, project names and physical file paths are
   user content. Their bytes, task metadata and existing IDs do not change
   with the interface language. Newly created session attachment labels use the
@@ -95,13 +99,11 @@ The page already redraws its DOM from local task state. A locale-only redraw
 captures and restores in-progress form edits instead of repeating bootstrap or
 remounting the iframe, which would discard drafts and issue unnecessary reads.
 
-### Why the composer draft lives in state
+### Why the composer saves on this device
 
-Session and task events call the same redraw that rebuilds the whole page, so
-a draft held only on the input node vanished on the next background event.
-Keeping it in `state.composerDraft` and restoring focus makes the typed prompt
-survive until the user starts a task or session, regardless of when a refresh
-lands.
+Navigation can discard the entire iframe. The workbench sends committed edits
+to the SDK device store as they happen so an outgoing page has no save timer
+to flush. The draft stays in this browser profile and installation namespace.
 
 ### Why task paths remain Chinese
 

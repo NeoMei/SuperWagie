@@ -72,6 +72,7 @@ describe('built-in workbench language updates', () => {
           ? { status: 200, body: JSON.stringify({ weather: { label: '多云', temp: '18°' } }) }
           : { status: 503, body: '{}' });
         if (message.type === 'open-project-dialog') reply(message);
+        if (message.type === 'open-session') reply(message);
         if (message.type === 'start-session') reply(message, { sessionId: 'qa-new-session', sent: 'skipped' });
       });
     });
