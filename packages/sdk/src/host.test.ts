@@ -1122,6 +1122,27 @@ describe('connectHost resolve and badge', () => {
     await sent;
   });
 
+  test('openWalkthrough posts a trimmed comparison base and returns host refusal', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    try {
+      await expect(host.openWalkthrough({ base: '  ' })).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+      const request = host.openWalkthrough({ base: ' refs/heads/main ' });
+      const sent = parent.posted.find((message) => message.type === 'open-walkthrough');
+      expect(sent).toMatchObject({ payload: { base: 'refs/heads/main' } });
+      if (!sent || !('id' in sent)) throw new Error('Missing walkthrough request');
+      guest.dispatch(new MessageEvent('message', { data: {
+        channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION,
+        type: 'result', id: sent.id, ok: false, code: 'UNSUPPORTED', error: 'Unavailable here',
+      } }));
+      await expect(request).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    } finally {
+      host.dispose();
+    }
+  });
+
   test('setHeight sends whole pixels within the wire range', async () => {
     const parent = createFrame();
     const guest = createFrame();

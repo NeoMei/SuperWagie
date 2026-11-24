@@ -7,7 +7,8 @@ import { toast } from 'sonner';
 import { tableSelection, type TableCell, type TableQuote } from './tableSelection';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
-import { delimiterForPath, parseDelimitedText } from './delimitedText';
+import { parseDelimitedText } from './delimitedText';
+import { resolveDelimiter } from './tableDelimiter';
 
 const ROW_HEIGHT_ESTIMATE = 25;
 const MIN_COLUMN_CHARS = 4;
@@ -43,7 +44,7 @@ export const TableArtifact: React.FC<{
   onQuote?: (quote: TableQuote) => boolean;
 }> = ({ path, content, sizeBytes, onQuote }) => {
   const { t } = useI18n();
-  const table = React.useMemo(() => parseDelimitedText(content, delimiterForPath(path)), [content, path]);
+  const table = React.useMemo(() => parseDelimitedText(content, resolveDelimiter(path, content)), [content, path]);
   const [selection, setSelection] = React.useState<{ anchor: TableCell; end: TableCell } | null>(null);
   const dragging = React.useRef(false);
   React.useEffect(() => { setSelection(null); dragging.current = false; }, [table]);

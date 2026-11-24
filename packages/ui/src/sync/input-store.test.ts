@@ -100,6 +100,40 @@ describe("input-store attachments", () => {
     useInputStore.getState().setAttachedFiles([])
   })
 
+  testWithMockFileReader("holds the chosen Office original and its bytes in the owning draft", async () => {
+    const owner = { runtimeKey: "runtime", directory: "/repo", sessionId: "draft" }
+    const other = { ...owner, sessionId: "other" }
+    const store = useInputStore.getState()
+    store.selectAttachmentDraft(owner)
+    const source = new File([new Uint8Array([0, 1, 2])], "Report.DOCX")
+    const attaching = store.addAttachedFile(source, "Report.DOCX", undefined, "original")
+    await waitForReaderCount(1)
+    expect(pendingReaders).toHaveLength(1)
+    resolveReader(pendingReaders[0], "data:application/octet-stream;base64,AAEC")
+    expect(await attaching).toBe(true)
+    store.selectAttachmentDraft(other)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+    store.selectAttachmentDraft(owner)
+    expect(useInputStore.getState().attachedFiles).toMatchObject([{
+      filename: "Report.DOCX",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      dataUrl: "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,AAEC",
+      composerAnchor: "Report.DOCX",
+    }])
+  })
+
+  testWithMockFileReader("holds Office originals above the inline payload limit", async () => {
+    const original = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "report.pptx")
+    const attaching = useInputStore.getState().addAttachedFile(original, original.name, undefined, "original")
+    // Keep a rejection observable while waiting to see whether intake starts.
+    const outcome = attaching.catch((error: Error) => error)
+    await waitForReaderCount(1)
+    expect(pendingReaders).toHaveLength(1)
+    resolveReader(pendingReaders[0], "data:application/octet-stream;base64,AQID")
+    expect(await outcome).toBe(true)
+    expect(useInputStore.getState().attachedFiles[0]?.size).toBe(original.size)
+  })
+
   testWithMockFileReader("refuses a file over 10 MB without reading it when it has no path on disk", async () => {
     const big = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "place.rbxl")
 
@@ -284,24 +318,18 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe("data:text/plain;base64,e30=")
   })
 
-  test("rejects an unknown binary file after inspecting its contents", async () => {
-    const attached = await useInputStore.getState().addAttachedFile(
-      new File([new Uint8Array([0, 1, 2, 3])], "archive.bin", { type: "application/octet-stream" })
-    )
-
-    expect(attached).toBe(false)
-    expect(pendingReaders).toHaveLength(0)
-    expect(useInputStore.getState().attachedFiles).toEqual([])
-  })
-
-  test("rejects unknown content with too many control bytes", async () => {
-    const attached = await useInputStore.getState().addAttachedFile(
-      new File([new Uint8Array([1, 2, 3, 65])], "encoded.custom", { type: "application/octet-stream" })
-    )
-
-    expect(attached).toBe(false)
-    expect(pendingReaders).toHaveLength(0)
-  })
+  for (const bytes of [[0, 1, 2, 3], [1, 2, 3, 65]]) {
+    testWithMockFileReader(`holds unknown binary bytes after inspection (${bytes[0]})`, async () => {
+      const source = new File([new Uint8Array(bytes)], "archive.bin", { type: "application/octet-stream" })
+      const attaching = useInputStore.getState().addAttachedFile(source, source.name)
+      await waitForReaderCount(1)
+      const dataUrl = `data:application/octet-stream;base64,${btoa(String.fromCharCode(...bytes))}`
+      expect(pendingReaders).toHaveLength(1)
+      resolveReader(pendingReaders[0], dataUrl)
+      expect(await attaching).toBe(true)
+      expect(useInputStore.getState().attachedFiles).toMatchObject([{ filename: source.name, dataUrl }])
+    })
+  }
 
   testWithMockFileReader("accepts an unknown MIME type when its contents are text", async () => {
     const addPromise = useInputStore.getState().addAttachedFile(

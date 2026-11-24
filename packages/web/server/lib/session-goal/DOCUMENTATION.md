@@ -352,3 +352,9 @@ UniHub admission or alter accounting, turn limits, notifications or prompt style
 The session list supplies bounded candidates and their directories. The existing
 metadata store owns current goal state and concurrent updates. Using a listed
 session's metadata would restore stale state or skip goals stored locally.
+
+An interrupted-idle event pauses independently of any audit or read still
+in flight. The interrupted tick loses write and continuation authority.
+Transient pause writes retry, and an explicit Resume or replacement goal
+releases the hold. The assistant tail also recognizes the v2 `aborted`
+error name on recovery.

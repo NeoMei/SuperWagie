@@ -63,7 +63,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'chat.activity-default',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.activityDefault',
-    keywords: ['activity', 'collapsed', 'expanded', 'live', 'tools', 'history'],
+    keywords: ['activity', 'collapsed', 'show notes', 'text', 'expanded', 'live', 'tools', 'history', '显示笔记'],
   },
   {
     id: 'appearance.language',

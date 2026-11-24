@@ -186,6 +186,7 @@ When the verified account reports product-credit billing, the Wallet tab
 shows shared cash, top-ups, product orders and versioned renewal settings.
 The Wallet tab places the payer, cash balance and recharge first inside the
 existing account dialog. The checkout replaces the recharge form in place.
+The card scrolls into view again when its QR image loads and expands the layout.
 Its QR, amount, method and cancellation controls stay together on wide and
 narrow screens. Renewals are available in a disclosure, and transaction
 history follows the payment controls.

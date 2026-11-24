@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { isRecord, isString } from '../shared/guards.js';
 import { runCommand } from '../spaces/run-command.js';
 import { OpenChamberControlError, controlErrorFields } from './error.js';
+import { SECRET_ENV_NAME, SECRET_RUN_MAX_VALUE_LENGTH } from './secret-store.js';
 const SECRET_RUN_MAX_INPUTS = 8;
 const SECRET_RUN_MAX_REASON_LENGTH = 1000;
 const SECRET_RUN_MAX_LABEL_LENGTH = 120;
@@ -8,11 +10,9 @@ const SECRET_RUN_MAX_PLACEHOLDER_LENGTH = 80;
 const SECRET_RUN_DEFAULT_TIMEOUT_MS = 120_000;
 const SECRET_RUN_MAX_TIMEOUT_MS = 600_000;
 export const SECRET_LEASE_MS = 10 * 60_000;
-const SECRET_MAX_VALUE_LENGTH = 16_000;
 const CAPTURE_BYTES = 1024 * 1024;
 const OUTPUT_LIMIT = 32_000;
-const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
-const RAN_NOTE = "The command ran once, with the secrets in its environment. In stdout and stderr every secret value is replaced by [secret:NAME]. Fix a failing command and call secret.run again; the env names in remembered are reused without asking the user while they last.";
+const RAN_NOTE = "The command ran once, with the secrets in its environment. In stdout and stderr every secret value is replaced by [secret:NAME]. Fix a failing command and call secret.run again; the env names in remembered are reused without asking the user while they last. Saved secrets require the user to confirm the command on a new card.";
 const DECLINED_NOTE = "The user declined to give the secrets, so the command did not run. Continue without it or say what it blocks; ask again only if they want to.";
 const CHAT_SENT_EARLIER_NOTE = "The card did not wait and the command did not run: the user had already written in the chat before it appeared, and that message follows this result. Continue from that message; call again only if it still fits.";
 export function secretRunCommandLine(program, args) {
@@ -65,7 +65,7 @@ const normalizeSecretRun = (input = {}) => {
         const env = readText(entry?.env);
         const label = readText(entry?.label);
         const placeholder = readText(entry?.placeholder);
-        if (!ENV_NAME.test(env))
+        if (!SECRET_ENV_NAME.test(env))
             throw refuse(`inputs[${index}].env must be an environment variable name such as API_TOKEN`);
         if (seen.has(env))
             throw refuse(`inputs[${index}].env ${env} appears twice`);
@@ -127,12 +127,6 @@ export const createSecretLeases = ({ now = Date.now, leaseMs = SECRET_LEASE_MS }
     return { read, keep, forget };
 };
 const NUL = String.fromCharCode(0);
-const retainedValue = (values, env) => {
-    const value = values[env];
-    if (value === undefined)
-        throw new TypeError(`Missing submitted secret: ${env}`);
-    return value;
-};
 const prefixFunction = (text) => {
     const prefix = new Array(text.length).fill(0);
     for (let index = 1; index < text.length; index += 1) {
@@ -230,7 +224,16 @@ const runOnce = async ({ program, args, timeoutMs }, { values, directory, signal
         return { outcome, exitCode: null, stdout: '', stderr: '', error: error instanceof Error ? error.message : String(error) };
     }
 };
-export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLeases(), run = runCommand }) => {
+const ownValue = (record, env) => Object.hasOwn(record, env) ? record[env] : undefined;
+const savedSnapshot = (entries) => Object.fromEntries(Object.entries(entries).map(
+    ([env, { scope, revision }]) => [env, { scope, revision }],
+));
+const staleConsent = () => new OpenChamberControlError('The project or saved secrets changed. Decline this card and ask the agent to try again.', 409);
+
+export const createSecretRuns = ({
+    waits, hasUnreadChat, leases = createSecretLeases(), run = runCommand,
+    savedStore, projectForDirectory, resolveSessionDirectory,
+}) => {
     const pending = new Map();
     const key = (sessionId, callId) => `${sessionId}\u0000${callId}`;
     const execute = async (input, { sessionId, callId, directory, signal, authorized }) => {
@@ -241,7 +244,7 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
             throw new OpenChamberControlError('This connection cannot wait for a secret', 400);
         if (!directory)
             throw new OpenChamberControlError('This session has no directory to run the command in', 400);
-        const values = {};
+        const values = Object.create(null);
         const missing = [];
         for (const field of request.inputs) {
             const value = leases.read(sessionId, field.env);
@@ -251,31 +254,40 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
                 values[field.env] = value;
         }
         const reused = Object.keys(values);
+        const fields = missing.map((field) => field.env);
+        let persistence = null;
+        if (fields.length && savedStore && projectForDirectory && resolveSessionDirectory) {
+            try {
+                const project = await projectForDirectory(directory);
+                const stored = savedStore.read(project?.id ?? null, fields);
+                persistence = { project, consent: randomUUID(), saved: savedSnapshot(stored) };
+            } catch {
+                // An unavailable store still allows a one-time or session answer.
+            }
+        }
         if (await hasUnreadChat(sessionId)) {
             return { answer: { answered: false, reason: 'chat-sent-earlier' }, note: CHAT_SENT_EARLIER_NOTE };
         }
-        let remember = [];
-        if (missing.length > 0) {
+        if (fields.length > 0) {
             const slotKey = key(sessionId, callId);
-            const submission = { answer: null };
-            pending.set(slotKey, { fields: missing.map((field) => field.env), reused, deliver: (answer) => { submission.answer = answer; } });
+            if (pending.has(slotKey))
+                throw new OpenChamberControlError('This call already waits for secrets', 409);
+            const slot = { fields, reused, persistence, directory, signal, submission: null };
+            pending.set(slotKey, slot);
             try {
                 const title = missing.map((field) => field.label).join(', ').slice(0, SECRET_RUN_MAX_LABEL_LENGTH);
                 const answer = await waits.wait({ sessionId, callId, title, directory, signal });
-                if (answer.summary !== 'submitted' || !submission.answer) {
+                if (answer.summary !== 'submitted' || !slot.submission)
                     return { answer: { status: 'declined' }, note: DECLINED_NOTE };
-                }
-            }
-            finally {
+            } finally {
                 pending.delete(slotKey);
             }
             if (signal?.aborted)
                 throw new OpenChamberControlError('The card stopped waiting before the user answered', 499);
-            Object.assign(values, submission.answer.values);
-            remember = submission.answer.remember;
+            Object.assign(values, slot.submission.values);
+            for (const env of slot.submission.remember)
+                leases.keep(sessionId, env, values[env]);
         }
-        for (const env of remember)
-            leases.keep(sessionId, env, retainedValue(values, env));
         const result = await runOnce(request, { values, directory, signal, run });
         const stdout = shownOutput(result.stdout, values);
         const stderr = shownOutput(result.stderr, values);
@@ -293,40 +305,113 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
             data.error = redactSecrets(result.error, values);
         return data;
     };
+    const describe = ({ fields, reused, persistence }) => ({
+        fields,
+        reused,
+        ...(persistence && {
+            projectPath: persistence.project?.path ?? null,
+            consent: persistence.consent,
+            saved: Object.fromEntries(Object.entries(persistence.saved).map(([env, { scope }]) => [env, scope])),
+        }),
+    });
     const fieldsFor = (sessionId, callId) => {
         const slot = pending.get(key(sessionId, callId));
-        return slot ? { fields: slot.fields, reused: slot.reused } : null;
+        return slot ? describe(slot) : null;
     };
-    const submit = (sessionId, callId, input, settle) => {
+    const assertWaiting = (sessionId, callId, slot) => {
+        if (!slot || slot.signal?.aborted || slot.submission || pending.get(key(sessionId, callId)) !== slot)
+            throw new OpenChamberControlError('This request is no longer waiting for a secret', 404);
+    };
+    const assertConsent = async (sessionId, callId, slot, consent) => {
+        const persistence = slot.persistence;
+        if (!persistence || !isText(consent) || consent !== persistence.consent)
+            throw staleConsent();
+        const directory = await resolveSessionDirectory(sessionId);
+        if (directory !== slot.directory)
+            throw staleConsent();
+        const project = await projectForDirectory(directory);
+        assertWaiting(sessionId, callId, slot);
+        if (project?.id !== persistence.project?.id || consent !== persistence.consent)
+            throw staleConsent();
+    };
+    const readCurrent = (slot) => {
+        const { project, saved } = slot.persistence;
+        const stored = savedStore.read(project?.id ?? null, slot.fields);
+        for (const env of slot.fields) {
+            const expected = ownValue(saved, env);
+            const current = ownValue(stored, env);
+            if (expected?.revision !== current?.revision || expected?.scope !== current?.scope)
+                throw staleConsent();
+        }
+        return stored;
+    };
+    const submit = async (sessionId, callId, input, settle) => {
         const slot = pending.get(key(sessionId, callId));
+        assertWaiting(sessionId, callId, slot);
         const raw = input.values;
         if (!isValues(raw))
             throw new OpenChamberControlError('values is required: one value per field', 400);
-        const values = {};
-        if (!slot)
-            throw new TypeError("Cannot read properties of undefined (reading 'fields')");
-        for (const env of slot.fields) {
-            const value = raw[env];
+        const saved = slot.persistence?.saved ?? {};
+        const typedFields = slot.fields.filter((env) => !Object.hasOwn(saved, env));
+        const values = Object.create(null);
+        for (const env of typedFields) {
+            const value = ownValue(raw, env);
             if (!isText(value) || !value.trim())
                 throw new OpenChamberControlError(`A value for ${env} is required`, 400);
-            if (value.length > SECRET_MAX_VALUE_LENGTH)
-                throw new OpenChamberControlError(`The value for ${env} is ${value.length} characters; the limit is ${SECRET_MAX_VALUE_LENGTH}`, 413);
+            if (value.length > SECRET_RUN_MAX_VALUE_LENGTH)
+                throw new OpenChamberControlError(`The value for ${env} is ${value.length} characters; the limit is ${SECRET_RUN_MAX_VALUE_LENGTH}`, 413);
             if (value.includes(NUL))
                 throw new OpenChamberControlError(`The value for ${env} contains a NUL character`, 400);
             values[env] = value;
         }
-        const extra = Object.keys(raw).find((env) => !slot.fields.includes(env));
-        if (extra)
-            throw new OpenChamberControlError(`${extra} is not a field of this card`, 400);
-        const remember = Array.isArray(input.remember) ? [...new Set(input.remember.filter((env) => slot.fields.includes(env)))] : [];
-        slot.deliver({ values, remember });
+        if (Object.keys(raw).some((env) => !Object.hasOwn(values, env)))
+            throw new OpenChamberControlError('The answer contains a value this card did not request', 400);
+        const remember = Array.isArray(input.remember) ? [...new Set(input.remember.filter((env) => typedFields.includes(env)))] : [];
+        const save = input.save ?? [];
+        const saveGlobally = input.saveGlobally ?? [];
+        if (![save, saveGlobally].every((list) => Array.isArray(list) && list.every((env) => typedFields.includes(env)))
+            || save.some((env) => saveGlobally.includes(env))
+            || remember.some((env) => save.includes(env) || saveGlobally.includes(env)))
+            throw new OpenChamberControlError('Choose one retention option per new secret', 400);
+        if (save.length && !slot.persistence?.project)
+            throw new OpenChamberControlError('This session is not in a configured project', 400);
+
+        if (Object.keys(saved).length || save.length || saveGlobally.length) {
+            await assertConsent(sessionId, callId, slot, input.consent);
+            assertWaiting(sessionId, callId, slot);
+            if (slot.persistence.consent !== input.consent) throw staleConsent();
+            const current = readCurrent(slot);
+            for (const [env, { value }] of Object.entries(current)) values[env] = value;
+            const set = [
+                ...[...new Set(save)].map((env) => ({ env, value: values[env], scope: 'project' })),
+                ...[...new Set(saveGlobally)].map((env) => ({ env, value: values[env], scope: 'global' })),
+            ];
+            if (set.length) savedStore.update(slot.persistence.project?.id ?? null, { set });
+        }
+        slot.submission = { values, remember };
         settle(sessionId, callId, 'submitted', null);
         return { status: 'submitted' };
+    };
+    const forgetSaved = async (sessionId, callId, env, consent) => {
+        const slot = pending.get(key(sessionId, callId));
+        assertWaiting(sessionId, callId, slot);
+        await assertConsent(sessionId, callId, slot, consent);
+        assertWaiting(sessionId, callId, slot);
+        if (slot.persistence.consent !== consent) throw staleConsent();
+        const current = readCurrent(slot);
+        const entry = ownValue(current, env);
+        if (!entry)
+            throw new OpenChamberControlError('This card has no saved value for that field', 400);
+        const projectId = slot.persistence.project?.id ?? null;
+        savedStore.update(projectId, { remove: { env, scope: entry.scope, revision: entry.revision } });
+        slot.persistence.saved = savedSnapshot(savedStore.read(projectId, slot.fields));
+        slot.persistence.consent = randomUUID();
+        return describe(slot);
     };
     const forget = (sessionId) => {
         if (!sessionId)
             throw new OpenChamberControlError('secret.forget needs the calling session', 400);
         return { forgotten: leases.forget(sessionId) };
     };
-    return { execute, fieldsFor, submit, forget };
+    return { execute, fieldsFor, submit, forgetSaved, forget };
 };

@@ -139,9 +139,11 @@ export const createEnvironmentRuntime = ({
     }
   };
 
+  const loadProjects = async () => (await listProjects()).map((project) => ({ id: project.id, path: path.resolve(project.path) }));
+
   const projects = async () => {
     if (projectsCache && now() - projectsCache.at < projectLookupTtlMs) return projectsCache.list;
-    const list = (await listProjects()).map((project) => ({ id: project.id, path: path.resolve(project.path) }));
+    const list = await loadProjects();
     projectsCache = { at: now(), list };
     return list;
   };
@@ -171,8 +173,7 @@ export const createEnvironmentRuntime = ({
     return primary ? path.resolve(primary) : null;
   };
 
-  const findTarget = async (directory) => {
-    const list = await projects();
+  const findTarget = async (directory, list) => {
     const direct = longestMatch(list
       .filter((project) => isInside(directory, project.path))
       .map((project) => ({ projectId: project.id, root: project.path })));
@@ -191,9 +192,16 @@ export const createEnvironmentRuntime = ({
   const targetFor = async (directory) => {
     const cached = targetCache.get(directory);
     if (cached && now() - cached.at < projectLookupTtlMs) return cached.target;
-    const target = await findTarget(directory);
+    const target = await findTarget(directory, await projects());
     setBounded(targetCache, directory, { at: now(), target });
     return target;
+  };
+
+  // Credential consent must see project changes as soon as they happen.
+  const projectForDirectory = async (directory) => {
+    const list = await loadProjects();
+    const target = await findTarget(path.resolve(directory), list);
+    return list.find((project) => project.id === target?.projectId) ?? null;
   };
 
   const generationOf = (projectId) => generations.get(projectId) ?? 0;
@@ -304,5 +312,5 @@ export const createEnvironmentRuntime = ({
     return variables ? overlayEnvironment(env, variables) : env;
   };
 
-  return { forDirectory, applyToDirectory, forOpenCode, projectStatus, invalidateProject, reloadProject };
+  return { forDirectory, applyToDirectory, forOpenCode, projectForDirectory, projectStatus, invalidateProject, reloadProject };
 };

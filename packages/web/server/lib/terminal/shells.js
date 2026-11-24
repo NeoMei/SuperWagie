@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import { statSync } from 'node:fs';
+
 const TERMINAL_SHELL_IDS = ['bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu'];
 const TERMINAL_SHELL_ID_SET = new Set(TERMINAL_SHELL_IDS);
 const isString = (value) => String(value) === value;
@@ -41,12 +44,46 @@ export const buildTerminalShellLaunch = (executable, { mode = 'interactive', com
   return { executable, args: [...loginArgs, '-i', '-c', trimmedCommand] };
 };
 
-export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecutable, buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env }) => {
-  const resolveExecutable = (candidate) => {
+const WINDOWS_POWER_SHELL_ALIAS = /[\\/]WindowsApps[\\/]pwsh\.exe$/i;
+
+const launchPowerShellProbe = (file) => new Promise((resolve) => {
+  execFile(file, ['-NoProfile', '-Command', 'exit 0'], { timeout: 3000, windowsHide: true }, (error) => resolve(!error));
+});
+
+export const createTerminalShellResolver = ({
+  fs, path, searchPathFor, isExecutable, probePowerShell = launchPowerShellProbe,
+  buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env,
+}) => {
+  const tryAlias = async (file, aliases) => {
+    if (!WINDOWS_POWER_SHELL_ALIAS.test(file)) return false;
+    const key = file.toLowerCase();
+    if (aliases.has(key)) return aliases.get(key);
+    try {
+      (fs.statSync ?? statSync)(file);
+      return false;
+    } catch (error) {
+      if (error?.code !== 'EACCES') return false;
+    }
+    const probe = probePowerShell(file);
+    aliases.set(key, probe);
+    return probe;
+  };
+
+  const resolveExecutable = async (candidate, aliases) => {
     if (!candidate) return null;
     const value = String(candidate);
-    const found = value.includes('/') || value.includes('\\') ? value : searchPathFor(value, buildAugmentedPath());
-    if (found && isExecutable(found)) return found;
+    const searchPath = buildAugmentedPath();
+    if (platform === 'win32' && /^(?:pwsh|pwsh\.exe)$/i.test(value)) {
+      for (const directory of searchPath.split(';').filter(Boolean)) {
+        const found = searchPathFor(value, directory);
+        if (found && isExecutable(found)) return found;
+        const alias = path.join(directory, 'pwsh.exe');
+        if (await tryAlias(alias, aliases)) return alias;
+      }
+      return isExecutable(value) ? value : null;
+    }
+    const found = value.includes('/') || value.includes('\\') ? value : searchPathFor(value, searchPath);
+    if (found && (isExecutable(found) || platform === 'win32' && await tryAlias(found, aliases))) return found;
     return isExecutable(value) ? value : null;
   };
 
@@ -62,14 +99,19 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
       ]
     : [env.OPENCHAMBER_TERMINAL_SHELL, env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh', 'zsh', 'bash', 'sh'];
 
-  const resolveCandidates = (candidates) => {
+  const resolveCandidates = async function* (candidates, cache = new Map(), aliases = new Map()) {
     const seen = new Set();
-    return candidates
-      .map(resolveExecutable)
-      .filter((candidate) => candidate && !seen.has(candidate) && seen.add(candidate));
+    for (const candidate of candidates) {
+      if (!cache.has(candidate)) cache.set(candidate, resolveExecutable(candidate, aliases));
+      const executable = await cache.get(candidate);
+      if (executable && !seen.has(executable)) {
+        seen.add(executable);
+        yield executable;
+      }
+    }
   };
 
-  const list = async () => {
+  const listCandidates = async () => {
     let configuredShells = [];
     if (platform !== 'win32') {
       try {
@@ -83,10 +125,17 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
       }
     }
 
-    const candidates = platform === 'win32'
+    return platform === 'win32'
       ? [...defaultCandidates(), ...TERMINAL_SHELL_IDS]
       : [env.OPENCHAMBER_TERMINAL_SHELL, env.SHELL, ...configuredShells, ...TERMINAL_SHELL_IDS, '/bin/zsh', '/bin/bash', '/bin/sh'];
-    const autoExecutable = resolveCandidates(defaultCandidates())[0] ?? null;
+  };
+
+  const list = async () => {
+    const candidates = await listCandidates();
+    const cache = new Map();
+    const aliases = new Map();
+    const auto = await resolveCandidates(defaultCandidates(), cache, aliases).next();
+    const autoExecutable = auto.value ?? null;
     const byId = new Map([
       ['auto', {
         id: 'auto',
@@ -95,7 +144,7 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
         supportsLogin: Boolean(autoExecutable && getTerminalShellLoginArgs(autoExecutable, platform)),
       }],
     ]);
-    for (const executable of resolveCandidates(candidates)) {
+    for await (const executable of resolveCandidates(candidates, cache, aliases)) {
       const id = shellIdFromPath(executable);
       if (id && !byId.has(id)) {
         byId.set(id, { id, name: shellLabel(id), executable, supportsLogin: Boolean(getTerminalShellLoginArgs(executable, platform)) });
@@ -108,9 +157,11 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
     const normalized = normalizeTerminalShell(preference ?? 'auto');
     if (!normalized) throw new Error('Invalid terminal shell');
     if (normalized === 'auto') return { id: 'auto', executables: resolveCandidates(defaultCandidates()) };
-    const selected = (await list()).find((shell) => shell.id === normalized);
-    if (!selected) throw new Error(`Terminal shell "${normalized}" is not available`);
-    return { id: selected.id, executables: [selected.executable] };
+    const candidates = (await listCandidates()).filter((candidate) => shellIdFromPath(candidate) === normalized);
+    for await (const executable of resolveCandidates(candidates)) {
+      if (shellIdFromPath(executable) === normalized) return { id: normalized, executables: [executable] };
+    }
+    throw new Error('Terminal shell "' + normalized + '" is not available');
   };
 
   return { list, resolve };

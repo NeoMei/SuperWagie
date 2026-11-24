@@ -319,6 +319,9 @@ export type BadgeRequest = {
 };
 
 /** A commit the guest asks the host to show in its Diff view. */
+export type OpenWalkthroughRequest = { base: string };
+export const GUEST_WALKTHROUGH_BASE_MAX = 255;
+
 export type OpenCommitRequest = {
   sha: string;
 };
@@ -703,6 +706,7 @@ export type GuestFileStatMessage = GuestCall<'file-stat', FileStatRequest>;
 export type GuestGenerateMessage = GuestCall<'generate', GenerateRequest>;
 export type GuestBadgeMessage = GuestCall<'badge', BadgeRequest>;
 export type GuestResizeMessage = GuestCall<'resize', ResizeRequest>;
+export type GuestOpenWalkthroughMessage = GuestCall<'open-walkthrough', OpenWalkthroughRequest>;
 export type GuestOpenCommitMessage = GuestCall<'open-commit', OpenCommitRequest>;
 export type GuestStatusControlsMessage = GuestCall<'status-controls', { controls: GuestStatusControl[] }>;
 export type GuestPopoverOpenMessage = GuestCall<'popover-open', GuestPopoverRequest>;
@@ -768,6 +772,7 @@ export type GuestMessage =
   | GuestBadgeMessage
   | GuestResizeMessage
   | GuestOpenCommitMessage
+  | GuestOpenWalkthroughMessage
   | GuestStatusControlsMessage
   | GuestPopoverOpenMessage
   | GuestPopoverCloseMessage

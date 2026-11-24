@@ -35,7 +35,16 @@ const PR: ChangeRequest = {
 
 const STATUS: GitStatus = { current: 'feature-17', tracking: null, ahead: 0, behind: 0, files: [], isClean: true };
 
-test('the pull request diff on a host without change-request diffs says so and offers no retry', async () => {
+type DiffScenario = {
+  supportsPatch: boolean;
+  supportsRevisions?: boolean;
+  reviewRevision?: string;
+  providerHead?: string;
+  branchRevisions?: [before: string, after: string];
+  verify: (container: HTMLElement, requests: URL[]) => void;
+};
+
+async function runDiffScenario({ supportsPatch, supportsRevisions = false, reviewRevision, providerHead, branchRevisions, verify }: DiffScenario) {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const globals = {
@@ -52,15 +61,31 @@ test('the pull request diff on a host without change-request diffs says so and o
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   const originalFetch = globalThis.fetch;
-  const paths: string[] = [];
+  const requests: URL[] = [];
+  let branchReads = 0;
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
     const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
-    paths.push(url.pathname);
+    requests.push(url);
     if (url.pathname === '/api/source-control/binding') return Response.json(BINDING);
     if (url.pathname === '/api/git/status') return Response.json(STATUS);
     if (url.pathname === '/api/git/projects') return Response.json({ projects: [{ directory: '/repo', isGitRepository: true, status: STATUS }] });
+    if (url.pathname === '/api/git/range-files' && branchRevisions) {
+      return Response.json({ files: [{ path: 'src/file.ts', status: 'M', revision: branchRevisions[branchReads++ === 0 ? 0 : 1] }] });
+    }
+    if (url.pathname === '/api/git/range-diff' && branchRevisions) {
+      return Response.json({ diff: 'diff --git a/src/file.ts b/src/file.ts\nBinary files a/src/file.ts and b/src/file.ts differ\n' });
+    }
     if (url.pathname === '/api/source-control/github/pulls/list') {
       return Response.json({ items: [PR], page: 1, hasMore: false } satisfies PageResult<ChangeRequest>);
+    }
+    if (url.pathname === '/api/source-control/github/pulls/context') {
+      return Response.json({
+        identity: IDENTITY, project: PROJECT, changeRequest: { ...PR, headSha: providerHead },
+        issueComments: [], reviewComments: [], files: [], diff: 'another patch',
+      });
+    }
+    if (supportsPatch && url.pathname === '/api/walkthrough/pr-diff') {
+      return new Response('', { headers: { 'content-type': 'text/plain' } });
     }
     // As the server refuses a host without the diff read.
     if (url.pathname.startsWith('/api/walkthrough/')) {
@@ -84,28 +109,35 @@ test('the pull request diff on a host without change-request diffs says so and o
   const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
   const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
   const github = githubLikeDescriptor();
-  const descriptor = { ...github, features: { ...github.features, changeRequestPatch: false } };
+  const descriptor = { ...github, features: { ...github.features, changeRequestPatch: supportsPatch, revisions: supportsRevisions } };
   useSourceControlProviderRegistry.setState({ ordered: [descriptor], byId: new Map([[descriptor.id, descriptor]]), status: 'ready', holdsList: true });
   // Opened on a pull request from the board, through the project's folder.
   const { usePullRequestSelectionStore } = await import('@/stores/usePullRequestSelectionStore');
   usePullRequestSelectionStore.getState().requestDiff('/repo', { kind: 'pr', number: 17, sourceRepo: { owner: 'team', repo: 'project' } });
   const { DiffView } = await import('./DiffView');
+  const { ReviewDiffView } = await import('./ReviewDiffView');
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
   try {
     await act(async () => {
       root.render(<SyncProvider sdk={sdk} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={createWebAPIs()}>
-        <DiffView directory="/repo" diffScope="pr" />
+        {reviewRevision || branchRevisions
+          ? <ReviewDiffView visible onBack={() => {}} request={{
+            panelDirectory: '/repo', sourceDirectory: '/repo', isCurrentRuntime: () => true,
+            destination: {
+              kind: 'diff', path: 'src/file.ts', line: 12, side: 'deletions',
+              origin: branchRevisions
+                ? { kind: 'branch', baseRef: 'main', headRef: 'feature-17', revision: branchRevisions[0] }
+                : { kind: 'change-request', provider: 'github', repository: 'team/project', number: 17, revision: reviewRevision },
+            },
+          }} />
+          : <DiffView directory="/repo" diffScope="pr" />}
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
     // The repository check is batched on a timer; let it and the reads after it land.
     for (let round = 0; round < 4; round += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
-    expect(container.textContent).toContain("GitHub doesn't serve pull request diffs");
-    expect(container.textContent).not.toContain('does not offer change request walkthroughs');
-    expect([...container.querySelectorAll('button')].map((button) => button.textContent)).not.toContain('Retry');
-    // The diff is not asked of the host.
-    expect(paths.filter((path) => path.startsWith('/api/walkthrough/'))).toEqual([]);
+    verify(container, requests);
   } finally {
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;
@@ -115,4 +147,51 @@ test('the pull request diff on a host without change-request diffs says so and o
       else Reflect.deleteProperty(globalThis, name);
     }
   }
+}
+
+test('the pull request diff on a host without change-request diffs says so and offers no retry', async () => {
+  await runDiffScenario({
+    supportsPatch: false,
+    verify: (container, requests) => {
+      expect(container.textContent).toContain("GitHub doesn't serve pull request diffs");
+      expect(container.textContent).not.toContain('does not offer change request walkthroughs');
+      expect([...container.querySelectorAll('button')].map((button) => button.textContent)).not.toContain('Retry');
+      expect(requests.filter((request) => request.pathname.startsWith('/api/walkthrough/'))).toEqual([]);
+    },
+  });
+}, 30_000);
+
+test('a review comment requests its recorded patchset from the bound repository', async () => {
+  const revision = 'a'.repeat(40);
+  await runDiffScenario({
+    supportsPatch: true, supportsRevisions: true, reviewRevision: revision,
+    verify: (_, requests) => {
+      const sources = requests.filter((request) => request.pathname === '/api/walkthrough/pr-diff')
+        .map((request) => JSON.parse(request.searchParams.get('source') ?? 'null'));
+      expect(sources).toEqual([{ kind: 'pr', number: 17, sourceRepo: { owner: 'team', repo: 'project' }, revision }]);
+    },
+  });
+}, 30_000);
+
+test('a current-only provider cannot open a review comment on a newer patch', async () => {
+  await runDiffScenario({
+    supportsPatch: true, reviewRevision: 'a'.repeat(40), providerHead: 'b'.repeat(40),
+    verify: (container, requests) => {
+      expect(requests.some((request) => request.pathname === '/api/source-control/github/pulls/context')).toBe(true);
+      expect(requests.some((request) => request.pathname === '/api/walkthrough/pr-diff')).toBe(false);
+      expect(container.textContent).toContain('The comparison for this comment is unavailable.');
+    },
+  });
+}, 30_000);
+
+test('a branch review comment discards a patch when the file changes during its read', async () => {
+  await runDiffScenario({
+    supportsPatch: true, branchRevisions: ['file-revision-before', 'file-revision-after'],
+    verify: (container, requests) => {
+      expect(requests.map(({ pathname }) => pathname).filter((path) => path.startsWith('/api/git/range-'))).toEqual([
+        '/api/git/range-files', '/api/git/range-diff', '/api/git/range-files',
+      ]);
+      expect(container.textContent).toContain('The comparison for this comment is unavailable.');
+    },
+  });
 }, 30_000);

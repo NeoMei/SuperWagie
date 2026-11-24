@@ -654,7 +654,7 @@ describe('workflow runtime', () => {
     const first = await setup(agents);
     const { runId } = await first.act('workflow.run', { script: script("return agent('slow')") });
     await first.runtime.approve({ runId });
-    await waitFor(async () => (await first.act('workflow.status', { runId })).agents.length === 1);
+    await waitFor(async () => (await first.act('workflow.status', { runId })).agents[0]?.sessionId === 'ses_agent1');
     await first.store.flush();
     const file = path.join(first.dataDir, 'workflow-runs', `${runId}.json`);
     const before = await fs.readFile(file, 'utf8');

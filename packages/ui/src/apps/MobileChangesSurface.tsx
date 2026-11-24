@@ -40,6 +40,7 @@ import type { GitIdentityProfile } from '@/lib/api/types';
 import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
 import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/components/views/git/changeStatus';
 import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
+import { ReviewDiffView } from '@/components/views/ReviewDiffView';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { hasConfigChangedGrant } from '@/lib/source-control/types';
@@ -76,7 +77,7 @@ import { useI18n } from '@/lib/i18n';
 import { generateCommitMessage, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from '@/lib/gitApi';
 import type { GitRemote } from '@/lib/gitApi';
 import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
-import { diffCommentOriginFromSource, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { changeRequestHeadForDiff, diffCommentOriginForFile, diffCommentOriginFromSource, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useWholeFileComment } from '@/components/comments';
 import {
   useGitStore,
@@ -163,8 +164,13 @@ type MobileChangesSurfaceProps = {
 export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = (props) => {
   // A draft waiting for a new space shows the space's changes, and none of this computer's until it runs.
   const draftSpace = useDraftSpaceTarget();
-  const rootDirectory = normalizePath(panelContentDirectory(draftSpace, useEffectiveDirectory())) ?? '';
-  const discovered = useNestedGitDirectory(rootDirectory || null, { enabled: props.visible ?? true, recheckOnOpen: true });
+  const effectiveDirectory = useEffectiveDirectory();
+  const rootDirectory = normalizePath(panelContentDirectory(draftSpace, effectiveDirectory)) ?? '';
+  const reviewDiffRequest = useUIStore((state) => state.reviewDiffRequest);
+  const isReviewDiff = reviewDiffRequest !== null
+    && reviewDiffRequest.panelDirectory === normalizePath(effectiveDirectory) && reviewDiffRequest.isCurrentRuntime();
+  const visible = props.visible ?? true;
+  const discovered = useNestedGitDirectory(rootDirectory || null, { enabled: visible && !isReviewDiff, recheckOnOpen: true });
   // A PR the board asked to show from a repository under the folder is shown
   // there, while the Git selection stays where it was.
   const requestedRepository = usePullRequestSelectionStore((state) => (rootDirectory ? state.changesRepositories.get(rootDirectory) : undefined));
@@ -172,7 +178,14 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = (props)
     ? { ...discovered, gitDirectory: requestedRepository }
     : discovered;
   if (draftSpace?.kind === 'preparing') return <SpacePreparing />;
-  return <MobileChangesPane {...props} rootDirectory={rootDirectory} repository={repository} />;
+  return <>
+    <div className={cn('h-full', isReviewDiff && 'hidden')}>
+      <MobileChangesPane {...props} visible={visible && !isReviewDiff} rootDirectory={rootDirectory} repository={repository} />
+    </div>
+    {isReviewDiff ? (
+      <ReviewDiffView request={reviewDiffRequest} visible={visible} onBack={() => useUIStore.getState().setReviewDiffRequest(null)} />
+    ) : null}
+  </>;
 };
 
 interface MobileChangesPaneProps extends MobileChangesSurfaceProps {
@@ -390,7 +403,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return null;
   }, [branchComparison.base, currentBranch, mode, prComparison.diffUnavailable, selectedCommitHash, selectedPr]);
   const comparisonRevision = mode === 'branch' ? branchComparison.revision : '';
-  const selectedPrHead = selectedPr ? prComparison.prs.find((pr) => pr.number === selectedPr.number)?.headSha : undefined;
+  const selectedPrHead = changeRequestHeadForDiff(selectedPr, prComparison.prs);
   const commentOrigin = React.useMemo(
     () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }),
     [comparisonSource, prComparison.provider, selectedPrHead],
@@ -1140,6 +1153,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return (
       <MobileDiffDetail
         path={route.path}
+        directory={currentDirectory}
         diff={selectedDiff}
         staged={route.staged}
         fileExists={Boolean(selectedFileEntry)}
@@ -1155,6 +1169,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return (
       <MobileDiffDetail
         path={route.path}
+        directory={currentDirectory}
         subtitle={t('diffView.scope.lastTurn')}
         diff={turnDiffData.get(route.path) ?? null}
         fileExists={turnFiles.some((file) => file.path === route.path)}
@@ -1183,8 +1198,9 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return (
       <MobileDiffDetail
         path={activeComparisonPath}
+        directory={currentDirectory}
         subtitle={[modeLabel, sourceLabel].filter(Boolean).join(' · ')}
-        commentOrigin={commentOrigin}
+        commentOrigin={diffCommentOriginForFile(commentOrigin, comparison.files?.find((file) => file.path === activeComparisonPath)?.revision)}
         diff={activeFullComparisonDiff ?? (activeComparisonDiff.status === 'ready' ? activeComparisonDiff.diff : null)}
         fileExists={!comparison.files || comparison.files.some((file) => file.path === activeComparisonPath)}
         error={comparison.error ?? (activeComparisonDiff.status === 'error' ? activeComparisonDiff.message : null)}
@@ -1544,13 +1560,14 @@ const MobileDiffDetail: React.FC<{
   contextLoading?: boolean;
   /** The comparison this file comes from, for comments; absent for uncommitted changes. */
   commentOrigin?: DiffCommentOrigin;
-}> = ({ path, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin }) => {
+  directory: string;
+}> = ({ path, directory, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin }) => {
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
   const hideWhitespace = useUIStore((state) => state.diffHideWhitespace);
   const setHideWhitespace = useUIStore((state) => state.setDiffHideWhitespace);
   const whitespaceState = hideWhitespace ? t('diffView.whitespace.hidden') : t('diffView.whitespace.shown');
-  const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
+  const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin, staged: !commentOrigin && staged, repositoryDirectory: directory });
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
@@ -1631,6 +1648,8 @@ const MobileDiffDetail: React.FC<{
               language={language}
               fileName={path}
               commentOrigin={commentOrigin}
+              commentStaged={!commentOrigin && staged}
+              commentRepositoryDirectory={directory}
               renderSideBySide={false}
               wrapLines={true}
               hideWhitespace={hideWhitespace}

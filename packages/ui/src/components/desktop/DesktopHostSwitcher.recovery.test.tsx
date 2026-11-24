@@ -21,8 +21,29 @@ for (const [name, value] of Object.entries({
 }
 Object.defineProperty(browser, '__OPENCHAMBER_ELECTRON__', { value: { runtime: 'electron' } });
 const nativeWrites: string[] = [];
+let sshFixture = false;
+let sshConnected = false;
+const openedUrls: string[] = [];
+const sshHost = { id: 'ssh-fixture', label: 'SSH workspace', url: 'http://127.0.0.1:49192' };
 Object.defineProperty(browser, '__OPENCHAMBER_DESKTOP__', { value: {
-  invoke: async (command: string) => {
+  invoke: async (command: string, args?: { url?: string }) => {
+    if (sshFixture) {
+      if (command === 'desktop_hosts_get') return {
+        hosts: [sshConnected ? { ...sshHost, url: 'http://127.0.0.1:49193', sshForwarded: true } : sshHost],
+        defaultHostId: null, localOrigin: null,
+      };
+      if (command === 'desktop_ssh_instances_get') return { instances: [{ id: sshHost.id, sshCommand: 'ssh workspace' }] };
+      if (command === 'desktop_ssh_status') return [{ id: sshHost.id, phase: sshConnected ? 'ready' : 'idle' }];
+      if (command === 'desktop_ssh_connect') {
+        nativeWrites.push(command);
+        sshConnected = true;
+        return null;
+      }
+      if (command === 'desktop_new_window_at_url') {
+        openedUrls.push(args?.url ?? '');
+        return null;
+      }
+    }
     if (command === 'desktop_hosts_get') return { hosts: [], defaultHostId: null, localOrigin: null };
     if (command === 'desktop_ssh_instances_get') return { instances: [] };
     if (command === 'desktop_ssh_status' || command === 'desktop_ssh_import_hosts') return [];
@@ -56,6 +77,9 @@ beforeEach(() => {
   useI18nStore.getState().setLocale('en');
   useUIStore.getState().setSettingsDialogOpen(false);
   requests.length = 0;
+  sshFixture = false;
+  sshConnected = false;
+  openedUrls.length = 0;
   nativeWrites.length = 0;
   host = document.createElement('div');
   document.body.append(host);
@@ -142,3 +166,15 @@ for (const mode of ['Sign in', 'Create account']) {
     expect(requests.some(path => path.endsWith('/register') || path.endsWith('/password-login'))).toBe(false);
   });
 }
+
+
+test('connects the idle SSH instance once and opens its new forwarded endpoint', async () => {
+  sshFixture = true;
+  await act(async () => root.render(<I18nProvider><DesktopHostSwitcherDialog open onOpenChange={() => {}} /></I18nProvider>));
+  await settle();
+  const open = document.querySelector<HTMLButtonElement>('button[aria-label="Open in new window"]');
+  if (!open) throw new Error('Missing SSH new window action');
+  await act(async () => { open.click(); open.click(); });
+  expect(nativeWrites.filter(command => command === 'desktop_ssh_connect')).toHaveLength(1);
+  expect(openedUrls).toEqual(['http://127.0.0.1:49193/']);
+});

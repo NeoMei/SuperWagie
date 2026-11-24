@@ -220,6 +220,8 @@ walkthrough behaves the same on every surface. The panel header never wraps:
 then the step arrows and Generate, then the scope label), with the CSS in
 `index.css`.
 
+An open walkthrough can export Markdown or standalone HTML from the wide header or the options menu. Exports use the current visible result, including stale warnings, explanations and patches. The HTML has no external dependencies and writes model content as text.
+
 The walkthrough's stream column has a zero minimum width so long diff lines
 cannot widen it beyond the panel. Explanations wrap within that column; code
 uses the shared diff wrap preference and scrolls horizontally when wrap is off.
@@ -342,8 +344,23 @@ model reads where the lines come from ("in GitHub pull request #5543 at commit
 …"), because a pull request that is not checked out has other lines on disk,
 and the chip names it beside the file. Drafts show only on the diff they were
 written on, so a comment on a pull request's `app.ts` does not appear on the
-working tree's. A comment on uncommitted changes has no origin: its lines are
-the files on disk.
+working tree's. Drafts from staged changes keep their index side. A branch
+comparison records the file revision when its listing supplies one.
+
+The review source action opens Files for a working file or a read-only
+comparison inside Changes for a historical or original-side anchor.
+`ReviewDiffView` keeps the recorded commit, branch refs, provider, repository,
+and patchset. A provider that keeps patchsets receives the recorded revision.
+For a current-only provider with a recorded head, the returned change request
+context must report that head before the view accepts its patch. Branch
+anchors with a file revision check it before and after reading the patch.
+A changed head or branch-file revision shows the unavailable comparison state. The pending
+line jump waits for the selected side's rendered row and expires with its
+snapshot. Returning to Changes restores the retained view.
+
+Web and Electron use the context panel. Hosted mobile and Capacitor use their
+existing workspace drawer when it is available. VS Code opens eligible file
+anchors with its editor bridge.
 
 A file's header in Changes, mobile Changes and the walkthrough also takes a
 comment on the whole file (`components/comments/useWholeFileComment.tsx`): a

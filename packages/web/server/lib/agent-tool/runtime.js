@@ -129,6 +129,12 @@ const ALL_PARAMETER_PROPERTIES = {
   model: { type: 'string', description: "provider/model. session.create with an agent and no model runs that agent's bound model; with neither, it picks from models.list favorites or recents, or omits it; send and fork omit it to keep the session's model" },
   agent: { type: 'string', description: 'Only when the user asks. Default: build for a new session, unchanged for an existing one' },
   variant: { type: 'string', description: 'Only when the user asks' },
+  brief: { type: 'string', description: 'lead.brief: replace the brief with this Markdown' },
+  edits: { type: 'string', description: 'lead.brief: a JSON array of { find, replace } objects, each matching exactly once' },
+  needsYou: { type: 'string', description: 'lead.digest: a JSON array of { question, options, recommended } objects' },
+  now: { type: 'string', description: 'lead.digest: active work, one item per line' },
+  news: { type: 'string', description: 'lead.digest: progress worth reporting, one item per line' },
+  suggestions: { type: 'string', description: 'lead.digest: optional follow-ups, one item per line' },
   worktree: { type: 'string', description: 'Folder name of a new worktree, named after the task (fix-login-timeout). Required for session.moveToWorktree; on session.create only when the user asks, and uncommitted changes stay behind' },
   branch: { type: 'string', description: 'session.create: default the worktree name. work.name: the new name of a placeholder branch' },
   startRef: { type: 'string', description: "Ref the new branch starts from; default: the repository's default branch" },
@@ -911,9 +917,16 @@ export const createAgentToolRuntime = (dependencies) => {
     // falls through with no directory, exactly like the old "no directory" path.
     // Knowledge writes are attributed to the calling session, so no payload
     // field may stand in for the session OpenCode reported.
-    const knowledgeAction = OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action);
-    const libraryAction = OPENCHAMBER_LIBRARY_ACTIONS.includes(action);
-    let contextDirectory = knowledgeAction || libraryAction ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
+    const leadAction = action.startsWith('lead.');
+    const { authenticatedAgent, ...executionOptions } = options;
+    if (leadAction && authenticatedAgent !== true) {
+      return createResult({ ok: false, action, error: { message: 'Lead actions require an authenticated SuperWagie tool call', kind: 'usage' } });
+    }
+    const requiresSessionDirectory = leadAction
+      || action === 'secret.run'
+      || OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action)
+      || OPENCHAMBER_LIBRARY_ACTIONS.includes(action);
+    let contextDirectory = requiresSessionDirectory ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
     const sessionID = asNonEmptyString(payload.sessionID);
     if (!contextDirectory && sessionID && typeof resolveSessionDirectory === 'function') {
       contextDirectory = await Promise.resolve(resolveSessionDirectory(sessionID))
@@ -922,11 +935,12 @@ export const createAgentToolRuntime = (dependencies) => {
     }
     try {
       // The calling session scopes browser actions to that session's page.
-      const contextSessionId = knowledgeAction || libraryAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
+      const contextSessionId = requiresSessionDirectory ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
       // The call id lets a page that waits for an answer be found again
       // when the user answers it.
       const contextCallId = asNonEmptyString(payload.callID);
-      const actionOptions = { ...options };
+      const actionOptions = { ...executionOptions };
+      if (leadAction) actionOptions.authenticatedAgent = true;
       if (contextSessionId) actionOptions.contextSessionId = contextSessionId;
       if (contextCallId) actionOptions.contextCallId = contextCallId;
       if (asNonEmptyString(payload.tool) === 'openchamber_secret') actionOptions.authorized = true;
@@ -984,7 +998,7 @@ export const createAgentToolRuntime = (dependencies) => {
       res.once('close', abortOnDisconnect);
       const untrack = trackInflight(asNonEmptyString(req.body?.sessionID), controller);
       try {
-        return res.json(await execute(req.body, { signal: controller.signal }));
+        return res.json(await execute(req.body, { signal: controller.signal, authenticatedAgent: true }));
       } catch (error) {
         return res.json(createResult({
           ok: false,

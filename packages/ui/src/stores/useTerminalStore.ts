@@ -56,6 +56,7 @@ export type TerminalTab = {
   id: string;
   terminalSessionId: string | null;
   lifecycle: TerminalTabLifecycle;
+  mode?: TerminalServerSession['mode'];
   purpose: TerminalTabPurpose;
   label: string;
   iconKey: string | null;
@@ -96,7 +97,7 @@ interface TerminalStore {
   matchesActionExecution: (directory: string, tabId: string, executionId: string | null | undefined) => boolean;
   captureStartedActionMutationRevisions: (directory: string) => TerminalActionMutationRevisions;
 
-  createTab: (directory: string) => string;
+  createTab: (directory: string, commandSession?: { sessionId: string; status: 'running' | 'exited' }) => string;
   reconcileServerSessions: (directory: string, serverSessions: TerminalServerSession[], options?: ReconcileServerSessionsOptions) => void;
   setActiveTab: (directory: string, tabId: string) => void;
   setTabLabel: (directory: string, tabId: string, label: string) => void;
@@ -165,6 +166,7 @@ type PersistedTerminalTabPurpose =
 
 type PersistedTerminalTab = Pick<TerminalTab, 'id' | 'label' | 'iconKey' | 'createdAt'> & {
   purpose?: PersistedTerminalTabPurpose;
+  mode?: 'command';
 };
 
 type PersistedDirectoryTerminalState = {
@@ -343,11 +345,12 @@ const partializeTerminalStore = (state: TerminalStore): PersistedTerminalStoreSt
       directory,
       {
         activeTabId: dirState.activeTabId,
-        tabs: dirState.tabs.map((tab) => ({
+        tabs: dirState.tabs.map((tab): PersistedTerminalTab => ({
           id: tab.id,
           label: tab.label,
           iconKey: tab.iconKey,
           createdAt: tab.createdAt,
+          ...(tab.mode === 'command' && tab.purpose.type === 'terminal' ? { mode: 'command' } : {}),
           purpose: tab.purpose.type === 'project-action'
             ? { type: 'project-action', actionId: tab.purpose.actionId }
             : { type: 'terminal' },
@@ -444,13 +447,13 @@ export const useTerminalStore = create<TerminalStore>()(
           return snapshot;
         },
 
-        createTab: (directory: string) => {
+        createTab: (directory, commandSession) => {
           const key = normalizeDirectory(directory);
           if (!key) {
             return 'tab-invalid';
           }
 
-          const tabId = createTerminalTabId();
+          const tabId = commandSession?.sessionId ?? createTerminalTabId();
 
           set((state) => {
             const newSessions = new Map(state.sessions);
@@ -459,6 +462,12 @@ export const useTerminalStore = create<TerminalStore>()(
             const nextTabId = state.nextTabId + 1;
             const label = nextDefaultTabLabel(existing?.tabs ?? []);
             const tab = createEmptyTab(tabId, label);
+            if (commandSession) {
+              if (existing?.tabs.some((tab) => tab.id === tabId)) return state;
+              tab.mode = 'command';
+              tab.terminalSessionId = tabId;
+              tab.lifecycle = commandSession.status;
+            }
 
             if (!existing) {
               newSessions.set(key, createEmptyDirectoryState(tab));
@@ -566,6 +575,7 @@ export const useTerminalStore = create<TerminalStore>()(
                 if (
                   current.terminalSessionId !== session.sessionId
                   || current.lifecycle !== nextLifecycle
+                  || current.mode !== session.mode
                   || current.isConnecting !== false
                   || current.createdAt !== nextCreatedAt
                   || purposeChanged
@@ -574,6 +584,7 @@ export const useTerminalStore = create<TerminalStore>()(
                     ...current,
                     terminalSessionId: session.sessionId,
                     lifecycle: nextLifecycle,
+                    mode: session.mode,
                     purpose: nextPurpose,
                     isConnecting: false,
                     createdAt: nextCreatedAt,
@@ -602,6 +613,7 @@ export const useTerminalStore = create<TerminalStore>()(
               const tab: TerminalTab = {
                 ...createEmptyTab(session.sessionId, label),
                 terminalSessionId: session.sessionId,
+                mode: session.mode,
                 lifecycle: sessionPurpose?.type === 'project-action' ? toActionLifecycle(session.status) : session.status,
                 purpose: nextPurpose,
                 iconKey,
@@ -1254,7 +1266,8 @@ export const useTerminalStore = create<TerminalStore>()(
                 label: typeof rawTab.label === 'string' ? rawTab.label : 'Terminal',
                 iconKey: typeof rawTab.iconKey === 'string' ? rawTab.iconKey : null,
                 terminalSessionId: null,
-                lifecycle: 'idle',
+                lifecycle: rawTab.mode === 'command' ? 'exited' : 'idle',
+                mode: rawTab.mode === 'command' ? 'command' : undefined,
                 purpose,
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
                 isConnecting: false,

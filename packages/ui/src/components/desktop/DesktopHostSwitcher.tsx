@@ -267,6 +267,8 @@ export function DesktopHostSwitcherDialog({
   const [isLoading, setIsLoading] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [switchingHostId, setSwitchingHostId] = React.useState<string | null>(null);
+  const openingHostsRef = React.useRef(new Set<string>());
+  const [openingHosts, setOpeningHosts] = React.useState<ReadonlySet<string>>(() => new Set());
   const [sshHostIds, setSshHostIds] = React.useState<Record<string, true>>({});
   const [sshStatusesById, setSshStatusesById] = React.useState<Record<string, DesktopSshInstanceStatus>>({});
   // "Connecting to {host}" while a switch waits on the host: an SSH tunnel
@@ -744,23 +746,45 @@ export function DesktopHostSwitcherDialog({
     await persist(configHosts, next);
   }, [configHosts, persist]);
 
-  const openInNewWindow = React.useCallback((host: DesktopHost) => {
-    const reportFailure = (err: unknown) => {
-      toast.error(t('desktopHostSwitcher.error.failedToOpenNewWindow'), {
-        description: err instanceof Error ? err.message : String(err),
+  const openInNewWindow = React.useCallback(async (selectedHost: DesktopHost) => {
+    const hostId = selectedHost.id;
+    if (openingHostsRef.current.has(hostId) || switchingHostId === hostId) return;
+    openingHostsRef.current.add(hostId);
+    setOpeningHosts(new Set(openingHostsRef.current));
+
+    try {
+      let host = selectedHost;
+      if (isElectronShell() && hostId !== LOCAL_HOST_ID && sshHostIds[hostId]) {
+        if (sshStatusesById[hostId]?.phase !== 'ready') {
+          await desktopSshConnect(hostId);
+          await waitForSshReady(hostId, SSH_CONNECT_TIMEOUT_MS, (status) => {
+            setSshStatusesById((previous) => ({ ...previous, [status.id]: status }));
+          });
+        }
+        const forwarded = (await desktopHostsGet()).hosts.find((entry) => entry.id === hostId);
+        if (!forwarded) throw new Error('SSH host is no longer available');
+        host = forwarded;
+        setConfigHosts((previous) => previous.map((entry) => entry.id === hostId ? forwarded : entry));
+      }
+      // The new window resolves a relay-capable host's transport independently.
+      if (host.relay && hostId !== LOCAL_HOST_ID) {
+        await desktopOpenNewWindowForHost(hostId);
+        return;
+      }
+      const origin = hostId === LOCAL_HOST_ID ? localOrigin : getDesktopHostApiUrl(host);
+      if (!origin) return;
+      await desktopOpenNewWindowAtUrl(toNavigationUrl(origin), {
+        clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null,
       });
-    };
-    // Relay-capable hosts can't be expressed as a fixed window URL — the new
-    // window boots the local UI and picks direct-vs-tunnel itself.
-    if (host.relay && host.id !== LOCAL_HOST_ID) {
-      desktopOpenNewWindowForHost(host.id).catch(reportFailure);
-      return;
+    } catch (error) {
+      toast.error(t('desktopHostSwitcher.error.failedToOpenNewWindow'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      openingHostsRef.current.delete(hostId);
+      setOpeningHosts(new Set(openingHostsRef.current));
     }
-    const origin = host.id === LOCAL_HOST_ID ? localOrigin : getDesktopHostApiUrl(host);
-    if (!origin) return;
-    const target = toNavigationUrl(origin);
-    desktopOpenNewWindowAtUrl(target, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch(reportFailure);
-  }, [localOrigin, t]);
+  }, [localOrigin, sshHostIds, sshStatusesById, switchingHostId, t]);
 
   const switchToLocal = React.useCallback(async () => {
     switchTokenRef.current += 1;
@@ -1080,12 +1104,14 @@ export function DesktopHostSwitcherDialog({
                               )}
                             onClick={(e) => {
                               e.stopPropagation();
-                              openInNewWindow(host);
+                              void openInNewWindow(host);
                             }}
-                            disabled={isBlockedDisplayStatus(statusKind)}
+                            disabled={isBlockedDisplayStatus(statusKind) || switchingHostId === host.id || openingHosts.has(host.id)}
+                            aria-busy={openingHosts.has(host.id)}
                             aria-label={t('desktopHostSwitcher.actions.openInNewWindowAria')}
                           >
-                            <Icon name="window" className="h-4 w-4" />
+                            <Icon name={openingHosts.has(host.id) ? 'loader-4' : 'window'}
+                              className={cn('h-4 w-4', openingHosts.has(host.id) && 'animate-spin')} />
                           </button>
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>

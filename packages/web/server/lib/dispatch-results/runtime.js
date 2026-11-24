@@ -18,7 +18,9 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { asNonEmptyString } from '../shared/guards.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { isAdmissionManagedProvider } from '../session-lead/runtime.js';
 
 const FILE_NAME = 'dispatch-results.json';
 const FILE_VERSION = 1;
@@ -59,6 +61,9 @@ const entrySchema = z.object({
   // The newest end-of-run record before the dispatch; null when there was
   // none. Entries written before this field compare clock times instead.
   afterIdleId: afterIdleSchema.optional(),
+  directory: z.string().min(1).optional(),
+  parentDirectory: z.string().min(1).optional(),
+  resume: z.boolean().optional(),
   messageId: messageIdSchema.optional(),
   deliveryOutcome: z.object({ state: z.enum(['completed', 'error', 'cancelled']), text: z.string(), errorMessage: z.string().optional() }).optional(),
   deliveryTitle: z.string().optional(),
@@ -313,10 +318,11 @@ export function createDispatchResultsRuntime({
 
   // --- OpenCode access -----------------------------------------------------
 
-  const openCodeRequest = async (fetchPath, { method = 'GET', body, query } = {}) => {
+  const openCodeRequest = async (fetchPath, { method = 'GET', body, query, directory } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const search = new URLSearchParams(query || {}).toString();
     const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
+    if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
     const init = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
     if (body) {
       headers['Content-Type'] = 'application/json';
@@ -356,7 +362,10 @@ export function createDispatchResultsRuntime({
     let sessionRead = false;
     const partial = () => records.length > 0 ? { kind: 'ended', title, records, complete: false, historyUnavailable: true } : null;
     try {
-      const session = parse(sessionRecordSchema, await openCodeRequest(`/api/session/${encoded}`));
+      const scope = pendingFor(sessionId).find((entry) => entry.directory)?.directory;
+      const record = await openCodeRequest(`/api/session/${encoded}`);
+      const session = parse(sessionRecordSchema, record);
+      const directory = scope ? record?.location?.directory || scope : undefined;
       sessionRead = true;
       title = session?.title?.trim() ?? '';
       const seen = new Set();
@@ -366,7 +375,7 @@ export function createDispatchResultsRuntime({
         const query = { limit: String(MESSAGE_PAGE_LIMIT), order: 'desc' };
         if (cursor) query.cursor = cursor;
         const page = parse(messagePageSchema, await openCodeRequest(`/api/session/${encoded}/message`, {
-          query,
+          query, directory,
         }));
         if (!page) return partial();
         records.push(...page.data);
@@ -393,10 +402,20 @@ export function createDispatchResultsRuntime({
     // value made every parent look archived, so none was ever woken. A failed
     // lookup wakes: the agent asked for this result.
     const archived = await Promise.resolve(isSessionArchived(entry.parentSessionId)).catch(() => false);
-    const resume = archived !== true;
+    let resume = archived !== true && entry.resume !== false;
+    const target = `/api/session/${encodeURIComponent(entry.parentSessionId)}`;
+    let directory = entry.parentDirectory;
     try {
-      await openCodeRequest(`/api/session/${encodeURIComponent(entry.parentSessionId)}/synthetic`, {
-        method: 'POST',
+      if (entry.resume !== undefined) {
+        // Provider selection and location may have changed after dispatch.
+        // Persist the result even if a new managed prompt cannot be admitted.
+        const parent = await openCodeRequest(target);
+        directory = parent?.location?.directory || directory;
+        const provider = asNonEmptyString(parent?.model?.providerID);
+        resume = resume && Boolean(provider) && !isAdmissionManagedProvider(provider);
+      }
+      await openCodeRequest(`${target}/synthetic`, {
+        method: 'POST', directory,
         body: { id: entry.messageId, ...message, delivery: 'steer', resume },
       });
       return true;
@@ -454,7 +473,8 @@ export function createDispatchResultsRuntime({
       const delivered = new Set();
       for (const entry of saved) {
         if (!delivered.has(entry.messageId)) {
-          await deliver(entry, buildDispatchResultMessage({ sessionId, title: entry.deliveryTitle ?? '', outcome: entry.deliveryOutcome }));
+          const deliveryEntry = saved.find((item) => item.messageId === entry.messageId && item.resume !== undefined) ?? entry;
+          await deliver(deliveryEntry, buildDispatchResultMessage({ sessionId, title: entry.deliveryTitle ?? '', outcome: entry.deliveryOutcome }));
           delivered.add(entry.messageId);
         }
         entries.delete(entry.id);
@@ -517,7 +537,9 @@ export function createDispatchResultsRuntime({
           title: entry.deliveryTitle ?? (watched.kind === 'ended' ? watched.title : ''),
           outcome: entry.deliveryOutcome ?? outcome,
         });
-        await deliver(entry, message);
+        const deliveryEntry = group.find((item) => item.entry.resume === false)?.entry
+          ?? group.find((item) => item.entry.resume === true)?.entry ?? entry;
+        await deliver(deliveryEntry, message);
         for (const item of group) entries.delete(item.entry.id);
         await persist();
         console.log(`[dispatch-results] delivered the ${outcome.state} result of ${sessionId} to ${entry.parentSessionId}`);
@@ -558,7 +580,7 @@ export function createDispatchResultsRuntime({
    * and delivers its result to `parentSessionId`. Resolves once the entry is
    * on disk, so a restart right after the tool answers still delivers.
    */
-  const register = async ({ parentSessionId, sessionId, dispatchedAt, afterIdleId }) => {
+  const register = async ({ parentSessionId, sessionId, dispatchedAt, afterIdleId, directory, parentDirectory, resume }) => {
     const parent = parse(sessionIdSchema, parentSessionId);
     const watched = parse(sessionIdSchema, sessionId);
     if (!parent || !watched) throw new TypeError('parentSessionId and sessionId must be session ids');
@@ -570,6 +592,9 @@ export function createDispatchResultsRuntime({
     // Kept only when it is a real baseline (an id, or null for "none yet").
     const baseline = afterIdleSchema.safeParse(afterIdleId);
     if (afterIdleId !== undefined && baseline.success) entry.afterIdleId = baseline.data;
+    if (directory) entry.directory = directory;
+    if (parentDirectory) entry.parentDirectory = parentDirectory;
+    if (resume === true || resume === false) entry.resume = resume;
     entries.set(entry.id, entry);
     if (entries.size > MAX_ENTRIES) {
       const oldest = Array.from(entries.values())

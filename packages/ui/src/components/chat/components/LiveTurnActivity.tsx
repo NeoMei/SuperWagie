@@ -29,6 +29,7 @@ interface TurnFoldProps {
     hasLaterAssistant: boolean;
     expanded: boolean;
     finalMessageId: string | undefined;
+    keepText?: boolean;
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }
@@ -37,19 +38,22 @@ interface TurnFoldProps {
  * The fold's header. Folded, it also draws what stays in view: a working
  * turn's latest steps, then the pages it showed and the steps after them.
  */
-export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, onToggle, renderMessage }: TurnFoldProps) {
+export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, keepText = false, onToggle, renderMessage }: TurnFoldProps) {
     const { t } = useI18n();
-    const { finalMessage, activityMessages, settled, isExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId);
+    const { finalMessage, activityMessages, settled, isExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId, keepText);
     // Folded, a working turn shows only its latest rows (the header counts
     // the earlier ones) and a settled one shows none.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
     const groups = getActivityGroups(turn.assistantMessages);
-    const trim = React.useMemo(() => (expanded
-        ? null
-        : planActivityTrim(
-            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces, groups).length),
+    const trim = React.useMemo(() => {
+        if (expanded) return null;
+        const shownBelow = keepText ? new Set(pages.map((part) => part.id)) : null;
+        return planActivityTrim(
+            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces, groups)
+                .filter((part) => !shownBelow?.has(part.id)).length),
             LIVE_ACTIVITY_VISIBLE_ROWS,
-        )), [activityMessages, expanded, groups, showReasoningTraces]);
+        );
+    }, [activityMessages, expanded, groups, keepText, pages, showReasoningTraces]);
     const shownMessages = React.useMemo(
         () => (trim && trim.hiddenMessages > 0 ? activityMessages.slice(trim.hiddenMessages) : activityMessages),
         [activityMessages, trim],
@@ -57,8 +61,8 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     const skippedMessageId = trim && trim.skipRows > 0 ? shownMessages[0]?.info.id : undefined;
     const skippedRows = trim?.skipRows ?? 0;
     const rowSkip = React.useMemo(
-        () => (skippedMessageId ? { messageId: skippedMessageId, rows: skippedRows } : null),
-        [skippedMessageId, skippedRows],
+        () => (skippedMessageId ? { messageId: skippedMessageId, rows: skippedRows, excludeHoisted: keepText } : null),
+        [skippedMessageId, skippedRows, keepText],
     );
     const hiddenRows = trim?.hiddenRows ?? 0;
     const rowsRef = React.useRef<HTMLDivElement>(null);
@@ -69,7 +73,12 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     // While the turn works, what the agent does after its last page (more
     // steps, the reply it is still writing) is drawn below the page, in the
     // order it happened.
-    const lastPageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
+    const lastPageMessageId = React.useMemo(() => {
+        if (finalMessage) return undefined;
+        // A note (or a form kept alongside it) cannot open up the steps below it.
+        const boundaryPages = keepText ? getShownPages(turn.assistantMessages) : pages;
+        return boundaryPages.at(-1)?.messageID;
+    }, [finalMessage, keepText, pages, turn.assistantMessages]);
     const [messagesAbovePages, messagesBelowPages] = React.useMemo(() => {
         const pageIndex = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) : -1;
         if (pageIndex < 0) return [shownMessages, NO_MESSAGES];
@@ -144,7 +153,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                             </div>
                         </LiveActivityCollapse>
                         {!finalMessage && pages.length > 0 ? <TurnPages pages={pages} /> : null}
-                        {messagesBelowPages.length > 0 ? (
+                        {messagesBelowPages.length > 0 && (isExpanded || !keepText) ? (
                             <ActivityRowSkipContext.Provider value={rowSkip}>
                                 {messagesBelowPages.map((message) => (
                                     isActivityContinuationOnlyMessage(message, groups) ? null

@@ -44,23 +44,7 @@ interface SessionTabsStore {
   removeTabs: (sessionIds: readonly string[]) => void;
 }
 
-const MAX_PINNED_SESSION_TABS = 10;
-
 type PersistedSessionTabs = { tabIds: string[]; previewTabId: string | null };
-
-/**
- * Soft cap on pinned tabs: past it the oldest pinned tab leaves the working
- * set. The newly opened tab lands last, so it is never the one evicted.
- */
-const capPinnedTabs = (tabIds: string[], previewTabId: string | null): string[] => {
-  let excess = tabIds.filter((id) => id !== previewTabId).length - MAX_PINNED_SESSION_TABS;
-  if (excess <= 0) return tabIds;
-  return tabIds.filter((id) => {
-    if (excess <= 0 || id === previewTabId) return true;
-    excess -= 1;
-    return false;
-  });
-};
 
 export const useSessionTabsStore = create<SessionTabsStore>()(
   devtools(
@@ -93,7 +77,7 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
 
           if (pinned) {
             set({
-              tabIds: capPinnedTabs([...tabIds, sessionId], currentPreview),
+              tabIds: [...tabIds, sessionId],
               previewTabId: currentPreview,
               pinOnOpenIds: nextPinOnOpenIds,
             });
@@ -112,7 +96,7 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
           const { tabIds, previewTabId, pinOnOpenIds } = get();
           if (tabIds.includes(sessionId)) {
             if (previewTabId !== sessionId) return;
-            set({ tabIds: capPinnedTabs(tabIds, null), previewTabId: null });
+            set({ previewTabId: null });
             return;
           }
           if (pinOnOpenIds.includes(sessionId)) return;
@@ -143,7 +127,7 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
           const next = [...tabIds];
           next.splice(to, 0, ...next.splice(from, 1));
           const nextPreview = previewTabId === activeId ? null : previewTabId;
-          set({ tabIds: capPinnedTabs(next, nextPreview), previewTabId: nextPreview });
+          set({ tabIds: next, previewTabId: nextPreview });
         },
 
         removeTabs: (sessionIds) => {

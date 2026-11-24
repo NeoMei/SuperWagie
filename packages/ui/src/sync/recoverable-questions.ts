@@ -47,6 +47,8 @@ export const resetRecoverableQuestions = (): void => {
 
 const toolKey = (tool: QuestionToolLink): string => `${tool.messageID}\u0000${tool.toolID}`
 
+export const recoverableQuestionKey = (sessionID: string, formID: string): string => `${sessionID}\u0000${formID}`
+
 const questionToolSchema = z.object({ messageID: z.string().min(1), id: z.string().min(1) })
 
 /** A session form can be linked by the question tool or by a deferred plugin. */
@@ -109,8 +111,9 @@ function forgetReleasedForm(sessionID: string, formID: string): void {
 export function classifyQuestionToolError(error: string, errorType: string | undefined, local: boolean): QuestionAskOutcome {
   if (local) return error === "Interrupted" ? "turn-death" : "unresolved"
   if (error === DEFERRED_QUESTION_NOTE) return "deferred"
-  if (errorType !== undefined && errorType !== "aborted") return "dismissed"
-  if (error === "Tool execution interrupted") return "turn-death"
+  if (error === "The user dismissed this question") return "dismissed"
+  if (errorType !== undefined && errorType !== "aborted" && errorType !== "unknown") return "dismissed"
+  if (error === "All fibers interrupted without error" || error.startsWith("Tool execution interrupted")) return "turn-death"
   if (error === "Interaction cancelled because the location shut down") return "shutdown"
   return "unresolved"
 }
@@ -135,9 +138,9 @@ export function deriveRecoveredQuestions(
   scopeSessionIds: ReadonlySet<string>,
 ): RecoveredQuestion[] {
   const recovered: RecoveredQuestion[] = []
-  for (const [formID, seen] of recovery.seen) {
-    if (recovery.outcomes.has(formID) || !scopeSessionIds.has(seen.sessionID)) continue
-    if (state.form[seen.sessionID]?.some((form) => form.id === formID)) continue
+  for (const [key, seen] of recovery.seen) {
+    if (recovery.outcomes.has(key) || !scopeSessionIds.has(seen.sessionID)) continue
+    if (state.form[seen.sessionID]?.some((form) => form.id === seen.form.id)) continue
     const candidate = state.part[seen.tool.messageID]?.find((part) => part.id === seen.tool.toolID)
     const part = candidate?.type === "tool" ? candidate : undefined
     // A later server event can revoke a locally manufactured interruption.
@@ -163,7 +166,7 @@ function noteDeferredAnswerMessage(message: Message): void {
   const answer = deferredAnswerSchema.safeParse(message.metadata)
   if (!answer.success) return
   const id = answer.data.openchamber.deferredAnswer.formID
-  if (useRecoverableQuestionsStore.getState().seen.get(id)?.sessionID === message.sessionID) noteLocalFormReplied(id)
+  noteLocalFormReplied(message.sessionID, id)
 }
 
 /** Retain terminal authority from a committed transcript before history is trimmed. */
@@ -180,7 +183,7 @@ export function noteQuestionToolSnapshot(
     const candidate = parts[seen.tool.messageID]?.find((part) => part.id === seen.tool.toolID)
     const outcome = partAskOutcome(candidate?.type === "tool" ? candidate : undefined)
     if (outcome === "deferred" || recovery.dispositions.get(toolKey(seen.tool))?.outcome === "deferred") {
-      needsDeferredAnswerScan ||= !recovery.outcomes.has(seen.form.id)
+      needsDeferredAnswerScan ||= !recovery.outcomes.has(recoverableQuestionKey(seen.sessionID, seen.form.id))
     }
     if (outcome === "answered" || outcome === "dismissed" || outcome === "shutdown" || outcome === "deferred") {
       recordDisposition(sessionID, seen.tool, outcome)
@@ -193,8 +196,9 @@ function noteQuestionFormSeen(form: FormRequest, directory: string): void {
   const tool = questionToolLink(form)
   if (!tool) return
   useRecoverableQuestionsStore.setState((state) => {
-    if (state.seen.has(form.id)) return state
-    const seen = new Map(state.seen).set(form.id, { form, directory, sessionID: form.sessionID, tool })
+    const key = recoverableQuestionKey(form.sessionID, form.id)
+    if (state.seen.has(key)) return state
+    const seen = new Map(state.seen).set(key, { form, directory, sessionID: form.sessionID, tool })
     const outcomes = new Map(state.outcomes)
     const dispositions = new Map(state.dispositions)
     while (seen.size > MAX_SEEN_QUESTIONS) {
@@ -233,30 +237,32 @@ export function moveRecoveredQuestions(sessionID: string, directory: string): vo
   })
 }
 
-function closeQuestion(formID: string, outcome: ClosedOutcome): void {
+function closeQuestion(sessionID: string, formID: string, outcome: ClosedOutcome): void {
+  const key = recoverableQuestionKey(sessionID, formID)
   useRecoverableQuestionsStore.setState((state) => {
-    if (!state.seen.has(formID) || state.outcomes.has(formID)) return state
-    return { outcomes: new Map(state.outcomes).set(formID, outcome) }
+    if (!state.seen.has(key) || state.outcomes.has(key)) return state
+    return { outcomes: new Map(state.outcomes).set(key, outcome) }
   })
 }
 
-export const noteLocalFormReplied = (formID: string): void => closeQuestion(formID, "answered")
-export const noteLocalFormCancelled = (formID: string): void => closeQuestion(formID, "dismissed")
+export const noteLocalFormReplied = (sessionID: string, formID: string): void => closeQuestion(sessionID, formID, "answered")
+export const noteLocalFormCancelled = (sessionID: string, formID: string): void => closeQuestion(sessionID, formID, "dismissed")
 
-export function submitRecoveredAnswer(formID: string, send: () => Promise<void>): Promise<void> {
+export function submitRecoveredAnswer(sessionID: string, formID: string, send: () => Promise<void>): Promise<void> {
+  const key = recoverableQuestionKey(sessionID, formID)
   const state = useRecoverableQuestionsStore.getState()
-  if (state.outcomes.has(formID)) return Promise.resolve()
-  const existing = state.submissions.get(formID)
+  if (state.outcomes.has(key)) return Promise.resolve()
+  const existing = state.submissions.get(key)
   if (existing) return existing
   const run = send().finally(() => {
     useRecoverableQuestionsStore.setState((current) => {
-      if (current.submissions.get(formID) !== run) return current
+      if (current.submissions.get(key) !== run) return current
       const submissions = new Map(current.submissions)
-      submissions.delete(formID)
+      submissions.delete(key)
       return { submissions }
     })
   })
-  useRecoverableQuestionsStore.setState((current) => ({ submissions: new Map(current.submissions).set(formID, run) }))
+  useRecoverableQuestionsStore.setState((current) => ({ submissions: new Map(current.submissions).set(key, run) }))
   return run
 }
 
@@ -277,16 +283,17 @@ function dropSession(sessionID: string): void {
   useRecoverableQuestionsStore.setState((state) => {
     const seen = new Map(state.seen)
     const outcomes = new Map(state.outcomes)
-    for (const [formID, entry] of seen) {
+    for (const [key, entry] of seen) {
       if (entry.sessionID !== sessionID) continue
-      seen.delete(formID)
-      outcomes.delete(formID)
+      seen.delete(key)
+      outcomes.delete(key)
     }
     const dispositions = new Map(state.dispositions)
     for (const [key, entry] of dispositions) if (entry.sessionID === sessionID) dispositions.delete(key)
     const prefix = `${sessionID}\u0000`
     const releasedForms = new Set([...state.releasedForms].filter((key) => !key.startsWith(prefix)))
-    return { seen, outcomes, dispositions, releasedForms }
+    const submissions = new Map([...state.submissions].filter(([key]) => !key.startsWith(prefix)))
+    return { seen, outcomes, dispositions, releasedForms, submissions }
   })
 }
 
@@ -299,7 +306,7 @@ export function applyRecoverableQuestionEvents(directory: string, events: readon
       case "form.settled":
         forgetReleasedForm(event.properties.sessionID, event.properties.formID)
         // Turn death cancels its form too; only a reply is conclusive here.
-        if (event.properties.disposition === "replied") noteLocalFormReplied(event.properties.formID)
+        if (event.properties.disposition === "replied") noteLocalFormReplied(event.properties.sessionID, event.properties.formID)
         break
       case "message.updated":
         noteDeferredAnswerMessage(event.properties.info)

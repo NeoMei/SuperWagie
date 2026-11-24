@@ -28,7 +28,9 @@ import { guestMessageSchema } from '@openchamber/sdk/schemas';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getReadableThemeColors } from '@/lib/theme/readableColors';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { ChatSurfaceContext } from '@/components/chat/chatSurfaceContextValue';
+import { useChatColumnSession } from '@/components/chat/chatColumnSession';
+import { resolveEffectiveDirectory, useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
@@ -60,6 +62,7 @@ import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
 import { resolveOpenFileTarget } from '@/lib/guests/openFileTarget';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { openGuestUrl } from '@/lib/guests/open-url';
+import { openGuestWalkthrough, readWalkthroughRepository, supportsGuestWalkthrough } from '@/lib/guests/open-walkthrough';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -197,6 +200,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onPopoverActivity,
 }) => {
   const { t, locale } = useI18n();
+  const isMiniChat = React.useContext(ChatSurfaceContext) === 'mini-chat';
+  const chatColumn = useChatColumnSession();
+  const followsMainDirectory = !chatColumn && !popoverHost && pinnedDirectory === undefined && !backgroundAction
+    && (surface !== 'status' || statusDirectory === undefined);
   const { currentTheme } = useThemeSystem();
   const effectiveDirectory = useEffectiveDirectory();
   const contentDirectory = panelContentDirectory(useDraftSpaceTarget(), effectiveDirectory);
@@ -351,6 +358,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   readyRef.current = ready;
   const directoryRef = React.useRef(directory);
   directoryRef.current = directory;
+  const walkthroughScopeRef = React.useRef({ directory, contentDirectory });
+  if (walkthroughScopeRef.current.directory !== directory || walkthroughScopeRef.current.contentDirectory !== contentDirectory) {
+    walkthroughScopeRef.current = { directory, contentDirectory };
+  }
   const effectiveDirectoryRef = React.useRef(effectiveDirectory);
   effectiveDirectoryRef.current = effectiveDirectory;
   const contentDirectoryRef = React.useRef(contentDirectory);
@@ -984,6 +995,24 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           supported: !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
           });
         },
+        openWalkthrough: (base) => {
+          const scope = walkthroughScopeRef.current;
+          const apis = getRegisteredRuntimeAPIs();
+          const git = apis?.git;
+          const sourceControl = apis?.sourceControl;
+          return openGuestWalkthrough({
+            base,
+            directory: scope.directory || null,
+            supported: supportsGuestWalkthrough(isMiniChat),
+            ownsScope: () => ownsFrame() && walkthroughScopeRef.current === scope && frameDocumentRef.current === requestDocument
+              && getRegisteredRuntimeAPIs() === apis
+              && (!followsMainDirectory || (
+                resolveEffectiveDirectory() === scope.directory && Boolean(scope.contentDirectory)
+                && spaceIdOfDirectory(scope.contentDirectory) === spaceIdOfDirectory(scope.directory)
+              )),
+            readRepository: git && sourceControl ? (dir, isCurrent) => readWalkthroughRepository(git, sourceControl, dir, isCurrent) : null,
+          });
+        },
         resize: (height) => {
           onResizeRef.current?.(height);
         },
@@ -1082,7 +1111,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);
     };
-  }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, frameKey, guestEnabled, guestEntry, headless, popover, postToGuest, pushHostState, refreshOauth, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface]);
+  }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, followsMainDirectory, frameKey, guestEnabled, guestEntry, headless, isMiniChat, popover, postToGuest, pushHostState, refreshOauth, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface]);
 
   // A project switch retires header callbacks, not the still-mounted frame's
   // workspace observers or unrelated in-flight requests.

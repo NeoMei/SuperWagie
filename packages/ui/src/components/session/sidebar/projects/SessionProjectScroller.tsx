@@ -1,3 +1,4 @@
+import { createProjectLead, useLeadAvailability } from '@/sync/session-lead';
 import React from 'react';
 import {
   DndContext,
@@ -159,6 +160,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   // A project's isolated spaces page: while the feature's switch is on, and never in VS Code (decision 16).
+  const leadsAvailable = useLeadAvailability();
   const spacesPageAvailable = useUIStore((state) => state.isolatedSpacesEnabled) && !isVSCodeRuntime();
   const openProjectOnBoard = useOpenProjectOnBoard();
   const [folderDeleteConfirm, setFolderDeleteConfirm] = React.useState<DeleteFolderConfirmState>(null);
@@ -409,6 +411,17 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           });
           actions.openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.normalizedPath });
         }}
+        onNewLead={leadsAvailable && project.normalizedPath ? async () => {
+          const directory = project.normalizedPath;
+          prepareSessionProjectAction({
+            projectId: project.id,
+            mobileVariant: view.mobileVariant,
+            closeMobileSwitcher: true,
+            setActiveProjectIdOnly: actions.setActiveProjectIdOnly,
+            setSessionSwitcherOpen: actions.setSessionSwitcherOpen,
+          });
+          await createProjectLead(directory);
+        } : undefined}
         onNewWorktreeSession={() => {
           prepareSessionProjectAction({
             projectId: project.id,
@@ -533,7 +546,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     return <div className="py-1 text-start typography-micro text-muted-foreground" style={{ paddingInlineStart: rowTextInset }}>
       {t('sessions.sidebar.group.empty.noArchivedSessions')}
     </div>;
-  }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
+  }, [actions, deleteFolder, files, leadsAvailable, model, openProjectFolder, openProjectOnBoard, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => {
     if (row.kind === 'project-header') return activeDrag?.kind === 'group' ? [] : [row.section.project.id];

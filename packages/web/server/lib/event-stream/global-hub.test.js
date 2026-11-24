@@ -356,3 +356,22 @@ describe('events of isolated spaces in the global hub', () => {
     expect(seen).toEqual([null, null]);
   });
 });
+
+it('drops stale turn boundaries independently for the host and each isolated space', async () => {
+  const hub = createDeltaHub({ blocks: [] });
+  const received = [];
+  hub.subscribeEvent((event) => received.push(event), { spaces: true });
+  const push = (id, seq, type, spaceId = null) => hub.injectEvent({
+    payload: { id, type, durable: { aggregateID: 'shared', seq }, data: { sessionID: 'shared' } },
+    directory: '/repo',
+    spaceId,
+  });
+  push('host-start', 10, 'session.execution.started');
+  push('space-start', 2, 'session.execution.started', 'space');
+  push('old-host-end', 9, 'session.execution.succeeded');
+  push('space-end', 3, 'session.execution.succeeded', 'space');
+  push('host-end', 11, 'session.execution.succeeded');
+  expect(received.map((event) => event.payload.id)).toEqual(['host-start', 'space-start', 'space-end', 'host-end']);
+  expect(hub.replayAfter(received[0].eventId).map((event) => event.eventId))
+    .toEqual(received.slice(1).map((event) => event.eventId));
+});

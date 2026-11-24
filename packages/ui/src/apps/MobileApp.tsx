@@ -246,6 +246,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   }), []);
 
   const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean } | null = null) => {
+    if (diff) useUIStore.getState().setReviewDiffRequest(null);
     setPendingChangesDiff(diff);
     setWorkspaceTab('changes');
     setWorkspaceOpen(true);
@@ -311,6 +312,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         openChangesSurface(diffPath ? { path: diffPath, staged: staged === true } : null);
       },
       openFiles: () => openFilesSurface(),
+      openTerminal: () => {
+        setPendingChangesDiff(null);
+        setWorkspaceTab('terminal');
+        setWorkspaceOpen(true);
+      },
       openSettings: () => openSettingsSurface('nav'),
       openSourceBoard: () => openSurface('board'),
     }),

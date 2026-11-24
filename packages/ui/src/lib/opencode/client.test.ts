@@ -175,19 +175,31 @@ describe('experimental OpenCode requests', () => {
   })
 
   test('preserves binary temp-file writes and per-file failure', async () => {
-    responses.push(json({ paths: { tmp: '/fixture/tmp' } }), json({ data: { path: '/fixture/tmp/upload.bin' } }), json({ _tag: 'ForbiddenError', message: 'denied' }, 403))
+    responses.push(
+      json({ paths: { tmp: '/fixture/tmp' } }),
+      (request) => json({ data: { path: request.url.searchParams.get('path') } }),
+      json({ _tag: 'ForbiddenError', message: 'denied' }, 403),
+      json({ data: { path: '/fixture/tmp/unrelated.bin' } }),
+    )
     const results = await opencodeClient.writeOpenCodeTempFiles('/repo/中文 folder', [
       { filename: 'binary.bin', bytes: new Uint8Array([0, 1, 128, 255]) },
       { filename: 'refused.bin', bytes: new Uint8Array([9]) },
+      { filename: 'unconfirmed.bin', bytes: new Uint8Array([2]) },
     ])
-    expect(results[0]).toEqual({ filename: 'binary.bin', path: '/fixture/tmp/upload.bin' })
-    expect(results[1].filename).toBe('refused.bin')
-    if (!('error' in results[1])) throw new Error('Expected the refused write to return its error')
-    expect(results[1].error).toBeInstanceOf(Error)
     const writes = requests.slice(1)
-    expect(writes.map(request => request.method)).toEqual(['POST', 'POST'])
+    const [written, refused, unconfirmed] = results
+    expect(results).toHaveLength(3)
+    expect(written).toEqual({ filename: 'binary.bin', path: writes[0].url.searchParams.get('path') })
+    if (!refused || !unconfirmed || !('error' in refused) || !('error' in unconfirmed)) {
+      throw new Error('Expected both writes to return an error')
+    }
+    expect(refused.filename).toBe('refused.bin')
+    expect(unconfirmed.filename).toBe('unconfirmed.bin')
+    expect(refused.error).toBeInstanceOf(Error)
+    expect(unconfirmed.error).toBeInstanceOf(Error)
+    expect(writes.map(request => request.method)).toEqual(['POST', 'POST', 'POST'])
     expect(writes[0].headers.get('content-type')).toBe('application/octet-stream')
-    expect(writes.map(request => request.url.pathname)).toEqual(['/api/experimental/fs/write', '/api/experimental/fs/write'])
+    expect(writes.map(request => request.url.pathname)).toEqual(Array(3).fill('/api/experimental/fs/write'))
     expect(writes[0].bytes).toEqual([0, 1, 128, 255])
     expect(writes[0].url.searchParams.get('path')).toMatch(/^\/fixture\/tmp\/openchamber\/[a-f0-9]+\/binary\.bin$/)
     expect(writes.every(request => request.headers.get('x-opencode-directory') === encodeURIComponent('/repo/中文 folder'))).toBe(true)
@@ -727,6 +739,77 @@ describe("managed model scope refusal", () => {
 
 })
 
+describe("undelivered prompt", () => {
+  const unreachable = (status = 503) => new Response(null, {
+    status, headers: { "x-openchamber-error": "opencode-unreachable" },
+  })
+  const path = "/api/session/ses_1/prompt"
+
+  test("retries only the prompt, preserving its message id, files and delivery", async () => {
+    const beforeSend = mock(() => undefined)
+    const file = { type: "file" as const, mime: "text/plain", filename: "notes.txt", url: "data:text/plain;base64,YQ==" }
+    responses.push(json({ id: "ctx" }), unreachable(), json({ id: "msg_retry" }))
+    expect(await opencodeClient.sendMessage({
+      id: "ses_1", providerID: "retry-fixture", text: "hello", files: [file], delivery: "steer",
+      messageId: "msg_retry", context: [{ id: "ctx", text: "context" }], beforeSend,
+    })).toBe("msg_retry")
+    expect(requests.map((request) => request.url.pathname)).toEqual(["/api/session/ses_1/synthetic", path, path])
+    expect(requests[1].body).toEqual({ id: "msg_retry", text: "hello", files: [{ uri: file.url, name: file.filename }], delivery: "steer" })
+    expect(requests[2].body).toEqual(requests[1].body)
+    expect(beforeSend).toHaveBeenCalledTimes(1)
+  })
+
+  test("does not resend on an unmarked 503, wrong status, or lost response", async () => {
+    for (const response of [json({}, 503), unreachable(504), new TypeError("lost response")]) {
+      responses.push(response)
+      await expect(opencodeClient.sendMessage({ id: "ses_1", providerID: "retry-fixture", text: "hello" })).rejects.toThrow()
+    }
+    expect(requests.map((request) => request.url.pathname)).toEqual([path, path, path])
+  })
+
+  test("stops retrying when the runtime changes", async () => {
+    responses.push(() => {
+      runtimeKey = "other"
+      return unreachable()
+    })
+    await expect(opencodeClient.sendMessage({
+      id: "ses_1", providerID: "retry-fixture", text: "hello",
+    })).rejects.toThrow("runtime changed")
+    expect(requests.map((request) => request.url.pathname)).toEqual([path])
+  })
+
+  test("keeps another send behind the original prompt while it retries", async () => {
+    let notifyFirst = () => {}
+    const firstAttempt = new Promise<void>((resolve) => { notifyFirst = resolve })
+    responses.push(() => { notifyFirst(); return unreachable() }, json({ id: "msg_first" }), json({ id: "msg_next" }))
+    const first = opencodeClient.sendMessage({
+      id: "ses_1", providerID: "retry-order", text: "first", messageId: "msg_first",
+    })
+    await firstAttempt
+    const next = opencodeClient.sendMessage({
+      id: "ses_1", providerID: "retry-order", text: "next", messageId: "msg_next",
+    })
+    expect(await Promise.all([first, next])).toEqual(["msg_first", "msg_next"])
+    expect(requests.map((request) => request.body)).toEqual([
+      { id: "msg_first", text: "first" },
+      { id: "msg_first", text: "first" },
+      { id: "msg_next", text: "next" },
+    ])
+  })
+
+  test("interrupt stops an undelivered prompt from resending", async () => {
+    let notifyFirst = () => {}
+    const firstAttempt = new Promise<void>((resolve) => { notifyFirst = resolve })
+    responses.push(() => { notifyFirst(); return unreachable() }, json({ interrupted: false }))
+    const sending = opencodeClient.sendMessage({ id: "ses_1", providerID: "retry-abort", text: "first" })
+    const outcome = sending.catch(String)
+    await firstAttempt
+    await opencodeClient.abortSession("ses_1")
+    expect(await outcome).toContain("OpenCode could not be reached")
+    expect(requests.map((request) => request.url.pathname)).toEqual([path, "/api/session/ses_1/interrupt"])
+  })
+})
+
 test("records a creation skill on the target session without resuming it", async () => {
   responses.push(new Response(null, { status: 204 }))
   await opencodeClient.activateSessionSkill("ses_1", "superweb", "/repo/app")
@@ -741,7 +824,7 @@ describe("sendMessage with inline skills", () => {
   const instructionFor = (names: readonly string[]) => (names.length ? `use: ${names.join(",")}` : null)
 
   test("attaches known skills to the prompt by id, without an instruction", async () => {
-    responses.push(json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy"), skillInfo("code-audit", "audit")] }), json({ id: "msg_1" }))
+    responses.push(json({}), json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy"), skillInfo("code-audit", "audit")] }), json({ id: "msg_1" }))
     await opencodeClient.sendMessage({
       id: "ses_1",
       providerID: "openai",
@@ -751,8 +834,9 @@ describe("sendMessage with inline skills", () => {
       directory: "/repo/app",
       skills: { names: ["audit", "deploy"], instructionFor },
     })
-    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["GET /api/skill", "POST /api/session/ses_1/prompt"])
-    expect(requests[1].body).toEqual({
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["GET /api/model/default", "GET /api/skill", "POST /api/session/ses_1/prompt"])
+    expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/app"))
+    expect(requests[2].body).toEqual({
       id: "msg_1",
       text: "/audit then /deploy",
       skills: [{ id: "code-audit" }, { id: "deploy" }],
@@ -761,7 +845,7 @@ describe("sendMessage with inline skills", () => {
   })
 
   test("names OpenCode does not list fall back to an instruction admitted before the prompt", async () => {
-    responses.push(json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }), json({ id: "syn_1" }), json({ id: "msg_1" }))
+    responses.push(json({}), json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }), json({ id: "syn_1" }), json({ id: "msg_1" }))
     await opencodeClient.sendMessage({
       id: "ses_1",
       providerID: "openai",
@@ -769,13 +853,13 @@ describe("sendMessage with inline skills", () => {
       messageId: "msg_1",
       skills: { names: ["deploy", "ghost"], instructionFor },
     })
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
-    expect(requests[1].body).toMatchObject({ text: "use: ghost", resume: false })
-    expect(requests[2].body).toMatchObject({ skills: [{ id: "deploy" }] })
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/model/default", "/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
+    expect(requests[2].body).toMatchObject({ text: "use: ghost", resume: false })
+    expect(requests[3].body).toMatchObject({ skills: [{ id: "deploy" }] })
   })
 
   test("a failed skill list still sends, naming every skill in the instruction", async () => {
-    responses.push(json({ _tag: "UnknownError", message: "boom" }, 500), json({ id: "syn_1" }), json({ id: "msg_1" }))
+    responses.push(json({}), json({ _tag: "UnknownError", message: "boom" }, 500), json({ id: "syn_1" }), json({ id: "msg_1" }))
     await opencodeClient.sendMessage({
       id: "ses_1",
       providerID: "openai",
@@ -783,15 +867,15 @@ describe("sendMessage with inline skills", () => {
       messageId: "msg_1",
       skills: { names: ["deploy"], instructionFor },
     })
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
-    expect(requests[1].body).toMatchObject({ text: "use: deploy" })
-    const promptBody = requests[2].body
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/model/default", "/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
+    expect(requests[2].body).toMatchObject({ text: "use: deploy" })
+    const promptBody = requests[3].body
     expect(typeof promptBody === "object" && promptBody !== null && "skills" in promptBody).toBe(false)
   })
 
   test("a skill removed before the prompt resends the same message with the instruction", async () => {
     responses.push(
-      json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }),
+      json({}), json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }),
       json({ _tag: "InvalidRequestError", message: "Skill not found: deploy", field: "skills" }, 400),
       json({ id: "syn_1" }),
       json({ id: "msg_1" }),
@@ -805,22 +889,106 @@ describe("sendMessage with inline skills", () => {
     })
     expect(id).toBe("msg_1")
     expect(requests.map((r) => r.url.pathname)).toEqual([
+      "/api/model/default",
       "/api/skill",
       "/api/session/ses_1/prompt",
       "/api/session/ses_1/synthetic",
       "/api/session/ses_1/prompt",
     ])
-    expect(requests[1].body).toMatchObject({ id: "msg_1", skills: [{ id: "deploy" }] })
-    expect(requests[2].body).toMatchObject({ text: "use: deploy" })
-    expect(requests[3].body).toEqual({ id: "msg_1", text: "x" })
+    expect(requests[2].body).toMatchObject({ id: "msg_1", skills: [{ id: "deploy" }] })
+    expect(requests[3].body).toMatchObject({ text: "use: deploy" })
+    expect(requests[4].body).toEqual({ id: "msg_1", text: "x" })
   })
 
   test("other prompt rejections are not retried", async () => {
-    responses.push(json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }), json({ _tag: "InvalidRequestError", message: "Attachment too big", field: "files" }, 400))
+    responses.push(json({}), json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }), json({ _tag: "InvalidRequestError", message: "Attachment too big", field: "files" }, 400))
     await expect(
       opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "x", skills: { names: ["deploy"], instructionFor } }),
     ).rejects.toThrow()
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/prompt"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/model/default", "/api/skill", "/api/session/ses_1/prompt"])
+  })
+})
+
+describe("Auto attachment preflight", () => {
+  const model = { providerID: "openchamber", id: "auto" }
+  const files = [{ type: "file" as const, mime: "application/pdf", filename: "scan.pdf", url: "data:application/pdf;base64,AQID", preserveMime: true }]
+  const preflight = "/api/routing/sessions/ses_1/prepare-send"
+  const session = "/api/session/ses_1"
+  const pathText = "Read this\n\n[scan.pdf](</kernel/tmp/scan.pdf>)"
+  const attachmentFailure = () => json({ _tag: "InvalidRequestError", message: "Could not prepare attachment paths." }, 400)
+  const prepared = () => json({ ticket: "oc-auto-checkpoint", text: pathText, files: [] })
+
+  test("safe retry uses the existing Auto ticket and does not prepare the attachment again", async () => {
+    responses.push(
+      noContent(), prepared(), json({ id: "ctx" }),
+      new Response(null, { status: 503, headers: { "x-openchamber-error": "opencode-unreachable" } }),
+      json({ id: "msg_auto_retry" }),
+    )
+    expect(await opencodeClient.sendMessage({
+      id: "ses_1", directory: "/repo", model, providerID: model.providerID, text: "Read this", files,
+      messageId: "msg_auto_retry", context: [{ id: "ctx", text: "Context" }],
+    })).toBe("msg_auto_retry")
+    expect(requests.map((request) => request.url.pathname)).toEqual([
+      `${session}/model`, preflight, `${session}/synthetic`, `${session}/prompt`, `${session}/prompt`,
+    ])
+    expect(requests[3].body).toEqual(requests[4].body)
+    expect(requests.slice(3).map((request) => request.headers.get("idempotency-key")))
+      .toEqual(["oc-auto-checkpoint", "oc-auto-checkpoint"])
+  })
+
+  test("an attachment write failure admits no context and retry preserves memory and skill fallback order", async () => {
+    const params = {
+      id: "ses_1", directory: "/repo", model, providerID: model.providerID, text: "Read this", files,
+      messageId: "msg_attachment",
+      context: [{ id: "msg_memory", text: "remembered context", metadata: { memory: true } }],
+      skills: { names: ["deploy", "unlisted"], instructionFor: (names: readonly string[]) => names.length ? `use: ${names.join(", ")}` : null },
+      delivery: "steer" as const,
+    }
+    responses.push(noContent(), attachmentFailure())
+    await expect(opencodeClient.sendMessage(params)).rejects.toThrow("Could not prepare attachment paths.")
+    expect(requests.map((request) => request.url.pathname)).toEqual([`${session}/model`, preflight])
+    expect(requests[1].body).toMatchObject({
+      id: "msg_attachment", text: "Read this", files: [{ uri: files[0].url, name: "scan.pdf" }],
+    })
+    expect(requests[1].url.searchParams.get("directory")).toBe("/repo")
+
+    requests.length = 0
+    responses.push(
+      noContent(), prepared(), json({}),
+      json({ location: { directory: "/repo" }, data: [{ id: "deploy", name: "deploy", path: "/skills/deploy/SKILL.md", content: "fixture" }] }),
+      json({ id: "msg_memory" }), json({ id: "msg_unlisted" }),
+      json({ _tag: "InvalidRequestError", message: "Skill not found: deploy", field: "skills" }, 400),
+      json({ id: "msg_skill_fallback" }), json({ id: "msg_attachment" }),
+    )
+    expect(await opencodeClient.sendMessage(params)).toBe("msg_attachment")
+    expect(requests.map((request) => request.url.pathname)).toEqual([
+      `${session}/model`, preflight, "/api/model/default", "/api/skill",
+      `${session}/synthetic`, `${session}/synthetic`, `${session}/prompt`, `${session}/synthetic`, `${session}/prompt`,
+    ])
+    expect(requests[4].body).toMatchObject({ id: "msg_memory", text: "remembered context", metadata: { memory: true }, delivery: "steer", resume: false })
+    expect(requests[5].body).toMatchObject({ text: "use: unlisted" })
+    expect(requests[6].body).toMatchObject({ id: "msg_attachment", text: pathText, skills: [{ id: "deploy" }], delivery: "steer" })
+    expect(requests[7].body).toMatchObject({ text: "use: deploy" })
+    expect(requests[8].body).toEqual({ id: "msg_attachment", text: pathText, delivery: "steer" })
+    expect([requests[6], requests[8]].map((request) => request.headers.get("idempotency-key")))
+      .toEqual(["oc-auto-checkpoint", "oc-auto-checkpoint"])
+  })
+
+  test("a command retries attachment preparation before carrying its synthetic context", async () => {
+    const params = { id: "ses_1", directory: "/repo", model, command: "review", arguments: "Read this", files,
+      context: [{ id: "msg_quote", text: "quoted context" }] }
+    responses.push(noContent(), attachmentFailure())
+    await expect(opencodeClient.sendCommand(params)).rejects.toThrow("Could not prepare attachment paths.")
+    expect(requests.map((request) => request.url.pathname)).toEqual([`${session}/model`, preflight])
+    expect(requests[1].body).toMatchObject({ name: "review", text: "Read this" })
+
+    requests.length = 0
+    responses.push(noContent(), prepared(), json({ id: "msg_quote" }), noContent())
+    await opencodeClient.sendCommand(params)
+    expect(requests.map((request) => request.url.pathname)).toEqual([`${session}/model`, preflight, `${session}/synthetic`, `${session}/command`])
+    expect(requests[2].body).toMatchObject({ id: "msg_quote", text: "quoted context", resume: false })
+    expect(requests[3].body).toEqual({ name: "review", text: pathText })
+    expect(requests[3].headers.get("idempotency-key")).toBe("oc-auto-checkpoint")
   })
 })
 

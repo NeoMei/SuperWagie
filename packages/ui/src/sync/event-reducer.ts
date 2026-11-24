@@ -208,7 +208,8 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
     const next = { ...message }
     if (patch.time) next.time = compact({ ...message.time, ...patch.time })
     if (patch.finish !== undefined) next.finish = patch.finish
-    if (patch.error !== undefined) next.error = patch.error
+    if (patch.error === null) delete next.error
+    else if (patch.error !== undefined) next.error = patch.error
     // A completion the server reports supersedes the local interruption mark
     // (`interruptedTurnToolParts`); a turn that really failed arrives with its
     // own error in the same patch.

@@ -190,7 +190,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
           signal: AbortSignal.timeout(OPENCODE_INFO_TIMEOUT_MS),
         }),
-        fetchLatestOpenCodeVersion(),
+        fetchLatestOpenCodeVersion().catch(() => null),
       ]);
       const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {

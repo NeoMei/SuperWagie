@@ -100,6 +100,17 @@ describe('environment runtime', () => {
     expect(spawn.mock.calls[0][1].cwd).toBe(worktree);
   });
 
+  it('resolves a linked worktree to its configured project and sees project removal immediately', async () => {
+    const worktree = path.join(root, 'worktree');
+    fs.mkdirSync(worktree);
+    fs.writeFileSync(path.join(worktree, '.git'), `gitdir: ${path.join(projectPath, '.git', 'worktrees', 'feature')}\n`);
+    let projects = [{ id: 'path_project', path: projectPath }];
+    const runtime = createRuntime({ listProjects: async () => projects });
+    expect(await runtime.projectForDirectory(worktree)).toEqual({ id: 'path_project', path: projectPath });
+    projects = [];
+    expect(await runtime.projectForDirectory(worktree)).toBeNull();
+  });
+
   it('reports a failing command, applies nothing from it and logs no output', async () => {
     await store.updateProject('path_project', { variables: { B: '2' }, command: 'direnv export json' });
     const spawn = vi.fn(() => fakeChild({ stdout: 'SECRET=leaked', code: 1 }));

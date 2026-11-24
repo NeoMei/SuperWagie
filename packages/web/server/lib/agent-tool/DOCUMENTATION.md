@@ -9,6 +9,9 @@ the user can want independently:
 - `openchamber` — projects, sessions, worktrees, and showing a file to the
   user (`file.open`). Enabled while the persisted `agentControlToolEnabled`
   setting is not `false`.
+  Lead actions require the authenticated plugin callback and resolve their
+  owner and directory from the calling OpenCode session. The session must be
+  marked as a Lead and the managed control tool must be enabled.
 - `openchamber_schedule` — the `schedule.*` actions of the same control
   service, for scheduled tasks. Enabled while `agentScheduleToolEnabled` is not
   `false`. It used to be part of `openchamber`; reading settings sets it to

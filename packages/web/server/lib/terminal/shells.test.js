@@ -55,13 +55,36 @@ describe('terminal shell resolver', () => {
     ]));
   });
 
+  it('discovers Store PowerShell without probing other access-denied executables', async () => {
+    const store = 'C:/Users/user/AppData/Local/Microsoft/WindowsApps';
+    const alias = store + '/pwsh.exe';
+    const attempts = [];
+    const resolver = createTerminalShellResolver({
+      fs: { promises: { readFile: async () => '' }, statSync: () => {
+        throw Object.assign(new Error('alias cannot be stat-ed'), { code: 'EACCES' });
+      } },
+      path: { join: (...parts) => parts.join('/') },
+      platform: 'win32',
+      env: {},
+      buildAugmentedPath: () => 'C:/Tools;' + store,
+      searchPathFor: () => null,
+      isExecutable: () => false,
+      probePowerShell: async (file) => { attempts.push(file); return file === alias; },
+    });
+
+    await expect(resolver.resolve('pwsh')).resolves.toEqual({ id: 'pwsh', executables: [alias] });
+    expect(attempts).toEqual([alias]);
+  });
+
   it('uses environment overrides before platform defaults for auto', async () => {
     const { resolver } = createResolver({
       env: { OPENCHAMBER_TERMINAL_SHELL: '/custom/zsh', SHELL: '/bin/bash' },
       executables: ['/custom/zsh', '/bin/bash'],
     });
 
-    await expect(resolver.resolve('auto')).resolves.toEqual({ id: 'auto', executables: ['/custom/zsh', '/bin/bash'] });
+    const selection = await resolver.resolve('auto');
+    expect(selection.id).toBe('auto');
+    expect(await Array.fromAsync(selection.executables)).toEqual(['/custom/zsh', '/bin/bash']);
   });
 
   it('uses only known platform-safe login arguments', () => {

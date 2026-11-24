@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createUpstreamSseReader } from './upstream-reader.js';
 import { serializeMessageStreamWsEvent } from './protocol.js';
 import { translateWireEvent } from './translate-v2.js';
+import { createTurnBoundaryOrder } from './turn-boundary-order.js';
 import { createDeltaCoalescer, DELTA_COALESCE_WINDOW_MS } from './delta-coalescer.js';
 
 // Raised from 512 → 2048 to improve recovery after brief disconnects during
@@ -28,6 +29,7 @@ export function createGlobalMessageStreamHub({
   const spaceSubscribers = new Set();
   const statusSubscribers = new Set();
   const replay = [];
+  const isStaleTurnBoundary = createTurnBoundaryOrder();
   let replayBytes = 0;
   let latestEventId;
   // OpenCode's event stream carries no SSE ids (verified on 1.18.30: not one
@@ -126,6 +128,11 @@ export function createGlobalMessageStreamHub({
 
   const coalescer = createDeltaCoalescer({ emit: commitEvent, windowMs: deltaCoalesceWindowMs });
 
+  const admitEvent = (event) => {
+    if (isStaleTurnBoundary(event.payload, event.envelope?.spaceId)) return;
+    coalescer.push(event);
+  };
+
   const start = () => {
     if (reader) {
       return;
@@ -158,7 +165,7 @@ export function createGlobalMessageStreamHub({
         notifyStatus({ type: 'disconnect', reason });
       },
       onEvent(event) {
-        coalescer.push(event);
+        admitEvent(event);
       },
       onError(error) {
         if (controller?.signal.aborted) {
@@ -188,6 +195,7 @@ export function createGlobalMessageStreamHub({
     controller = null;
     everConnected = false;
     buildUrlFailed = false;
+    isStaleTurnBoundary.clear();
   };
 
   return {
@@ -217,7 +225,7 @@ export function createGlobalMessageStreamHub({
      * a client keeps one cursor for everything. `directory` is the space's, `spaceId` marks it.
      */
     injectEvent({ payload, directory, spaceId }) {
-      coalescer.push({ envelope: { directory, spaceId }, payload });
+      admitEvent({ envelope: { directory, spaceId }, payload });
     },
     subscribeStatus(subscriber) {
       statusSubscribers.add(subscriber);

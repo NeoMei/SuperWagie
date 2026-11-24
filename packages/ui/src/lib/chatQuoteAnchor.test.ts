@@ -190,3 +190,22 @@ describe('quotes across the rows of a long answer', () => {
         expect(resolveChatQuoteRanges([onlyStart], legacy)?.map((part) => part.toString())).toEqual(['A quote that starts in this row and runs on']);
     });
 });
+
+test('kept notes own their quote context and do not enter the answer’s text stream', () => {
+    const scope = renderRoot(`<div data-message-id="answer"><div data-chat-quote-root>
+        <div data-message-id="step" data-message-hoisted="a"><div data-chat-quote-root>Earlier note.</div></div>
+        <div data-message-id="step" data-message-hoisted="b"><div data-chat-quote-root>See <strong>helper</strong> first.</div></div>
+        <p>Final answer.</p>
+    </div></div>`);
+    const roots = findChatQuoteRoots(scope, 'step');
+    const anchor = captureChatQuoteAnchor(roots, selectText(roots[1], 'helper'));
+    expect(anchor).toMatchObject({ text: 'helper', prefix: 'See ', suffix: ' first.' });
+    const expanded = renderRoot('<p>Earlier note.</p><div>Read tool</div><p>See <strong>helper</strong> first.</p>');
+    expect(anchor && resolveChatQuoteAnchor(expanded, anchor)?.toString()).toBe('helper');
+    const answer = findChatQuoteRoots(scope, 'answer')[0];
+    const answerText = answer.querySelector('p')?.firstChild;
+    if (!answerText) throw new Error('Missing answer text');
+    const answerRange = document.createRange();
+    answerRange.selectNodeContents(answerText);
+    expect(captureChatQuoteAnchor(answer, answerRange)?.prefix).not.toContain('helper');
+});

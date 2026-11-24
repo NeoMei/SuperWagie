@@ -12,16 +12,16 @@
 
 import { SpaceError } from './errors.js';
 import { isSpaceId } from './labels.js';
-import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
+import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed, stripClientCredentialQuery } from '../security/request-security.js';
 import { SPACE_SERVER_HOST, SPACE_SERVER_PORT, spaceWorkPath } from './layout.js';
 import {
   classifySpacePath,
   describeFailure,
+  directoryHeaderFailure,
   forwardRequestHeaders,
   isDirectoryOfSpace,
   requestedDirectories,
   spaceRouteOf,
-  stripCredentialQuery,
 } from './dispatcher.js';
 
 // The sockets of the server inside that a client may reach through the prefix. Any other
@@ -299,6 +299,8 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
       req.url = `/api/spaces/${encodeURIComponent(route.spaceId)}${url.pathname.slice('/api'.length)}${url.search}`;
     }
     socket.on('error', () => {});
+    const invalidHeader = directoryHeaderFailure(req);
+    if (invalidHeader) { refuse(socket, invalidHeader.status, invalidHeader.code, invalidHeader.message); return; }
     if (!isSpaceId(route.spaceId)) { refuse(socket, 404, 'space_not_found', 'There is no such space.'); return; }
     const rule = classifySpacePath(route.path);
     if (rule === 'host_only') { refuse(socket, 403, 'host_only_route', 'This route exists on the host only and is not forwarded to a space.'); return; }
@@ -314,7 +316,7 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
           refuse(socket, 400, 'directory_outside_space', `A request to space ${route.spaceId} may name a directory under ${spaceWorkPath(route.spaceId)} only.`);
           return;
         }
-        stripCredentialQuery(url);
+        stripClientCredentialQuery(url.searchParams);
         await forward(req, socket, head, { spaceId: route.spaceId, path: innerPath }, url.search);
       } catch (error) {
         if (error?.code === 'client_gone') { socket.destroy(); return; }

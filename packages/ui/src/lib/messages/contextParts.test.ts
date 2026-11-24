@@ -9,6 +9,7 @@ import {
     formatContextText,
     hasContextParts,
     readContextPart,
+    reviewCommentDestination,
     type ContextPartPayload,
 } from './contextParts';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
@@ -27,6 +28,59 @@ const draft = (overrides: Partial<InlineCommentDraft> = {}): InlineCommentDraft 
     text: 'fix this',
     createdAt: 1,
     ...overrides,
+});
+
+describe('review comment source', () => {
+    test('keeps the original side and the exact comparison through send and restore', () => {
+        const origin = { kind: 'change-request', provider: 'github', repository: 'team/project', number: 12, revision: 'a'.repeat(40) } as const;
+        const { metadata } = createContextPart(contextPayloadFromDraft(draft({ origin, side: 'original' })));
+        const payload = readContextPart({ type: 'text', metadata });
+        if (!payload) throw new Error('Expected code comment');
+        const restored = draftFromContextPayload(payload);
+        expect(restored?.origin).toEqual(origin);
+        expect(reviewCommentDestination(payload, '/project')).toEqual({
+            kind: 'diff', path: 'src/app.ts', line: 3, side: 'deletions', origin,
+        });
+    });
+
+    test('uses the file and line from an older OpenCode comment', () => {
+        const payload = readContextPart({ type: 'text', metadata: { opencodeComment: {
+            path: 'src/app.ts', selection: { startLine: 4, endLine: 7 }, comment: 'fix this', origin: 'review',
+        } } });
+        expect(payload && reviewCommentDestination(payload, '/project')).toEqual({ kind: 'file', path: '/project/src/app.ts', line: 4 });
+    });
+
+    test('opens a whole-file anchor without inventing a line', () => {
+        const payload = contextPayloadFromDraft(draft({ source: 'file', startLine: 0, endLine: 0 }));
+        expect(reviewCommentDestination(payload, '/project')).toEqual({ kind: 'file', path: '/project/src/app.ts' });
+    });
+
+    test('retains the side of a staged diff through send and restore', () => {
+        const { metadata } = createContextPart(contextPayloadFromDraft(draft({ staged: true, side: 'original' })));
+        const payload = readContextPart({ type: 'text', metadata });
+        if (!payload) throw new Error('Expected code comment');
+        expect(draftFromContextPayload(payload)?.staged).toBe(true);
+        expect(reviewCommentDestination(payload, '/project')).toEqual({
+            kind: 'diff', path: 'src/app.ts', line: 3, side: 'deletions', staged: true,
+        });
+    });
+
+    test('preserves a nested repository relative to the comment owner', () => {
+        const origin = { kind: 'commit', hash: 'abcdef123456' } as const;
+        const { metadata } = createContextPart(contextPayloadFromDraft(draft({ origin, repositoryPath: 'nested/client' })));
+        const payload = readContextPart({ type: 'text', metadata });
+        if (!payload) throw new Error('Expected code comment');
+        expect(draftFromContextPayload(payload)?.repositoryPath).toBe('nested/client');
+        expect(reviewCommentDestination(payload, '/project')).toEqual({
+            kind: 'diff', path: 'src/app.ts', line: 3, side: 'additions', origin, repositoryPath: 'nested/client',
+        });
+    });
+
+    test('ignores display-only file quotes and path traversal in isolated spaces', () => {
+        expect(reviewCommentDestination({ kind: 'file-quote', fileLabel: 'budget.csv · CSV · B3:C5', quote: '2', text: '' }, '/project')).toBeNull();
+        const payload = contextPayloadFromDraft(draft({ source: 'file', fileLabel: '../../host/app.ts' }));
+        expect(reviewCommentDestination(payload, '/spaces/123456abcdef/project')).toBeNull();
+    });
 });
 
 describe('model-facing text', () => {

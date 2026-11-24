@@ -814,3 +814,11 @@ lines that run through rows they do not belong to.
 The user center exposes SuperWagie wallet, subscription, owned key metadata and
 records. It has no model-provider setup handoff or infrastructure console link.
 Provider configuration remains in Settings and is not part of account navigation.
+
+## Leads
+
+The managed session service advertises Lead capability. It enables New Lead
+in a project's menu and mark, unmark, handover and take-over in session
+menus. Handover targets are active top-level Leads in the source directory.
+The Lead marker follows the same authoritative session metadata as the goal
+glyph. VS Code renders existing markers and digests as read-only.

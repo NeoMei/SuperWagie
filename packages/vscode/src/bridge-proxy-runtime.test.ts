@@ -34,6 +34,40 @@ const asBridgeContext = (manager: typeof connectedManager): BridgeContext => ({ 
 
 const ctx = asBridgeContext(connectedManager);
 
+describe('VS Code prompt delivery', () => {
+  const prompt = { id: 'prompt', type: 'api:session:message', payload: { path: '/api/session/ses_fixture/prompt', bodyText: '{}' } };
+  const marker = 'x-openchamber-error';
+  const deliveryResponse = async (context: BridgeContext | undefined) => {
+    const response = await handleProxyBridgeMessage(prompt, context, deps);
+    assert.equal(response?.success, true);
+    // The bridge serializes the HTTP result under data for this message type.
+    return response?.data as { status: number; headers: Record<string, string> };
+  };
+
+  test('marks a prompt held before forwarding when the host has no API URL', async () => {
+    const response = await deliveryResponse(undefined);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers[marker], 'opencode-unreachable');
+  });
+
+  test('marks connect failures and strips an upstream marker', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET']) {
+        globalThis.fetch = async () => { throw new TypeError('fetch failed', { cause: Object.assign(new Error(code), { code }) }); };
+        const response = await deliveryResponse(ctx);
+        assert.equal(response.status, 503);
+        assert.equal(response.headers[marker], code === 'ECONNRESET' ? undefined : 'opencode-unreachable');
+      }
+      globalThis.fetch = async () => new Response(null, { status: 503, headers: { [marker]: 'opencode-unreachable' } });
+      const response = await deliveryResponse(ctx);
+      assert.equal(response.headers[marker], undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 describe('VS Code folder trust', () => {
   test('returns the local assessment and refuses to forward a paused location', async () => {
     const assessment = { directory: '/fixture', fingerprint: null, items: [], trusted: false };

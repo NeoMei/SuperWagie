@@ -1,8 +1,16 @@
 import { recordStartupPerformance } from './startup-performance.js';
+import { OPENCODE_PROXY_ERROR_HEADER } from '../../proxy-headers.js';
 
 const READINESS_HOLD_POLL_MS = 75;
 const READINESS_HOLD_MAX_MS = 6000;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Only callers that can prove no prompt was forwarded may attach this header. */
+export const markUnforwardedPrompt = (req, res) => {
+  const url = req.originalUrl ?? req.url;
+  if (res.headersSent || req.method !== 'POST' || !/^\/api\/session\/[^/?]+\/prompt\/?(?:\?|$)/i.test(url)) return;
+  res.setHeader(OPENCODE_PROXY_ERROR_HEADER, 'opencode-unreachable');
+};
 
 const classifyReadinessRoute = (path) => {
   const requestPath = path.replace(/^\/api(?=\/|$)/, '');
@@ -45,7 +53,10 @@ export const createOpenCodeRequestReadiness = ({ getRuntime, readyGraceMs }) => 
     }
 
     record('timeout');
-    if (!res.headersSent) res.status(503).json({ error: 'OpenCode is restarting', restarting: true });
+    if (!res.headersSent) {
+      markUnforwardedPrompt(req, res);
+      res.status(503).json({ error: 'OpenCode is restarting', restarting: true });
+    }
     return false;
   };
 };

@@ -12,6 +12,25 @@ import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useChatQuoteHighlightApi } from '../../hooks/chatQuoteHighlightStore';
 import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { isWholeFileComment } from '@/components/comments/wholeFileComment';
+import { useReviewCommentSource } from '@/components/comments/useReviewCommentSource';
+
+type ContextReveal = { label: string; onReveal: () => void; icon?: IconName };
+
+const ContextRevealButton = ({ label, onReveal, icon = 'arrow-up' }: ContextReveal) => (
+    <button
+        type="button"
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-interactive-hover hover:text-foreground"
+        style={{ minHeight: 0, minWidth: 0 }}
+        onClick={(event) => {
+            event.stopPropagation();
+            onReveal();
+        }}
+        aria-label={label}
+        title={label}
+    >
+        <Icon name={icon} className="h-3.5 w-3.5" />
+    </button>
+);
 
 /**
  * A context item attached to a user message: an inline code comment, a
@@ -42,7 +61,7 @@ const ContextCard: React.FC<{
     collapsed?: boolean;
     onExpand?: () => void;
     /** Scroll to where the quote came from, with the button's label. */
-    reveal?: { label: string; onReveal: () => void };
+    reveal?: ContextReveal;
     /** The message's file names: `[name]` in the user's comment renders as a file chip. */
     attachmentFilenames: readonly string[];
 }> = ({ icon, summary, title, body, text, mono, collapsed, onExpand, reveal, attachmentFilenames }) => {
@@ -62,14 +81,15 @@ const ContextCard: React.FC<{
             onExpand?.();
         };
         return (
-            <div
-                className="my-1 flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 border-s-2 border-[var(--interactive-border)] ps-3 text-xs text-muted-foreground"
-                role="button"
-                tabIndex={0}
-                onClick={onExpand}
-                onKeyDown={handleKeyDown}
-                title={title}
-            >
+            <div className="my-1 flex min-w-0 max-w-full items-center gap-1.5 border-s-2 border-[var(--interactive-border)] ps-3 text-xs text-muted-foreground">
+              <div
+                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5"
+                  role="button"
+                  tabIndex={0}
+                  onClick={onExpand}
+                  onKeyDown={handleKeyDown}
+                  title={title}
+              >
                 <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">
                     {comment.length > 0 ? `${summary}: ` : summary}
@@ -78,6 +98,8 @@ const ContextCard: React.FC<{
                     ) : null}
                 </span>
                 <Icon name="arrow-down-s" className="ms-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+              </div>
+              {reveal?.icon === 'external-link' ? <ContextRevealButton {...reveal} /> : null}
             </div>
         );
     }
@@ -92,21 +114,7 @@ const ContextCard: React.FC<{
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">{summary}</span>
-                    {reveal ? (
-                        <button
-                            type="button"
-                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-interactive-hover hover:text-foreground"
-                            style={{ minHeight: 0, minWidth: 0 }}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                reveal.onReveal();
-                            }}
-                            aria-label={reveal.label}
-                            title={reveal.label}
-                        >
-                            <Icon name="arrow-up" className="h-3.5 w-3.5" />
-                        </button>
-                    ) : null}
+                    {reveal ? <ContextRevealButton {...reveal} /> : null}
                 </div>
                 {hasBody ? (
                     <div
@@ -136,13 +144,18 @@ const basename = (path: string): string => {
 
 const UserContextPart: React.FC<{
     payload: ContextPartPayload;
+    directory?: string | null;
     /** Message-level collapse state, shared with the text parts. */
     collapsed?: boolean;
     onExpand?: () => void;
     attachmentFilenames: readonly string[];
-}> = ({ payload, collapsed, onExpand, attachmentFilenames }) => {
+}> = ({ payload, directory, collapsed, onExpand, attachmentFilenames }) => {
     const { t } = useI18n();
     const quoteHighlights = useChatQuoteHighlightApi();
+    const reviewSource = useReviewCommentSource(directory)(payload);
+    const reviewReveal: ContextReveal | undefined = reviewSource
+        ? { ...reviewSource, icon: 'external-link' }
+        : undefined;
     // A part without a provider was written before providers other than GitHub existed: a pull request.
     const changeRequestTerm = useChangeRequestTerm(payload.kind === 'pr-comment' || payload.kind === 'pr-check' ? payload.provider : null);
     const shared = { collapsed, onExpand, attachmentFilenames };
@@ -162,7 +175,7 @@ const UserContextPart: React.FC<{
                 : payload.startLine === payload.endLine
                 ? t('chat.message.context.codeCommentLine', { file: fullFile, line: payload.startLine })
                 : t('chat.message.context.codeComment', { file: fullFile, start: payload.startLine, end: payload.endLine });
-            return <ContextCard icon="chat-1" summary={summary} title={fullTitle} body={payload.code} text={payload.text} mono {...shared} />;
+            return <ContextCard icon="chat-1" summary={summary} title={fullTitle} body={payload.code} text={payload.text} reveal={reviewReveal} mono {...shared} />;
         }
         case 'terminal':
             return (
@@ -218,7 +231,7 @@ const UserContextPart: React.FC<{
                     ? t('chat.message.context.codeCommentLine', { file, line: payload.startLine })
                     : t('chat.message.context.codeComment', { file, start: payload.startLine, end: payload.endLine }))
                 : t('chat.message.context.fileQuote', { file });
-            return <ContextCard icon="chat-1" summary={summary} title={payload.fileLabel} body={payload.quote} text={payload.text} {...shared} />;
+            return <ContextCard icon="chat-1" summary={summary} title={payload.fileLabel} body={payload.quote} text={payload.text} reveal={reviewReveal} {...shared} />;
         }
         case 'chat-quote': {
             const sourceMessageId = payload.messageId;

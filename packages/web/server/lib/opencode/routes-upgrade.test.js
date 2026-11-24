@@ -89,6 +89,25 @@ describe('OpenCode upgrade routes', () => {
     }
   });
 
+  it('keeps the running version and staged update when the registry is unavailable', async () => {
+    globalThis.fetch = vi.fn(async (input) => (
+      String(input).endsWith('/api/info')
+        ? jsonResponse({ version: '2.3.2' })
+        : jsonResponse({ error: 'registry unavailable' }, 503)
+    ));
+    const { app } = createApp({
+      openCodeRuntimeUpdater: { status: () => ({ status: 'installed', installedVersion: '2.3.3' }) },
+    });
+
+    const { body } = await request(app).get('/api/opencode/upgrade-status').expect(200);
+    expect(body).toMatchObject({
+      available: null,
+      currentVersion: '2.3.2',
+      latestVersion: null,
+      runtimeUpdate: { status: 'installed', installedVersion: '2.3.3', restartRequired: true },
+    });
+  });
+
   it('fails closed without contacting the bundled OpenCode updater', async () => {
     globalThis.fetch = vi.fn();
     const { app } = createApp();

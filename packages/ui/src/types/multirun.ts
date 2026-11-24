@@ -9,6 +9,8 @@ export interface MultiRunFileAttachment {
   mime: string;
   filename: string;
   url: string;
+  composerAnchor?: string;
+  saveCopy?: boolean;
 }
 
 export interface MultiRunGroup {
@@ -47,4 +49,5 @@ export interface CreateMultiRunResult {
   sessionIds: string[];
   firstSessionId: string | null;
   failedCount: number;
+  promptsDelivered: Promise<boolean>;
 }

@@ -35,6 +35,9 @@ export interface InlineCommentDraft {
   provider?: SourceControlProvider;
   /** The diff a `diff` comment was written on; absent for uncommitted changes. */
   origin?: DiffCommentOrigin;
+  /** A working-tree comparison read from the index. */
+  staged?: boolean;
+  repositoryPath?: string;
   createdAt: number;
 }
 
@@ -196,6 +199,8 @@ const persistedDraftSchema = z.object({
   anchor: chatQuoteAnchorSchema.optional(),
   provider: sourceControlProviderIdSchema.optional(),
   origin: diffCommentOriginSchema.optional(),
+  staged: z.boolean().optional().catch(undefined),
+  repositoryPath: z.string().min(1).optional().catch(undefined),
   createdAt: z.number(),
 });
 

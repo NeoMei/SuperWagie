@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Session } from '@/lib/opencode/model';
 import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
-import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
+import type { CreateMultiRunParams, CreateMultiRunResult, MultiRunFileAttachment } from '@/types/multirun';
 import { opencodeClient } from '@/lib/opencode/client';
 import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
@@ -95,7 +95,7 @@ export async function dispatchRunPrompt(input: {
   modelID: string;
   variant?: string;
   agent?: string;
-  files?: Array<{ type: 'file'; mime: string; filename: string; url: string }>;
+  files?: Array<MultiRunFileAttachment & { type: 'file' }>;
 }): Promise<void> {
   input.assertCurrent();
   const expandText = useSnippetsStore.getState().expandText;
@@ -344,14 +344,8 @@ export const useMultiRunStore = create<MultiRunStore>()(
             return null;
           }
 
-          const filesForMessage = files?.map((f) => ({
-            type: 'file' as const,
-            mime: f.mime,
-            filename: f.filename,
-            url: f.url,
-          }));
-
-          void Promise.allSettled(createdRuns.map(async (run) => {
+          const filesForMessage = files?.map((file) => ({ ...file, type: 'file' as const }));
+          const promptsDelivered = Promise.all(createdRuns.map(async (run) => {
             try {
               await dispatchRunPrompt({
                 runtimeKey,
@@ -363,16 +357,18 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 modelID: run.modelID,
                 variant: run.variant,
                 agent,
-                files: [...(filesForMessage ?? []), ...(run.files ?? []).map((f) => ({ type: 'file' as const, mime: f.mime, filename: f.filename, url: f.url }))],
+                files: [...(filesForMessage ?? []), ...(run.files ?? []).map((file) => ({ ...file, type: 'file' as const }))],
               });
+              return true;
             } catch (err) {
               console.warn('[MultiRun] Failed to start run:', err);
+              return false;
             }
-          }));
+          })).then((results) => results.every(Boolean));
 
           set({ isLoading: false });
           const failedCount = groups.reduce((total, group) => total + group.models.length, 0) - sessionIds.length;
-          return { groupSlug, groupKey: multiRunGroupKey(membershipGroup, groupSlug), sessionIds, firstSessionId, failedCount };
+          return { groupSlug, groupKey: multiRunGroupKey(membershipGroup, groupSlug), sessionIds, firstSessionId, failedCount, promptsDelivered };
         } catch (error) {
           if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) return null;
           set({

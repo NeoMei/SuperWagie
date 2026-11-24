@@ -32,6 +32,7 @@ type ComposerAttachmentControlsProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
     handlePickLocalFiles: () => void;
+    onPickOfficeOriginals?: () => void;
     openGitHubPicker: () => void;
     /** The host the project's issues and change requests come from. */
     /** The project's source-control provider id; its mark and wording label the link action. */
@@ -58,6 +59,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         footerIconButtonClass,
         iconSizeClass,
         handlePickLocalFiles,
+        onPickOfficeOriginals,
         openGitHubPicker,
         repositoryProvider = null,
         trackerPickers,
@@ -67,6 +69,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         filesOnly = false,
     } = props;
     const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
+    const localFilesOnly = isVSCode || filesOnly;
 
     return (
         <div className="flex items-center gap-x-1.5">
@@ -91,7 +94,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                     >
                         <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
                     </button>
-                ) : isVSCode || filesOnly ? (
+                ) : localFilesOnly && !onPickOfficeOriginals ? (
                     <button
                         type="button"
                         className={footerIconButtonClass}
@@ -110,7 +113,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                 title={t('chat.chatInput.actions.addAttachment')}
                                 aria-label={t('chat.chatInput.actions.addAttachment')}
                             >
-                                <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                                <Icon name={localFilesOnly ? "attachment-2" : "add-circle"} className={cn(iconSizeClass, 'text-current')} />
                             </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent side="top" align="start">
@@ -122,36 +125,46 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                 <Icon name="attachment-2"/>
                                 {t('chat.chatInput.actions.attachFiles')}
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(openGitHubPicker);
-                                }}
-                            >
-                                <ProviderIcon descriptor={repositoryDescriptor}/>
-                                {t(`chat.chatInput.actions.linkRepositoryItem.${repositoryDescriptor.terminology.changeRequest}`, { provider: repositoryDescriptor.label })}
-                            </DropdownMenuItem>
-                            {trackerPickers?.map((picker) => (
-                                <DropdownMenuItem
-                                    key={picker.provider}
-                                    onSelect={() => {
-                                        requestAnimationFrame(picker.open);
-                                    }}
-                                >
-                                    <Icon name={picker.icon}/>
-                                    {picker.label}
+                            {onPickOfficeOriginals && (
+                                <DropdownMenuItem onSelect={() => requestAnimationFrame(onPickOfficeOriginals)}>
+                                    <Icon name="attachment-2" />
+                                    {t('chat.chatInput.actions.attachOfficeOriginals')}
                                 </DropdownMenuItem>
-                            ))}
-                            {attachGuests?.map((guest) => (
-                                <DropdownMenuItem
-                                    key={guest.id}
-                                    onSelect={() => {
-                                        requestAnimationFrame(() => onOpenGuestAttach?.(guest.id));
-                                    }}
-                                >
-                                    <GuestIcon icon={guest.icon} iconSrc={guest.iconSrc} className="size-4" />
-                                    {guest.name}
-                                </DropdownMenuItem>
-                            ))}
+                            )}
+                            {!localFilesOnly && (
+                                <>
+                                    <DropdownMenuItem
+                                        onSelect={() => {
+                                            requestAnimationFrame(openGitHubPicker);
+                                        }}
+                                    >
+                                        <ProviderIcon descriptor={repositoryDescriptor}/>
+                                        {t(`chat.chatInput.actions.linkRepositoryItem.${repositoryDescriptor.terminology.changeRequest}`, { provider: repositoryDescriptor.label })}
+                                    </DropdownMenuItem>
+                                    {trackerPickers?.map((picker) => (
+                                        <DropdownMenuItem
+                                            key={picker.provider}
+                                            onSelect={() => {
+                                                requestAnimationFrame(picker.open);
+                                            }}
+                                        >
+                                            <Icon name={picker.icon}/>
+                                            {picker.label}
+                                        </DropdownMenuItem>
+                                    ))}
+                                    {attachGuests?.map((guest) => (
+                                        <DropdownMenuItem
+                                            key={guest.id}
+                                            onSelect={() => {
+                                                requestAnimationFrame(() => onOpenGuestAttach?.(guest.id));
+                                            }}
+                                        >
+                                            <GuestIcon icon={guest.icon} iconSrc={guest.iconSrc} className="size-4" />
+                                            {guest.name}
+                                        </DropdownMenuItem>
+                                    ))}
+                                </>
+                            )}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 )}
@@ -180,6 +193,8 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     && prev.onOpenMobileSheet === next.onOpenMobileSheet
     && prev.onOpenGuestAttach === next.onOpenGuestAttach
     && prev.filesOnly === next.filesOnly
+    && prev.handlePickLocalFiles === next.handlePickLocalFiles
+    && prev.onPickOfficeOriginals === next.onPickOfficeOriginals
     // The project's host is known only once its binding loads, so the link
     // item must follow it rather than keep the GitHub default it first drew.
     && prev.repositoryProvider === next.repositoryProvider

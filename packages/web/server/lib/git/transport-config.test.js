@@ -53,6 +53,20 @@ describe('effective Git transport configuration', () => {
     ]);
   });
 
+  it('ignores rotating command trace values and still distinguishes transport changes', async () => {
+    const revision = (scope, origin, header) => readEffectiveGitTransportRevision('/repository', {
+      execFileImpl: async (_binary, args) => ({
+        stdout: args[0] === 'config' ? Buffer.from([scope, origin, 'http.extraheader\n' + header, ''].join('\0')) : Buffer.alloc(0),
+      }),
+    });
+
+    const first = await revision('command', 'command line:', 'traceparent: first');
+    expect(await revision('command', 'command line:', 'TraceParent: second')).toBe(first);
+    expect(await revision('command', 'command line:', 'Authorization: changed')).not.toBe(first);
+    expect(await revision('local', 'file:.git/config', 'traceparent: first'))
+      .not.toBe(await revision('local', 'file:.git/config', 'traceparent: second'));
+  });
+
   it('treats no matching keys as authoritative empty and propagates command failure', async () => {
     const noMatch = vi.fn(async (_binary, args) => {
       if (args[0] === 'config') throw Object.assign(new Error('no match'), { code: 1 });

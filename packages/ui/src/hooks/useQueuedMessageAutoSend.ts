@@ -13,6 +13,9 @@ import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { createInputHistorySubmission } from '@/stores/useInputHistoryStore';
+import { buildSkillMentionInstruction } from '@/lib/skillMentionInstruction';
+import { OpencodeApiError } from '@/lib/opencode/client';
+import { isAmbiguousSendFailure } from '@/sync/send-failure-classification';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -81,7 +84,7 @@ const getAbortHoldUntil = (sessionId: string): number | null => {
 
 export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
   const queued = queue[0];
-  if (!queued) {
+  if (!queued || queued.deliveryUnconfirmed) {
     return null;
   }
 
@@ -93,6 +96,7 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     primaryText: queued.text,
     primaryAttachments: queued.attachments ?? [],
     agentMentionName: queued.agentMention,
+    skills: queued.skills,
     additionalParts: queuedContextToParts(queued.context ?? []),
     sendConfig: queued.sendConfig,
     goal: queued.goal ?? null,
@@ -122,7 +126,12 @@ export const sendQueuedAutoSendPayload = (
     payload.additionalParts.length > 0 ? payload.additionalParts : undefined,
     resolved.variant,
     'normal',
-    { target, historySubmissions: payload.historySubmissions, queuedGoal: payload.goal },
+    {
+      target,
+      historySubmissions: payload.historySubmissions,
+      queuedGoal: payload.goal,
+      ...(payload.skills?.length ? { skills: { names: payload.skills, instructionFor: buildSkillMentionInstruction } } : {}),
+    },
   );
 };
 
@@ -345,6 +354,13 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         sendFailuresRef.current.delete(targetKey);
       } catch (error) {
         console.warn('[queue] queued auto-send failed:', error);
+        // The send already checked the prompt's message ID. An unresolved
+        // transport failure cannot start a new logical turn with a new ID.
+        if (error instanceof OpencodeApiError && error.operation === 'session.prompt' && isAmbiguousSendFailure(error)) {
+          useMessageQueueStore.getState().markDeliveryUnconfirmed(target, payload.queuedMessageId);
+          sendFailuresRef.current.delete(targetKey);
+          return;
+        }
         const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
         const failures = priorFailures + 1;
         const nextAttemptAt = Date.now() + getQueuedAutoSendRetryDelayMs(failures);

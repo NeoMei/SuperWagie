@@ -8,6 +8,7 @@ export interface MessageViewportAnchor {
     readonly offsetTop: number;
     /** Which row of a long answer the anchor sits in (`data-message-slice`); absent for its first. */
     readonly slice?: string;
+    readonly kept?: { readonly row: string; readonly partId: string };
 }
 
 export type ViewportAnchorAlignment = 'missing' | 'moved' | 'aligned';
@@ -41,13 +42,18 @@ const isInsideStuckSticky = (node: HTMLElement, container: HTMLElement, containe
 // not in visual order in the DOM (a row mounted while scrolling up is appended
 // after the rows below it), so every mounted message is compared by position.
 export const captureMessageViewportAnchor = (container: HTMLElement): MessageViewportAnchor | null => {
-    const containerTop = container.getBoundingClientRect().top;
+    const { top: containerTop, bottom: containerBottom } = container.getBoundingClientRect();
+    let kept: { node: HTMLElement; top: number } | null = null;
     let best: { node: HTMLElement; top: number } | null = null;
     let fallback: { node: HTMLElement; top: number } | null = null;
 
     for (const node of container.querySelectorAll<HTMLElement>('[data-message-id]')) {
         const rect = node.getBoundingClientRect();
         if (rect.bottom <= containerTop + 1) continue;
+        if (node.dataset.messageHoisted) {
+            if (rect.top < containerBottom && (!kept || rect.top < kept.top)) kept = { node, top: rect.top };
+            continue;
+        }
         if (!fallback || rect.top < fallback.top) fallback = { node, top: rect.top };
         if (best && rect.top >= best.top) continue;
         // Only a node touching the top edge can be a stuck sticky header.
@@ -55,6 +61,11 @@ export const captureMessageViewportAnchor = (container: HTMLElement): MessageVie
         best = { node, top: rect.top };
     }
 
+    if (kept && (!best || best.top >= containerBottom)) {
+        const { messageId, messageHoisted: partId } = kept.node.dataset;
+        const row = kept.node.closest<HTMLElement>('[data-row-key]')?.dataset.rowKey;
+        if (messageId && partId && row) return { messageId, offsetTop: kept.top - containerTop, kept: { row, partId } };
+    }
     const chosen = best ?? fallback;
     const messageId = chosen?.node.dataset.messageId;
     if (!chosen || !messageId) return null;

@@ -13,6 +13,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { diffCommentOriginKey, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { getRelativeFilePath, isFilePathWithinDirectory } from '@/lib/path-utils';
 
 type LineRangeBase = {
   start: number;
@@ -34,6 +35,8 @@ interface UseInlineCommentControllerOptions<TRange extends LineRangeBase> {
   fromDraftRange: (draft: InlineCommentDraft) => TRange;
   /** The diff these comments are written on; absent for uncommitted changes. */
   origin?: DiffCommentOrigin;
+  staged?: boolean;
+  repositoryDirectory?: string;
 }
 
 const normalizeStoreRange = (range: StoreRange): StoreRange => {
@@ -60,7 +63,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   options: UseInlineCommentControllerOptions<TRange>
 ) {
   const { t } = useI18n();
-  const { source, fileLabel, language, getCodeForRange, toStoreRange, fromDraftRange, origin } = options;
+  const { source, fileLabel, language, getCodeForRange, toStoreRange, fromDraftRange, origin, staged, repositoryDirectory } = options;
   // The same path in a pull request and on disk are different lines, so a
   // comment shows only on the diff it was written on.
   const originKey = diffCommentOriginKey(origin);
@@ -85,6 +88,9 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
 
   const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
   const draftDirectory = sessionDirectory ?? effectiveDirectory;
+  const relativeRepository = repositoryDirectory && draftDirectory && isFilePathWithinDirectory(repositoryDirectory, draftDirectory)
+    ? getRelativeFilePath(repositoryDirectory, draftDirectory) : '';
+  const repositoryPath = relativeRepository && relativeRepository !== '.' ? relativeRepository : undefined;
   const target = React.useMemo(() => {
     if (!sessionKey || !draftDirectory) return null;
     return { directory: draftDirectory, sessionKey };
@@ -103,8 +109,10 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     if (!target || !fileLabel) return [];
     return sessionDrafts.filter((draft) => (
       draft.source === source && draft.fileLabel === fileLabel && diffCommentOriginKey(draft.origin) === originKey
+      && (draft.staged === undefined || draft.staged === Boolean(staged))
+      && (draft.repositoryPath === undefined || draft.repositoryPath === repositoryPath)
     ));
-  }, [fileLabel, originKey, sessionDrafts, source, target]);
+  }, [fileLabel, originKey, repositoryPath, sessionDrafts, source, staged, target]);
 
   const reset = React.useCallback(() => {
     setSelection(null);
@@ -156,6 +164,8 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
         language,
         text: trimmedText,
         origin,
+        staged,
+        repositoryPath,
       });
     } else {
       addDraft(target, {
@@ -168,6 +178,8 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
         language,
         text: trimmedText,
         origin,
+        staged,
+        repositoryPath,
       });
     }
 
@@ -175,7 +187,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     if (isNewComment) {
       requestAnimationFrame(focusChatInput);
     }
-  }, [addDraft, editingDraftId, fileLabel, getCodeForRange, language, origin, reset, selection, source, t, target, toStoreRange, updateDraft]);
+  }, [addDraft, editingDraftId, fileLabel, getCodeForRange, language, origin, repositoryPath, reset, selection, source, staged, t, target, toStoreRange, updateDraft]);
 
   return {
     sessionKey,

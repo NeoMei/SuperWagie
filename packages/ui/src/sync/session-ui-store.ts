@@ -12,8 +12,8 @@
  * SDK-calling actions that need domain data read it from sync-refs.
  */
 
-import { needsImagePathFallback, prepareTextModelImagePaths } from "@/components/chat/composer/attachments/attachmentSubmission"
-import { normalizeDroppedPath } from "@/components/chat/composer/attachments/filePaths"
+import { prepareAttachmentDelivery } from "@/components/chat/composer/attachments/attachmentSubmission"
+import { isAutoModel } from "@/lib/routing/autoModel"
 import { attachmentBasename, attachmentWireName } from "@/lib/attachmentIdentity"
 import type { ComposerSendProgress } from "@/lib/unconfirmedSends"
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
@@ -179,9 +179,41 @@ export async function resolveSendSelection(
   }
 }
 
-export class ImagePathPreparationError extends Error {
+export class AttachmentPathPreparationError extends Error {
   constructor(public readonly filenames: readonly string[]) {
-    super("Could not prepare image attachment paths")
+    super("Could not prepare attachment paths.")
+  }
+}
+
+type OutgoingFile = {
+  type: "file"
+  mime: string
+  url: string
+  filename: string
+  composerAnchor?: string
+  saveCopy?: boolean
+  deliverAsPath?: boolean
+}
+
+const toOutgoingFile = (file: AttachedFile): OutgoingFile => ({
+  type: "file",
+  mime: file.mimeType,
+  url: file.dataUrl,
+  filename: attachmentWireName(file),
+  composerAnchor: file.composerAnchor,
+  saveCopy: file.saveCopy,
+  deliverAsPath: file.deliverAsPath,
+})
+
+const fileUriPath = (uri: string): string | undefined => {
+  if (!uri.startsWith("file:")) return
+  try {
+    const url = new URL(uri)
+    const path = decodeURIComponent(url.pathname)
+    if (url.hostname && url.hostname !== "localhost") return `//${url.hostname}${path}`
+    return /^\/[A-Za-z]:\//.test(path) ? path.slice(1) : path
+  } catch {
+    return undefined
   }
 }
 
@@ -197,8 +229,8 @@ export async function routeMessage(params: {
   /** `null` is an explicit `Default` thinking level. */
   variant?: string | null
   inputMode?: "normal" | "shell"
-  files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
-  additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: ContextPartMetadata; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
+  files?: OutgoingFile[]
+  additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: ContextPartMetadata; files?: OutgoingFile[] }>
   appendSubmissions?: () => void
   delivery?: 'steer'
   skills?: SkillMentions
@@ -262,32 +294,50 @@ export async function routeMessage(params: {
   }
   const contextFiles = (params.additionalParts ?? []).flatMap((part) => part.files ?? [])
   const sendFiles = [...(params.files ?? []), ...contextFiles]
-  const prepareImagePaths = async (text: string, directory: string | undefined) => {
-    // Use the profile chosen for this send, including queue and side-chat
-    // sends, and write on the runtime which owns the admitted session.
-    const inputModalities = useConfigStore.getState().getModelMetadata(params.providerID, params.modelID)?.modalities?.input
-    if (!needsImagePathFallback(inputModalities) || !sendFiles.some((file) => file.mime.toLowerCase().startsWith("image/"))) {
-      return { text, files: sendFiles }
+  const prepareDelivery = async (text: string, directory: string | undefined) => {
+    const retired = () => markDefiniteTransportFailure(new Error("Message was not sent because the runtime changed."))
+    if (!isCurrent()) throw retired()
+    if (sendFiles.length === 0) return { text, files: sendFiles }
+    const auto = isAutoModel(params.providerID, params.modelID) && !isVSCodeRuntime()
+    if (auto) {
+      // The server sees Auto's actual model only after selecting it. The
+      // parameter carries copy intent through the SDK's file URI field.
+      const files = sendFiles.map((file) => ({
+        ...file,
+        preserveMime: true,
+        url: file.saveCopy ? file.url.replace(/^(data:image\/[^;,]+)(;base64,)/i, "$1;x-openchamber-save-copy=1$2") : file.url,
+      }))
+      return { text, files }
     }
-    const preparation = await prepareTextModelImagePaths({
+    const metadata = useConfigStore.getState().getModelMetadata(params.providerID, params.modelID)?.modalities?.input
+    const media = sendFiles.some((file) => /^(image\/|application\/pdf)/i.test(file.mime)
+      || (file.url.startsWith("file:") && /\.(pdf|png|jpe?g|gif|webp)$/i.test(file.filename)))
+    const live = media
+      ? await opencodeClient.getModelInputModalities(params.providerID, params.modelID, directory).catch(() => undefined)
+      : undefined
+    if (!isCurrent()) throw retired()
+    const preparation = await prepareAttachmentDelivery({
       text,
       attachments: sendFiles.map((file) => {
-        const attachment = {
+        const path = fileUriPath(file.url)
+        return {
           filePart: file,
           filename: attachmentBasename(file.filename),
           dataUrl: file.url,
           mimeType: file.mime,
+          composerAnchor: file.composerAnchor,
+          saveCopy: file.saveCopy,
+          deliverAsPath: file.deliverAsPath,
+          source: path ? "server" as const : undefined,
+          serverPath: path,
         }
-        return file.url.startsWith("file://")
-          ? { ...attachment, source: "server" as const, serverPath: normalizeDroppedPath(file.url) }
-          : attachment
       }),
-      inputModalities,
+      inputModalities: live ?? (isSpaceDirectory(directory) ? undefined : metadata),
       isCurrent,
       write: (files) => opencodeClient.writeOpenCodeTempFiles(directory, files),
     })
-    if (preparation.status === "retired") throw new Error("Message was not sent because the runtime changed.")
-    if (preparation.status === "failed") throw new ImagePathPreparationError(preparation.imageNames)
+    if (preparation.status === "retired") throw retired()
+    if (preparation.status === "failed") throw markDefiniteTransportFailure(new AttachmentPathPreparationError(preparation.filenames))
     return { text: preparation.text, files: preparation.attachments.map(({ filePart }) => filePart) }
   }
 
@@ -366,14 +416,12 @@ export async function routeMessage(params: {
         ...((await lateContext) ?? []),
         ...skillInstructionContext(),
       ]
-      const selection = await sendSelection()
       const directory = sendDirectory()
-      const delivery = await prepareImagePaths(tail.join(" "), directory)
+      const delivery = await prepareDelivery(tail.join(" "), directory)
       await opencodeClient.sendCommand({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
-        model: selection.model,
-        agent: selection.agent,
+        resolveSelection: sendSelection,
         command: cmdName,
         arguments: delivery.text,
         files: delivery.files,
@@ -410,16 +458,14 @@ export async function routeMessage(params: {
     markBusy: params.markBusy,
     appendSubmissions: params.appendSubmissions,
     send: async (messageID, context) => {
-      const selection = await sendSelection()
       const lateContext = (await lateContextRead) ?? []
       const directory = sendDirectory()
-      const delivery = await prepareImagePaths(params.content, directory)
+      const delivery = await prepareDelivery(params.content, directory)
       return opencodeClient.sendMessage({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
         providerID: params.providerID,
-        model: selection.model,
-        agent: selection.agent,
+        resolveSelection: sendSelection,
         text: delivery.text,
         agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
         files: delivery.files,
@@ -2313,12 +2359,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
         markPendingUserSendAnimation(sessionId)
 
-        const files = attachments?.map((a) => ({
-          type: "file" as const,
-          mime: a.mimeType,
-          url: a.dataUrl,
-          filename: attachmentWireName(a),
-        }))
+        const files = attachments?.map(toOutgoingFile)
 
         try {
           await routeMessage({
@@ -2345,12 +2386,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
               text: p.text,
               synthetic: p.synthetic,
               metadata: p.metadata,
-              files: p.attachments?.map((a: AttachedFile) => ({
-                type: "file" as const,
-                mime: a.mimeType,
-                url: a.dataUrl,
-                filename: attachmentWireName(a),
-              })),
+              files: p.attachments?.map(toOutgoingFile),
             })),
           })
         } catch (error) {
@@ -2432,12 +2468,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         markPendingUserSendAnimation(targetSessionId)
       }
 
-      const files = attachments?.map((a) => ({
-        type: "file" as const,
-        mime: a.mimeType,
-        url: a.dataUrl,
-        filename: attachmentWireName(a),
-      }))
+      const files = attachments?.map(toOutgoingFile)
 
       // Standing project context (pinned notes and plans, the memory index),
       // written into the session alongside the goal write and while the
@@ -2484,12 +2515,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           text: p.text,
           synthetic: p.synthetic,
           metadata: p.metadata,
-          files: p.attachments?.map((a) => ({
-            type: "file" as const,
-            mime: a.mimeType,
-            url: a.dataUrl,
-            filename: attachmentWireName(a),
-          })),
+          files: p.attachments?.map(toOutgoingFile),
         })),
       })
       if (isCurrentOwner() && route === "prompt") options?.onPromptAdmitted?.()

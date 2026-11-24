@@ -101,7 +101,9 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, co
             {capturedAgentName && capturedAgentName !== composerAgentName ? (
                 <QueuedMessageAgentBadge agentName={capturedAgentName} />
             ) : null}
-            {!message.scheduledTask ? (
+            {message.deliveryUnconfirmed ? (
+                <span className="shrink-0 typography-ui-label text-muted-foreground">{t('chat.queuedMessage.deliveryUnconfirmed')}</span>
+            ) : !message.scheduledTask ? (
                 <>
                     <Button
                         type="button"

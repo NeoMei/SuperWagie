@@ -1,90 +1,66 @@
-import type { Message } from '@/lib/opencode/model';
-
 import type { ChatMessageEntry } from './types';
 
-const resolveMessageRole = (message: ChatMessageEntry): string | null => {
-    const info = message.info as { clientRole?: string | null; role?: string | null };
-    return (typeof info.clientRole === 'string' ? info.clientRole : null)
-        ?? (typeof info.role === 'string' ? info.role : null)
-        ?? null;
-};
-
-interface RetryOverlayInput {
-    sessionId: string | null;
-    message: string;
-    confirmedAt?: number;
-    fallbackTimestamp: number;
+export interface RetryOverlay {
+    sessionId: string;
+    lastIdleAt: number | null;
+    notice?: { message: string };
 }
 
 export const applyRetryOverlay = (
     messages: ChatMessageEntry[],
-    input: RetryOverlayInput,
+    overlay: RetryOverlay | null,
 ): ChatMessageEntry[] => {
-    if (!input.sessionId) {
-        return messages;
-    }
-
-    const retryError = {
-        name: 'SessionRetry',
-        message: input.message,
-        data: { message: input.message },
-    };
-
+    if (!overlay) return messages;
+    const { sessionId, lastIdleAt, notice } = overlay;
     let lastUserIndex = -1;
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        if (resolveMessageRole(messages[index]) === 'user') {
+    let targetIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index--) {
+        const { info } = messages[index];
+        if (info.sessionID !== sessionId) continue;
+        if (info.role === 'user') {
             lastUserIndex = index;
             break;
         }
+        if (targetIndex < 0 && info.role === 'assistant') targetIndex = index;
+    }
+    if (lastUserIndex < 0) return messages;
+
+    const target = messages[targetIndex];
+    const info = target?.info;
+    const retryError = notice ? { type: 'SessionRetry', message: notice.message.trim() } : undefined;
+
+    if (info?.role === 'assistant') {
+        const stepTime = info.time.completed ?? info.time.created;
+        const afterLastIdle = lastIdleAt === null || stepTime > lastIdleAt;
+        if (!afterLastIdle || (info.error ? !info.retry : !retryError)) return messages;
+
+        // This is a display projection for the current execution. Keep the
+        // recorded error so it can be shown again if OpenCode ends the turn.
+        const nextInfo = { ...info };
+        if (retryError) nextInfo.error = retryError;
+        else delete nextInfo.error;
+        const next = messages.slice();
+        next[targetIndex] = { ...target, info: nextInfo };
+        return next;
     }
 
-    if (lastUserIndex < 0) {
-        return messages;
-    }
-
-    let targetAssistantIndex = -1;
-    for (let index = messages.length - 1; index > lastUserIndex; index -= 1) {
-        if (resolveMessageRole(messages[index]) === 'assistant') {
-            targetAssistantIndex = index;
-            break;
-        }
-    }
-
-    if (targetAssistantIndex >= 0) {
-        const existing = messages[targetAssistantIndex];
-        const existingInfo = existing.info as { error?: unknown };
-        if (existingInfo.error) {
-            return messages;
-        }
-
-        return messages.map((message, index) => {
-            if (index !== targetAssistantIndex) {
-                return message;
-            }
-            return {
-                ...message,
-                info: {
-                    ...(message.info as Record<string, unknown>),
-                    error: retryError,
-                } as unknown as Message,
-            };
-        });
-    }
-
-    const eventTime = typeof input.confirmedAt === 'number' ? input.confirmedAt : input.fallbackTimestamp;
-    const syntheticId = `synthetic_retry_notice_${input.sessionId}`;
+    if (!retryError) return messages;
+    const promptTime = messages[lastUserIndex].info.time.created;
+    if (lastIdleAt !== null && promptTime <= lastIdleAt) return messages;
     const synthetic: ChatMessageEntry = {
         info: {
-            id: syntheticId,
-            sessionID: input.sessionId,
+            id: 'synthetic_retry_notice_' + sessionId,
+            sessionID: sessionId,
             role: 'assistant',
-            time: { created: eventTime, completed: eventTime },
+            agent: '',
+            modelID: '',
+            providerID: '',
+            time: { created: promptTime, completed: promptTime },
             finish: 'stop',
             error: retryError,
-        } as unknown as Message,
+        },
         parts: [],
     };
-
     const next = messages.slice();
     next.splice(lastUserIndex + 1, 0, synthetic);
     return next;

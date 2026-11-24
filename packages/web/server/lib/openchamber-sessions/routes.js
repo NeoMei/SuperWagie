@@ -19,6 +19,7 @@ import { parseModelSelection } from '../opencode/config-v2.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
+import { createSessionLead, isAdmissionManagedProvider } from '../session-lead/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
 import { readObjective, writeObjective } from '../session-goal/objectives.js';
@@ -296,11 +297,11 @@ const applySessionSelection = async ({ client, sessionID, model, agent, variant 
   if (agent) await client.session.switchAgent({ sessionID, agent });
 };
 
-const createSession = async ({ client, directory, title }) => {
-  const session = await client.session.create({
-    location: { directory },
-    ...(title ? { title } : {}),
-  });
+const createSession = async ({ client, directory, title, leadParentId }) => {
+  const input = { location: { directory } };
+  if (title) input.title = title;
+  if (leadParentId) input.metadata = { openchamber: { leadParentID: leadParentId } };
+  const session = await client.session.create(input);
   const sessionID = asNonEmptyString(session?.id);
   if (!sessionID) throw new Error('failed to create session');
   return sessionID;
@@ -539,6 +540,8 @@ export const createOpenChamberSessionService = (dependencies) => {
     // Whether routing can run Auto right now (the composer's own test). Null
     // when routing is not wired in.
     isAutoReady = null,
+    dispatchResults = null,
+    isLeadEnabled = async () => false,
   } = dependencies;
 
   if ((!injectedArchiveStore || !injectedSessionMetadataStore) && !dataDir) {
@@ -798,6 +801,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     requestedVariant,
     reuseSessionSelection = false,
     promptedBySessionId = null,
+    leadDispatch = false,
   }) => {
     let { model, agent, variant } = await selectForSession({
       client, sessionID, directory, projectId, requestedModel, requestedAgent, requestedVariant, reuseSessionSelection,
@@ -820,7 +824,10 @@ export const createOpenChamberSessionService = (dependencies) => {
       variant = routed.model.variant ?? undefined;
       agent = routed.agent || agent;
     }
-    const parsedCommand = parseScheduledCommandPrompt(prompt);
+    if (leadDispatch && isAdmissionManagedProvider(model?.providerID)) {
+      throw new OpenChamberControlError('Choose a model that can run in background sessions. Managed models require an authenticated chat prompt.', 403);
+    }
+    const parsedCommand = leadDispatch ? null : parseScheduledCommandPrompt(prompt);
     let resolvedCommand = null;
     if (parsedCommand) {
       try {
@@ -1039,7 +1046,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     return sessionArchive.unarchive(parsed.ids);
   };
 
-  const create = async (payload = {}) => {
+  const create = async (payload = {}, leadParentId = null) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const goalInput = resolveGoalInput(payload, prompt);
@@ -1047,6 +1054,9 @@ export const createOpenChamberSessionService = (dependencies) => {
       throw new OpenChamberControlError(goalInput.error, 400);
     }
     const model = resolveRequestedModel(payload);
+    if (leadParentId && (!model || isAutoModel(model) || isAdmissionManagedProvider(model.providerID))) {
+      throw new OpenChamberControlError('Select an explicit background-capable model using provider/model', 400);
+    }
     const agent = asNonEmptyString(payload.agent);
     const variant = asNonEmptyString(payload.variant);
 
@@ -1151,8 +1161,9 @@ export const createOpenChamberSessionService = (dependencies) => {
     const authHeaders = getOpenCodeAuthHeaders();
     const sessionID = await createSession({
       client,
+      leadParentId,
       directory: sessionDirectory,
-      ...(title ? { title } : {}),
+      title,
     });
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {
@@ -1168,7 +1179,8 @@ export const createOpenChamberSessionService = (dependencies) => {
         requestedModel: selection.model,
         requestedAgent: selection.agent,
         requestedVariant: selection.variant,
-        promptedBySessionId: asNonEmptyString(payload.promptedBySessionId),
+        promptedBySessionId: leadParentId || asNonEmptyString(payload.promptedBySessionId),
+        leadDispatch: Boolean(leadParentId),
       });
     }
 
@@ -1212,7 +1224,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     return result;
   };
 
-  const runExisting = async (action, sourceSessionId, payload = {}) => {
+  const runExisting = async (action, sourceSessionId, payload = {}, leadDispatch = false) => {
     const sourceSessionID = asNonEmptyString(sourceSessionId);
     const prompt = asNonEmptyString(payload.prompt);
     if (!sourceSessionID) throw new OpenChamberControlError('sessionId is required', 400);
@@ -1285,6 +1297,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         requestedVariant: asNonEmptyString(payload.variant),
         reuseSessionSelection: true,
         promptedBySessionId: asNonEmptyString(payload.promptedBySessionId),
+        leadDispatch,
       });
       const result = {
         action,
@@ -1403,8 +1416,54 @@ export const createOpenChamberSessionService = (dependencies) => {
     return resolved.directory;
   };
 
+  const readLeadSession = async (sessionId) => {
+    let session;
+    try {
+      session = await clientFor().session.get({ sessionID: sessionId });
+    } catch (error) {
+      if (error?._tag === 'SessionNotFoundError' || error?.status === 404) return null;
+      throw error;
+    }
+    const directory = asNonEmptyString(session?.location?.directory);
+    if (!directory) return null;
+    return { ...session, directory, metadata: await sessionMetadataStore.get(sessionId, { directory }) };
+  };
+
+  // The index is global and paginated. Filter metadata from the index records;
+  // listing a lead's work must never start the MCP fleet of every project.
+  const listLeadSessions = async () => {
+    const client = clientFor();
+    const sessions = [];
+    const seen = new Set();
+    let cursor;
+    do {
+      const response = await client.session.list(cursor ? { cursor } : {});
+      if (!Array.isArray(response?.data)) throw new OpenChamberControlError('Could not read the session index', 503);
+      sessions.push(...response.data.map((session) => ({ ...session, directory: session.location?.directory })));
+      cursor = asNonEmptyString(response.cursor?.next);
+      if (cursor && seen.has(cursor)) throw new OpenChamberControlError('The session index did not advance', 503);
+      if (cursor) seen.add(cursor);
+    } while (cursor);
+    return sessions;
+  };
+
+  const lead = dataDir ? createSessionLead({
+    dataDir, readSession: readLeadSession, listSessions: listLeadSessions, updateMetadata,
+    isEnabled: isLeadEnabled,
+    syncGuidance: (sessionId, directory, guidance) => {
+      const entries = clientFor(directory).session.instructions.entry;
+      const input = { sessionID: sessionId, key: 'openchamber.lead' };
+      return guidance ? entries.put({ ...input, value: guidance }) : entries.remove(input);
+    },
+    isArchived: (sessionId) => sessionArchive.isArchived(sessionId),
+    createChild: create,
+    sendChild: (sessionId, payload) => runExisting('send', sessionId, payload, true),
+    registerResult: dispatchResults?.register,
+  }) : null;
+
   return {
     create,
+    lead,
     resolveDirectory,
     archive,
     unarchive,
@@ -1437,6 +1496,28 @@ const sendServiceError = (res, error, fallback) => {
 
 export const registerOpenChamberSessionRoutes = (app, dependencies) => {
   const service = dependencies.sessionService || createOpenChamberSessionService(dependencies);
+
+  if (service.lead) {
+    const leadResponse = (run) => async (req, res) => {
+      try {
+        return res.json(await run(req));
+      } catch (error) {
+        return sendServiceError(res, error, 'Lead request failed');
+      }
+    };
+    app.get('/api/openchamber/sessions/lead-capability', leadResponse(async () => ({ enabled: await service.lead.isEnabled() })));
+    app.get('/api/openchamber/sessions/:sessionId/lead', leadResponse((req) => service.lead.readBrief(req.params.sessionId)));
+    app.post('/api/openchamber/sessions/:sessionId/lead', express.json({ limit: '16kb' }), leadResponse((req) => {
+      const sessionId = req.params.sessionId;
+      switch (req.body?.action) {
+        case 'mark': return service.lead.setLead(sessionId, true);
+        case 'unmark': return service.lead.setLead(sessionId, false);
+        case 'handover': return service.lead.handover(sessionId, req.body.leadId);
+        case 'takeOver': return service.lead.takeOver(sessionId);
+        default: throw new OpenChamberControlError('Unknown lead action', 400);
+      }
+    }));
+  }
 
   app.post('/api/openchamber/sessions', express.json({ limit: '1mb' }), async (req, res) => {
     try {

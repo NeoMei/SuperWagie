@@ -60,6 +60,7 @@ interface ComposerFooterProps {
 
     onOpenSettings?: () => void;
     onPickLocalFiles: () => void;
+    onPickOfficeOriginals?: () => void;
     onOpenGitHubPicker: () => void;
     /** The host the project's issues and change requests come from. */
     repositoryProvider?: SourceControlProvider | null;
@@ -131,6 +132,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
         dictationActive,
         onOpenSettings,
         onPickLocalFiles,
+        onPickOfficeOriginals,
         onOpenGitHubPicker,
         repositoryProvider,
         trackerPickers,
@@ -186,6 +188,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 footerIconButtonClass={footerIconButtonClass}
                                 iconSizeClass={iconSizeClass}
                                 handlePickLocalFiles={onPickLocalFiles}
+                                onPickOfficeOriginals={onPickOfficeOriginals}
                                 openGitHubPicker={onOpenGitHubPicker}
                                 repositoryProvider={repositoryProvider}
                                 trackerPickers={trackerPickers}
@@ -259,6 +262,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             footerIconButtonClass={footerIconButtonClass}
                             iconSizeClass={iconSizeClass}
                             handlePickLocalFiles={onPickLocalFiles}
+                            onPickOfficeOriginals={onPickOfficeOriginals}
                             openGitHubPicker={onOpenGitHubPicker}
                             repositoryProvider={repositoryProvider}
                             trackerPickers={trackerPickers}

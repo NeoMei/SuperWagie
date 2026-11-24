@@ -430,8 +430,8 @@ export const useChatTimelineScroll = ({
     const liveGlideRef = React.useRef<FollowGlide | null>(null);
     // Collapsed activity stops the follow at the end of the reader's message.
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
-    const stopAfterUserMessageRef = React.useRef(activityRenderMode === 'collapsed');
-    stopAfterUserMessageRef.current = activityRenderMode === 'collapsed';
+    const stopAfterUserMessageRef = React.useRef(activityRenderMode !== 'summary');
+    stopAfterUserMessageRef.current = activityRenderMode !== 'summary';
     // Per place the follow may stop at (see followEnd): whether it still may.
     // A reader who returns to the end themselves has passed the current ones,
     // so the turn is followed as usual from then on.

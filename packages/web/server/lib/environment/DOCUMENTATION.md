@@ -32,6 +32,8 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   user variables, command output, then project variables. `forOpenCode()`
   answers `opencode service set env` variables under the user variables.
   `applyToDirectory(dir, env)` is the overlay consumers call.
+  `projectForDirectory(dir)` uses the same project rules and reads the
+  configured project list afresh for Secret card consent.
 - `opencode-service-env.js`: reads `env` from `service.json` in OpenCode's
   global config directory (the stable channel's file only). Not a published
   OpenCode contract; anything unexpected reads as no variables.

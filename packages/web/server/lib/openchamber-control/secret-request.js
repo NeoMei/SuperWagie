@@ -43,9 +43,9 @@ export const createSecretFiles = ({ directory, now = Date.now, fsPromises = fs }
     };
     return { write, remove, sweep };
 };
-export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnreadChat = async () => false, leases, runCommand }) => {
+export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnreadChat = async () => false, leases, runCommand, savedStore, projectForDirectory, resolveSessionDirectory }) => {
     const waits = createPageAnswers({ onWaitChange });
-    const runs = createSecretRuns({ waits, hasUnreadChat, leases, run: runCommand });
+    const runs = createSecretRuns({ waits, hasUnreadChat, leases, run: runCommand, savedStore, projectForDirectory, resolveSessionDirectory });
     const assertEnabled = async () => {
         if (!await isEnabled()) {
             throw new OpenChamberControlError('The secret tool is turned off in OpenChamber settings', 403);
@@ -118,8 +118,14 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
             settle(sessionId, callId, 'declined', null);
             return { status: 'declined' };
         }
-        if (runs.fieldsFor(sessionId, callId))
+        if (input.forgetSaved !== undefined) {
+            await assertEnabled();
+            return runs.forgetSaved(sessionId, callId, readText(input.forgetSaved), input.consent);
+        }
+        if (runs.fieldsFor(sessionId, callId)) {
+            await assertEnabled();
             return runs.submit(sessionId, callId, input, settle);
+        }
         const value = isText(input.value) ? input.value : '';
         if (!value.trim()) {
             throw new OpenChamberControlError('value is required', 400);

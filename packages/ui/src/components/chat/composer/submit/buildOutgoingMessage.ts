@@ -36,9 +36,8 @@ export interface OutgoingMessage {
     /** The agent the first `@agent` mention routed to, if any. */
     agentMentionName?: string;
     /**
-     * Skills the composer text names inline, deduped in order of appearance.
-     * The send attaches them to the prompt (see `SkillMentions`); queued
-     * messages already carry the instruction they were queued with.
+     * Skills captured with queued text and named in the composer, deduped
+     * in message order. The send resolves them to prompt attachments.
      */
     skillNames: string[];
     /** True when there is nothing worth sending. */
@@ -53,13 +52,14 @@ export interface OutgoingMessage {
 export interface QueuedInput {
     text: string;
     agentMention?: string;
+    skills?: readonly string[];
     attachments?: AttachedFile[];
     context?: readonly QueuedContextPart[];
 }
 
 export const selectComposerQueue = (messages: readonly QueuedMessage[]): readonly QueuedMessage[] =>
-    messages.some((message) => message.scheduledTask)
-        ? messages.filter((message) => !message.scheduledTask)
+    messages.some((message) => message.scheduledTask || message.deliveryUnconfirmed)
+        ? messages.filter((message) => !message.scheduledTask && !message.deliveryUnconfirmed)
         : messages;
 
 /** An issue, discussion, PR or tracker item attached to the composer, as it is sent. */
@@ -131,12 +131,7 @@ export function buildOutgoingMessage(
         if (text.trim()) texts.push(text);
     };
 
-    const skillNames: string[] = [];
-    const noteSkills = (text: string) => {
-        for (const name of deps.collectSkillNames(text)) {
-            if (!skillNames.includes(name)) skillNames.push(name);
-        }
-    };
+    const skillNames = new Set<string>();
 
     /** The first agent mention encountered wins; later ones are ignored. */
     const noteAgent = (name?: string) => {
@@ -148,7 +143,7 @@ export function buildOutgoingMessage(
         const agent = deps.parseAgentMention(raw);
         noteAgent(agent.agentName);
         const mentions = deps.extractFileMentions(agent.text);
-        noteSkills(mentions.text);
+        for (const name of deps.collectSkillNames(mentions.text)) skillNames.add(name);
         return mentions;
     };
 
@@ -156,6 +151,7 @@ export function buildOutgoingMessage(
     // reads chronologically. The context each was queued with follows it.
     for (const queued of input.queued) {
         noteAgent(queued.agentMention);
+        for (const name of queued.skills ?? []) skillNames.add(name);
         addText(queued.text);
         primaryAttachments.push(...deps.sanitizeAttachments(queued.attachments));
         additionalParts.push(...queuedContextToParts(queued.context ?? []));
@@ -174,7 +170,7 @@ export function buildOutgoingMessage(
 
     // Everything the composer had attached follows its text.
     additionalParts.push(...queuedContextToParts(
-        buildComposerContext(input, null),
+        buildComposerContext(input),
     ));
 
     return {
@@ -182,7 +178,7 @@ export function buildOutgoingMessage(
         primaryAttachments,
         additionalParts,
         agentMentionName,
-        skillNames,
+        skillNames: [...skillNames],
         isEmpty: !primaryText && primaryAttachments.length === 0 && additionalParts.length === 0,
     };
 }
@@ -197,7 +193,6 @@ export function buildOutgoingMessage(
  */
 export function buildComposerContext(
     input: ComposerContextInput,
-    skillInstruction: string | null,
 ): QueuedContextPart[] {
     const context: QueuedContextPart[] = [];
     // An attached item is context only: no instructions guess what the user
@@ -264,10 +259,6 @@ export function buildComposerContext(
                 break;
             }
         }
-    }
-
-    if (skillInstruction) {
-        context.push({ kind: 'instruction', text: skillInstruction });
     }
 
     return context;

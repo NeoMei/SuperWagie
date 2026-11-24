@@ -37,6 +37,7 @@ describe('platform prompt admission routes', () => {
     });
     const response = await request(app).post('/api/session/ses_one/prompt').send({ parts: [] });
     expect(response.status).toBe(503);
+    expect(response.headers['x-openchamber-error']).toBe('opencode-unreachable');
     expect(response.body).toEqual({ error: 'OpenCode is restarting', restarting: true });
     expect(read).toBe(0);
   });

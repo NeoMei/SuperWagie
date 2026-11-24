@@ -29,6 +29,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { GoToLineDialog } from './GoToLineDialog';
 import { DocumentSymbolsPanel } from './DocumentSymbolsPanel';
+import { useSourceSelectionComment } from './files/useSourceSelectionComment';
 import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButton';
 import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
@@ -763,10 +764,14 @@ const MAX_FILE_EDITOR_POSITIONS = 100;
 
 const FilePositionEditor = ({
   positionKey,
+  commentPath,
+  commentDirectory,
   onViewReady,
   ...props
-}: React.ComponentProps<typeof CodeMirrorEditor> & { positionKey: string }) => {
+}: React.ComponentProps<typeof CodeMirrorEditor> & { positionKey: string; commentPath: string; commentDirectory: string }) => {
   const viewRef = React.useRef<EditorView | null>(null);
+  const comment = useSourceSelectionComment(commentPath, commentDirectory, !props.detached);
+  const extensions = React.useMemo(() => [...(props.extensions ?? []), comment.extension], [props.extensions, comment.extension]);
 
   React.useLayoutEffect(() => () => {
     const view = viewRef.current;
@@ -783,23 +788,27 @@ const FilePositionEditor = ({
   }, [positionKey]);
 
   return (
-    <CodeMirrorEditor
-      {...props}
-      onViewReady={(view) => {
-        viewRef.current = view;
-        const position = fileEditorPositions.get(positionKey);
-        if (position) {
-          view.dispatch({
-            selection: {
-              anchor: Math.min(position.anchor, view.state.doc.length),
-              head: Math.min(position.head, view.state.doc.length),
-            },
-            effects: position.scroll,
-          });
-        }
-        onViewReady?.(view);
-      }}
-    />
+    <>
+      <CodeMirrorEditor
+        {...props}
+        extensions={extensions}
+        onViewReady={(view) => {
+          viewRef.current = view;
+          const position = fileEditorPositions.get(positionKey);
+          if (position) {
+            view.dispatch({
+              selection: {
+                anchor: Math.min(position.anchor, view.state.doc.length),
+                head: Math.min(position.head, view.state.doc.length),
+              },
+              effects: position.scroll,
+            });
+          }
+          onViewReady?.(view);
+        }}
+      />
+      {comment.overlay}
+    </>
   );
 };
 
@@ -5417,6 +5426,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 <FilePositionEditor
                   key={filePositionKey}
                   positionKey={filePositionKey}
+                  commentPath={selectedFilePath ?? ''}
+                  commentDirectory={panelDirectory}
                   detached={!visible}
                   value={draftContent}
                   onChange={setDraftContent}
@@ -5710,6 +5721,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               <FilePositionEditor
                 key={`${filePositionKey}:fullscreen`}
                 positionKey={`${filePositionKey}:fullscreen`}
+                commentPath={selectedFilePath ?? ''}
+                commentDirectory={panelDirectory}
                 value={draftContent}
                 onChange={setDraftContent}
                 readOnly={!canEdit}

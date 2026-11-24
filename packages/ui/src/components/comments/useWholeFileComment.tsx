@@ -12,12 +12,19 @@ const WHOLE_FILE_RANGE = { start: 0, end: 0 };
  * trigger; the editor and the saved comments render under the header, where
  * the line comments' editor would, so the file's own diff never moves.
  */
-export function useWholeFileComment({ fileLabel, origin }: { fileLabel: string; origin?: DiffCommentOrigin }) {
+export function useWholeFileComment({ fileLabel, origin, staged, repositoryDirectory }: {
+  fileLabel: string;
+  origin?: DiffCommentOrigin;
+  staged?: boolean;
+  repositoryDirectory?: string;
+}) {
   const controller = useInlineCommentController<{ start: number; end: number }>({
     source: 'diff',
     fileLabel,
     language: '',
     origin,
+    staged,
+    repositoryDirectory,
     getCodeForRange: () => '',
     toStoreRange: () => ({ startLine: 0, endLine: 0 }),
     fromDraftRange: () => WHOLE_FILE_RANGE,

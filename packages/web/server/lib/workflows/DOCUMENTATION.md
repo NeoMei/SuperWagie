@@ -250,3 +250,8 @@ and skip-start hosts report unsupported regardless of the stored preference.
 The agent tool is not injected there. Mobile clients see the
 card, approve and stop runs, and get the report through the server they are
 connected to; the work-status panel is not shown on phones.
+
+Workflow completion uses the parent session's directory and current
+model selection before waking the parent. A managed paid parent receives
+the report in its transcript and can resume on the next authenticated
+prompt.

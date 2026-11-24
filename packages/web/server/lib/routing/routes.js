@@ -21,15 +21,20 @@
  */
 import express from 'express';
 import { isAutoModel } from './defaults.js';
+import { AttachmentDeliveryError } from '../opencode/attachment-delivery.js';
 
 const CREATE_PATH = '/api/session';
 const MODEL_PATH = '/api/session/:sessionId/model';
+const PREPARE_SEND_PATH = '/api/routing/sessions/:sessionId/prepare-send';
 const SEND_PATHS = [
   '/api/session/:sessionId/prompt',
   '/api/session/:sessionId/command',
 ];
 
 const sendError = (res, error) => {
+  if (error instanceof AttachmentDeliveryError) {
+    return res.status(400).json({ _tag: 'InvalidRequestError', message: error.message });
+  }
   const status = Number.isInteger(error?.status) ? error.status : 500;
   res.status(status).json({ error: error?.message ?? 'Routing request failed' });
 };
@@ -165,19 +170,42 @@ export function registerRoutingPromptRewrite(app, runtime) {
     next();
   }));
 
+  const prepareSend = withParsedBody((req, res) => {
+    runtime.prepareSend({ sessionId: req.params.sessionId, directory: directoryOf(req), body: req.body })
+      .then((prepared) => res.set('Cache-Control', 'no-store').json(prepared))
+      .catch((error) => sendError(res, error));
+  });
+  app.post(PREPARE_SEND_PATH, (req, res, next) => (
+    req.is('application/json') ? prepareSend(req, res, next) : res.status(415).end()
+  ));
+
+  const attachmentTicketOf = (req) => {
+    const header = req.get('idempotency-key');
+    return header?.startsWith('oc-auto-') ? header : null;
+  };
+
   // Whether the session is routed is known from the URL alone, so an ordinary
   // send is never read: it reaches the proxy as the stream it arrived as, the
   // way it did before routing existed.
   const routedSendsOnly = (handler) => {
     const parsed = withParsedBody(handler);
-    return (req, res, next) => (runtime.isAutoSession(req.params.sessionId) ? parsed(req, res, next) : next());
+    return (req, res, next) => {
+      const ticket = attachmentTicketOf(req);
+      if (ticket && !req.is('application/json')) return res.status(415).end();
+      return ticket || runtime.isAutoSession(req.params.sessionId) ? parsed(req, res, next) : next();
+    };
   };
 
   app.post(SEND_PATHS, routedSendsOnly((req, res, next) => {
     const sessionId = req.params.sessionId;
     const directory = directoryOf(req);
-    runtime.routeSend({ sessionId, directory, body: req.body })
-      .then(() => next())
-      .catch((error) => sendError(res, error));
+    const ticket = attachmentTicketOf(req);
+    const routed = ticket
+      ? runtime.routePreparedSend({ sessionId, directory, body: req.body, ticket, command: req.path.endsWith('/command') })
+      : runtime.routeSend({ sessionId, directory, body: req.body });
+    routed.then(() => {
+      if (ticket) delete req.headers['idempotency-key'];
+      next();
+    }).catch((error) => sendError(res, error));
   }));
 }

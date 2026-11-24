@@ -45,6 +45,7 @@ import {
   WalkthroughBanners,
   WalkthroughEmptyState,
   WalkthroughGenerateButton,
+  WalkthroughExportMenu,
   WalkthroughLanguagePicker,
   WalkthroughModelPicker,
   WalkthroughOptions,
@@ -573,6 +574,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
               labelClassName="walkthrough-header__label"
             />
           )}
+          {!prDiffUnavailable && <WalkthroughExportMenu review={review} className="walkthrough-header__option" />}
           <Popover.Root open={moreOpen} onOpenChange={setMoreOpen}>
             <Popover.Trigger
               render={

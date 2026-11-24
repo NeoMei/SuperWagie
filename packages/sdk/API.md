@@ -161,6 +161,7 @@ Access tokens never appear in `ready` or in request results.
 | `stat`            | `path: string`                    | `Promise<{ kind, size, mtime }>` | `kind` adds `'missing'`; a missing path is not an error. Same path rules              |
 | `setBadge`        | `count: number \| null`          | `Promise<void>`                | Number on this guest's rail icon, 0–999 (clamped); `null` clears. Opening the panel clears it too. In memory only |
 | `openCommit`      | `sha: string`                     | `Promise<void>`                | Show that commit of the open project in the host's Diff view (commit scope). 7–64 hex characters; the host reads the commit itself. `NO_DIRECTORY` without a project, `NOT_FOUND` for an unknown commit, `UNSUPPORTED` where the host has no Diff view |
+| `openWalkthrough` | `{ base: string }` | `Promise<void>` | Open Changes Walkthrough on the frame's project, comparing its checked-out branch with the given base. See [Changes Walkthrough](#changes-walkthrough). |
 | `setHeight`       | `height: number`                  | `Promise<void>`                | Content height in CSS px. The Work Status section sizes its frame to it, clamped to 24–320; taller content scrolls inside. A page docked to a shared surface grows or shrinks its dock to it (a width for a `left`/`right` dock), from 24 px up to half the panel. Other surfaces ignore it |
 | `setStatusControls` | `GuestStatusControl[]` | `Promise<void>` | Replace host-rendered controls for this mounted status frame. Requires `features.statusControls`; old hosts reject with `UNSUPPORTED` |
 | `openPopover` | `GuestPopoverRequest` | `Promise<void>` | Open a sandboxed frame outside this frame's bounds, anchored to a rectangle in its viewport. Requires `features.popovers` |
@@ -196,6 +197,20 @@ Access tokens never appear in `ready` or in request results.
 `worktree` is `false` or omitted for the target directory, `true` for a generated new worktree, `{ kind: 'existing', directory }` for a known worktree belonging to the project, or `{ kind: 'new', name?, baseBranch? }`. `name` names both the branch and worktree. Omitted name/base use the host's normal defaults. First-message model/agent/variant selection is captured when the call starts.
 
 A created session returns `{ sessionId, directory, sent, linked, worktree? }`. `linked: false` means the session exists but saving the attached item failed. If a worktree was created but bootstrap or session creation failed, the result is `{ sessionId: null, sent: 'skipped', directory, worktree, failure }`, where `failure` is `bootstrap-failed` or `session-create-failed`. The worktree is retained. Inspect the result before offering Retry, which would otherwise create another worktree. The call waits up to 180 seconds; a timeout does not prove the server rolled back.
+
+### Changes Walkthrough
+
+`host.openWalkthrough({ base })` uses Git in the frame's project or selected
+nested repository. Pass a branch name or an explicit `refs/heads/…` or
+`refs/remotes/…` ref. A bare name prefers the bound remote's tracking branch.
+An explicit remote ref must exist on the bound remote. Success opens the
+existing branch comparison and saves its base in the branch picker.
+Generation still requires the user to click Generate.
+
+The host returns `NO_DIRECTORY` without an open project, `NOT_FOUND` for a
+missing base or checked-out branch, and `HOST_UNAVAILABLE` when the
+repository read fails or the frame, repository selection, or runtime changes.
+Mini Chat, VS Code, hosted mobile, and Capacitor return `UNSUPPORTED`.
 
 ### Workspace lists and subscriptions
 

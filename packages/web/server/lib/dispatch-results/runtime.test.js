@@ -605,3 +605,21 @@ describe('dispatch result job authority', () => {
     expect(openCode.fetchImpl.mock.calls.some(([url]) => new URL(url).searchParams.has('parentID'))).toBe(false);
   });
 });
+
+
+describe('Lead dispatch delivery', () => {
+  it.each([false, true])('retains the result without waking a paid lead (initial resume %s)', async (resume) => {
+    const { runtime, openCode } = await createRuntime();
+    openCode.state.sessions.ses_lead = { id: 'ses_lead', model: { providerID: 'unihub' }, location: { directory: '/repo' } };
+    openCode.state.sessions.ses_child.location = { directory: '/repo/job' };
+    openCode.state.records.ses_child = [user(10), assistant('Done', 11), idle('succeeded', 12)];
+    await runtime.register({ parentSessionId: 'ses_lead', sessionId: 'ses_child', dispatchedAt: 9, afterIdleId: null, resume,
+      parentDirectory: '/repo', directory: '/repo/job' });
+    await settle();
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({ sessionID: 'ses_lead', resume: false })]);
+    expect(openCode.fetchImpl.mock.calls.find(([url]) => new URL(url).pathname === '/api/session/ses_child/message')[1].headers)
+      .toMatchObject({ 'x-opencode-directory': encodeURIComponent('/repo/job') });
+    expect(openCode.fetchImpl.mock.calls.find(([url]) => new URL(url).pathname === '/api/session/ses_lead/synthetic')[1].headers)
+      .toMatchObject({ 'x-opencode-directory': encodeURIComponent('/repo') });
+  });
+});

@@ -22,7 +22,7 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Standard engine API contract
 
 The standard runtime pins the official client, schema and packaged CLI to
-2.3.2. External and standalone engines must be 2.2.4 or newer within 2.x;
+2.4.1. External and standalone engines must be 2.2.4 or newer within 2.x;
 `compatibility.js` owns this minimum and the VS Code CLI preflight uses the
 same predicate. The frozen Intel local source retains its separate 2.1.4
 engine and compatibility guard until it is ported independently.
@@ -75,7 +75,7 @@ If a package was staged without the server, the bundled CLI remains a bounded
 compatibility fallback. A missing server and CLI fails managed startup with
 `OPENCODE_BINARY_MISSING`; it never falls through to a system installation.
 
-The bundled server is staged from the pinned `@opencode/server@2.3.2` package
+The bundled server is staged from the pinned `@opencode/server@2.4.1` package
 and its platform-native assets. Its launch entry owns the server-only contract,
 so the desktop package does not need a CLI command path for ordinary operation.
 The existing CLI staging remains available for explicit development and recovery
@@ -420,7 +420,7 @@ Provider model discovery also reads `max_input_tokens`, `input_modalities` and `
 
 Version and upgrade-status reads of `/api/info` use the health probe's 3-second
 timeout. An aborted read returns the route's existing error response. These
-routes register before the generic proxy and need their own deadline.
+routes register before the generic proxy and need their own deadline. The upgrade-status route still returns the running version and managed update state when the registry read fails. Update availability is then unknown.
 
 ## CLI upgrades
 
@@ -1356,6 +1356,29 @@ file lock per read, which must not sit on every proxied request.
 
 This server gate covers web, Electron, hosted mobile, and Capacitor connections.
 The VS Code extension owns its separate Git and proxy implementation.
+
+### Client and engine headers
+
+The main proxy strips the OpenChamber client's cookie, authorization, proxy
+authorization and Cloudflare Access headers on both forwarding paths. It removes
+OpenChamber URL credentials from upstream query strings, including browser SSE
+connections authenticated by a URL token. It applies the configured OpenCode
+credential for the current upstream, when present. The host handles `100 Continue`
+and strips `Expect` before forwarding so `http-proxy` can replay parsed bodies.
+On the response path, `Set-Cookie`, `Clear-Site-Data`, and `x-openchamber-error`
+from OpenCode stay upstream. The catch-all keeps `Content-Encoding` for streamed
+bytes, and the fetch-based paths drop it after fetch decodes the body.
+
+### Prompt delivery proof
+
+A `503` with `x-openchamber-error: opencode-unreachable` on
+`POST /api/session/:sessionID/prompt` certifies that the host did not deliver the
+prompt to OpenCode. The readiness hold can issue it before UniHub admission or
+generic forwarding. The proxy can also issue it for a refused connection or a
+failed DNS lookup before connecting. Timeouts, resets and upstream responses
+carry no proof. The main server exposes the header to trusted packaged desktop
+and mobile origins. The space dispatcher continues to allowlist response headers
+from its separate server and does not relay proof issued inside a space.
 
 ## Public exports (watcher.js)
 - `createOpenCodeWatcherRuntime(dependencies)`: creates global event watcher runtime backed by the shared upstream SSE reader.

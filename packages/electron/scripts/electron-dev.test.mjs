@@ -181,6 +181,7 @@ test('dev-server spawn error cancels readiness before Electron starts', async ()
   let spawns = 0;
   let readinessAborted = false;
   await vm.runInNewContext(`${main}\nmain();`, {
+    resolveBundledOpenCodeServerEnv: () => ({ OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR: '/fixture/opencode-server' }),
     resolveElectronDevMode: () => ({ startHmr: true, useBundledUi: false }),
     process: { env: {}, on() {}, exit(code) { exits.push(code); } },
     AbortController,
@@ -215,6 +216,7 @@ test('bundled asset build retains its existing launcher signal ownership', async
   let spawns = 0;
   const build = new Promise((resolve) => { releaseBuild = resolve; });
   const launched = vm.runInNewContext(`${main}\nmain();`, {
+    resolveBundledOpenCodeServerEnv: () => ({ OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR: '/fixture/opencode-server' }),
     resolveElectronDevMode: () => ({ startHmr: false, useBundledUi: true }),
     process: { env: {}, on(signal) { signals.push(signal); }, exit() {} },
     AbortController, console,

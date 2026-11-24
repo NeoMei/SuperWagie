@@ -13,6 +13,7 @@ const { useInlineCommentDraftStore } = await import('@/stores/useInlineCommentDr
 const { tableQuoteDraft } = await import('@/components/views/files/previews/tableQuoteDraft');
 const { formatContextText, contextPayloadFromDraft } = await import('@/lib/messages/contextParts');
 const { ComposerContextChips } = await import('./ComposerContextChips');
+const { useUIStore } = await import('@/stores/useUIStore');
 let root: Root | null = null;
 let host: HTMLDivElement;
 let preview: HTMLDivElement;
@@ -37,4 +38,25 @@ test('composer inspection distinguishes two files at the same range and removing
   expect(outgoing).toContain('forecast.tsv · TSV · B3:C5');
   expect(outgoing).not.toContain('budget.csv');
   expect(outgoing).not.toContain('first');
+});
+
+test('opening the source from a draft reveals its line and preserves the draft', async () => {
+  await useI18nStore.getState().setLocale('en');
+  const store = useInlineCommentDraftStore.getState();
+  const id = store.addDraft(target, {
+    source: 'file', fileLabel: 'src/main.ts', startLine: 11, endLine: 14,
+    code: 'const main = () => {};', language: 'typescript', text: 'Rename this.',
+  });
+  host = document.createElement('div');
+  preview = document.createElement('div');
+  document.body.append(host, preview);
+  root = createRoot(host);
+  await act(async () => root?.render(<I18nProvider><ComposerContextChips draftTarget={target} colors={getDefaultTheme(false).colors} previewHost={preview} /></I18nProvider>));
+  await act(async () => host.querySelector('button')?.click());
+  const openSource = preview.querySelector<HTMLButtonElement>('button[aria-label="Open source file"]');
+  if (!openSource) throw new Error('Expected a source action on the comment');
+  await act(async () => openSource.click());
+  expect(useUIStore.getState().pendingFileNavigation).toEqual({ path: '/repo/src/main.ts', line: 11, column: 1 });
+  expect(store.getDrafts(target).map((draft) => draft.id)).toEqual([id]);
+  useUIStore.getState().setPendingFileNavigation(null);
 });

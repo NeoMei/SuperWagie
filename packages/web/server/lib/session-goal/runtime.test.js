@@ -293,6 +293,23 @@ describe('session goal session-read recovery', () => {
     expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
   });
 
+  it('persists a stop immediately while an ordinary assistant turn is still being read', async () => {
+    const gate = Promise.withResolvers();
+    const sessionRead = vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined);
+    const test = setup(sessionRead);
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused', statusReason: 'paused after abort' });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(test.generate).not.toHaveBeenCalled();
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
   it('rechecks active status at the settlement write', async () => {
     const test = setup();
     await test.start();
@@ -1032,7 +1049,7 @@ describe('session goal reconnect guards', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(messageReads).toBe(2);
     expect(generate).toHaveBeenCalledTimes(1);
-    expect(seam.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(seam.persistSessionGoal).toHaveBeenCalledTimes(change === 'aborted' ? 2 : 1);
     const allowed = ['unchanged', 'mid-goal-edit', 'accounting'].includes(change);
     expect(server.calls.filter((call) => call.path.endsWith('/prompt') && call.method === 'POST')).toHaveLength(allowed ? 1 : 0);
   });

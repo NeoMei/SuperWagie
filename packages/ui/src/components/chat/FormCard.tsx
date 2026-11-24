@@ -155,7 +155,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = fa
         respondingRef.current = true;
         setIsResponding(true);
         try {
-            if (recovered) noteLocalFormCancelled(form.id);
+            if (recovered) noteLocalFormCancelled(form.sessionID, form.id);
             else await sessionActions.cancelForm(form.sessionID, form.id);
             dropFormDraft(draftScope);
             if (isCurrent()) setHasResponded(true);

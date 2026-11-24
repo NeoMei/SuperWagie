@@ -15,6 +15,11 @@ const harness = (metadata, overrides = {}) => {
 };
 
 describe('sourceOwnedLinksPatch', () => {
+  it('removes Lead markers and associations from forks', () => {
+    expect(sourceOwnedLinksPatch({ openchamber: { lead: { at: 1 }, leadParentID: 'ses_parent' } }))
+      .toEqual({ lead: null, leadParentID: null });
+  });
+
   it('pauses an active goal so the fork does not pursue it in parallel', () => {
     expect(sourceOwnedLinksPatch({ openchamber: { goal: { id: 'g', status: 'active' } } }))
       .toEqual({ goal: { status: 'paused', statusReason: 'paused in fork' } });

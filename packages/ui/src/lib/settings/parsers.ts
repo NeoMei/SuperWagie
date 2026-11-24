@@ -396,14 +396,14 @@ export const parseFollowUpBehavior: SettingsParser<'steer' | 'queue'> = (value, 
   return legacy.data ? 'queue' : 'steer';
 };
 
-const activityRenderModeSchema = trimmed.pipe(z.enum(['collapsed', 'summary']));
+const activityRenderModeSchema = trimmed.pipe(z.enum(['collapsed', 'text', 'summary']));
 
 /**
  * The removed Sorted chat mode (`chatRenderMode: 'sorted'`) showed only the
  * answers with the work folded away; Collapsed is its closest match, so it
  * wins over a stored mode until the user picks one (which retires the key).
  */
-export const parseActivityRenderMode: SettingsParser<'collapsed' | 'summary'> = (value, raw) => {
+export const parseActivityRenderMode: SettingsParser<z.infer<typeof activityRenderModeSchema>> = (value, raw) => {
   if (raw.chatRenderMode === 'sorted') return 'collapsed';
   const direct = activityRenderModeSchema.safeParse(value);
   return direct.success ? direct.data : undefined;

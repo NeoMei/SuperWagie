@@ -666,6 +666,15 @@ DOC/DOCX, XLS/XLSX and PPT/PPTX. Its original-byte reader without a byte ceiling
 AbortSignal ownership, viewer disposal and live theme variables remain owned by
 `OfficeArtifact`, `officePreviewBytes` and `officeViewer`.
 
+## Comments on source editor selections
+
+The source editor shows Comment for a single selected range. The comment
+records the exact editor text and inclusive source lines, including ranges
+whose final position is the start of the next line. The file path and the
+main composer are captured before the comment input opens. On save the
+composer owner and runtime must still match, so switching to another session
+in the same directory cannot attach the earlier selection there.
+
 ## Table columns and quotes
 
 Table previews window columns as well as rows. The horizontal virtualizer uses

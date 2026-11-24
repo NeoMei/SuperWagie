@@ -6,6 +6,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { OpenCode } from '@opencode/client';
 import { useUIStore } from '@/stores/useUIStore';
+import { useTerminalStore } from '@/stores/useTerminalStore';
+import type { TerminalAPI } from '@/lib/api/types';
 
 const browser = new Window({ url: 'http://localhost/', settings: { navigation: {
   disableMainFrameNavigation: true, disableChildPageNavigation: true, disableFallbackToSetURL: true,
@@ -21,7 +23,13 @@ Object.assign(globalThis, { window: browser, document: browser.document, navigat
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 Object.defineProperty(globalThis, 'customElements', { configurable: true, value: browser.customElements });
 mock.module('@/lib/router/openSessionFromRoute', () => ({ openSessionLink: async () => undefined }));
-mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ runtime: { isVSCode: false }, editor: undefined }) }));
+const createTerminal = mock<TerminalAPI['createSession']>(async () => ({
+  sessionId: 'reply-terminal-fixture', cols: 80, rows: 24, mode: 'command', status: 'exited',
+}));
+mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({
+  runtime: { isVSCode: false }, editor: undefined,
+  terminal: { createSession: createTerminal, listSessions: async () => [], close: async () => {} },
+}) }));
 const openedLinks: string[] = [];
 mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => (href: string) => { openedLinks.push(href); } }));
 let currentTheme = getDefaultTheme(false);
@@ -99,6 +107,26 @@ test('renders semantic Markdown through native Streamdown code and table compone
   expect(tableWrapper?.lastElementChild?.querySelector('table')).not.toBeNull();
   expect(Array.from(host.querySelector('pre code')?.children ?? []).map((line) => line.textContent).join('\n')).toBe('first\nsecond');
   expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('first\nsecond');
+});
+
+test('a settled assistant shell fence runs only after the terminal button is pressed', async () => {
+  const draw = (settled: boolean) => act(async () => root.render(
+    React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, {
+      content: '```bash\nprintf ok\n```', directory: '/project', sessionId: 'session', messageId: 'message',
+      settled, uiBlocks: true, mode: settled ? 'static' : 'streaming', isStreaming: !settled, enableFileReferences: false,
+    }))));
+  const button = () => host.querySelector<HTMLButtonElement>('button[aria-label*="/project"]');
+  await draw(false);
+  expect(button()).toBeNull();
+  await draw(true);
+  expect(button()).not.toBeNull();
+  expect(createTerminal).not.toHaveBeenCalled();
+  await act(async () => { button()?.click(); });
+  expect(createTerminal).toHaveBeenCalledWith({
+    cwd: '/project', mode: 'command', command: 'printf ok', shell: 'bash', loginShell: false, purpose: { type: 'terminal' },
+  });
+  expect(useTerminalStore.getState().getActiveTab('/project')?.terminalSessionId).toBe('reply-terminal-fixture');
+  useTerminalStore.getState().removeDirectory('/project');
 });
 
 test('invisible-only blocks leave no paragraphs or arrival wrappers in either render mode', async () => {

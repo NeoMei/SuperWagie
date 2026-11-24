@@ -64,6 +64,20 @@ describe('captureMessageViewportAnchor', () => {
         expect(captureMessageViewportAnchor(container)).toEqual({ messageId: 'reply', offsetTop: 20 });
     });
 
+    test('records a hoisted note by the rendered row and part when it fills the viewport', () => {
+        const { container, addMessage } = createTimeline();
+        const row = document.createElement('div');
+        row.dataset.rowKey = 'fold:turn';
+        container.append(row);
+        const note = addMessage('step', { top: 60, height: 880 }, row);
+        note.dataset.messageHoisted = 'part';
+        addMessage('overscan', { top: 960, height: 100 });
+
+        expect(captureMessageViewportAnchor(container)).toEqual({
+            messageId: 'step', offsetTop: -40, kept: { row: 'fold:turn', partId: 'part' },
+        });
+    });
+
     test('returns null when no message is visible', () => {
         const { container, addMessage } = createTimeline();
         addMessage('gone', { top: -300, height: 200 });

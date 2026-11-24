@@ -466,7 +466,7 @@ import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, ModelSelection, Part, Session, SessionStatus } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
-import { applyRecoverableQuestionEvents, noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
+import { applyRecoverableQuestionEvents, noteQuestionFormSnapshot, recoverableQuestionKey, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { buildFormAnswer, type FormValues } from "../components/chat/formCardState"
 import { serializeFormAnswerAsMarkdown } from "../components/chat/formSerializers"
 
@@ -3818,7 +3818,7 @@ describe("sendRecoveredFormAnswer", () => {
       target: { runtimeKey: "default-runtime", sessionId: "session-a", directory: "/test/project" },
     }])
     // The card is done only after the send was accepted.
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_recovered")).toBe("answered")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get(recoverableQuestionKey("session-a", "frm_recovered"))).toBe("answered")
   })
 
   test("the new turn carries the serialized answer payload", async () => {
@@ -3856,7 +3856,7 @@ describe("sendRecoveredFormAnswer", () => {
     await expect(sendRecoveredFormAnswer(question, "the answer")).rejects.toThrow("send failed")
 
     // No tombstone: the card and the draft the surface keeps stay for a retry.
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has(recoverableQuestionKey("session-a", "frm_recovered"))).toBe(false)
   })
 
   test("a duplicate submission reuses the first send", async () => {
@@ -3889,7 +3889,7 @@ describe("sendRecoveredFormAnswer", () => {
     await sendRecoveredFormAnswer(question, "the answer")
 
     expect(sendMessageCalls).toHaveLength(1)
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has(recoverableQuestionKey("session-a", "frm_recovered"))).toBe(false)
   })
 })
 

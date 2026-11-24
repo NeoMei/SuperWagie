@@ -693,6 +693,12 @@ Input history keeps both runtime-wide and runtime/directory/session buckets in o
 
 Server-owned queue acceptance records the original prompt and restorable attachments against its captured runtime/directory/session identity. Rejection records nothing. Automatic delivery and manual take do not record the accepted item again. VS Code retains recording at dispatch, using the full messages actually taken for sending.
 
+The queue carries explicit skill names through enqueue, projection, local
+persistence, and take. Old synthetic skill instructions still deliver as
+captured. An item with unconfirmed delivery remains visible and is excluded
+from sending and take. The server reconciles its own items. In VS Code, the
+foreground receipt check runs before the local queue marks an item unconfirmed.
+
 Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
 
 ### `useTerminalStore.ts`
@@ -1004,6 +1010,14 @@ A skill's id is its folder, so a rename changes it: `renameSkill` carries a
 switched-off skill's rule to the new id, and deleting every copy of a skill
 removes its rule. Otherwise the renamed skill would come back on, and the
 old rule would keep a row (`keepSwitchedOffSkills`) for a skill that is gone.
+
+## Review source navigation
+
+`useUIStore.reviewDiffRequest` holds the latest active review source in
+memory. It separates the panel directory from the source directory and checks
+the runtime instance. Opening another diff or explicitly closing its tab
+retires the request. The comparison view owns pending row jumps and their
+snapshot lifetime.
 
 ## Selector Rules
 

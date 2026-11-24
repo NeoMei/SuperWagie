@@ -1,3 +1,5 @@
+import type { TableDelimiter } from './tableDelimiter';
+
 /**
  * CSV/TSV parsing for the table preview.
  *
@@ -28,7 +30,7 @@ export const delimiterForPath = (filePath: string): ',' | '\t' => (
 
 export const parseDelimitedText = (
   content: string,
-  delimiter: ',' | '\t',
+  delimiter: TableDelimiter,
   rowCap: number = DEFAULT_TABLE_ROW_CAP,
 ): DelimitedTable => {
   const records: string[][] = [];

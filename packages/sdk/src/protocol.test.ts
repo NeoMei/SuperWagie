@@ -928,6 +928,15 @@ describe('actions, commands, and badge wire shapes', () => {
     }
   });
 
+  test('walkthrough requests carry exactly one bounded base', () => {
+    const message = { ...envelope, type: 'open-walkthrough', id: 'walk-1' };
+    expect(parseGuestMessage({ ...message, payload: { base: ' origin/release/2026 ' } }))
+      .toMatchObject({ payload: { base: 'origin/release/2026' } });
+    for (const payload of [{ base: '' }, { base: 'a'.repeat(256) }, { base: 7 }, { base: 'main', directory: '/other' }]) {
+      expect(parseGuestMessage({ ...message, payload })).toBeNull();
+    }
+  });
+
   test('accepts resize heights in range and drops the rest', () => {
     expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: 180 } })).toMatchObject({ payload: { height: 180 } });
     expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: -1 } })).toBeNull();

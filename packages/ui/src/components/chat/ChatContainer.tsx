@@ -1,3 +1,5 @@
+import { isLeadSession } from '@/lib/sessionLead';
+import { LeadDigestRow } from './column/LeadDigestRow';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import type { Message, Part, Session } from '@/lib/opencode/model';
@@ -23,6 +25,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { KeepAlive } from '@/components/ui/KeepAlive';
 import ChatEmptyState from './ChatEmptyState';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
+import type { RetryOverlay } from './lib/turns/applyRetryOverlay';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { createTimelineRevealGate, type TimelineRevealGate } from './timelineRevealGate';
 
@@ -128,7 +131,6 @@ import { isChatDirectoryPath } from '@/lib/chatDirectories';
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
-const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
 const DRAFT_EXIT_DURATION_MS = 120;
 const COMPOSER_MOVE_DURATION_MS = 180;
 const CHAT_SCROLL_STYLE = {
@@ -236,12 +238,7 @@ type ChatViewportProps = {
     sessionIsWorking: boolean;
     streamingMessageId: string | null;
     activeStreamingPhase: import('./message/types').StreamPhase | null;
-    retryOverlay: {
-        sessionId: string;
-        message: string;
-        confirmedAt?: number;
-        fallbackTimestamp?: number;
-    } | null;
+    retryOverlay: RetryOverlay | null;
     scrollToBottom: () => void;
     /** A drag on the overlay scrollbar's thumb takes the scroll from auto-follow. */
     onScrollbarDrag: () => void;
@@ -1086,47 +1083,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         play: playAutoReadAloud,
     });
 
-    const activeRetryStatus = React.useMemo(() => {
-        if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
-            return null;
-        }
-
-        const rawMessage = typeof (sessionStatusForCurrent as { message?: string }).message === 'string'
-            ? (((sessionStatusForCurrent as { message?: string }).message) ?? '').trim()
-            : '';
-
-        return {
-            sessionId: currentSessionId,
-            message: rawMessage || DEFAULT_RETRY_MESSAGE,
-            confirmedAt: (sessionStatusForCurrent as { confirmedAt?: number }).confirmedAt,
-        };
-    }, [currentSessionId, sessionStatusForCurrent]);
-    const [retryFallbackTimestamp, setRetryFallbackTimestamp] = React.useState<number>(0);
-    const retryFallbackSessionRef = React.useRef<string | null>(null);
-
-    React.useEffect(() => {
-        if (!activeRetryStatus || typeof activeRetryStatus.confirmedAt === 'number') {
-            retryFallbackSessionRef.current = null;
-            setRetryFallbackTimestamp(0);
-            return;
-        }
-
-        if (retryFallbackSessionRef.current !== activeRetryStatus.sessionId) {
-            retryFallbackSessionRef.current = activeRetryStatus.sessionId;
-            setRetryFallbackTimestamp(Date.now());
-        }
-    }, [activeRetryStatus]);
-
-    const retryOverlay = React.useMemo(() => {
-        if (!activeRetryStatus) {
-            return null;
-        }
-
-        return {
-            ...activeRetryStatus,
-            fallbackTimestamp: retryFallbackTimestamp,
-        };
-    }, [activeRetryStatus, retryFallbackTimestamp]);
+    const currentSession = useSession(currentSessionId, effectiveSessionDirectory);
+    const lastIdleAt = currentSession?.time.idle ?? null;
+    const retryOverlay = React.useMemo<RetryOverlay | null>(() => {
+        if (!currentSessionId || sessionStatusForCurrent.type === 'idle') return null;
+        const notice = sessionStatusForCurrent.type === 'retry'
+            ? { message: sessionStatusForCurrent.message }
+            : undefined;
+        return { sessionId: currentSessionId, lastIdleAt, notice };
+    }, [currentSessionId, lastIdleAt, sessionStatusForCurrent]);
 
     // History metadata — use sync's hasMore/isLoading
     const historyMeta = React.useMemo(() => {
@@ -1217,7 +1182,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     }, [pinned, setWorkStatusPanelVisible, showWorkStatusPanel]);
     const messageListRef = React.useRef<MessageListHandle | null>(null);
 
-    const currentSession = useSession(currentSessionId, effectiveSessionDirectory);
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);
 
     // A pinned column hides "Return to parent" on the session it was opened
@@ -1911,6 +1875,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			className="relative flex min-w-0 flex-1 flex-col h-full bg-background"
 		>
 			{returnToParentButton}
+			{currentSession && isLeadSession(currentSession) && !isDesktopExpandedInput ? (
+				<LeadDigestRow key={currentSessionKey ?? currentSession.id} session={currentSession}
+					canReply={active && !isVSCode && !promptReadOnly && !sessionIsWorking && statusSnapshotReady && Boolean(currentSession.model)}
+					showBrief={!isVSCode && !currentSession.time.archived} />
+			) : null}
 			{sessionSurface}
 			{chatSearch.open && currentSessionId && messageSearchEnabled ? (
 				<div className="pointer-events-none absolute inset-e-3 top-2 z-20">

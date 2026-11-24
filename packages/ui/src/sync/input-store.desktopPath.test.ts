@@ -288,14 +288,14 @@ test('outgoing prompt and queued assembly send bounded notes, including restored
   }
 });
 
-test('unsupported local desktop binary falls back to a note without reading its bytes into the prompt', async () => {
+test('unsupported local desktop binary stays in the draft for the target runtime', async () => {
   const { useInputStore } = await import('./input-store');
   const store = useInputStore.getState();
   store.clearAttachedFiles();
   expect(await store.addAttachedFile(new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0])], 'book.epub'))).toBe(true);
   const [file] = useInputStore.getState().attachedFiles;
-  expect(file.dataUrl.startsWith('data:text/plain;')).toBe(true);
-  expect(await file.file.text()).toContain('/Users/me/Documents/book.epub');
+  expect(file.dataUrl).toBe('data:application/octet-stream;base64,UEsDBAAA');
+  expect(file.serverPath).toBeUndefined();
 });
 
 test('a desktop connected to a remote runtime refuses a large local file', async () => {

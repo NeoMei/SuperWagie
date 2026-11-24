@@ -11,6 +11,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import UserTextPart from './UserTextPart';
 import type { Part } from '@/lib/opencode/model';
 import { CONTEXT_METADATA_KEY } from '@/lib/messages/contextParts';
+import { ChatTranscriptDirectoryContext } from '../../chatColumnSession';
 
 // Plain rendering keeps the lazy markdown module (and its shiki worker asset
 // import) out of the test graph; the expand affordance is mode-independent.
@@ -331,6 +332,38 @@ describe('UserTextPart expand affordance (issue #3742)', () => {
             await act(async () => {
                 root.unmount();
             });
+            dom.restore();
+        }
+    });
+
+    test('a collapsed legacy review comment opens the file from its transcript scope', async () => {
+        const dom = installDomStub();
+        const root = createRoot(dom.container);
+        const part = {
+            ...makeTextPart('Rename this.'),
+            metadata: { opencodeComment: { path: 'src/main.ts', origin: 'review', selection: { startLine: 13, endLine: 18 }, comment: 'Rename this.' } },
+        };
+        let expanded = false;
+        try {
+            await act(async () => root.render(
+                <SyncProvider sdk={sdk} directory="">
+                    <I18nProvider>
+                        <ChatTranscriptDirectoryContext.Provider value="/pinned-repo">
+                            <UserTextPart part={part} isMobile={false} messageExpanded={false}
+                                onExpandMessage={() => { expanded = true; }} partIndex={0} attachmentFilenames={[]}
+                                onCollapsedLinesChange={() => undefined} onTruncationChange={() => undefined} />
+                        </ChatTranscriptDirectoryContext.Provider>
+                    </I18nProvider>
+                </SyncProvider>,
+            ));
+            const button = dom.container.querySelector<HTMLButtonElement>('button[aria-label="Open source file"]');
+            if (!button) throw new Error('Expected the legacy context source control');
+            await act(async () => button.click());
+            expect(expanded).toBe(false);
+            expect(useUIStore.getState().pendingFileNavigation).toEqual({ path: '/pinned-repo/src/main.ts', line: 13, column: 1 });
+        } finally {
+            await act(async () => root.unmount());
+            useUIStore.getState().setPendingFileNavigation(null);
             dom.restore();
         }
     });

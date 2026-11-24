@@ -1,3 +1,6 @@
+import { isLeadSession } from '@/lib/sessionLead';
+import { useLeadStrings } from '@/sync/session-lead';
+import { SessionLeadMenu } from './SessionLeadMenu';
 import { guestActionLabel } from '@/lib/guests/built-in-copy';
 import { DirectoryActionIndicator } from './DirectoryActionIndicator';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
@@ -654,6 +657,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       </span>
     </RowMarkTooltip>
   ) : null;
+  const leadText = useLeadStrings();
+  const leadMark = isLeadSession(resolvedSession) ? (
+    <Icon name="team" className="size-3 shrink-0 text-muted-foreground" role="img"
+      aria-hidden={false} aria-label={leadText['sessions.sidebar.session.leadMark']} />
+  ) : null;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   // Rows with the tree slot open to their subsessions, the Tree view's
   // Chats, Pinned and In work rows included. List is a flat list: a node that
@@ -962,7 +970,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
               </span>
             ) : null}
             zombieIndicator={null}
-            goal={sessionGoalGlyph}
+            goal={leadMark || sessionGoalGlyph ? <>{leadMark}{sessionGoalGlyph}</> : null}
             badges={null}
             hideMetaOnHoverClass=""
           />
@@ -1295,6 +1303,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         {t('sessions.sidebar.session.menu.rename')}
       </Item>
       </SessionMenuItemHint>
+      {!archivedBucket && !resolvedSession.parentID && sessionDirectory ? (
+        <SessionLeadMenu session={resolvedSession} directory={sessionDirectory} open={isSessionMenuOpen}
+          Item={Item} Sub={Sub} SubTrigger={SubTrigger} SubContent={SubContent} />
+      ) : null}
       <SessionAiRenameMenuItem sessionID={session.id} directory={sessionDirectory} open={isSessionMenuOpen} Item={Item} />
       <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.copyId')}>
       <Item onClick={() => handleCopySessionId(session.id)} className="[&>svg]:me-1">
@@ -1714,7 +1726,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       directoryIndicator={!archivedBucket && sessionDirectory && renderContext !== 'project' ? <DirectoryActionIndicator directory={sessionDirectory} /> : null}
       prBadge={timelinePrBadge}
       zombieIndicator={isTimelineRow ? streamingIndicator : null}
-      goal={sessionGoalGlyph}
+      goal={leadMark || sessionGoalGlyph ? <>{leadMark}{sessionGoalGlyph}</> : null}
       badges={rowBadges}
       doneHint={doneHintBadge()}
       providerId={isTimelineRow ? resolvedSession.model?.providerID ?? null : null}

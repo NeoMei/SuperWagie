@@ -92,6 +92,8 @@ interface PierreDiffViewerProps {
   fileName?: string;
   /** The diff this is, for comments; absent for uncommitted changes. */
   commentOrigin?: DiffCommentOrigin;
+  commentStaged?: boolean;
+  commentRepositoryDirectory?: string;
   renderSideBySide: boolean;
   wrapLines?: boolean;
   layout?: 'fill' | 'inline';
@@ -1016,6 +1018,8 @@ const PierreDiffViewerBody: React.FC<
   language,
   fileName,
   commentOrigin,
+  commentStaged,
+  commentRepositoryDirectory,
   renderSideBySide,
   wrapLines,
   layout = 'fill',
@@ -1048,6 +1052,8 @@ const PierreDiffViewerBody: React.FC<
     source: 'diff',
     fileLabel: fileName || 'unknown',
     origin: commentOrigin,
+    staged: commentStaged,
+    repositoryDirectory: commentRepositoryDirectory,
     language,
     getCodeForRange: (range) => extractSelectedCode(original, modified, incomingFileDiff, range),
     toStoreRange: (range) => ({

@@ -19,8 +19,14 @@ export function usePublishMainComposerDraftTarget(target: InlineCommentDraftTarg
 
 /** App-wide file actions target the main composer; pinned columns keep their own drafts. */
 export function attachToMainComposerDraft(runtimeKey: string, directory: string, draft: DraftInput): boolean {
+  return captureMainComposerDraftAttachment(runtimeKey, directory)?.(draft) ?? false;
+}
+
+/** A comment composed across renders stays bound to the composer that opened it. */
+export function captureMainComposerDraftAttachment(runtimeKey: string, directory: string): ((draft: DraftInput) => boolean) | null {
   const published = mainComposer;
   if (!published || !published.isCurrentRuntime() || runtimeKey !== published.runtimeKey
-    || normalizePath(directory) !== normalizePath(published.target.directory)) return false;
-  return useInlineCommentDraftStore.getState().addDraft(published.target, draft) !== null;
+    || normalizePath(directory) !== normalizePath(published.target.directory)) return null;
+  return (draft) => published === mainComposer && published.isCurrentRuntime()
+    && useInlineCommentDraftStore.getState().addDraft(published.target, draft) !== null;
 }

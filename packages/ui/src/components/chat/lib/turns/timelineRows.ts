@@ -58,6 +58,8 @@ type TurnRowFields = {
      * the rows of a live turn agree on it while its record lags the stream.
      */
     underFold: boolean;
+    /** Keep intermediate text in view while the fold is closed. */
+    keepText: boolean;
     /** Under a fold, the answer it leaves outside, from the same record. */
     finalMessageId: string | undefined;
     gapBelow: boolean;
@@ -65,6 +67,7 @@ type TurnRowFields = {
 
 export type TimelineRowsOptions = {
     collapsedActivity: boolean;
+    keepActivityText?: boolean;
     expandedTurns: ReadonlyMap<string, boolean>;
     showReasoningTraces: boolean;
 };
@@ -138,7 +141,9 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
     const groups = getActivityGroups(turn.assistantMessages);
     const underFold = options.collapsedActivity && hasLiveActivity(turn, options.showReasoningTraces);
     const finalMessage = underFold ? getLiveFinalMessage(turn.assistantMessages) : undefined;
-    const fields = { entry, underFold, finalMessageId: finalMessage?.info.id, gapBelow: false };
+    const expanded = options.expandedTurns.get(turn.turnId) === true;
+    const keepText = underFold && !expanded && options.keepActivityText === true;
+    const fields = { entry, underFold, keepText, finalMessageId: finalMessage?.info.id, gapBelow: false };
     const rows: TimelineRow[] = [{ kind: 'turn-head', key: entry.key, ...fields }];
     const addMessage = (message: ChatMessageEntry, final = false) => {
         if (isActivityContinuationOnlyMessage(message, groups)) return;
@@ -170,7 +175,7 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
         // turn's latest steps, the pages and the steps after them. Opened,
         // every step is a row of its own.
         rows.push({ kind: 'turn-fold', key: `fold:${turn.turnId}`, ...fields });
-        if (options.expandedTurns.get(turn.turnId) === true) {
+        if (expanded) {
             const pages = finalMessage ? [] : getShownPages(turn.assistantMessages);
             // A working turn draws what came after its last page below it.
             const lastPageMessageId = pages[pages.length - 1]?.messageID;
@@ -202,7 +207,7 @@ const isSameSlice = (previous: MessageSlice | null, next: MessageSlice | null): 
 const isSameRow = (previous: TimelineRow, next: TimelineRow): boolean => {
     if (previous.kind !== next.kind || previous.entry !== next.entry) return false;
     if (previous.kind === 'ungrouped' || next.kind === 'ungrouped') return true;
-    if (previous.gapBelow !== next.gapBelow || previous.underFold !== next.underFold || previous.finalMessageId !== next.finalMessageId) return false;
+    if (previous.gapBelow !== next.gapBelow || previous.underFold !== next.underFold || previous.keepText !== next.keepText || previous.finalMessageId !== next.finalMessageId) return false;
     if (previous.kind === 'turn-message' && next.kind === 'turn-message') {
         return previous.messageId === next.messageId && previous.final === next.final && isSameSlice(previous.slice, next.slice)
             && previous.messageAliases?.length === next.messageAliases?.length
