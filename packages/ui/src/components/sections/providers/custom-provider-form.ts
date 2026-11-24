@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import type { Model } from '@/lib/opencode/model';
 import type { CustomProviderIcon } from '@/lib/customProviderIcons';
 
@@ -228,11 +229,37 @@ const discoveredModelSchema = z.object({
 });
 
 /** What `POST /api/provider/discover-models` answers on success. */
-export const modelDiscoveryResponseSchema = z.object({ models: z.array(discoveredModelSchema) });
+const modelDiscoveryResponseSchema = z.object({ models: z.array(discoveredModelSchema) });
 /** What it answers on failure. */
-export const modelDiscoveryErrorSchema = z.object({ error: z.string() });
+const modelDiscoveryErrorSchema = z.object({ error: z.string() });
 
 export type DiscoveredModel = z.infer<typeof discoveredModelSchema>;
+
+type ProviderModelQuery = {
+  baseURL: string;
+  providerID?: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  metadataProviderID: string;
+};
+
+export async function queryProviderModels(
+  query: ProviderModelQuery,
+  directory?: string | null,
+  signal?: AbortSignal,
+): Promise<DiscoveredModel[]> {
+  const response = await runtimeFetch('/api/provider/discover-models', {
+    method: 'POST',
+    query: { directory },
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...query, enrich: true }),
+    signal,
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  const parsed = modelDiscoveryResponseSchema.safeParse(payload);
+  if (!response.ok || !parsed.success) throw new Error(modelDiscoveryErrorSchema.safeParse(payload).data?.error);
+  return parsed.data.models;
+}
 
 /**
  * A form row for one discovered model. The provider's own numbers win over
@@ -506,7 +533,7 @@ export const storedProviderEntrySchema = z.object({
   name: z.string().optional(),
   package: z.string().optional(),
   env: z.array(z.string()).optional(),
-  settings: z.record(z.string(), z.unknown()).optional(),
+  settings: z.looseObject({ baseURL: z.string().optional().catch(undefined) }).optional(),
   headers: z.record(z.string(), z.string()).optional(),
   models: z.record(z.string(), z.object({
     modelID: z.string().optional(),

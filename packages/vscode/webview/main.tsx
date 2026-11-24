@@ -1368,7 +1368,10 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   if (pathname === '/api/provider/discover-models' && method === 'POST') {
     try {
       const body = await extractJsonBody(input, init, method);
-      const data = await sendBridgeMessage('api:provider:discover-models', body);
+      const data = await sendBridgeMessage('api:provider:discover-models', {
+        ...body,
+        directory: url.searchParams.get('directory') || undefined,
+      });
       if (data && typeof data === 'object' && 'success' in data && (data as { success?: boolean }).success === false) {
         return jsonResponse({ error: (data as { error?: string }).error || 'Failed to discover provider models' }, 400);
       }

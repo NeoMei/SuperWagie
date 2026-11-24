@@ -49,6 +49,7 @@ import { ProviderAccounts } from './ProviderAccounts';
 import { ProviderAccountSwitchToggle } from './ProviderAccountSwitchToggle';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { CustomProviderForm } from './CustomProviderForm';
+import { CustomProviderModelUpdates } from './CustomProviderModelDiscovery';
 import { useCustomProviderOperationOwner } from './useCustomProviderOperationOwner';
 
 import { ProviderAuthMethodCards } from './ProviderAuthMethodCards';
@@ -59,10 +60,12 @@ import {
   storeKeyAfterConfigWrite,
   CUSTOM_PROVIDER_ID,
   isConfigDefinedCustomProvider,
+  modelRowFromDiscovery,
   providerToEditFormState,
   resolveProviderConfigScope,
   storedProviderEntrySchema,
   type CustomProviderFormState,
+  type DiscoveredModel,
   type CustomProviderPersistPlan,
   type ProviderConfigScope,
   type StoredProviderEntry,
@@ -668,6 +671,7 @@ export const ProvidersPage: React.FC = () => {
             <CustomProviderForm
               key={customOwner.visit}
               mode="create"
+              directory={settingsDirectory ?? null}
               existingProviderIDs={connectedProviderIds}
               busy={authBusy?.kind === 'custom'}
               authFailureHint={customAuthFailureHint}
@@ -810,6 +814,23 @@ export const ProvidersPage: React.FC = () => {
     </span>
   );
 
+  const storedProvider = selectedSnapshot?.config ?? null;
+  const discoveryBaseURL = storedProvider?.settings?.baseURL;
+  const canDiscoverUpdates = isEditableCustomProvider && !enterpriseLocked
+    && selectedProvider.id !== 'superwagie' && !selectedProvider.id.startsWith('superwagie-account-')
+    && discoveryBaseURL && /^https?:\/\//i.test(discoveryBaseURL);
+  const openCustomEditor = (newModels: readonly DiscoveredModel[] = []) => {
+    if (!customOwner.ownsVisit() || !selectedSources) return;
+    const values = providerToEditFormState(selectedProvider, storedProvider, customProviderIcons[selectedProvider.id]);
+    const savedIds = new Set(values.models.map((model) => model.id));
+    values.models.push(...newModels.filter((model) => !savedIds.has(model.id)).map(modelRowFromDiscovery));
+    retireEditor();
+    setCustomAuthFailureHint(null);
+    setEditingCustomFormInitial({ scope, values });
+    setEditingCustomScope(resolveProviderConfigScope(selectedSources));
+    setEditingCustomProviderId(selectedProvider.id);
+  };
+
   const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
     typeof model?.name === 'string' ? model.name : '',
     typeof model?.id === 'string' ? model.id : '',
@@ -828,6 +849,7 @@ export const ProvidersPage: React.FC = () => {
           mode="edit"
           existingProviderIDs={connectedProviderIds}
           initialValues={editingCustomFormInitial.values}
+          directory={settingsDirectory ?? null}
           allowExistingAuth={hasCredentials || !sourcesLoaded}
           busy={authBusy?.kind === 'custom'}
           authFailureHint={customAuthFailureHint}
@@ -865,18 +887,7 @@ export const ProvidersPage: React.FC = () => {
                 variant="outline"
                 size="xs"
                 className="!font-normal"
-                onClick={() => {
-                  if (!customOwner.ownsVisit() || !selectedSources) return;
-                  retireEditor();
-                  setCustomAuthFailureHint(null);
-                  setEditingCustomFormInitial({ scope, values: providerToEditFormState(
-                    selectedProvider,
-                    selectedSnapshot.config,
-                    customProviderIcons[selectedProvider.id],
-                  ) });
-                  setEditingCustomScope(resolveProviderConfigScope(selectedSources));
-                  setEditingCustomProviderId(selectedProvider.id);
-                }}
+                onClick={() => openCustomEditor()}
               >
                 {t('settings.providers.page.actions.edit')}
               </Button>
@@ -952,7 +963,7 @@ export const ProvidersPage: React.FC = () => {
         ) : null}
       </SettingsSection>
 
-      {showModelsSection ? (
+      {showModelsSection || canDiscoverUpdates ? (
       <SettingsSection
         title={t('settings.providers.page.models.title')}
         titleAccessory={
@@ -987,6 +998,20 @@ export const ProvidersPage: React.FC = () => {
         )}
         settingsItem="providers.models"
       >
+            {canDiscoverUpdates ? (
+              <CustomProviderModelUpdates
+                key={JSON.stringify([scope, selectedProvider.id, settingsDirectory, activeAccountId])}
+                providerID={selectedProvider.id}
+                directory={settingsDirectory ?? null}
+                baseURL={discoveryBaseURL}
+                headers={storedProvider?.headers}
+                existingIds={new Set([
+                  ...providerModels.map((model) => model.id),
+                  ...Object.keys(storedProvider?.models ?? {}),
+                ])}
+                onAdd={openCustomEditor}
+              />
+            ) : null}
             <div className="relative mb-2">
               <Icon name="search" className="absolute inset-s-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input

@@ -28,6 +28,7 @@ const fetchSpy = spyOn(globalThis,'fetch').mockImplementation(async(input,init) 
  if(method==='PUT' && url.pathname==='/api/provider' && configHeld) { await configGate.promise; return Response.json({error:'DUMMY_CONFIG_REJECTION'},{status:400}); }
  if(method!=='GET' && url.pathname===heldPath) { await gate.promise; if(failed)return Response.json({error:'DUMMY_REJECTION',name:'ValidationError',data:{message:'DUMMY_REJECTION'}},{status:400}); }
  if(url.pathname.endsWith('/disabled') && method==='PUT') { const id=decodeURIComponent(url.pathname.split('/')[3]);disabled=JSON.parse(body).disabled?[id]:[];return Response.json({providers:disabled}); }
+ if(url.pathname==='/api/provider/discover-models')return Response.json({models:[]});
  if(url.pathname==='/api/provider/disabled')return Response.json({providers:disabled});
  if(url.pathname.includes('/connect/key'))return new Response(null,{status:204});
  if(url.pathname.includes('/credential/') && method!=='GET')return new Response(null,{status:204});
@@ -72,7 +73,8 @@ async function setup(id='openai'){
  await act(async()=>until(()=>!!document.querySelector('button[title*="Hide this provider"]')));
  success.mockClear();error.mockClear();records.length=0;
 }
-const writes=()=>records.filter(r=>r.method!=='GET');
+// Provider discovery uses POST to carry its settings and only reads the catalog.
+const writes=()=>records.filter(r=>r.method!=='GET'&&r.path!=='/api/provider/discover-models');
 const snapshot=(name:string,extra={})=>console.log(JSON.stringify({case:name,key:keyInput()?.value??null,resource:resourceInput()?.value??null,name:nameInput()?.value??null,records:[...records],success:success.mock.calls.length,error:error.mock.calls.length,text:document.body.textContent?.slice(0,600),...extra}));
 async function navigate(label:string){await act(async()=>button('All providers').click());await act(async()=>button(label).click());}
 async function googleDraft(){await navigate('Google');await act(async()=>until(()=>keyInput()!==null));await type(keyInput(),'DUMMY_NEW_KEY');await type(resourceInput(),'DUMMY_NEW_RESOURCE');const node=keyInput()!;return node;}
