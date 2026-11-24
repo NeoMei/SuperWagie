@@ -2,7 +2,7 @@
 
 ## Ownership
 
-This module owns SuperWagie's managed quukk provider, authenticated task admission, the local model proxy and its durable journal. `platform-account` owns the bounded OIDC session. UniHub owns membership and credits. llmrouter owns model selection, upstream attempts, usage and settlement.
+This module owns SuperWagie's managed quukk provider, authenticated task admission, the local model proxy and its durable journal. `platform-account` owns the bounded OIDC session. UniHub owns the managed product model policy, membership and credits. SuperWagie chooses the next product model for a managed chat. LLMRouter selects the upstream channel and handles provider attempts, usage and settlement.
 
 Web and Electron use the managed backend. External OpenCode has no managed plugin and refuses this feature. VS Code has no corresponding server and does not offer platform account controls. Hosted mobile and Capacitor retain an explicit unsupported platform account page. No relay wire format changes.
 
@@ -26,7 +26,8 @@ the suspended factory until that option is present.
 - A managed chat HTTP 402 with `platform_insufficient_funds` or legacy `platform_billing_unavailable` maps to a funding refusal only when the same call has a verified REJECTED receipt. A REJECTED receipt may contain an empty `charged` string; this means no amount was supplied, never zero. Other statuses still reject empty amounts. A receipt with a conflicting terminal status cannot overwrite the confirmed state or its amount. Otherwise the existing incomplete-call path preserves reconciliation. Refreshing or funding the account never replays a prompt; the user may send a new one after resolving the shortage.
 
 - `OPENCHAMBER_UNIHUB_GATEWAY_URL` pins an HTTPS gateway, or a loopback HTTP gateway for development, with `/platform/v1` as its path. `OPENCHAMBER_UNIHUB_MODELS` is a JSON array of `{id,name,context,maxOutput}`. Missing configuration leaves ordinary providers unchanged.
-- The managed config adds provider `unihub`, displayed as `quukk`, and the plugin together. Its default base URL is an unusable loopback destination. The user selects quukk in the ordinary model picker. Existing BYOK and default selections remain unchanged.
+- The managed config adds provider `unihub`, displayed as `quukk`, and the plugin together. Its default base URL is an unusable loopback destination. The picker shows the primary chat model from the published product policy. Newly admitted generations use the current product primary. An existing session may rebind to that primary after reconciliation of its outstanding calls, keeping the original payer, task and call receipts. BYOK providers use their own configuration.
+- The managed transport reads `GET /v1/products/superwagie/managed-models` from the configured UniHub origin. This response carries a product version and ordered model IDs by operation. Missing operations inherit the previous product behavior and empty lists disable the operation. A failed read blocks new managed dispatch once the 30-second local snapshot expires. The isolated product proxy also checks current policy for new requests. It accepts historical receipt reads with the originally admitted model and payer.
 - **The legacy child-process capability is not a trusted caller boundary.** A
   controlled OpenCode test showed that a shell child can inherit the callback
   token and submit a forged request while a prompt is active. Product startup
@@ -95,7 +96,8 @@ the suspended factory until that option is present.
   capabilities remain in backend memory. The URL may reach the child
   environment, but the HMAC key and bootstrap never do.
 - Gateway requests use a restricted model capability for the saved account and task, exact model allowlist, bounded output and usage-enabled Chat SSE. The proxy does not debit cash or calculate charges.
-- Stream output is journaled before forwarding. A clean completion requires `[DONE]` and EOF. Transport failure, abort, malformed SSE or missing completion retains an unresolved call. Automatic client retries are disabled, and the legacy limit-failover plugin does not switch a UniHub call to another provider. Gateway retries use the original durable call.
+- Stream output is journaled before forwarding. A clean completion requires `[DONE]` and EOF. Transport failure, abort, malformed SSE or missing completion retains an unresolved call. The legacy limit-failover plugin keeps UniHub calls on the managed provider.
+- For SuperWagie product credits, HTTP 503 with `platform_model_route_unavailable` and `stage: pre_admission` makes the current attempt terminal without a receipt. The runtime checks the ordered backups against the executable streaming catalog and output and context limits, then journals a fresh call ID for the next model. Each generation keeps its original prompt permit, payer and deadline. Independently purchased or user-configured providers are outside this chain. API Key probes name the model directly and report each result.
 - Receipt GET authenticates the same actor/account/task/model. It never calls the model. SETTLED, RELEASED or REJECTED permit a future generation. Missing receipt, pending settlement and UNKNOWN keep the task blocked. Reconciliation of PREPARED is safe because gateway IO has not begun.
 - When dispatch is suspended, reconciliation also queries the original receipt
   for an accepted `ASYNC_PENDING` video or image-edit call. Unknown responses
@@ -123,8 +125,12 @@ the suspended factory until that option is present.
 - Gateway receipt and video status metadata are read from bounded streams;
   oversized, interrupted, malformed or refused responses leave the original
   call's accounting state unresolved and never trigger another dispatch.
-- The managed account API Key checks use the configured product chat and media
-  catalog plus the fixed managed OCR and knowledge models. An explicit
+- The managed account API Key checks use the current UniHub policy lists in
+  their published order. Each omitted operation uses its legacy models.
+  An empty list disables that operation. Chat and vision have distinct
+  probes even when the same model implements both. A batch captures its plan
+  and gateway at activation and sends each probe directly to the listed model.
+  An explicit
   same-origin request uses the signed-in actor's selected payer and the same
   private product proxy as ordinary model calls. The server sends only fixed
   samples, reads bounded outputs, and requires the matching settled product

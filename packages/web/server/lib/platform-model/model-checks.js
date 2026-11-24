@@ -37,7 +37,6 @@ export function createManagedModelChecks({ platformAccount, models, store, isAva
     };
     return { id, accountId, identity, authSession: actor.authSession, assertCurrent, assertAvailable };
   };
-  const plan = () => managedModelCheckPlan(models());
   const initialRows = (rows) => rows.map(({ id, modelId, purpose, operation }) => ({
     id, modelId, purpose, status: operation ? 'queued' : 'skipped', testedAt: null,
     errorCode: operation ? null : 'account_key_probe_unavailable',
@@ -59,16 +58,15 @@ export function createManagedModelChecks({ platformAccount, models, store, isAva
   };
   const read = async (input) => {
     const ctx = context(input);
-    const rows = plan();
+    const rows = managedModelCheckPlan(await models());
     const saved = await store.read(ctx.id);
     ctx.assertCurrent();
     return view(ctx, rows, saved?.kind === 'managed-model-check' && saved.plan === digest(rows) ? saved : null);
   };
-  const run = async (ctx, rows, saved) => {
+  const run = async (ctx, rows, saved, gateway) => {
     let cursor = 0;
     let stopped = false;
     let writes = Promise.resolve();
-    const { gateway } = models();
     const update = (index, change) => {
       Object.assign(saved.tests[index], change);
       const tests = structuredClone(saved.tests);
@@ -128,13 +126,15 @@ export function createManagedModelChecks({ platformAccount, models, store, isAva
     if (input.action !== 'retest') fail('model_configuration_invalid_input', 400);
     ctx.assertAvailable();
     if (active.has(ctx.id) || active.size >= 4) fail('account_key_busy', 409);
-    const rows = plan();
     active.set(ctx.id, ctx);
     try {
+      const config = await models();
+      const rows = managedModelCheckPlan(config);
+      ctx.assertAvailable();
       await platformAccount.usesProductCreditWallet(ctx.identity);
       ctx.assertAvailable();
       const saved = await store.create({ id: ctx.id, kind: 'managed-model-check', runId: randomUUID(), plan: digest(rows), status: 'testing', tests: initialRows(rows) });
-      void run(ctx, rows, saved).catch(() => {}).finally(() => active.delete(ctx.id));
+      void run(ctx, rows, saved, config.gateway).catch(() => {}).finally(() => active.delete(ctx.id));
       return view(ctx, rows, saved);
     } catch (error) {
       active.delete(ctx.id);

@@ -9,6 +9,7 @@ import { isEnterpriseMode } from '../enterprise-mode.js';
 import { createPlatformKnowledgeAdapter } from './knowledge.js';
 import { projectPlatformApiKeys } from './api-keys.js';
 import { PlatformUsageActivityError, createUsageActivityRuntime } from './usage-activity.js';
+import { readProductManagedModels } from '../platform-model/product-managed-models.js';
 
 const userSchema = z.object({ id: z.string().min(1), name: z.string(), email: z.string() });
 const runtimeIdentitySchema = z.object({ type: z.enum(['session', 'client']), token: z.string().min(1) });
@@ -1200,7 +1201,12 @@ export const createPlatformAccountRuntime = ({ env = process.env, fetchImpl = fe
     const authSession = crypto.createHash('sha256').update(JSON.stringify([session.generation ?? '', session.accountVersion])).digest('hex');
     return { actingUserId: session.user.id, billingAccountId: session.accountId, expiresAt: session.expiresAt, authSession };
   };
-  return { publicSession, identitySession, identityAccounts, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, usesProductCreditWallet, proxyProductModel, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
+  const managedModelPolicy = async () => {
+    const current = config();
+    if (!current || enterprise()) return null;
+    return readProductManagedModels({ api: current.api, fetchImpl });
+  };
+  return { managedModelPolicy, publicSession, identitySession, identityAccounts, captureIdentitySession, begin, start, callback, selectAccount, authMethods, register, passwordLogin, captureCommerceSession, usesProductCreditWallet, proxyProductModel, readKnowledgeResult, dispatchKnowledgeEmbedding, dispatchKnowledgeRerank, ...knowledgeAdapter,
     logout: (identity) => { const session = restoreSession(identity); const key = namespace(identity); revokePlatformSession(session); activeLogins.delete(key); removeSession(identity); for (const [state, t] of transactions) if (t.key === key) transactions.delete(state); for (const [ticket, t] of starts) if (t.key === key) starts.delete(ticket); return { status: 'signed-out' }; },
     request: async (identity, path, init) => { const session = await ensureFreshSession(identity); const key = namespace(identity); return sessionRequest(key, session, path, init); },
     readUsage, readApiKeys, startUsageActivity, wakeUsageActivity: () => { if (!activityClosed) void activityRuntimePromise?.then((runtime) => runtime.wake()).catch(() => {}); }, close,

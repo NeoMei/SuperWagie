@@ -23,6 +23,90 @@ const answer = 'data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const scope = () => ({ actingUserId: 'actor-a', billingAccountId: 'account-a' });
 
+it('plans exactly the policy models in operation order and preserves each list order', () => {
+  const managedModels = {
+    chat: ['second-chat', 'first-chat'],
+    vision: ['first-chat'],
+    speech: ['fixture-tts'],
+    transcription: ['fixture-asr'],
+    'image-generation': ['fixture-image'],
+    'image-edit': ['fixture-edit'],
+    video: ['fixture-video'],
+    'knowledge-embedding': ['text-embedding-v4'],
+    'knowledge-rerank': [],
+    ocr: ['PaddleOCR-VL-1.6'],
+  };
+  expect(managedModelCheckPlan({ ...config, managedModels }).map(({ id, purpose }) => [id, purpose])).toEqual([
+    ['chat:second-chat', 'agent'],
+    ['chat:first-chat', 'agent'],
+    ['vision:first-chat', 'vision'],
+    ['speech:fixture-tts', 'tts'],
+    ['transcription:fixture-asr', 'stt-short'],
+    ['image-generation:fixture-image', 'image-generation'],
+    ['image-edit:fixture-edit', 'image-editing'],
+    ['video:fixture-video', 'video-generation'],
+    ['knowledge-embedding:text-embedding-v4', 'embedding'],
+    ['ocr:PaddleOCR-VL-1.6', 'ocr'],
+  ]);
+  const legacyRows = managedModelCheckPlan(config);
+  expect(managedModelCheckPlan({ ...config, managedModels: {} })).toEqual(legacyRows);
+  expect(managedModelCheckPlan({ ...config, managedModels: null })).toEqual(legacyRows);
+  expect(managedModelCheckPlan({ ...config, managedModels: { chat: ['policy-chat'], vision: [] } })).toEqual([
+    { id: 'chat:policy-chat', modelId: 'policy-chat', purpose: 'agent', operation: 'chat' },
+    ...legacyRows.filter(({ operation }) => operation !== 'chat' && operation !== 'vision'),
+  ]);
+});
+
+it('probes the listed chat models directly and reports each result independently', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'managed-policy-model-check-'));
+  const models = vi.fn(async () => ({
+    gateway: config.gateway,
+    managedModels: { chat: ['primary', 'secondary'], vision: ['secondary'], 'knowledge-embedding': [], 'knowledge-rerank': [], ocr: [] },
+  }));
+  const proxyProductModel = vi.fn(async (_actor, { operation, model, callId }) => {
+    if (operation === 'receipt') return settled(callId);
+    if (model === 'primary') return Response.json({ error: { code: 'platform_model_route_unavailable', stage: 'pre_admission' } }, { status: 503 });
+    return events(answer);
+  });
+  const check = createManagedModelChecks({
+    platformAccount: {
+      actor: () => ({ ...scope(), authSession: 'fixture-login' }),
+      captureCommerceSession: () => ({ ...scope(), serviceId: 'fixture-service' }),
+      instancePrincipal: () => ({ issuer: 'https://account.test', userId: 'actor-a' }),
+      usesProductCreditWallet: async () => true,
+      proxyProductModel,
+    },
+    store: createModelBootstrapStore({ dataDir }),
+    models,
+    isAvailable: () => true, enterprise: () => false,
+  });
+  const input = { identity, owner: identity, accountId: 'account-a', action: 'retest' };
+  let reads = 0;
+  try {
+    const started = await check.activate(input);
+    expect(started.activation.tests.map(({ id }) => id)).toEqual(['chat:primary', 'chat:secondary', 'vision:secondary']);
+    await vi.waitFor(async () => {
+      reads++;
+      const { activation } = await check.read(input);
+      expect(activation.status).toBe('failed');
+      expect(activation.tests).toMatchObject([
+        { id: 'chat:primary', status: 'failed', errorCode: 'platform_model_route_unavailable' },
+        { id: 'chat:secondary', status: 'verified', errorCode: null },
+        { id: 'vision:secondary', status: 'verified', errorCode: null },
+      ]);
+    }, { timeout: 5000 });
+    const calls = proxyProductModel.mock.calls.map(([, call]) => call);
+    const chats = calls.filter(({ operation }) => operation === 'chat');
+    expect(chats.map(({ model }) => model).sort()).toEqual(['primary', 'secondary', 'secondary']);
+    expect(new Set(chats.map(({ callId }) => callId)).size).toBe(3);
+    expect(chats.filter(({ body }) => Array.isArray(JSON.parse(body).messages[0].content))).toMatchObject([{ model: 'secondary' }]);
+    expect(calls.filter(({ operation }) => operation === 'receipt').map(({ model }) => model)).toEqual(['secondary', 'secondary']);
+    expect(models).toHaveBeenCalledTimes(1 + reads);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+}, 15000);
+
 it('keeps reads free and checks models only after a same-origin action from the selected payer', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'managed-model-check-'));
   let release;

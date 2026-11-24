@@ -133,6 +133,7 @@ const fixture = async (options = {}) => {
       headers: { Authorization: 'Bearer uh_key_fixture', 'X-UniHub-Product-Authorization': 'proof-' + productRequests.length, 'X-UniHub-Task-ID': 'uh_task_fixture', 'Idempotency-Key': callId },
     })),
     request: async (_identity, target, init) => {
+      if (target.endsWith('/model-discovery')) return options.managedCatalog;
       const body = JSON.parse(init.body); grants.push({ target, body });
       await waitForGrant?.();
       const token = `uh_model_${grants.length}_private`; grantModels.set(token, body.models[0]);
@@ -140,7 +141,7 @@ const fixture = async (options = {}) => {
     },
   };
   const create = async () => {
-    const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env, getAccountRuntime: () => account, isProductModelConfigured: () => options.productCredit === true, readExecution: options.readExecution ?? (async () => ({ promptID, idle, model: session().model })), isManaged: () => true, enterprise: () => enterprise, trustedBoundary: options.trustedBoundary === true });
+    const runtime = await createPlatformModelRuntime({ dataDir: dir, instanceDir: path.join(dir, 'run'), env, getAccountRuntime: () => account, readManagedModels: options.readManagedModels, isProductModelConfigured: () => options.productCredit === true, readExecution: options.readExecution ?? (async () => ({ promptID, idle, model: session().model })), isManaged: () => true, enterprise: () => enterprise, trustedBoundary: options.trustedBoundary === true });
     cleanups.push(() => runtime.close());
     await runtime.materializePlugin();
     return runtime;
@@ -174,6 +175,124 @@ const fixture = async (options = {}) => {
     },
   };
 };
+
+it.each([
+  { stage: 'pre_admission', expected: ['fixture', 'backup'], status: 200, blocked: false },
+  { stage: undefined, expected: ['fixture'], status: 502, blocked: true },
+])('switches a managed chat only on a confirmed route refusal ($stage)', async ({ stage, expected, status, blocked }) => {
+  const sent = [];
+  const policy = { product_id: 'superwagie', version: 3, managed_models: { chat: ['fixture', 'backup'] } };
+  const f = await fixture({
+    productCredit: true,
+    readManagedModels: async () => policy,
+    managedCatalog: { models: [{ id: 'backup', context: 8192, max_output: 200, input_modalities: ['text'],
+      capability_metadata: { operations: [{ id: 'chat.completions.create', executable: true, available: true, transports: ['sse'], public_tariff: { asset: 'CREDIT/6' } }] },
+    }] },
+    productModelProxy: async (_identity, { model, callId, body }) => {
+      if (!body) {
+        if (model !== 'backup') return new Response(null, { status: 404 });
+        return Response.json({ call_id: 'settled', idempotency_key: callId, credit_scope: 'product_v1', funding_product_id: 'superwagie', status: 'SETTLED', asset: 'CREDIT/6' });
+      }
+      sent.push({ model, callId, body: JSON.parse(body) });
+      if (model === 'fixture') return Response.json({ error: { code: 'platform_model_route_unavailable', stage } }, { status: 503 });
+      return new Response('data: {"choices":[{"delta":{"content":"backup"}}]}\n\ndata: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
+    },
+  });
+  expect(Object.keys(f.runtime().providerConfig().unihub.models)).toEqual(['fixture']);
+  await f.runtime().admit(alice, session(), 'msg_test');
+  expect((await f.prepare('route-failover')).status).toBe(200);
+  const completed = await f.completion('route-failover');
+  expect(completed.status).toBe(status);
+  if (status === 200) expect(await completed.text()).toContain('backup');
+  expect(sent.map(({ model }) => model)).toEqual(expected);
+  expect(f.runtime().status(alice, 'ses_one').blocked).toBe(blocked);
+  if (status === 200) {
+    expect(sent[1].callId).not.toBe(sent[0].callId);
+    expect(sent[1].body).toEqual({ ...sent[0].body, model: 'backup' });
+    expect(f.runtime().status(alice, 'ses_one').calls.map(({ status }) => status)).toEqual(['REJECTED', 'SETTLED']);
+  }
+});
+
+it('ends a proven product policy rejection without attempting a backup or looking up an absent receipt', async () => {
+  const sent = [];
+  const policy = { product_id: 'superwagie', version: 5, managed_models: { chat: ['fixture', 'backup'] } };
+  const f = await fixture({
+    productCredit: true,
+    readManagedModels: async () => policy,
+    productModelProxy: async (_identity, { model, body }) => {
+      sent.push({ model, submitted: Boolean(body) });
+      return Response.json({ error: { code: 'managed_model_not_allowed', stage: 'pre_admission' } }, { status: 403 });
+    },
+  });
+  await f.runtime().admit(alice, session(), 'msg_test');
+  expect((await f.prepare('policy-refused')).status).toBe(200);
+  const response = await f.completion('policy-refused');
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: { code: 'platform_model_not_allowed' } });
+  expect(sent).toEqual([{ model: 'fixture', submitted: true }]);
+  expect(f.runtime().status(alice, 'ses_one')).toMatchObject({ blocked: false, calls: [{ callID: 'policy-refused', status: 'REJECTED' }] });
+});
+
+it('uses the active product primary and leaves separately configured providers outside admission', async () => {
+  const policy = {
+    product_id: 'superwagie', version: 4,
+    managed_models: { chat: ['deepseek-flash', 'backup'], speech: [] },
+  };
+  const f = await fixture({ productCredit: true, readManagedModels: async () => policy });
+  expect(f.runtime().providerConfig().unihub.models).toMatchObject({ 'deepseek-flash': { name: 'DeepSeek 4.1 Flash' } });
+  expect(Object.keys(f.runtime().providerConfig().unihub.models)).toEqual(['deepseek-flash']);
+  await expect(f.runtime().admit(alice, session(), 'msg_test')).rejects.toMatchObject({ code: 'platform_model_not_allowed' });
+  await expect(f.runtime().admit(alice, { ...session(), model: { providerID: 'user-provider', id: 'fixture' } }, 'msg_test')).resolves.toBe(false);
+  expect(f.runtime().isMediaOperationConfigured('qwen3-tts-flash', 'speech')).toBe(false);
+  expect(f.runtime().isMediaOperationConfigured('qwen3-asr-flash', 'transcription')).toBe(true);
+  expect(await f.runtime().modelCheckConfig()).toMatchObject({ managedModels: policy.managed_models });
+});
+
+it('continues a settled managed session after its former primary leaves the picker', async () => {
+  let primary = 'fixture';
+  let promptID = 'msg_test';
+  const attempts = [];
+  const f = await fixture({
+    productCredit: true,
+    readManagedModels: async () => ({ product_id: 'superwagie', version: primary === 'fixture' ? 5 : 6, managed_models: { chat: [primary] } }),
+    readExecution: async () => ({ promptID, model: { providerID: 'unihub', id: primary } }),
+    productModelProxy: async (_identity, { model, body, callId }) => {
+      if (!body) return Response.json({
+        call_id: 'settled', idempotency_key: callId, credit_scope: 'product_v1', funding_product_id: 'superwagie', status: 'SETTLED', asset: 'CREDIT/6',
+      });
+      attempts.push(model);
+      return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
+    },
+  });
+  await f.runtime().admit(alice, session(), promptID);
+  const previous = await (await f.prepare('old-primary')).json();
+  expect(await (await f.completion('old-primary')).text()).toContain('[DONE]');
+
+  primary = 'deepseek-flash';
+  promptID = 'msg_next';
+  await f.restart();
+  const updated = { ...session(), model: { providerID: 'unihub', id: primary } };
+  await f.runtime().admit(alice, updated, promptID);
+  const prepared = await f.internal('/prepare', { sessionID: updated.id, callID: 'new-primary', model: primary, kind: 'primary' });
+  expect(prepared.status).toBe(200);
+  expect(await prepared.json()).toMatchObject({ taskID: previous.taskID });
+  const reply = await f.internal('/v1/chat/completions', { model: primary, stream: true, messages: [{ role: 'user', content: 'continue' }] },
+    { 'x-unihub-session-id': updated.id, 'idempotency-key': 'new-primary' });
+  expect(await reply.text()).toContain('[DONE]');
+  expect(attempts).toEqual(['fixture', 'deepseek-flash']);
+  expect(f.runtime().status(alice, updated.id).calls).toEqual(expect.arrayContaining([
+    expect.objectContaining({ callID: 'old-primary', status: 'SETTLED' }),
+    expect.objectContaining({ callID: 'new-primary', status: 'SETTLED' }),
+  ]));
+});
+
+it('keeps the managed provider hidden when the product policy is unavailable', async () => {
+  const f = await fixture({ productCredit: true, readManagedModels: async () => { throw new Error('policy unavailable'); } });
+  expect(f.runtime().providerConfig()).toEqual({});
+  await expect(f.runtime().modelCheckConfig()).rejects.toMatchObject({ code: 'platform_managed_model_policy_unavailable' });
+  await expect(f.runtime().admit(alice, { ...session(), model: { providerID: 'byok', id: 'fixture' } }, 'msg_test')).resolves.toBe(false);
+  expect(f.requests()).toBe(0);
+});
 
 it('uses the server-only product key and proof for a product credit call and original-key receipt', async () => {
   const f = await fixture({ productCredit: true });
