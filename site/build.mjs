@@ -68,7 +68,7 @@ const LANGS = {
     ctaTitle: '明天的工作台，<br>已经开着。',
     ctaText: '装上犇马，把明天第一件要做的事写进去。',
     ctaButton: '下载犇马',
-    ctaNote: `macOS / Windows x64 · ${SITE_VERSION} 候选版`,
+    ctaNote: `macOS / Windows x64 · ${SITE_VERSION} 正式版`,
   },
   en: {
     htmlLang: 'en',
@@ -113,7 +113,7 @@ const LANGS = {
     ctaTitle: 'Tomorrow’s workbench<br>is already open.',
     ctaText: 'Install SuperWagie and write tomorrow’s first task.',
     ctaButton: 'Download',
-    ctaNote: `macOS / Windows x64 · ${SITE_VERSION} release candidate`,
+    ctaNote: `macOS / Windows x64 · ${SITE_VERSION} stable release`,
   },
 };
 
