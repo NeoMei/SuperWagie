@@ -469,30 +469,24 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   app.post('/api/provider/discover-models', refuseInEnterpriseMode, async (req, res) => {
     try {
       const providerID = typeof req.body?.providerID === 'string' ? req.body.providerID.trim() : '';
-      // A stored key that cannot be read leaves discovery to the key in the form.
+      const requestedDirectory = req.get('x-opencode-directory') || req.query?.directory;
+      const resolved = requestedDirectory ? await resolveProjectDirectory(req) : null;
+      if (requestedDirectory && !resolved?.directory) {
+        return res.status(400).json({ error: resolved?.error || 'Working directory is required' });
+      }
       let storedApiKey = null;
       let storedBaseURL;
       if (providerID) {
-        try {
-          const { getProviderAuth } = await getAuthLibrary();
-          const storedAuth = await getProviderAuth(providerID);
-          storedApiKey = storedAuth?.type === 'api' && typeof storedAuth.key === 'string' ? storedAuth.key : null;
-          const { value: rawProvider } = readSectionEntry(readConfigLayers().mergedConfig, 'providers', providerID);
-          const providerEntity = rawProvider ? toProviderEntity(rawProvider) : null;
-          storedBaseURL = providerEntity?.settings?.baseURL;
-          if (!storedApiKey) {
-            // OpenCode tries each `env` name in order, so pick the first one
-            // that is set; when none is, keep the first so discovery can name
-            // it in the error instead of failing as an anonymous 401. This
-            // reads the server's environment: a variable that exists only in
-            // the managed OpenCode launch environment (Settings user env) is
-            // not visible here.
-            const envName = providerEntity?.env?.find((name) => process.env[name]) ?? providerEntity?.env?.[0];
-            storedApiKey = providerEntity?.settings?.apiKey || (envName ? `{env:${envName}}` : null);
-          }
-        } catch {
-          storedApiKey = null;
-        }
+        // A credential database read can fail while the provider still has a
+        // usable key in its saved configuration or the server environment.
+        const storedAuth = await getAuthLibrary().then(({ getProviderAuth }) => getProviderAuth(providerID)).catch(() => null);
+        const { value: rawProvider } = readSectionEntry(readConfigLayers(resolved?.directory).mergedConfig, 'providers', providerID);
+        const provider = rawProvider ? toProviderEntity(rawProvider) : null;
+        storedBaseURL = provider?.settings?.baseURL;
+        const envName = provider?.env?.find((name) => process.env[name]) ?? provider?.env?.[0];
+        storedApiKey = storedAuth?.type === 'api' && typeof storedAuth.key === 'string'
+          ? storedAuth.key
+          : provider?.settings?.apiKey || (envName ? `{env:${envName}}` : null);
       }
       return res.json(await discoverProviderModels(req.body, { storedApiKey, storedBaseURL }));
     } catch (error) {

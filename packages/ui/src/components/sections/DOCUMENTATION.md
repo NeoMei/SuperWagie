@@ -251,13 +251,17 @@ serves), `usesMachineCredentials` counts that as credentials: the card shows
 OpenCode config is switched on (`activation: "enabled"`) even without a key, so
 activation alone is not a sign-in signal.
 
-The custom-provider form can discover models before save through
-`POST /api/provider/discover-models`. Discovery is a one-time prefill the user
-starts with "Find models": they pick which returned models to add, the review
-panel closes, and nothing stays in sync with the provider afterwards (a
-maintainer decision; never add a recurring refresh). Provider metadata wins
-field by field and models.dev fills the gaps. Discovery failure never removes
-rows or blocks saving.
+Opening a saved, editable custom provider's model list queries its upstream
+catalog once for that visit. The lookup uses the saved connection for the
+current settings directory, and provider switches retire older results.
+Typing in the local model filter does not send more requests. New model IDs
+are available for review. Selecting them opens the existing editor and Save
+applies the change. A failed query keeps the configured models visible.
+SuperWagie managed providers use their product catalog.
+
+The custom-provider form also supports “Find models” before saving through
+`POST /api/provider/discover-models`. Provider metadata wins field by field
+and models.dev fills the gaps. Discovery failure does not block saving.
 
 Model rows render collapsed (name, id, limits, non-text inputs) so a provider
 with dozens of models stays scannable; a row added by hand opens, and a row

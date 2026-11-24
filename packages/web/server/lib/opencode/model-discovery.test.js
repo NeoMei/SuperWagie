@@ -1,3 +1,8 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import express from 'express';
+import request from 'supertest';
 import { describe, expect, test, vi } from 'vitest';
 import { discoverProviderModels, modelDiscoveryInternals } from './model-discovery.js';
 
@@ -173,4 +178,43 @@ describe('provider model discovery', () => {
       }),
     ]);
   });
+});
+
+// An OpenCode credential read can be unavailable while an environment-keyed
+// project provider still answers its catalog over the configured connection.
+test('the discovery route uses the requested project configuration without a stored credential', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'opencode-model-discovery-'));
+  const baseURL = 'https://project-provider.test/v1';
+  const fetchCatalog = vi.fn(async () => Response.json({ data: [{ id: 'updated-upstream-model' }] }));
+  vi.stubEnv('OPENCHAMBER_TEST_PROVIDER_KEY', 'test-provider-token');
+  vi.stubGlobal('fetch', fetchCatalog);
+  try {
+    await writeFile(path.join(directory, 'opencode.json'), JSON.stringify({
+      providers: { 'project-provider': { settings: { baseURL }, env: ['OPENCHAMBER_TEST_PROVIDER_KEY'] } },
+    }));
+    const { registerOpenCodeRoutes } = await import('./routes.js');
+    const app = express();
+    app.use(express.json());
+    registerOpenCodeRoutes(app, {
+      resolveProjectDirectory: async (req) => req.query.directory === directory
+        ? { directory }
+        : { error: 'Invalid test directory' },
+    });
+    const modelQuery = (target) => request(app).post('/api/provider/discover-models')
+      .query({ directory: target }).send({ providerID: 'project-provider', baseURL, enrich: false });
+
+    const success = await modelQuery(directory);
+    expect(success.status).toBe(200);
+    expect(success.body.models).toEqual([{ id: 'updated-upstream-model', name: 'updated-upstream-model' }]);
+    expect(fetchCatalog).toHaveBeenCalledWith(new URL(baseURL + '/models'), expect.objectContaining({
+      headers: { Accept: 'application/json', Authorization: 'Bearer test-provider-token' },
+    }));
+
+    expect((await modelQuery(path.join(directory, 'missing'))).status).toBe(400);
+    expect(fetchCatalog).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true });
+  }
 });

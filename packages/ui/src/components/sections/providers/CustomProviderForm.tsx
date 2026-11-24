@@ -16,7 +16,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { CUSTOM_PROVIDER_ICONS } from '@/lib/customProviderIcons';
 import { cn } from '@/lib/utils';
 import {
@@ -24,8 +23,7 @@ import {
   createEmptyCustomProviderForm,
   createHeaderRow,
   createModelRow,
-  modelDiscoveryErrorSchema,
-  modelDiscoveryResponseSchema,
+  queryProviderModels,
   modelRowFromDiscovery,
   validateCustomProvider,
   type DiscoveredModel,
@@ -43,6 +41,7 @@ type CustomProviderFormProps = {
   existingProviderIDs: ReadonlySet<string>;
   disabledProviders?: readonly string[];
   busy?: boolean;
+  directory?: string | null;
   mode?: 'create' | 'edit';
   initialValues?: CustomProviderFormState;
   allowExistingAuth?: boolean;
@@ -56,6 +55,7 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
   existingProviderIDs,
   disabledProviders = [],
   busy = false,
+  directory,
   mode = 'create',
   initialValues,
   allowExistingAuth = false,
@@ -140,27 +140,17 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
       const headers = Object.fromEntries(form.headers
         .map((header) => [header.key.trim(), header.value.trim()] as const)
         .filter(([key, value]) => key && value));
-      const response = await runtimeFetch('/api/provider/discover-models', {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          providerID: isEdit ? form.providerID : undefined,
-          baseURL: form.baseURL,
-          apiKey: form.apiKey,
-          headers,
-          enrich: true,
-          metadataProviderID: form.providerID,
-        }),
-      });
-      const payload: unknown = await response.json().catch(() => null);
-      const parsed = modelDiscoveryResponseSchema.safeParse(payload);
-      if (!response.ok || !parsed.success) {
-        throw new Error(modelDiscoveryErrorSchema.safeParse(payload).data?.error
-          || t('settings.providers.page.custom.discovery.failed'));
-      }
-      setDiscoveredModels(parsed.data.models);
+      setDiscoveredModels(await queryProviderModels({
+        providerID: isEdit ? form.providerID : undefined,
+        baseURL: form.baseURL,
+        apiKey: form.apiKey,
+        headers,
+        metadataProviderID: form.providerID,
+      }, directory));
     } catch (error) {
-      setDiscoveryError(error instanceof Error ? error.message : t('settings.providers.page.custom.discovery.failed'));
+      setDiscoveryError(error instanceof Error && error.message
+        ? error.message
+        : t('settings.providers.page.custom.discovery.failed'));
     } finally {
       setDiscovering(false);
     }

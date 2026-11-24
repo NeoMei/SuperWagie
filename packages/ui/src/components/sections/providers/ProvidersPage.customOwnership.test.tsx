@@ -22,6 +22,7 @@ let failKey = false;
 let savedProviderVisible = false;
 let sourceMode: 'ready' | 'held' | 'failed' = 'ready';
 let sourceGate = deferred<void>();
+let discoveredModels: Array<{ id: string; name: string }> | null = null;
 const savedProvider: Provider = {
   id: 'dummy-provider', name: 'Live provider', activation: 'enabled',
   package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'https://live.invalid/v1' },
@@ -44,6 +45,11 @@ const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, ini
    const response = Response.json({success:true});
    if (hold === 'body') Object.defineProperty(response,'json',{value:async()=>{await gate.promise;return {success:true};}});
    return response;
+ }
+ if(url.pathname === '/api/provider/discover-models') {
+   return discoveredModels === null
+     ? Response.json({error:'Fixture catalog unavailable'},{status:502})
+     : Response.json({models:discoveredModels});
  }
  if(url.pathname.includes('/connect/key')) {
    keys++;
@@ -106,7 +112,7 @@ async function field(label: string, value: string) {
     node.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
-async function setup(edit = false) {
+async function setup(edit = false, openEditor = true) {
  hold='none';gate=deferred<void>();retry=false;keys=0;failConfig=false;failKey=false;
  savedProviderVisible=edit;sourceMode='ready';sourceGate=deferred<void>();
  switchTo('a');
@@ -115,6 +121,7 @@ async function setup(edit = false) {
  useI18nStore.getState().setLocale('en');
  const box=document.createElement('div');document.body.replaceChildren(box);root=createRoot(box);
  await act(async()=>root?.render(createElement(I18nProvider,null,createElement(ThemeSystemProvider,null,createElement(ProvidersPage)))));
+ if (edit && !openEditor) return () => {};
  if (edit) {
    await act(async () => button('Edit').click());
    success.mockClear();error.mockClear();records.length=0;
@@ -129,8 +136,34 @@ async function setup(edit = false) {
  const form = document.querySelector('form');
  return () => submitForm(form);
 }
-afterEach(async()=>{await act(async()=>root?.unmount());root=null;gate.finish();sourceGate.finish();});
+afterEach(async()=>{await act(async()=>root?.unmount());root=null;gate.finish();sourceGate.finish();discoveredModels=null;});
 afterAll(()=>{fetchSpy.mockRestore();success.mockRestore();error.mockRestore();browser.close();});
+test('opening a saved provider queries its upstream once and previews new models without saving', async () => {
+ records.length=0;
+ discoveredModels=[{id:'dummy-model',name:'Already configured'},{id:'new-upstream-model',name:'New upstream model'}];
+ await setup(true, false);
+ await act(async()=>{await until(()=>document.body.textContent?.includes('Models found')===true);});
+ const reads=records.filter((request)=>request.path==='/api/provider/discover-models');
+ expect(reads).toHaveLength(1);
+ expect(new URL(reads[0].url).searchParams.get('directory')).toBe('/fixture');
+ expect(JSON.parse(reads[0].body)).toMatchObject({providerID:'dummy-provider',baseURL:'https://stored.invalid/v1'});
+ expect(document.body.textContent).toContain('new-upstream-model');
+ expect(document.querySelector('form')).toBeNull();
+ await act(async()=>button('Add selected (1)').click());
+ expect(document.querySelector('form')).not.toBeNull();
+ expect(document.body.textContent).toContain('New upstream model');
+ expect(records.filter((request)=>request.method==='PUT'&&request.path==='/api/provider')).toHaveLength(0);
+ expect(records.filter((request)=>request.path==='/api/provider/discover-models')).toHaveLength(1);
+});
+
+test('an unavailable upstream leaves the saved provider models visible', async () => {
+ records.length=0;
+ await setup(true, false);
+ await act(async()=>{await until(()=>document.body.textContent?.includes('Fixture catalog unavailable')===true);});
+ expect(document.body.textContent).toContain('Live model');
+ expect(records.filter((request)=>request.path==='/api/provider/discover-models')).toHaveLength(1);
+});
+
 for(const phase of ['response','body'] as const)for(const transition of ['same','A-B','A-B-A'])test(`${phase} ${transition}`,async()=>{
  const submit=await setup();hold=phase;
  await act(async()=>{submit();await until(()=>records.some(x=>x.method==='PUT'&&x.path==='/api/provider'));});

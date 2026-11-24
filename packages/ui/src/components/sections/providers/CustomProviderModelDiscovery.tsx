@@ -10,7 +10,8 @@ import { Icon } from '@/components/icon/Icon';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { formatGoalTokens } from '@/lib/sessionGoalMetadata';
-import type { DiscoveredModel } from './custom-provider-form';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
+import { queryProviderModels, type DiscoveredModel } from './custom-provider-form';
 
 /** Below this many results the list is short enough to scan without a filter. */
 const SEARCH_THRESHOLD = 8;
@@ -24,9 +25,8 @@ type Props = {
 };
 
 /**
- * The one-time review step after asking a provider for its models: pick
- * which ones to add, then the panel closes. Nothing here stays in sync with
- * the provider afterwards.
+ * The review step for a provider catalog read. Selecting models stages them
+ * in the editor, where the user can review and save the provider configuration.
  */
 export const CustomProviderModelDiscovery: React.FC<Props> = ({ models, existingIds, onAdd, onCancel }) => {
   const { t } = useI18n();
@@ -153,4 +153,52 @@ export const CustomProviderModelDiscovery: React.FC<Props> = ({ models, existing
       </div>
     </div>
   );
+};
+
+type UpdatesProps = Omit<Props, 'models' | 'onCancel'> & {
+  providerID: string;
+  directory: string | null;
+  baseURL: string;
+  headers?: Record<string, string>;
+};
+
+/** Read the saved provider once per model-list visit or connection change. */
+export const CustomProviderModelUpdates: React.FC<UpdatesProps> = ({
+  providerID, directory, baseURL, headers, existingIds, onAdd,
+}) => {
+  const { t } = useI18n();
+  const [result, setResult] = React.useState<{
+    models: readonly DiscoveredModel[];
+    error?: string;
+  } | null>(null);
+  const [dismissed, setDismissed] = React.useState(false);
+
+  React.useEffect(() => {
+    const request = new AbortController();
+    const isCurrent = captureRuntimeInstance();
+    setResult(null);
+    setDismissed(false);
+    void (async () => {
+      try {
+        const models = await queryProviderModels({ providerID, baseURL, headers, metadataProviderID: providerID }, directory, request.signal);
+        if (!request.signal.aborted && isCurrent()) setResult({ models });
+      } catch (error) {
+        if (!request.signal.aborted && isCurrent()) {
+          setResult({ models: [], error: error instanceof Error ? error.message : '' });
+        }
+      }
+    })();
+    return () => request.abort();
+  }, [providerID, directory, baseURL, headers]);
+
+  if (!result) {
+    return <p className={SETTINGS_HELPER_CLASS} role="status">{t('settings.providers.page.custom.discovery.fetching')}</p>;
+  }
+  if (result.error !== undefined) {
+    return <p className={SETTINGS_HELPER_CLASS} role="status">{result.error || t('settings.providers.page.custom.discovery.failed')}</p>;
+  }
+
+  const models = result.models.filter((model) => !existingIds.has(model.id));
+  if (dismissed || models.length === 0) return null;
+  return <CustomProviderModelDiscovery models={models} existingIds={existingIds} onAdd={onAdd} onCancel={() => setDismissed(true)} />;
 };
