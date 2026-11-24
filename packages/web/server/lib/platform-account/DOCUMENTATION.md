@@ -532,8 +532,14 @@ on a dedicated host or service identity with no user-command execution.
 The configuration takes `uniHubOrigin`, `modelGateway`, `allowedModels`,
 `serviceCredentialFile`, `vaultPath`, and optional `instanceId`, `host`,
 `port`, `tlsKeyFile` and `tlsCertificateFile` fields. The gateway URL ends in
-`/platform/v1`. Include `PaddleOCR-VL-1.6` in `allowedModels` for confirmed
-Knowledge Library PDF OCR. Supply a registered SuperWagie runtime credential with
+`/platform/v1`. New dispatch and knowledge preflight use UniHub's public
+SuperWagie policy for the requested operation. An omitted operation, a null
+policy map, or an HTTP 404 uses `allowedModels`. An empty operation list
+denies dispatch for that operation. A failed or invalid policy read returns
+503 before issuing a grant. Existing receipts and results use the original
+authorization during policy changes and outages. Include `PaddleOCR-VL-1.6`
+in `allowedModels` when confirmed Knowledge Library PDF OCR uses the legacy
+allowlist. Supply a registered SuperWagie runtime credential with
 `model:authorize`, a durable private vault, and TLS. If the proxy uses plain
 HTTP on loopback, terminate TLS at the dedicated reverse proxy. Keep the
 service mapping and encrypted vault stable because call receipts remain

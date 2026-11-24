@@ -1,11 +1,15 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
+import { PRODUCT_OCR_MODEL } from '../embedded-knowledge/ocr-contract.js';
 import { createProductModelProxy } from './product-model-proxy.js';
 
 const api = 'https://accounts.test';
 const gateway = 'https://models.test/platform/v1';
-const fixture = (expiredAt, allowedModels = ['fixture-chat']) => {
+const routeUnavailable = { error: { code: 'platform_model_route_unavailable', stage: 'pre_admission' } };
+const policy = (managed_models) => Response.json({ product_id: 'superwagie', version: 1, managed_models });
+const fixture = (expiredAt, allowedModels = ['fixture-chat'], { readPolicy = () => new Response(null, { status: 404 }), chatResponse } = {}) => {
   const gatewayCalls = [];
+  const authorizations = [];
   const saved = new Map();
   const app = createProductModelProxy({
     api, gateway, allowedModels, serviceCredential: 'operator-fixture',
@@ -13,6 +17,9 @@ const fixture = (expiredAt, allowedModels = ['fixture-chat']) => {
     fetchImpl: async (url, init) => {
       const target = new URL(url);
       switch (target.href) {
+        case api + '/v1/products/superwagie/managed-models':
+          expect(new Headers(init.headers).has('authorization')).toBe(false);
+          return readPolicy();
         case api + '/v1/me':
           return init.headers.Authorization === 'Bearer actor-fixture'
             ? Response.json({ id: 'actor-a' })
@@ -31,11 +38,13 @@ const fixture = (expiredAt, allowedModels = ['fixture-chat']) => {
         case api + '/internal/v1/product-runtime/model-proofs':
           expect(init.headers.Authorization).toBe('Bearer operator-fixture');
           expect(init.headers['X-UniHub-Actor-Authorization']).toBe('Bearer actor-fixture');
+          authorizations.push(target.pathname);
           if (expiredAt === 'proof') return Response.json({ error: 'product_membership_expired' }, { status: 403 });
           return Response.json({ token: 'proof-fixture', expires_at: Math.floor(Date.now() / 1000) + 90 });
         case gateway + '/chat/completions':
           expect(init.headers).toMatchObject({ Authorization: 'Bearer uh_key_fixture', 'X-UniHub-Product-Authorization': 'proof-fixture', 'Idempotency-Key': 'call-fixture' });
           gatewayCalls.push({ method: init.method, body: JSON.parse(init.body) });
+          if (chatResponse) return chatResponse();
           return new Response('data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream', Authorization: 'Bearer upstream-private' } });
         case gateway + '/calls/call-fixture':
           expect(init.headers).toMatchObject({ Authorization: 'Bearer uh_key_fixture', 'X-UniHub-Product-Authorization': 'proof-fixture' });
@@ -77,7 +86,7 @@ const fixture = (expiredAt, allowedModels = ['fixture-chat']) => {
   });
   const headers = { Authorization: 'Bearer actor-fixture', 'X-UniHub-Billing-Account': 'account-a', 'X-UniHub-Model': 'fixture-chat', 'Idempotency-Key': 'call-fixture' };
   const body = { model: 'fixture-chat', stream: true, messages: [{ role: 'user', content: 'fixture prompt' }] };
-  return { app, headers, body, gatewayCalls, saved };
+  return { app, headers, body, gatewayCalls, authorizations, saved };
 };
 
 describe('isolated product model proxy', () => {
@@ -152,5 +161,69 @@ describe('isolated product model proxy', () => {
     await request(retired.app).post('/v1/product-model/chat').set(retired.headers).send(retired.body).expect(400);
     await request(retired.app).get('/v1/product-model/calls/call-fixture').set(retired.headers).expect(200);
     expect(retired.gatewayCalls).toEqual([{ method: 'GET' }]);
+  });
+
+  it('uses the configured policy in place of the static list and infers vision from chat image parts', async () => {
+    const f = fixture(undefined, ['fixture-chat'], { readPolicy: () => policy({ chat: ['policy-chat'], vision: ['fixture-chat'] }) });
+    const chat = (model, content) => request(f.app).post('/v1/product-model/chat').set(f.headers).set('X-UniHub-Model', model)
+      .send({ ...f.body, model, messages: [{ role: 'user', content }] });
+    const imageParts = [{ type: 'text', text: 'What is this?' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }];
+    await chat('fixture-chat', 'text').expect(400);
+    await chat('policy-chat', imageParts).expect(400);
+    expect(f.authorizations).toEqual([]);
+    await chat('policy-chat', 'text').expect(200);
+    await chat('fixture-chat', imageParts).expect(200);
+    expect(f.gatewayCalls.map(({ body }) => body.model)).toEqual(['policy-chat', 'fixture-chat']);
+  });
+
+  it('keeps legacy defaults for omitted operations and checks explicit knowledge and OCR denials', async () => {
+    const f = fixture(undefined, ['text-embedding-v4', 'qwen3-rerank', 'fixture-chat', PRODUCT_OCR_MODEL], {
+      readPolicy: () => policy({ chat: [], 'knowledge-embedding': ['text-embedding-v4'], 'knowledge-rerank': [], ocr: [] }),
+    });
+    const knowledgeHeaders = { ...f.headers, 'X-UniHub-Task-ID': 'ktask_fixture' };
+    const route = (model, wire_operation) => request(f.app).post('/v1/product-model/knowledge-route')
+      .set(knowledgeHeaders).set('X-UniHub-Model', model).send({ model, wire_operation });
+    await route('qwen3-rerank', 'rerank.create').expect(400);
+    await request(f.app).post('/v1/product-model/chat').set(f.headers).send(f.body).expect(400);
+    await request(f.app).post('/v1/product-model/ocr').set(f.headers).set('X-UniHub-Model', PRODUCT_OCR_MODEL)
+      .set('Idempotency-Key', 'swocr_' + 'a'.repeat(60)).field('model', PRODUCT_OCR_MODEL)
+      .attach('file', Buffer.from('%PDF-1.4'), { filename: 'document.pdf', contentType: 'application/pdf' }).expect(400);
+    expect(f.authorizations).toEqual([]);
+    await route('text-embedding-v4', 'embeddings.create').expect(200);
+    await request(f.app).post('/v1/product-model/videos').set(f.headers)
+      .send({ model: 'fixture-chat', prompt: 'Fixture', seconds: 5, size: '1280*720' }).expect(200);
+  });
+
+  it('fails closed on unavailable or malformed policy and recovers receipts and results during the outage', async () => {
+    let readPolicy = () => policy(null);
+    let reads = 0;
+    const f = fixture(undefined, ['fixture-chat'], { readPolicy: () => { reads++; return readPolicy(); } });
+    const chat = () => request(f.app).post('/v1/product-model/chat').set(f.headers).send(f.body);
+    await chat().expect(200);
+    readPolicy = () => new Response(JSON.stringify(routeUnavailable), { status: 503 });
+    await chat().expect(503, { error: { code: 'platform_gateway_call_incomplete', stage: 'pre_admission' } });
+    readPolicy = () => { throw new TypeError('network unavailable'); };
+    await chat().expect(503);
+    readPolicy = () => Response.json({ product_id: 'superwagie', managed_models: null });
+    await chat().expect(503);
+    expect(f.authorizations).toHaveLength(1);
+    await request(f.app).get('/v1/product-model/calls/call-fixture').set(f.headers).expect(200);
+    await request(f.app).get('/v1/product-model/videos/call-fixture/result').set(f.headers).expect(200);
+    expect(reads).toBe(4);
+    readPolicy = () => policy({ chat: ['fixture-chat'] });
+    await chat().expect(200);
+  });
+
+  it('relays route unavailability only with the gateway status and pre-admission stage', async () => {
+    let response = () => Response.json(routeUnavailable, { status: 503, headers: { 'X-LLMRouter-Error-Origin': 'gateway' } });
+    const f = fixture(undefined, ['fixture-chat'], { chatResponse: () => response() });
+    const chat = () => request(f.app).post('/v1/product-model/chat').set(f.headers).send(f.body);
+    await chat().expect(503, routeUnavailable);
+    response = () => Response.json(routeUnavailable, { status: 503, headers: { 'X-LLMRouter-Error-Origin': 'upstream' } });
+    await chat().expect(503, { error: { code: 'platform_gateway_call_incomplete' } });
+    response = () => Response.json(routeUnavailable, { status: 502 });
+    await chat().expect(502, { error: { code: 'platform_gateway_call_incomplete' } });
+    response = () => Response.json({ error: { code: routeUnavailable.error.code } }, { status: 503 });
+    await chat().expect(503, { error: { code: 'platform_gateway_call_incomplete' } });
   });
 });

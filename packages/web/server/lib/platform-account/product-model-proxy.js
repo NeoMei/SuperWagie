@@ -4,6 +4,7 @@ import express from 'express';
 import { z } from 'zod';
 import { assertProductMembershipRefusal, createProductModelBroker } from './product-model-broker.js';
 import { readBoundedResponse } from '../platform-model/native-media.js';
+import { managedChatOperation, readProductManagedModels } from '../platform-model/product-managed-models.js';
 import { embeddingBodySchema, rerankBodySchema, knowledgeWireForModel } from './knowledge.js';
 import { PRODUCT_OCR_MAX_FILE_BYTES, PRODUCT_OCR_MODEL, productOcrCallId } from '../embedded-knowledge/ocr-contract.js';
 import { productWalletHeaders } from './product-wallet.js';
@@ -49,7 +50,7 @@ const routes = {
 };
 const escapedPath = (path, callId) => path.replace(':callId', () => encodeURIComponent(callId));
 
-const validatedInput = async (req, route, model) => {
+const validatedInput = async (req, routeName, route, model) => {
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return;
   if (route.input === multipart) {
     try {
@@ -59,7 +60,7 @@ const validatedInput = async (req, route, model) => {
         if ([...form.keys()].sort().join(',') !== 'file,model' || form.get('model') !== PRODUCT_OCR_MODEL
           || !(pdf instanceof File) || pdf.name !== 'document.pdf' || pdf.type !== 'application/pdf'
           || pdf.size < 8 || pdf.size > PRODUCT_OCR_MAX_FILE_BYTES || await pdf.slice(0, 5).text() !== '%PDF-') return;
-        return req.body;
+        return { body: req.body, operation: 'ocr' };
       }
       if ([...form.keys()].sort().join(',') !== 'image,mask,model,n,prompt' || form.get('model') !== model || form.get('n') !== '1' ||
           !z.string().trim().min(1).max(64 * 1024).safeParse(form.get('prompt')).success) return;
@@ -67,19 +68,25 @@ const validatedInput = async (req, route, model) => {
         const part = form.get(name);
         if (!(part instanceof File) || !IMAGE_MIME.test(part.type) || part.size < 1 || part.size > 16 * 1024 * 1024) return;
       }
-      return req.body;
+      return { body: req.body, operation: routeName };
     } catch { return; }
   }
   const body = req.body.toString('utf8');
   try {
     const parsed = route.schema.safeParse(JSON.parse(body));
-    if (parsed.success && parsed.data.model === model &&
-        (route.knowledge !== 'route' || parsed.data.wire_operation === knowledgeWireForModel(model))) return body;
+    if (!parsed.success || parsed.data.model !== model) return;
+    if (route.knowledge === 'route') {
+      const wire = parsed.data.wire_operation;
+      if (wire !== knowledgeWireForModel(model)) return;
+      return { body, operation: wire === 'embeddings.create' ? 'knowledge-embedding' : 'knowledge-rerank' };
+    }
+    return { body, operation: routeName === 'chat' ? managedChatOperation(parsed.data) : routeName };
   } catch { /* Malformed JSON. */ }
 };
 const capability = z.object({ client_id: z.string().min(1), product_id: z.literal('superwagie'), product_credit_wallet: z.boolean().optional() });
 const principal = z.object({ id: z.string().min(1).max(200) });
 const responseError = z.object({ error: z.object({ code: z.string().regex(/^[a-z0-9_]{1,100}$/), stage: z.literal('pre_admission').optional() }) });
+const invalidRequest = (res) => res.status(400).json({ error: { code: 'platform_request_invalid', stage: 'pre_admission' } });
 
 const httpsUrl = (value) => {
   let url;
@@ -118,7 +125,7 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
   const app = express();
   app.disable('x-powered-by');
   app.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  const proxy = (route) => async (req, res) => {
+  const proxy = (routeName, route) => async (req, res) => {
     const recovery = route.recovery === true;
     const accountId = req.get('X-UniHub-Billing-Account');
     const model = req.get('X-UniHub-Model');
@@ -131,13 +138,25 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
     const validKnowledge = !route.knowledge || knowledgeTask.test(taskId ?? '') && Boolean(knowledgeWireForModel(model))
       && (route.knowledge !== 'dispatch' || knowledgePin.test(policyDigest ?? ''));
     if (!identifier.test(accountId ?? '') || !validCall || !validKnowledge || route.ocr && model !== PRODUCT_OCR_MODEL ||
-        (recovery ? !modelName.safeParse(model).success : !models.has(model)) || req.get('Origin')) {
-      res.status(400).json({ error: { code: 'platform_request_invalid', stage: 'pre_admission' } }); return;
+        !modelName.safeParse(model).success || req.get('Origin')) {
+      invalidRequest(res); return;
     }
-    const body = route.input ? await validatedInput(req, route, model) : undefined;
-    if (route.input && body === undefined) { res.status(400).json({ error: { code: 'platform_request_invalid', stage: 'pre_admission' } }); return; }
+    const input = route.input ? await validatedInput(req, routeName, route, model) : undefined;
+    if (route.input && !input) { invalidRequest(res); return; }
     const abort = new AbortController();
     res.once('close', () => { if (!res.writableEnded) abort.abort(); });
+    if (!recovery) {
+      let policy;
+      try {
+        policy = await readProductManagedModels({ api, fetchImpl, signal: AbortSignal.any([abort.signal, AbortSignal.timeout(4_000)]) });
+      } catch {
+        if (!res.destroyed) res.status(503).json({ error: { code: 'platform_gateway_call_incomplete', stage: 'pre_admission' } });
+        return;
+      }
+      const configuredModels = policy?.managed_models?.[input.operation];
+      const allowed = configuredModels === undefined ? models.has(model) : configuredModels.includes(model);
+      if (!allowed) { invalidRequest(res); return; }
+    }
     const request = async (path, init) => {
       const response = await fetchImpl(new URL(path, apiUrl), {
         ...init, redirect: 'error', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
@@ -161,7 +180,7 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
       const path = escapedPath(route.upstream, callId);
       gatewayStarted = true;
       const response = await fetchImpl(route.absolute ? new URL(path, gatewayUrl.origin) : gatewayUrl.href + path, {
-        method: route.method, redirect: 'error', body,
+        method: route.method, redirect: 'error', body: input?.body,
         signal: AbortSignal.any([abort.signal, AbortSignal.timeout(route.output === 'video/mp4' || route.artifact ? 120_000 : recovery ? 10_000 : 180_000)]),
         headers: {
           Authorization: `Bearer ${grant.token}`, 'X-UniHub-Product-Authorization': grant.proof,
@@ -174,7 +193,13 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
       if (!response.ok) {
         const value = await readBoundedResponse(response, 4096).then((bytes) => JSON.parse(bytes.toString('utf8'))).catch(() => null);
         const parsed = responseError.safeParse(value);
-        res.status(response.status).json(parsed.success ? parsed.data : { error: { code: 'platform_gateway_call_incomplete' } });
+        const error = parsed.success ? parsed.data.error : null;
+        const gatewayAdmission = error?.stage === 'pre_admission' && response.headers.get('X-LLMRouter-Error-Origin') === 'gateway';
+        const invalidRouteMarker = error?.code === 'platform_model_route_unavailable'
+          && (routeName !== 'chat' || response.status !== 503 || !gatewayAdmission);
+        const invalidPolicyMarker = error?.code === 'managed_model_not_allowed'
+          && error.stage === 'pre_admission' && (recovery || response.status !== 403 || !gatewayAdmission);
+        res.status(response.status).json({ error: error && !invalidRouteMarker && !invalidPolicyMarker ? error : { code: 'platform_gateway_call_incomplete' } });
         return;
       }
       const contentType = response.headers.get('Content-Type')?.split(';', 1)[0];
@@ -213,11 +238,12 @@ export const createProductModelProxy = ({ api, gateway, allowedModels, serviceCr
       res.status(502).json({ error: { code: 'platform_gateway_call_incomplete', ...(!gatewayStarted && { stage: 'pre_admission' }) } });
     }
   };
-  for (const route of Object.values(routes)) {
+  for (const [routeName, route] of Object.entries(routes)) {
     const path = '/v1/product-model' + route.path;
-    if (route.input) app.post(path, express.raw({ type: route.input, limit: route.limit, inflate: false }), proxy(route));
-    else if (route.method === 'POST') app.post(path, proxy(route));
-    else app.get(path, proxy(route));
+    const handler = proxy(routeName, route);
+    if (route.input) app.post(path, express.raw({ type: route.input, limit: route.limit, inflate: false }), handler);
+    else if (route.method === 'POST') app.post(path, handler);
+    else app.get(path, handler);
   }
   app.use((error, _req, res, _next) => res.status(error.status === 413 ? 413 : 400).json({ error: { code: 'platform_request_invalid', stage: 'pre_admission' } }));
   return app;

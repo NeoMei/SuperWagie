@@ -2556,6 +2556,7 @@ async function main(options = {}) {
     instanceDir,
     getAccountRuntime: () => platformAccountRuntime,
     isProductModelConfigured: () => Boolean(productModelProxy),
+    readManagedModels: productModelProxy ? () => platformAccountRuntime.managedModelPolicy() : undefined,
     readExecution: (sessionID) => readPlatformExecution(openCodeSessionClient(), sessionID),
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     trustedBoundary: true,

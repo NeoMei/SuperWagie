@@ -4,8 +4,20 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { createNativeMediaTransport, decodeInlineImage, readBoundedResponse } from './native-media.js';
 import { sampleImage, sttProbeWav } from '../model-configuration/adapters.js';
-import { knowledgeWireForModel } from '../platform-account/knowledge.js';
 import { PRODUCT_OCR_MODEL, ocrDocumentSchema, productOcrStatusSchema } from '../embedded-knowledge/ocr-contract.js';
+
+const managedCheckPurposes = {
+  chat: 'agent',
+  vision: 'vision',
+  speech: 'tts',
+  transcription: 'stt-short',
+  'image-generation': 'image-generation',
+  'image-edit': 'image-editing',
+  video: 'video-generation',
+  'knowledge-embedding': 'embedding',
+  'knowledge-rerank': 'rerank',
+  ocr: 'ocr',
+};
 
 const managedMediaChecks = {
   'qwen3-tts-flash': ['tts', 'speech'],
@@ -17,7 +29,7 @@ const managedMediaChecks = {
   'wan2.6-t2v': ['video-generation', 'video'],
 };
 
-export const managedModelCheckPlan = ({ models = [], mediaModels = [] }) => [
+const legacyModelCheckRows = (models, mediaModels) => [
   ...models.map(({ id }) => ({ modelId: id, purpose: 'agent', operation: 'chat' })),
   ...models.filter(({ id }) => id === 'deepseek-v4-flash-vision-exp').map(({ id }) => ({ modelId: id, purpose: 'vision', operation: 'vision' })),
   ...[...new Set(mediaModels)].map((modelId) => {
@@ -27,7 +39,23 @@ export const managedModelCheckPlan = ({ models = [], mediaModels = [] }) => [
   { modelId: 'text-embedding-v4', purpose: 'embedding', operation: 'knowledge-embedding' },
   { modelId: 'qwen3-rerank', purpose: 'rerank', operation: 'knowledge-rerank' },
   { modelId: PRODUCT_OCR_MODEL, purpose: 'ocr', operation: 'ocr' },
-].map((row) => ({ ...row, id: `${row.operation ?? 'unsupported-media'}:${row.modelId}` }));
+];
+
+export const managedModelCheckPlan = ({ models = [], mediaModels = [], managedModels = null }) => {
+  const legacyRows = legacyModelCheckRows(models, mediaModels);
+  const rows = managedModels && Object.keys(managedModels).length
+    ? [
+      ...Object.entries(managedCheckPurposes).flatMap(([operation, purpose]) => {
+        const configuredModels = managedModels[operation];
+        return configuredModels === undefined
+          ? legacyRows.filter((row) => row.operation === operation)
+          : configuredModels.map((modelId) => ({ modelId, purpose, operation }));
+      }),
+      ...legacyRows.filter((row) => row.operation === null),
+    ]
+    : legacyRows;
+  return rows.map((row) => ({ ...row, id: `${row.operation ?? 'unsupported-media'}:${row.modelId}` }));
+};
 
 export const managedCheckCallId = (operation) => {
   const id = randomUUID();
@@ -98,11 +126,11 @@ const embedding = z.object({ data: z.tuple([z.object({ embedding: z.array(z.numb
 const score = z.object({ index: z.literal(0), relevance_score: z.number().finite() });
 const rerank = z.union([z.object({ output: z.object({ results: z.tuple([score]) }) }), z.object({ results: z.tuple([score]) })]);
 async function knowledgeProbe(send, model, operation, signal, callId, taskId) {
-  const wire = knowledgeWireForModel(model);
+  const isEmbedding = operation === 'knowledge-embedding';
+  const wire = isEmbedding ? 'embeddings.create' : 'rerank.create';
   const route = z.object({ policy_digest: z.string().regex(/^[a-f0-9]{64}$/) }).parse(await json(await requireResponse(
     await sendJSON(send, 'knowledge-route', { model, wire_operation: wire }),
   )));
-  const isEmbedding = operation === 'knowledge-embedding';
   const dispatch = await requireResponse(await sendJSON(send, operation, isEmbedding
     ? { model, input: 'Model connection test.', dimensions: 1024 }
     : { model, input: { query: 'connection test', documents: ['connection test'] }, parameters: { top_n: 1, return_documents: false } },

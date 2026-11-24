@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { openModelStore, modelChargeAssetSchema, PlatformStoreLockError } from './store.js';
 import { createPluginSource } from './plugin.js';
+import { eligibleChatBackups, managedChatOperation } from './product-managed-models.js';
+import { productWalletHeaders } from '../platform-account/product-wallet.js';
 import { mediaWorkspace, publishMediaArtifact, readMediaWorkspaceFile } from './media-files.js';
 import { createPlatformIpcSession, platformRequestSignature, secureEqual } from './ipc.js';
 import { decodeInlineImage, createNativeMediaTransport, NativeMediaError, readBoundedResponse } from './native-media.js';
@@ -48,7 +50,7 @@ const handshakeSchema = z.object({
 const identifier = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
 const modelSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/), name: z.string().min(1).max(120), context: z.number().int().positive().max(2_000_000), maxOutput: z.number().int().positive().max(100_000) }).strict();
 const grantSchema = z.object({ token: z.string().min(1), actor_id: z.string(), account_id: z.string(), task_id: z.string(), origin_product_id: z.literal('superwagie'), models: z.array(z.string()), expires_at: z.string() });
-const gatewayRefusalSchema = z.object({ error: z.object({ code: z.enum(['platform_billing_unavailable', 'platform_insufficient_funds', 'platform_model_credits_required', 'product_membership_expired', 'platform_model_access_unavailable', 'platform_session_expired', 'platform_gateway_call_incomplete', 'platform_request_invalid', 'request_too_large', 'platform_request_body_too_large']), stage: z.string().optional() }) });
+const gatewayRefusalSchema = z.object({ error: z.object({ code: z.enum(['platform_billing_unavailable', 'platform_insufficient_funds', 'platform_model_credits_required', 'product_membership_expired', 'platform_model_access_unavailable', 'platform_session_expired', 'platform_gateway_call_incomplete', 'platform_request_invalid', 'request_too_large', 'platform_request_body_too_large', 'platform_model_route_unavailable', 'managed_model_not_allowed']), stage: z.string().optional() }) });
 const preAdmissionCreditsRefused = (status, refusal) => status === 402 && refusal?.code === 'platform_model_credits_required' && refusal.stage === 'pre_admission';
 const readGatewayRefusal = async (response, productCredit) => {
   if (![400, 401, 402, 403, 413, 502, 503].includes(response.status)) return null;
@@ -56,6 +58,8 @@ const readGatewayRefusal = async (response, productCredit) => {
     const parsed = gatewayRefusalSchema.safeParse(JSON.parse((await readBoundedResponse(response, 4096)).toString('utf8')));
     if (!parsed.success) return null;
     const { code, stage } = parsed.data.error;
+    if (productCredit && response.status === 503 && code === 'platform_model_route_unavailable' && stage === 'pre_admission') return 'route-unavailable';
+    if (productCredit && response.status === 403 && code === 'managed_model_not_allowed' && stage === 'pre_admission') return 'managed-model-not-allowed';
     if (response.status === 403 && code === 'product_membership_expired') return stage === 'pre_admission' ? 'membership-expired-pre-admission' : 'membership-expired';
     if (productCredit && preAdmissionCreditsRefused(response.status, parsed.data.error)) return 'credits-required-pre-admission';
     if (response.status === 402 && ['platform_billing_unavailable', 'platform_insufficient_funds', 'platform_model_credits_required'].includes(code)) return 'funding';
@@ -108,8 +112,41 @@ const readBody = async (req, maxBytes = 1_048_576) => {
 };
 
 /** Only managed primary Chat SSE reaches the gateway. Unknown attempts remain durable. */
-export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = process.env, usePublicDefaults = env === process.env, getAccountRuntime, readExecution, isProductModelConfigured = () => false, isManaged = () => true, enterprise = isEnterpriseMode, fetchImpl = fetch, trustedBoundary = false }, strictJournalOpen = false) => {
+export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = process.env, usePublicDefaults = env === process.env, getAccountRuntime, readExecution, readManagedModels, isProductModelConfigured = () => false, isManaged = () => true, enterprise = isEnterpriseMode, fetchImpl = fetch, trustedBoundary = false }, strictJournalOpen = false) => {
   const config = readConfig(env, usePublicDefaults);
+  let policy = readManagedModels ? undefined : null;
+  let policyExpiresAt = 0;
+  let pendingPolicy;
+  let registeredChatModels = new Set();
+  const refreshManagedModels = async () => {
+    if (!readManagedModels || !isManaged() || enterprise()) return null;
+    if (Date.now() < policyExpiresAt) return policy?.managed_models ?? null;
+    pendingPolicy ??= (async () => {
+      try {
+        const next = await Promise.resolve().then(readManagedModels);
+        if (policy?.managed_models && next === null) refuse('platform_managed_model_policy_unavailable', 503);
+        policy = next;
+        policyExpiresAt = Date.now() + 30_000;
+        return policy?.managed_models ?? null;
+      } catch { refuse('platform_managed_model_policy_unavailable', 503); }
+      finally { pendingPolicy = undefined; }
+    })();
+    return pendingPolicy;
+  };
+  const chatModel = (id) => {
+    const existing = config?.models.find((model) => model.id === id);
+    const name = ['deepseek-flash', 'deepseek-v4-flash'].includes(id) ? 'DeepSeek 4.1 Flash' : existing?.name ?? id;
+    return { id, name, context: existing?.context ?? 65_536, maxOutput: existing?.maxOutput ?? 4_096 };
+  };
+  const visibleChatModels = () => {
+    if (policy === undefined) return [];
+    const chat = policy?.managed_models?.chat;
+    if (!chat) return config?.models ?? [];
+    return chat.length ? [chatModel(chat[0])] : [];
+  };
+  const mediaAllowed = (model, operation, managed = policy?.managed_models) =>
+    managed?.[productMediaOperations[operation]]?.includes(model) ?? config?.mediaModels.includes(model);
+  if (config && readManagedModels) await refreshManagedModels().catch(() => {});
   const identities = new Map();
   const permits = new Map();
   const grants = new Map();
@@ -353,26 +390,31 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     checkDispatch();
     if (SYNCHRONOUS_MEDIA.has(operation) && !isProductModelConfigured()) refuse('platform_media_recovery_unavailable', 503);
     const original = store.read().calls[callID];
-    if (!config.mediaModels.includes(model) && !(original?.creditScope === 'product_v1' && original.model === model && SYNCHRONOUS_MEDIA.has(operation))) refuse('platform_media_model_not_allowed', 403);
     const method = Object.hasOwn(MEDIA_METHODS, operation) ? MEDIA_METHODS[operation] : null;
     if (!method) refuse('platform_media_operation_unknown', 400);
-    mediaTransport ??= createNativeMediaTransport({
-      gateway: config.gateway,
-      fetchImpl,
-      grantFor: async () => refuse('platform_media_grant_injected', 500),
-      operationAllowlist: {},
-    });
-    return mediaCall({ identity, sessionID, callID, model, operation, inputs, validate, productOnly, dispatch: ({ grant, taskID, idempotencyKey, requestOperation }) => {
-      const transport = requestOperation ? createNativeMediaTransport({
-        gateway: config.gateway, fetchImpl, grantFor: async () => refuse('platform_media_grant_injected', 500), requestOperation,
-      }) : mediaTransport;
-      return transport[method]({ ...inputs, model, grant, taskID, idempotencyKey });
-    } });
+    const recovering = original?.creditScope === 'product_v1' && original.model === model && SYNCHRONOUS_MEDIA.has(operation);
+    const run = (managedModels) => {
+      checkDispatch();
+      if (!recovering && !mediaAllowed(model, operation, managedModels)) refuse('platform_media_model_not_allowed', 403);
+      mediaTransport ??= createNativeMediaTransport({
+        gateway: config.gateway,
+        fetchImpl,
+        grantFor: async () => refuse('platform_media_grant_injected', 500),
+        operationAllowlist: {},
+      });
+      return mediaCall({ identity, sessionID, callID, model, operation, inputs, validate, productOnly, dispatch: ({ grant, taskID, idempotencyKey, requestOperation }) => {
+        const transport = requestOperation ? createNativeMediaTransport({
+          gateway: config.gateway, fetchImpl, grantFor: async () => refuse('platform_media_grant_injected', 500), requestOperation,
+        }) : mediaTransport;
+        return transport[method]({ ...inputs, model, grant, taskID, idempotencyKey });
+      } });
+    };
+    return readManagedModels && !recovering ? refreshManagedModels().then(run) : run(null);
   };
   const defaultMediaModel = () => (config && config.mediaModels && config.mediaModels.length ? config.mediaModels[0] : null);
   // Local admission preflight only: gateway capability, account entitlement,
   // tariff and provider availability are checked later by the paid call.
-  const isMediaOperationConfigured = (model, operation) => Boolean(!closed && !suspended && config && isManaged() && !enterprise() && (!SYNCHRONOUS_MEDIA.has(operation) || isProductModelConfigured()) && config.mediaModels.includes(model) && Object.hasOwn(MEDIA_METHODS, operation));
+  const isMediaOperationConfigured = (model, operation) => Boolean(!closed && !suspended && config && isManaged() && !enterprise() && (!SYNCHRONOUS_MEDIA.has(operation) || isProductModelConfigured()) && policy !== undefined && Object.hasOwn(MEDIA_METHODS, operation) && mediaAllowed(model, operation));
   // The shared child token cannot authenticate a dedicated UI media task.
   // Skills must be tied to a live agent prompt; UI requests use the separately
   // authenticated mediaDispatch path.
@@ -693,7 +735,6 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   const admitMediaTask = async (identity, { model } = {}) => {
     if (model?.providerID !== PLATFORM_PROVIDER) return false;
     checkDispatch();
-    if (!(config.mediaModels ?? []).some((id) => id === model.id)) refuse('platform_media_model_not_allowed', 403);
     const scope = candidateScope(identity);
     if (childScope) scopeFor(identity);
     const owner = scope.owner;
@@ -708,6 +749,9 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       mediaSessions.set(sessionID, { owner, model: model.id });
       return { sessionID, taskID: existing.id, actorID: existing.actorID, accountID: existing.accountID, model: existing.model };
     }
+    const managedModels = await refreshManagedModels();
+    if (!Object.keys(MEDIA_METHODS).some((operation) => mediaAllowed(model.id, operation, managedModels))) refuse('platform_media_model_not_allowed', 403);
+    checkDispatch();
     scopeFor(identity, true);
     const task = await store.mutate((state) => {
       checkDispatch();
@@ -738,13 +782,19 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     assertGeneration();
     if (!/^msg_[A-Za-z0-9_-]{1,180}$/.test(promptID || '')) refuse('platform_prompt_id_required', 400);
     if (session.parentID) refuse('platform_child_unsupported', 403);
-    if (!config.models.some((item) => item.id === model.id)) refuse('platform_model_not_allowed', 403);
+    const managedModels = await refreshManagedModels();
     const scope = candidateScope(identity);
     if (childScope) scopeFor(identity);
     const owner = scope.owner;
     const existing = store.read().tasks[session.id];
     if (existing && (existing.owner !== owner || existing.actorID !== scope.actorID || existing.accountID !== scope.accountID)) refuse('platform_model_scope_restart_required', 403);
-    if (existing && existing.model !== model.id) refuse('platform_task_model_locked');
+    const chat = managedModels?.chat;
+    const changingPrimary = existing && existing.model !== model.id;
+    if (changingPrimary && model.id !== chat?.[0]) refuse('platform_task_model_locked');
+    const permittedModel = chat
+      ? chat.length > 0 && (existing || model.id === chat[0] || registeredChatModels.has(model.id))
+      : config.models.some((item) => item.id === model.id);
+    if (!permittedModel) refuse('platform_model_not_allowed', 403);
     scopeFor(identity, true);
     // A newly requested prompt retires the previous stream before reconciliation.
     // Abort its reader, then wait for its journal transition before admitting
@@ -760,7 +810,11 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     scopeFor(identity);
     const task = existing || { id: `uh_task_${crypto.randomUUID()}`, sessionID: session.id, actorID: scope.actorID, accountID: scope.accountID, owner, model: model.id };
     const productCredit = await productMode(identity);
-    if (!productCredit) await credential(task, identity);
+    if (!productCredit) {
+      if (changingPrimary) refuse('platform_task_model_locked');
+      if (chat && !chat.includes(task.model)) refuse('platform_model_not_allowed', 403);
+      await credential(task, identity);
+    }
     assertGeneration();
     checkDispatch();
     if (!existing) await store.mutate((state) => {
@@ -775,10 +829,19 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     if (existing) {
       await reconcile(identity, session.id);
       if (status(identity, session.id).blocked) refuse('platform_reconciliation_required');
+      if (changingPrimary) await store.mutate((state) => {
+        checkDispatch();
+        assertGeneration();
+        scopeFor(identity);
+        const savedTask = state.tasks[session.id];
+        if (savedTask.model !== existing.model || permits.has(session.id)) refuse('platform_task_conflict');
+        if (Object.values(state.calls).some((call) => call.sessionID === session.id && blocksSession(call))) refuse('platform_reconciliation_required');
+        savedTask.model = model.id;
+      });
     }
     checkDispatch();
     assertGeneration();
-    permits.set(session.id, { id: crypto.randomUUID(), promptID, idle: session.time?.idle ?? null, productCredit });
+    permits.set(session.id, { id: crypto.randomUUID(), promptID, idle: session.time?.idle ?? null, productCredit, managedModels });
     return true;
   };
   const validatePromptPermit = async (sessionID, permit, task) => {
@@ -821,20 +884,24 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
   const completion = async (req, res, body) => {
     checkDispatch();
     const sessionID = identifier.parse(req.headers['x-unihub-session-id']);
-    const callID = identifier.parse(req.headers['idempotency-key']);
+    let callID = identifier.parse(req.headers['idempotency-key']);
     const identity = identities.get(sessionID);
     if (!identity) refuse('platform_prompt_authorization_required', 401);
     const task = taskFor(identity, sessionID);
     const permit = permits.get(sessionID);
     const assertPermit = () => { if (!permit || permits.get(sessionID) !== permit) refuse('platform_prompt_authorization_required', 403); };
     assertPermit();
-    const model = config.models.find((item) => item.id === task.model);
     if (body?.model !== task.model || body?.stream !== true || !Array.isArray(body?.messages)) refuse('platform_protocol_unsupported', 400);
-    const maximum = body.max_completion_tokens ?? body.max_tokens ?? model.maxOutput;
+    const operation = managedChatOperation(body);
+    const candidates = (permit.productCredit && permit.managedModels?.[operation]) || [task.model];
+    if (!candidates.length) refuse('platform_model_not_allowed', 403);
+    const model = chatModel(candidates[0]);
+    const maximum = body.max_completion_tokens ?? body.max_tokens ?? chatModel(task.model).maxOutput;
     if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > model.maxOutput) refuse('platform_output_limit_invalid', 400);
-    const request = { ...body, max_tokens: maximum, stream_options: { include_usage: true } };
+    const request = { ...body, model: model.id, max_tokens: maximum, stream_options: { include_usage: true } };
     delete request.max_completion_tokens;
-    const payload = JSON.stringify(request); const digest = hash(payload);
+    let payload = JSON.stringify(request);
+    let digest = hash(payload);
     const abort = new AbortController();
     res.once('close', () => { if (!res.writableEnded) abort.abort(); });
     const headers = permit.productCredit ? null : legacyHeaders(await credential(task, identity), task.id);
@@ -850,27 +917,67 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       if (call.permitID !== permit.id) refuse('platform_prompt_authorization_required', 403);
       if (call.digest && call.digest !== digest) refuse('platform_call_digest_conflict');
       if (call.status !== 'PREPARED') refuse('platform_call_already_submitted');
-      call.digest = digest; call.status = 'DISPATCHED';
+      call.model = model.id; call.digest = digest; call.status = 'DISPATCHED';
     });
     const stream = { abort, response: res, finished: Promise.withResolvers() };
     inflight.set(sessionID, stream);
     const markUnknown = () => store.mutate((state) => { if (!terminal.has(state.calls[callID].status)) state.calls[callID].status = 'UNKNOWN'; });
     let upstreamStarted = false;
     try {
-      await validatePromptPermit(sessionID, permit, task);
-      checkDispatch();
-      scopeFor(identity);
-      assertPermit();
-      if (res.destroyed || req.aborted) refuse('platform_runtime_unsupported', 409);
-      upstreamStarted = true;
       const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(180_000)]);
-      const upstream = permit.productCredit
-        ? await proxyProductModel(task, task.model, identity, { callId: callID, body: payload, signal })
-        : await fetchImpl(`${config.gateway}/chat/completions`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', 'Idempotency-Key': callID }, body: payload, redirect: 'error', signal });
-      if (!upstream.ok || !upstream.headers.get('content-type')?.includes('text/event-stream') || !upstream.body) {
+      let remaining = candidates.slice(1);
+      let catalogChecked = false;
+      let upstream;
+      for (;;) {
+        await validatePromptPermit(sessionID, permit, task);
+        checkDispatch();
+        scopeFor(identity);
+        assertPermit();
+        if (res.destroyed || req.aborted || signal.aborted) refuse('platform_runtime_unsupported', 409);
+        upstreamStarted = true;
+        upstream = permit.productCredit
+          ? await proxyProductModel(task, request.model, identity, { callId: callID, body: payload, signal })
+          : await fetchImpl(`${config.gateway}/chat/completions`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', 'Idempotency-Key': callID }, body: payload, redirect: 'error', signal });
+        if (upstream.ok && upstream.headers.get('content-type')?.includes('text/event-stream') && upstream.body) break;
         const refusal = await readGatewayRefusal(upstream, permit.productCredit);
         if (!upstream.bodyUsed) await upstream.body?.cancel();
-        if (permit.productCredit && ['membership-expired-pre-admission', 'credits-required-pre-admission', 'proxy-pre-admission'].includes(refusal)) {
+        if (refusal === 'route-unavailable') {
+          await store.mutate((state) => {
+            const saved = state.calls[callID];
+            if (saved.status !== 'DISPATCHED' || saved.output || saved.digest !== digest) refuse('platform_reconciliation_required');
+            saved.status = 'REJECTED';
+            saved.rejection = { code: 'platform_model_route_unavailable', stage: 'pre_admission' };
+          });
+          if (remaining.length && !catalogChecked && !signal.aborted) {
+            catalogChecked = true;
+            const catalog = await getAccountRuntime().request(identity, `/v1/accounts/${encodeURIComponent(task.accountID)}/model-discovery`, productWalletHeaders({
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+              body: JSON.stringify({ model_scope: 'llmrouter_available', funding_mode: 'credits' }),
+            })).catch(() => null);
+            remaining = eligibleChatBackups(remaining, catalog, request, operation);
+          }
+          const next = remaining.shift();
+          if (!next || signal.aborted) refuse('platform_model_route_unavailable', 503);
+          await validatePromptPermit(sessionID, permit, task);
+          checkDispatch();
+          const nextId = crypto.randomUUID();
+          request.model = next;
+          const nextPayload = JSON.stringify(request);
+          const nextDigest = hash(nextPayload);
+          await store.mutate((state) => {
+            assertPermit();
+            scopeFor(identity);
+            if (state.calls[callID].status !== 'REJECTED' || state.calls[nextId]) refuse('platform_reconciliation_required');
+            state.calls[nextId] = { id: nextId, sessionID, taskID: task.id, model: next, permitID: permit.id,
+              digest: nextDigest, status: 'DISPATCHED', output: false, creditScope: 'product_v1' };
+          });
+          callID = nextId;
+          payload = nextPayload;
+          digest = nextDigest;
+          upstreamStarted = false;
+          continue;
+        }
+        if (permit.productCredit && ['membership-expired-pre-admission', 'credits-required-pre-admission', 'managed-model-not-allowed', 'proxy-pre-admission'].includes(refusal)) {
           await store.mutate((state) => {
             const saved = state.calls[callID];
             if (saved.status !== 'DISPATCHED' || saved.output || saved.digest !== digest) refuse('platform_reconciliation_required');
@@ -878,6 +985,7 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
           });
           if (refusal === 'membership-expired-pre-admission') refuse('product_membership_expired', 403);
           if (refusal === 'credits-required-pre-admission') refuse('platform_model_credits_required', 402);
+          if (refusal === 'managed-model-not-allowed') refuse('platform_model_not_allowed', 403);
           refuse('platform_model_access_unavailable', 503);
         }
         if (refusal === 'pre-admission-body-limit') {
@@ -1045,7 +1153,10 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
     isMediaOperationConfigured,
     admitMediaTask,
     historyAvailable: () => Boolean(store && config && !closed && isManaged() && !enterprise()),
-    modelCheckConfig: () => config ?? {},
+    modelCheckConfig: async () => {
+      const managedModels = await refreshManagedModels();
+      return config ? { ...config, managedModels } : {};
+    },
     enabled: () => Boolean(!suspended && config && store && !closed && isManaged() && !enterprise()),
     createChildEnv: () => {
       if (suspended || !config || !store || closed || !base) return {};
@@ -1054,7 +1165,20 @@ export const createPlatformModelRuntime = async ({ dataDir, instanceDir, env = p
       if (trustedBoundary && isProductModelConfigured()) env.OPENCHAMBER_PRODUCT_MANAGED_MEDIA = '1';
       return env;
     },
-    providerConfig: () => !suspended && config && store && !closed ? { unihub: { name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' }, models: Object.fromEntries(config.models.map((model) => [model.id, { name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput }, capabilities: { tools: true, input: ['text'], output: ['text'] } }])) } } : {},
+    providerConfig: () => {
+      const models = visibleChatModels();
+      if (suspended || !config || !store || closed || !models.length) return {};
+      registeredChatModels = new Set(models.map(({ id }) => id));
+      const input = policy?.managed_models?.vision?.length ? ['text', 'image'] : ['text'];
+      return { unihub: {
+        name: 'quukk', package: 'aisdk:@ai-sdk/openai-compatible',
+        settings: { baseURL: 'http://127.0.0.1:1/unihub-managed-only', apiKey: 'requires-managed-session', transport: 'http' },
+        models: Object.fromEntries(models.map((model) => [model.id, {
+          name: model.name, modelID: model.id, limit: { context: model.context, output: model.maxOutput },
+          capabilities: { tools: true, input, output: ['text'] },
+        }])),
+      } };
+    },
     close: () => {
       closePromise ??= (async () => {
         closed = true;
