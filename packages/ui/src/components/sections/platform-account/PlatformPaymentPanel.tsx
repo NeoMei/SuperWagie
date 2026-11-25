@@ -190,7 +190,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
 
     {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
     {upgrade && waiting && appliedCreditAmount === undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.estimatedRefund')} {t('platformAccount.cny', { amount: formatPlatformMoney(upgrade.estimated_refund_amount) })} · {t(upgrade.refund_payment_source === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}</p>}
-    <div className={walletLayout ? 'mt-3 grid justify-items-center gap-3 text-center' : 'mt-3 flex flex-col gap-4 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6'}>
+    <div className={walletLayout ? 'mt-2 grid justify-items-center gap-2 text-center' : 'mt-3 flex flex-col gap-4 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6'}>
       <div className={walletLayout ? 'grid min-w-0 justify-items-center gap-2' : 'min-w-0 space-y-3'}>
         <div className="space-y-1">
           {waiting && appliedCreditAmount !== undefined && <>
@@ -228,14 +228,14 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
               alt={scanHint}
               onLoad={walletLayout ? () => paymentCard.current?.scrollIntoView({ block: 'nearest' }) : undefined}
             />
-          : <p className={SETTINGS_HELPER_CLASS} role={qr ? 'alert' : 'status'}>{t(qr ? 'platformAccount.commerceFailed' : 'platformAccount.loading')}</p>}
+          : <p className={`${SETTINGS_HELPER_CLASS}${walletLayout ? ' grid h-48 w-48 max-w-full place-items-center' : ''}`} role={qr ? 'alert' : 'status'}>{t(qr ? 'platformAccount.commerceFailed' : 'platformAccount.loading')}</p>}
         {walletLayout && <p className={SETTINGS_HELPER_CLASS}>{scanHint}</p>}
       </div>}
     </div>
 
     {checkout.refund_status === 'REJECTED' && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.checkoutRefundRejected')}</p>}
     {codeUrl && !walletLayout && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.paymentAutoConfirm')}</p>}
-    <div className={walletLayout ? 'mt-4 flex flex-wrap justify-center gap-2' : 'mt-2 flex flex-wrap items-center gap-2'}>{actions}</div>
+    <div className={walletLayout ? 'mt-3 flex flex-wrap justify-center gap-2' : 'mt-2 flex flex-wrap items-center gap-2'}>{actions}</div>
     {refundConfirmation && refundable && <div className="mt-3 space-y-2">
       <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.refundConfirmation')}</p>
       <div className="flex flex-wrap gap-2">
