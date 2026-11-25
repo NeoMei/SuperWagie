@@ -82,6 +82,8 @@ const toneFor = (checkout: PlatformCheckout): 'waiting' | 'progress' | 'done' | 
 
 type PlatformPaymentPanelProps = {
   checkout: PlatformCheckout;
+  payer?: string;
+  switchingOffer?: boolean;
   /** Suppress every action while another financial command is in flight. */
   busy: boolean;
   /** Channels the account may pay with; more than one renders a switch. */
@@ -93,7 +95,7 @@ type PlatformPaymentPanelProps = {
   onRefresh: () => void;
   onRenew?: () => void;
   onDismiss?: () => void;
-  onClose: () => void;
+  onClose?: () => void;
   onRefund: () => void;
   /** Compact one-line rendering used by payment history. */
   compact?: boolean;
@@ -107,7 +109,7 @@ type PlatformPaymentPanelProps = {
  * field list or hunting for a QR elsewhere on the page. The commerce owner polls and reconciles the original order.
  */
 export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
-  checkout, busy, channels = [], onSwitchChannel, channelSwitchPending, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false, walletLayout = false, walletHistory = false,
+  checkout, payer, switchingOffer = false, busy, channels = [], onSwitchChannel, channelSwitchPending, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false, walletLayout = false, walletHistory = false,
 }) => {
   const { t, locale } = useI18n();
   const paymentCard = React.useRef<HTMLDivElement>(null);
@@ -116,7 +118,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const waiting = WAITING.includes(checkout.payment_status) && !checkout.refund_status;
   const refundable = isRefundableCheckout(checkout);
   const checkable = checkout.upgrade_return_status === 'UPGRADE_PENDING' || checkout.upgrade_return_status === 'UPGRADE_RELEASING' || waiting || checkout.refund_status === 'PENDING' || (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'PENDING');
-  const showPaymentSession = waiting && !checkout.close_pending;
+  const showPaymentSession = waiting && !checkout.close_pending && !switchingOffer;
   const session = showPaymentSession ? checkout.session : undefined;
   const remaining = useCountdown(showPaymentSession ? session?.expires_at ?? checkout.expires_at : undefined);
   const expired = waiting && remaining === 0;
@@ -130,6 +132,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const offerName = checkout.walletTopUp ? t('platformAccount.productWallet.topUp') : checkout.offer_name;
   const scanHint = t(paymentProvider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.scanWithAlipay');
   const providerName = t(paymentProvider === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay');
+  const purchaseLayout = payer !== undefined;
 
   React.useEffect(() => {
     if (!codeUrl) return undefined;
@@ -140,13 +143,13 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
     return () => { current = false; };
   }, [codeUrl]);
 
-  const cancel = waiting && !checkout.close_pending && <Button size={walletLayout ? 'default' : 'sm'} variant={walletLayout ? 'outline' : 'ghost'} disabled={busy} onClick={onClose}>
+  const cancel = onClose && waiting && !checkout.close_pending && <Button size={walletLayout ? 'default' : 'sm'} variant={walletLayout ? 'outline' : 'ghost'} disabled={busy} onClick={onClose}>
     {t(walletLayout ? 'platformAccount.productWallet.cancelPayment' : 'platformAccount.closeCheckout')}
   </Button>;
   const actions = <>
     {walletLayout && cancel}
     {!compact && showPaymentSession && onRenew && (expired || session?.kind !== 'qr') && <Button size="sm" disabled={busy} onClick={onRenew}>{t('platformAccount.renewPaymentCode')}</Button>}
-    {onDismiss && <Button size="sm" variant="ghost" disabled={busy} onClick={onDismiss}>{t(walletLayout ? 'platformAccount.productWallet.backToRecharge' : 'platformAccount.returnToPurchase')}</Button>}
+    {onDismiss && <Button size="sm" variant="ghost" disabled={busy} onClick={onDismiss}>{t(walletLayout ? 'platformAccount.productWallet.backToRecharge' : 'dialog.common.actions.close')}</Button>}
     {checkable && <Button size={walletLayout ? 'default' : 'sm'} variant="ghost" disabled={busy} onClick={onRefresh}>{t('platformAccount.refreshPaymentStatus')}</Button>}
     {!walletLayout && cancel}
     {refundable && <Button size="sm" variant="outline" disabled={busy} onClick={() => setRefundConfirmation(true)}>{t('platformAccount.requestRefund')}</Button>}
@@ -177,21 +180,22 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   return <div ref={paymentCard} className="oc-tile rounded-xl p-4" data-payment-checkout={checkout.id}>
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
       <div className="min-w-0">
-        {walletLayout
-          ? <h3 className="typography-ui-label font-semibold" dir="auto">{offerName}</h3>
+        {walletLayout || purchaseLayout
+          ? <h3 className="wrap-anywhere typography-ui-label font-semibold" dir="auto">{offerName}</h3>
           : <><p className="typography-micro uppercase tracking-wide text-muted-foreground">{t(waiting ? 'platformAccount.activePayment' : 'platformAccount.recentPayment')}</p>
               <p className="truncate typography-ui-label font-medium" dir="auto">{offerName}</p></>}
+        {purchaseLayout && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.taskAccount')} · <bdi>{payer}</bdi></p>}
       </div>
       <span className="flex items-center gap-1.5 text-muted-foreground">
         <StatusDot tone={toneFor(checkout)} />
-        <span className="typography-meta" role="status">{t(statusKey(checkout))}</span>
+        <span className="typography-meta" role="status">{t(switchingOffer && waiting && !checkout.close_pending ? 'platformAccount.switchingPurchaseOffer' : statusKey(checkout))}</span>
       </span>
     </div>
 
     {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
     {upgrade && waiting && appliedCreditAmount === undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.estimatedRefund')} {t('platformAccount.cny', { amount: formatPlatformMoney(upgrade.estimated_refund_amount) })} · {t(upgrade.refund_payment_source === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}</p>}
-    <div className={walletLayout ? 'mt-2 grid justify-items-center gap-2 text-center' : 'mt-3 flex flex-col gap-4 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6'}>
-      <div className={walletLayout ? 'grid min-w-0 justify-items-center gap-2' : 'min-w-0 space-y-3'}>
+    <div className={walletLayout ? 'mt-2 grid justify-items-center gap-2 text-center' : 'mt-3 flex flex-col gap-3 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6'}>
+      <div className={walletLayout ? 'grid min-w-0 justify-items-center gap-2' : 'min-w-0 space-y-2 @xl:space-y-3'}>
         <div className="space-y-1">
           {waiting && appliedCreditAmount !== undefined && <>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.netPlanPrice')} {t('platformAccount.cny', { amount: formatPlatformMoney(String(BigInt(checkout.amount) + BigInt(appliedCreditAmount))) })}</p>
@@ -218,13 +222,13 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
             : t('platformAccount.qrValidFor', { time: clock(remaining) })}
         </p>}
       </div>
-      {codeUrl && <div className="flex shrink-0 flex-col items-center gap-2 self-center">
+      {codeUrl && <div className="flex min-w-0 max-w-full shrink-0 flex-col items-center gap-2 self-center">
         {qr?.image
           ? <img
               src={qr.image}
               width={224}
               height={224}
-              className={walletLayout ? 'h-auto w-48 max-w-full rounded-lg bg-white' : 'rounded-lg bg-white'}
+              className={walletLayout ? 'h-auto w-48 max-w-full rounded-lg bg-white' : 'h-auto max-w-full rounded-lg bg-white'}
               alt={scanHint}
               onLoad={walletLayout ? () => paymentCard.current?.scrollIntoView({ block: 'nearest' }) : undefined}
             />

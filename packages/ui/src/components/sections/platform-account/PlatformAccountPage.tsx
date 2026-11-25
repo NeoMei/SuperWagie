@@ -277,11 +277,20 @@ export const PlatformAccountPage: React.FC = () => {
           </div>}
           {signedIn && (visibleTab === 'billing' || tab === 'orders' || visibleTab === 'wallet') && <>
             {visibleTab === 'billing' && (!signedIn.accountId || unsupported) && membershipSummary(null)}
-            {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} view={tab === 'orders' ? 'orders' : visibleTab === 'wallet' ? 'wallet' : 'overview'} payer={selectedAccountName ?? signedIn.accountId} membershipSummary={membershipSummary} hasActiveMembership={signedIn.credits.activeMembership ?? Boolean(currentMembership)} currentMembership={currentMembership} onAccountRefresh={() => void perform(readPlatformAccount)} />}
-          </>}
-          {visibleTab === 'billing' && !unsupported && signedIn?.accountId && <>
-            <PlatformAccountUsageSummary key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} />
-            <Button size="sm" variant="ghost" onClick={() => setTab('usage')}>{t('platformAccount.viewUsage')}</Button>
+            {!unsupported && signedIn.accountId && <PlatformAccountCommerce
+              key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`}
+              accountId={signedIn.accountId}
+              view={tab === 'orders' ? 'orders' : visibleTab === 'wallet' ? 'wallet' : 'overview'}
+              payer={selectedAccountName ?? signedIn.accountId}
+              membershipSummary={membershipSummary}
+              hasActiveMembership={signedIn.credits.activeMembership ?? Boolean(currentMembership)}
+              currentMembership={currentMembership}
+              onAccountRefresh={() => void perform(readPlatformAccount)}
+              overviewFooter={<>
+                <PlatformAccountUsageSummary accountId={signedIn.accountId} />
+                <Button size="sm" variant="ghost" onClick={() => setTab('usage')}>{t('platformAccount.viewUsage')}</Button>
+              </>}
+            />}
           </>}
           {visibleTab === 'keys' && !unsupported && signedIn?.accountId && (
             <PlatformAccountApiKeys key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} onConfigured={refreshModelConfiguration} />

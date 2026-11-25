@@ -135,26 +135,28 @@ row remains useful when another model fails or the next poll is interrupted.
 
 ## Direct checkout controls
 
-The membership/add-on confirmation includes an explicit payment method when
-merchant checkout is configured. Choosing a method before submitting a payment,
-changing tabs and opening the account page are read-only. The legacy cash option
-remains separate.
-Upgrade quotes bind their selected payment source and show the server's exact
-cent-rounded external charge before confirmation.
-Negotiated legacy upgrade quotes and their payment panels show the plan price,
-applied old-plan credit, and amount due. Payment starts the new term. The
-estimated-refund explanation belongs to the full-price upgrade flow.
+Membership and add-on cards show the price, grant, and billing period or pack
+validity. Browsing the catalog and choosing a method before checkout are read-only.
+Activating a regular external-payment offer creates one checkout and shows
+its payment panel alongside the catalog. Balance-funded purchases require an
+explicit debit action. Activating an upgrade offer fetches a quote for the
+selected payment source. Users see the exact charge and old-plan credit or
+estimated refund before accepting the quote.
 
-The checkout panel recovers server records after reopening. Waiting, unknown,
-paid-but-activating, completed and original-channel refund states stay distinct.
-The purchase confirmation stays in place when it changes to payment. It
-shows the offer, amount, method, QR and payment status together. Both providers
-supply merchant QR payloads, encoded locally by the panel. Expired codes and
-earlier redirect-only checkouts can be replaced after confirmed closure if the
+The checkout panel shows the offer, payer, amount, method, QR and payment
+status together. It restores unresolved checkout records after reopening.
+Waiting, unknown, paid-but-activating, completed and original-channel refund
+states stay distinct. Changing categories or billing periods keeps the current
+checkout open. Selecting a different eligible offer requests closure of an
+unpaid checkout and hides its QR. The replacement starts after confirmed
+closure. While closure is pending, the account keeps checking the original
+order. If payment has already arrived, the original result stays visible.
+Both providers supply merchant QR payloads, encoded locally by the panel.
+Expired codes and earlier redirect-only checkouts can be replaced after confirmed closure if the
 original purchase intent can be recovered. Switching methods follows the same
 rule, and a completed original payment is shown in place. The panel keeps
 polling while fulfillment is pending, hides the code after payment and retains
-the final result until the user returns to purchase. Verified fulfillment
+the final result until the user selects an offer. Verified fulfillment
 refreshes membership and credits.
 An unconfirmed submission with no known checkout is retried
 only by explicit action with its original key. Closed attempts are in history.

@@ -279,8 +279,8 @@ test('user center opens outside Settings, navigation stays read-only and explici
       assert.equal(await evaluate(`document.querySelectorAll('[role="dialog"]').length`), 1, 'Each entry must open one independent account dialog');
       assert.equal(await evaluate(`document.querySelector('[data-platform-account-tab="billing"]').getAttribute('aria-current')`), 'page');
       if (entry === 'funding') {
-        await until(`!!document.querySelector('[role="radio"][aria-label="Fixture credit pack"]')`, 'Funding must open the credit add-on plans');
-        assert.equal(await evaluate(`document.querySelector('[role="radio"][aria-label="Fixture credit pack"]').getAttribute('aria-checked')`), 'false', 'Funding must not select a plan');
+        await until(`!!document.querySelector('[data-platform-offer][aria-label="Fixture credit pack"]')`, 'Funding must open the credit add-on plans');
+        assert.equal(await evaluate('Boolean(document.querySelector("[data-purchase-checkout]"))'), false, 'Funding must not open checkout');
         assert.deepEqual(await evaluate('window.mutations'), [], 'Opening the credit purchase plans must remain read-only');
         if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
           await wait(250);
