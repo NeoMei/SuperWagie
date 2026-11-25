@@ -122,6 +122,7 @@ export const buildSwapScript = ({
   pid,
   logPath,
   openCommand = '/usr/bin/open',
+  copyCommand = '/usr/bin/ditto',
 }) => `#!/bin/sh
 set -u
 app=${JSON.stringify(appPath)}
@@ -129,6 +130,7 @@ staged=${JSON.stringify(stagedAppPath)}
 backup=${JSON.stringify(backupPath)}
 log=${JSON.stringify(logPath)}
 open=${JSON.stringify(openCommand)}
+copy=${JSON.stringify(copyCommand)}
 pid=${Number(pid)}
 {
   echo "[$(date)] waiting for pid $pid"
@@ -138,7 +140,7 @@ pid=${Number(pid)}
     echo "could not move the current app aside"
     exit 1
   fi
-  if /usr/bin/ditto "$staged" "$app"; then
+  if "$copy" "$staged" "$app"; then
     /usr/bin/xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
     rm -rf "$backup"
     echo "installed"
