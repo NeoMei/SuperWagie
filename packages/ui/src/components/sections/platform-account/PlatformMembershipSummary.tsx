@@ -6,6 +6,50 @@ import type { PlatformAccountState } from '@/lib/platformAccount';
 import { formatPlatformPoints, formatProductBillingDate } from '@/lib/platformCommerce';
 
 type SignedInAccount = Extract<PlatformAccountState, { status: 'signed-in' }>;
+type Membership = SignedInAccount['membership'][number];
+
+export const PlatformAccountBenefits: React.FC<{
+  account: SignedInAccount | null;
+  currentMembership: Membership | undefined;
+  loading: boolean;
+}> = ({ account, currentMembership, loading }) => {
+  const { t, locale } = useI18n();
+  const active = account?.credits.activeMembership ?? Boolean(currentMembership);
+  const membership = currentMembership ?? (active ? undefined : account?.membership
+    .filter((membership) => membership.product_id === 'superwagie')
+    .sort((a, b) => Date.parse(b.paid_through) - Date.parse(a.paid_through))[0]);
+  const paidThrough = account?.credits.membershipPaidThrough ?? membership?.paid_through;
+  const expiryTime = Date.parse(paidThrough ?? '');
+  const expired = expiryTime <= Date.now();
+  const refunded = !active && membership?.status === 'refunded';
+  const expiry = Number.isFinite(expiryTime) && (active || expired) && !refunded ? paidThrough : undefined;
+  const status = active ? t('platformAccount.membershipStatusActive')
+    : refunded ? t('platformAccount.membershipStatusRefunded')
+    : expired ? t('platformAccount.membershipExpired')
+    : t('platformAccount.noMembership');
+  const planName = active || expired || refunded ? membership?.offer.name : undefined;
+  const showPlanStatus = Boolean(planName && !active);
+  const date = expiry && (account?.productCreditWallet ? formatProductBillingDate(expiry, locale) : new Date(expiry).toLocaleDateString(locale));
+
+  return <dl data-platform-account-summary aria-busy={loading} className="min-w-0 space-y-1.5 border-s border-border/60 ps-3 @xl/account:space-y-5 @xl/account:border-s-0 @xl/account:border-t @xl/account:ps-0 @xl/account:pt-5">
+    <div className="min-w-0 space-y-1">
+      <dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.remainingPoints')}</dt>
+      <dd className="wrap-anywhere text-xl leading-none font-semibold tracking-tight tabular-nums @xl/account:text-2xl">
+        {account ? formatPlatformPoints(account.credits.available) : '—'}
+      </dd>
+    </div>
+    <div className="min-w-0 space-y-1">
+      <dt className={SETTINGS_HELPER_CLASS}>{t('platformAccount.sidebar.membership')}</dt>
+      <dd className="wrap-anywhere typography-ui-label font-medium" dir="auto">
+        {account ? planName || status : '—'}
+      </dd>
+      {(date || showPlanStatus) && <dd className={SETTINGS_HELPER_CLASS}>
+        {showPlanStatus && <span className="block">{status}</span>}
+        {date && <time dateTime={expiry}>{t('platformAccount.paidThrough', { date })}</time>}
+      </dd>}
+    </div>
+  </dl>;
+};
 
 export const PlatformMembershipSummary: React.FC<{
   account: SignedInAccount;
@@ -18,7 +62,7 @@ export const PlatformMembershipSummary: React.FC<{
   } | null;
 }> = ({ account, actions }) => {
   const { t, locale } = useI18n();
-  const displayDate = (value: string) => account.productCreditWallet ? formatProductBillingDate(value, locale) : new Date(value).toLocaleDateString();
+  const displayDate = (value: string) => account.productCreditWallet ? formatProductBillingDate(value, locale) : new Date(value).toLocaleDateString(locale);
   const now = Date.now();
   const memberships = account.membership.filter((membership) => membership.product_id === 'superwagie');
   const legacyActive = memberships.find((membership) => membership.status === 'active' && Date.parse(membership.paid_through) > now);

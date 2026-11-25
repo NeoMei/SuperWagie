@@ -5,6 +5,7 @@ import test from 'node:test';
 import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from '../../../../../../scripts/perf/cdp.mjs';
 
 const repo = path.resolve(import.meta.dirname, '../../../../../..');
+const sectionContent = `document.getElementById(document.querySelector('[data-platform-account-tab][aria-current="page"]').getAttribute('aria-controls'))`;
 
 test('user center opens outside Settings, navigation stays read-only and explicit key activation refreshes model settings', { timeout: 120_000 }, async () => {
   const { createServer } = await import('vite');
@@ -101,9 +102,9 @@ test('user center opens outside Settings, navigation stays read-only and explici
     let payer = team;
     const accountState = () => ({
       status: 'signed-in', user, accounts: walletScenario ? [team, personal] : [team], accountId: payer.id, expiresAt: '2027-01-01T12:00:00Z',
-      membership: [{ id: 'fixture-membership', product_id: 'superwagie', status: 'active', paid_through: '2027-01-01T00:00:00Z',
+      membership: [{ id: 'fixture-membership', product_id: 'superwagie', status: 'active', paid_through: payer === team ? '2027-01-01T00:00:00Z' : '2027-02-01T00:00:00Z',
         offer: { name: payer === team ? 'Fixture membership' : 'Personal membership' } }],
-      credits: { available: '240000000', reserved: '8000000', ...(walletScenario && { batches: creditBatches }) },
+      credits: { available: payer === team ? '240000000' : '80000000', reserved: '8000000', ...(walletScenario && { batches: creditBatches }) },
       consoleUrl: walletScenario ? null : 'https://unihub.example.test/console', modelService: 'available', ...(walletScenario && { productCreditWallet: true }),
     });
     window.mutations = []; window.reads = [];
@@ -274,7 +275,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
         await click('[data-fixture-funding-notice] button');
       }
       await until(`!!document.querySelector('[data-platform-account-tab="keys"]')`, 'API Key navigation did not render');
-      await until(`document.body.innerText.includes('Fixture membership')`, 'Account overview did not show authoritative membership');
+      await until(`${sectionContent}.innerText.includes('Fixture membership')`, 'Account overview did not show authoritative membership');
       assert.deepEqual(await evaluate('window.settingsNavigationState()'), { isSettingsDialogOpen: false, settingsPage: 'appearance', settingsJumpRequest: null }, 'Account entry must not change Settings navigation');
       assert.equal(await evaluate(`document.querySelectorAll('[role="dialog"]').length`), 1, 'Each entry must open one independent account dialog');
       assert.equal(await evaluate(`document.querySelector('[data-platform-account-tab="billing"]').getAttribute('aria-current')`), 'page');
@@ -292,7 +293,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
       }
       await click('[data-platform-account-tab="orders"]');
       await until(`document.querySelector('[data-platform-account-tab="orders"]').getAttribute('aria-current') === 'page'`, 'Orders navigation failed');
-      assert.equal(await evaluate(`document.body.innerText.includes('Fixture membership')`), false, 'Orders should have their own content');
+      assert.equal(await evaluate(`${sectionContent}.innerText.includes('Fixture membership')`), false, 'Orders should have their own content');
       await click('[data-platform-account-tab="billing"]');
       if (entry === 'sidebar') {
         for (const appearance of [{ width: 1280, dark: false, locale: 'zh-CN' }, { width: 1280, dark: true, locale: 'en' }, { width: 390, dark: false, locale: 'zh-CN' }]) {
@@ -374,14 +375,14 @@ test('user center opens outside Settings, navigation stays read-only and explici
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
     };
     const sixPages = [
-      ['billing', 'document.body.innerText.includes("Fixture membership")'],
+      ['billing', `${sectionContent}.innerText.includes("Fixture membership")`],
       ['wallet', '!!document.querySelector("[data-wallet-recharge] form")'],
       ['keys', 'document.body.innerText.includes("开通并配置")'],
-      ['usage', 'document.querySelectorAll("[role=group] button[tabindex]").length >= 365 && document.querySelector("dl dd")?.textContent.includes("32")'],
-      ['orders', 'document.querySelector("time")?.dateTime === "2026-11-14T10:00:00Z"'],
+      ['usage', `${sectionContent}.querySelectorAll("[role=group] button[tabindex]").length >= 365 && ${sectionContent}.querySelector("dl dd")?.textContent.includes("32")`],
+      ['orders', `${sectionContent}.querySelector("time")?.dateTime === "2026-11-14T10:00:00Z"`],
       ['profile', 'document.querySelector("#unihub-profile-username")?.textContent === "fixture-reviewer"'],
     ];
-    for (const width of [1280, 390]) {
+    for (const width of [1280, 640, 390]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 780, deviceScaleFactor: 1, mobile: false });
       await evaluate('window.setAppearance(false, "zh-CN")');
       await until(`document.querySelector('[data-platform-account-tab="wallet"]')?.textContent.trim() === '钱包'`, 'Panel locale did not load');
@@ -397,9 +398,12 @@ test('user center opens outside Settings, navigation stays read-only and explici
       assert.equal(await evaluate(`(() => {
         const panel = document.querySelector('[data-platform-account-sidebar]');
         const identity = panel.getBoundingClientRect();
-        const page = document.querySelector('[data-settings-page-heading]').getBoundingClientRect();
-        return panel.innerText.includes('reviewer@example.test') && (innerWidth >= 1000 ? identity.right <= page.left : identity.bottom <= page.top);
-      })()`), true, 'The shared identity must be on the left in wide windows and above the page in narrow windows');
+        const tabs = document.querySelector('[data-platform-account-tab]').closest('nav').getBoundingClientRect();
+        const dialog = panel.closest('[role="dialog"]').getBoundingClientRect();
+        return panel.innerText.includes('reviewer@example.test') && (innerWidth >= 640
+          ? identity.right <= tabs.left && tabs.top - identity.top <= 16 && dialog.bottom - identity.bottom <= 2
+          : identity.bottom <= tabs.top);
+      })()`), true, 'The sidebar must span the dialog height beside the tabs, or sit above the tabs in a compact window');
       for (const [tab, content] of sixPages) {
         await click('[data-platform-account-tab="' + tab + '"]');
         await until(`document.querySelector('[data-platform-account-tab="${tab}"]')?.getAttribute('aria-current') === 'page' && (${content})`, 'Expected content did not appear for ' + tab);
@@ -407,8 +411,14 @@ test('user center opens outside Settings, navigation stays read-only and explici
           const pickers = document.querySelectorAll('[aria-label="付费账户"]');
           return pickers.length === 1 && pickers[0] === window.fixturePayerPicker;
         })()`), true, 'All six tabs must share the same payer selector');
+        assert.equal(await evaluate(`(() => {
+          const summary = document.querySelector('[data-platform-account-summary]');
+          return summary?.innerText.includes('240') && summary.innerText.includes('Fixture membership')
+            && summary.querySelector('time')?.dateTime === '2027-01-01T00:00:00Z';
+        })()`), true, 'The confirmed payer credits, membership and expiry must remain visible across tabs');
         assert.equal(await evaluate(`document.querySelector('[role="dialog"] .overlay-scrollbar-container').scrollTop`), 0, 'Switching destinations should start at the top');
         if (process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR) {
+          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
           const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
           writeFileSync(path.join(process.env.PLATFORM_ACCOUNT_EVIDENCE_DIR, `${tab}-${width}.png`), Buffer.from(shot.data, 'base64'));
         }
@@ -421,11 +431,20 @@ test('user center opens outside Settings, navigation stays read-only and explici
     await clickPayerOption('My account');
     await until(`typeof window.confirmPayerChange === 'function' && window.fixturePayerPicker.disabled`, 'Payer switch did not enter a pending state');
     assert.equal(await evaluate(`document.body.innerText.includes('13.20')`), false, 'Old wallet balance must disappear while the new payer is being confirmed');
+    assert.equal(await evaluate(`(() => {
+      const summary = document.querySelector('[data-platform-account-summary]');
+      return summary?.getAttribute('aria-busy') === 'true' && !/240|Fixture membership/.test(summary.innerText) && !summary.querySelector('time');
+    })()`), true, 'The previous payer summary must disappear while selection is pending');
     assert.equal(await evaluate(`document.querySelector('[data-platform-account-tab="wallet"]').getAttribute('aria-current')`), 'page');
     await evaluate('window.confirmPayerChange()');
     await until(`window.fixturePayerPicker.textContent.includes('My account') && document.body.innerText.includes('23.70')`, 'Personal wallet did not load');
+    assert.equal(await evaluate(`(() => {
+      const summary = document.querySelector('[data-platform-account-summary]');
+      return summary?.innerText.includes('80') && summary.innerText.includes('Personal membership')
+        && summary.querySelector('time')?.dateTime === '2027-02-01T00:00:00Z';
+    })()`), true, 'The sidebar must show the confirmed personal credits, plan and expiry');
     await click('[data-platform-account-tab="billing"]');
-    await until(`document.body.innerText.includes('Personal membership')`, 'Membership did not use the personal payer');
+    await until(`${sectionContent}.innerText.includes('Personal membership')`, 'Membership did not use the personal payer');
     await click('[data-platform-account-tab="keys"]');
     await until(`document.body.innerText.includes('开通并配置')`, 'API Key did not use the personal payer');
     assert.equal(await evaluate(`window.fixturePayerPicker.textContent.includes('My account')`), true);
