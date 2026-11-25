@@ -147,7 +147,7 @@ const fetchFixture = spyOn(globalThis, 'fetch').mockImplementation(async (input,
     const [product, ...others] = productWallet.products;
     return Response.json({ ...productWallet, products: [{ ...product, subscription_renewal: { ...product.subscription_renewal, enabled: true, version: 7 } }, ...others] });
   }
-  if (path.endsWith('/api/platform-account/commerce?summary=1') && useProductWallet) return Response.json({ ...commerce, productCreditWallet: true, productWallet, wallets: [{ productId: '', asset: 'CNY/6', amount: '13200000' }] });
+  if (path.endsWith('/api/platform-account/commerce?summary=1') && useProductWallet) return Response.json({ ...commerce, productCreditWallet: true, productWallet, wallets: [{ productId: '', asset: 'CNY/6', amount: productWallet.cash.available }] });
   if (path.endsWith('/api/platform-account/commerce?summary=1')) { if (failCommerceAfterPurchase && purchaseRequests) return Response.json({ error: 'service_unavailable' }, { status: 503 }); return Response.json(financialAccess ? commerce : { ...commerce, financialAccess: false, role: 'member', wallets: null, orders: null, intents: [], payments: { mode: 'unconfigured', canPurchase: false } }); }
   if (path.endsWith('/api/platform-account/usage/team-a/summary')) return usageStatus === 200
     ? Response.json(nativeOverride ?? (nativeScenario ? { ...nativeRequestSummary, visibility: 'account' } : { ...usageSummary, usage_coverage: legacyCoverageUnknown ? undefined : usageSummary.usage_coverage })) : Response.json({ error: 'forbidden' }, { status: usageStatus });
@@ -1119,6 +1119,48 @@ describe('PlatformAccountPage', () => {
     expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
   });
 
+  test('insufficient shared cash opens recharge and preserves the original selection', async () => {
+    useI18nStore.getState().setLocale('en');
+    useProductWallet = true;
+    commerce.payments.canTopUp = true;
+    commerce.offers?.push({
+      id: 'membership-a', productId: 'superwagie', name: 'Fixture membership', accountKind: 'both',
+      kind: 'membership', period: 'month', price: '20000000', monthlyCredit: '100000000', validityMonths: 1, rank: 1, sandbox: false,
+    });
+    const cashBefore = productWallet.cash.available;
+    const topUp: NonNullable<PlatformCommerceState['checkouts']>[number] = {
+      id: 'top-up', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', walletTopUp: true, offer_name: '',
+      amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '',
+      expires_at: new Date(Date.now() + 600_000).toISOString(), created_at: new Date().toISOString(),
+    };
+    try {
+      await render();
+      await chooseOffer('Fixture membership');
+      expect(host.querySelector('[data-purchase-checkout] [aria-pressed=true]')?.textContent).toBe('Shared cash balance');
+      expect(host.querySelector('[data-purchase-checkout]')?.textContent).not.toContain('Buy Fixture membership for CNY 20.00');
+      await act(async () => button('Top up shared cash').click());
+      expect(host.querySelector('[data-platform-account-tab="wallet"]')?.getAttribute('aria-current')).toBe('page');
+      const amount = host.querySelector('[data-wallet-recharge] input');
+      expect(Boolean(amount)).toBe(true);
+      expect(document.activeElement === amount).toBe(true);
+      commerce.checkouts = [topUp];
+      await act(async () => button('Refresh wallets and orders').click());
+      expect(host.querySelector('[data-wallet-recharge] [data-payment-checkout]')?.getAttribute('data-payment-checkout')).toBe(topUp.id);
+      productWallet.cash.available = '23200000';
+      commerce.checkouts = [{ ...topUp, payment_status: 'PAID', fulfillment_status: 'FULFILLED' }];
+      await act(async () => button('Refresh wallets and orders').click());
+      await act(async () => host.querySelector<HTMLButtonElement>('[data-platform-account-tab="billing"]')?.click());
+      expect(host.querySelector('[data-purchase-checkout] h3')?.textContent).toBe('Fixture membership');
+      expect(button('Buy Fixture membership for CNY 20.00').disabled).toBe(false);
+      expect(rechargeRequests).toBe(0);
+      expect(purchaseRequests).toBe(0);
+    } finally {
+      delete commerce.payments.canTopUp;
+      delete commerce.checkouts;
+      productWallet.cash.available = cashBefore;
+    }
+  });
+
   test('clears a selected offer when the authoritative payer changes', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true; commerce.payments.mode = 'unconfigured';
     await render();
@@ -1159,19 +1201,20 @@ describe('PlatformAccountPage', () => {
     await render();
     await act(async () => button('Manage membership').click());
     const membershipGroup = host.querySelector('[role="group"][aria-label="Subscribe"]');
-    expect(membershipGroup?.textContent).toContain('CNY 19.00 / month');
+    expect(membershipGroup?.textContent).toContain('¥19.00per month');
     expect(membershipGroup?.textContent).toContain('7 credits each month');
     expect(membershipGroup?.textContent).not.toContain('Buy extra credits');
     expect(host.querySelector('[role="group"][aria-label="Buy extra credits"]')).toBeNull();
     expect(host.textContent).toContain('issue credits monthly');
     await act(async () => button('Annual').click());
-    expect(host.querySelector('[role="group"][aria-label="Subscribe"]')?.textContent).toContain('CNY 190.00 / year, paid in full');
+    expect(host.querySelector('[role="group"][aria-label="Subscribe"]')?.textContent).toContain('¥190.00per year, paid in full');
     expect(host.querySelector('[data-platform-offer][aria-label="Monthly plan"]')).toBeNull();
     expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Buy Monthly plan for CNY 19.00')).toBe(false);
     await act(async () => button('Buy extra credits').click());
     expect(host.querySelector('[data-platform-offer][aria-label="Annual plan"]')).toBeNull();
     expect(host.querySelector('[data-platform-offer][aria-label="Buy extra credits"]')).not.toBeNull();
     expect(host.querySelector('[data-purchase-checkout]')).toBeNull();
+    expect(Boolean(host.querySelector('[aria-label="Payment method"]'))).toBe(false);
     expect(purchaseRequests).toBe(0); expect(rechargeRequests).toBe(0);
     await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
     expect(host.textContent).toContain('订阅会员'); expect(host.textContent).toContain('加量包');
@@ -1197,7 +1240,7 @@ describe('PlatformAccountPage', () => {
     commerce.orders?.push({ id: 'order-a', productId: 'superwagie', offerName: 'Annual membership', amount: '100000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' });
     await render();
     await act(async () => button('Manage membership').click());
-    expect(host.querySelector('[role="group"][aria-label="Subscribe"]')?.textContent).toContain('CNY 100.00 / year, paid in full');
+    expect(host.querySelector('[role="group"][aria-label="Subscribe"]')?.textContent).toContain('¥100.00per year, paid in full');
     expect(host.querySelector('[data-platform-offer][aria-label="Annual membership"]')?.textContent).toContain('20 credits each month');
     expect(host.textContent).not.toContain('0 months'); expect(host.textContent).not.toContain('Account balance');
     expect(purchaseRequests).toBe(0);

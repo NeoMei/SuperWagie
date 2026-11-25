@@ -1,6 +1,6 @@
 import React from 'react';
 import QRCode from 'qrcode';
-import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -15,14 +15,10 @@ const WAITING = ['CREATED', 'PENDING', 'UNKNOWN'];
  *  and the amount beside it while the code is still scannable. */
 const useCountdown = (deadline: string | undefined): number | null => {
   const target = deadline ? Date.parse(deadline) : Number.NaN;
-  const [now, setNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    if (!Number.isFinite(target)) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [target]);
+  const active = target > Date.now();
+  const now = useDurationTickerNow(active);
   if (!Number.isFinite(target)) return null;
-  return Math.max(0, target - now);
+  return active ? Math.max(0, target - now) : 0;
 };
 
 /** Time left before a code stops working: minutes, or hours once it runs long. */
@@ -84,12 +80,16 @@ type PlatformPaymentPanelProps = {
   checkout: PlatformCheckout;
   payer?: string;
   switchingOffer?: boolean;
+  switchingToBalance?: boolean;
+  switchTargetName?: string;
+  onCancelOfferSwitch?: () => void;
   /** Suppress every action while another financial command is in flight. */
   busy: boolean;
   /** Channels the account may pay with; more than one renders a switch. */
   channels?: Provider[];
   /** Switches the payment channel by starting an equivalent checkout. */
   onSwitchChannel?: (provider: Provider) => void;
+  balanceOption?: { label: string; onSelect: () => void };
   channelSwitchPending?: boolean;
   /** Manual status read; the panel also polls on its own while waiting. */
   onRefresh: () => void;
@@ -109,7 +109,7 @@ type PlatformPaymentPanelProps = {
  * field list or hunting for a QR elsewhere on the page. The commerce owner polls and reconciles the original order.
  */
 export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
-  checkout, payer, switchingOffer = false, busy, channels = [], onSwitchChannel, channelSwitchPending, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false, walletLayout = false, walletHistory = false,
+  checkout, payer, switchingOffer = false, switchingToBalance, switchTargetName, onCancelOfferSwitch, busy, channels = [], onSwitchChannel, balanceOption, channelSwitchPending, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false, walletLayout = false, walletHistory = false,
 }) => {
   const { t, locale } = useI18n();
   const paymentActions = React.useRef<HTMLDivElement>(null);
@@ -118,13 +118,18 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const waiting = WAITING.includes(checkout.payment_status) && !checkout.refund_status;
   const refundable = isRefundableCheckout(checkout);
   const checkable = checkout.upgrade_return_status === 'UPGRADE_PENDING' || checkout.upgrade_return_status === 'UPGRADE_RELEASING' || waiting || checkout.refund_status === 'PENDING' || (checkout.payment_status === 'PAID' && checkout.fulfillment_status === 'PENDING');
+  const purchaseLayout = payer !== undefined;
+  const closingPurchase = purchaseLayout && waiting && checkout.close_pending;
   const showPaymentSession = waiting && !checkout.close_pending && !switchingOffer;
   const session = showPaymentSession ? checkout.session : undefined;
-  const remaining = useCountdown(showPaymentSession ? session?.expires_at ?? checkout.expires_at : undefined);
-  const expired = waiting && remaining === 0;
+  const remaining = useCountdown(showPaymentSession || closingPurchase ? session?.expires_at ?? checkout.expires_at : undefined);
+  const expired = showPaymentSession && remaining === 0;
   const codeUrl = session?.kind === 'qr' && !expired && !compact ? session.url : null;
   const qr = codeUrl && codeImage?.source === codeUrl ? codeImage : null;
   const paymentProvider = checkout.provider;
+  const paymentOptions = (channels.includes(paymentProvider) ? channels : [paymentProvider, ...channels]).map((channel) => ({
+    value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy,
+  }));
   const upgrade = checkout.product_credit_upgrade;
   const appliedCreditAmount = upgrade?.applied_credit_amount;
   const returned = checkout.upgrade_refund_amount;
@@ -132,8 +137,6 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   const offerName = checkout.walletTopUp ? t('platformAccount.productWallet.topUp') : checkout.offer_name;
   const scanHint = t(paymentProvider === 'wechat' ? 'platformAccount.scanWithWechat' : 'platformAccount.scanWithAlipay');
   const providerName = t(paymentProvider === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay');
-  const purchaseLayout = payer !== undefined;
-
   React.useEffect(() => {
     if (!codeUrl) return undefined;
     let current = true;
@@ -150,7 +153,8 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
     {walletLayout && cancel}
     {!compact && showPaymentSession && onRenew && (expired || session?.kind !== 'qr') && <Button size="sm" disabled={busy} onClick={onRenew}>{t('platformAccount.renewPaymentCode')}</Button>}
     {onDismiss && <Button size="sm" variant="ghost" disabled={busy} onClick={onDismiss}>{t(walletLayout ? 'platformAccount.productWallet.backToRecharge' : 'dialog.common.actions.close')}</Button>}
-    {checkable && <Button size={walletLayout ? 'default' : 'sm'} variant="ghost" disabled={busy} onClick={onRefresh}>{t('platformAccount.refreshPaymentStatus')}</Button>}
+    {checkable && <Button size={walletLayout ? 'default' : 'sm'} variant="ghost" disabled={busy} onClick={onRefresh}>{t(closingPurchase ? 'platformAccount.retryClosePayment' : 'platformAccount.refreshPaymentStatus')}</Button>}
+    {onCancelOfferSwitch && <Button size="sm" variant="ghost" onClick={onCancelOfferSwitch}>{t(switchingToBalance ? 'dialog.common.actions.cancel' : 'platformAccount.cancelOfferSwitch')}</Button>}
     {!walletLayout && cancel}
     {refundable && <Button size="sm" variant="outline" disabled={busy} onClick={() => setRefundConfirmation(true)}>{t('platformAccount.requestRefund')}</Button>}
   </>;
@@ -192,6 +196,13 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
       </span>
     </div>
 
+    {closingPurchase && <div className="oc-tile-inset mt-3 space-y-1.5 rounded-lg p-3">
+      {switchTargetName && <p className="wrap-anywhere typography-ui-label font-medium" role="status">{t('platformAccount.queuedOfferName', { name: switchTargetName })}</p>}
+      <p className={SETTINGS_HELPER_CLASS}>{t(switchingToBalance ? 'platformAccount.queuedBalanceHint' : switchTargetName ? 'platformAccount.queuedOfferHint' : 'platformAccount.closePendingBrowse')}</p>
+      {remaining !== null && <p className={`${SETTINGS_HELPER_CLASS} tabular-nums`}>
+        {remaining > 0 ? t('platformAccount.pendingOrderExpiry', { time: clock(remaining) }) : t('platformAccount.pendingOrderExpired')}
+      </p>}
+    </div>}
     {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
     {upgrade && waiting && appliedCreditAmount === undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.estimatedRefund')} {t('platformAccount.cny', { amount: formatPlatformMoney(upgrade.estimated_refund_amount) })} · {t(upgrade.refund_payment_source === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}</p>}
     <div className={walletLayout ? 'mt-1.5 grid justify-items-center gap-1.5 text-center @xl:mt-2 @xl:gap-2' : 'mt-3 flex flex-col gap-3 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6'}>
@@ -201,21 +212,27 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.netPlanPrice')} {t('platformAccount.cny', { amount: formatPlatformMoney(String(BigInt(checkout.amount) + BigInt(appliedCreditAmount))) })}</p>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.oldPlanCredit')} {t('platformAccount.cny', { amount: formatPlatformMoney(appliedCreditAmount) })}</p>
           </>}
-          <p className="typography-micro text-muted-foreground">{t(waiting ? 'platformAccount.payAmount' : checkout.payment_status === 'PAID' ? 'platformAccount.amountPaid' : 'platformAccount.price')}</p>
+          <p className="typography-micro text-muted-foreground">{t(waiting && !closingPurchase ? 'platformAccount.payAmount' : checkout.payment_status === 'PAID' ? 'platformAccount.amountPaid' : 'platformAccount.price')}</p>
           <p className="flex items-baseline gap-1.5">
             <span className="text-3xl font-medium leading-none tabular-nums" dir="auto">¥{formatPlatformMoney(checkout.amount)}</span>
             <span className="typography-meta text-muted-foreground">{providerName}</span>
           </p>
         </div>
         {waiting && appliedCreditAmount !== undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.resetUpgrade')}</p>}
-        {channels.length > 1 && onSwitchChannel && showPaymentSession && <div className="space-y-1">
+        {(paymentOptions.length > 1 || balanceOption) && showPaymentSession && <div className="space-y-1">
           <p className="typography-micro text-muted-foreground">{t('platformAccount.paymentChannel')}</p>
-          <SettingsChipGroup value={paymentProvider} onChange={(next) => { if (next !== paymentProvider && !busy) onSwitchChannel(next); }} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({ value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: busy }))} />
+          <SettingsChipGroup<Provider | 'wallet'> value={paymentProvider} onChange={(next) => {
+            if (busy || next === paymentProvider) return;
+            if (next === 'wallet') balanceOption?.onSelect();
+            else onSwitchChannel?.(next);
+          }} aria-label={t('platformAccount.paymentChannel')} options={balanceOption
+            ? [...paymentOptions, { value: 'wallet', label: balanceOption.label, disabled: busy }]
+            : paymentOptions} />
           {channelSwitchPending && <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.error.channelSwitchPending')}</p>}
         </div>}
         {codeUrl && !walletLayout && <p className={`${SETTINGS_HELPER_CLASS} max-w-[22rem]`}>{scanHint}</p>}
         {session?.kind === 'redirect' && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.legacyCheckoutHint')}</p>}
-        {waiting && remaining !== null && <p className={`${SETTINGS_HELPER_CLASS} flex items-center gap-1.5`}>
+        {showPaymentSession && remaining !== null && <p className={`${SETTINGS_HELPER_CLASS} flex items-center gap-1.5`}>
           <Icon name="time" className="size-3.5" />
           {expired ? t(session?.kind === 'qr' ? 'platformAccount.qrExpired' : 'platformAccount.checkoutExpired') : remaining > 86_400_000
             ? t('platformAccount.qrValidUntil', { date: new Date(session?.expires_at ?? checkout.expires_at).toLocaleString() })

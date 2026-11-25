@@ -12,14 +12,19 @@ test('checkout stays alongside the catalog and switches offers after confirmed c
     import { I18nProvider, useI18nStore } from '@/lib/i18n';
     import { PlatformAccountCommerce } from '@/components/sections/platform-account/PlatformAccountCommerce';
     import { CSSVariableGenerator } from '@/lib/theme/cssGenerator'; import { getDefaultTheme } from '@/lib/theme/themes';
+    window.__OPENCHAMBER_API_BASE_URL__ = location.origin;
+    window.__OPENCHAMBER_LOCAL_ORIGIN__ = location.origin;
     const original = { id:'original-checkout', account_id:'account', product_id:'superwagie', provider:'wechat', offer_name:'Confirmed plan', amount:'99000000', currency:'CNY', payment_status:'PENDING', fulfillment_status:'NOT_STARTED', refund_status:'', expires_at:new Date(Date.now()+900000).toISOString(), created_at:new Date().toISOString(), session:{ kind:'qr', url:'weixin://wxpay/bizpayurl?pr=fixture', expires_at:new Date(Date.now()+900000).toISOString() } };
     // The merchant QR has its own earlier deadline and carries a time zone offset.
     const alipaySessionExpiry = new Date(Date.parse(original.expires_at) - 60_000 + 8 * 60 * 60 * 1000).toISOString().replace('Z', '123456+08:00');
-    const offer = { id:'addon', productId:'superwagie', name:'200 积分加量包', accountKind:'both', kind:'addon', period:'once', price:'9800000', monthlyCredit:'200000000', validityMonths:12, rank:1, sandbox:false, salesReadiness:{ready:true} };
-    const largerOffer = {...offer, id:'larger-addon', name:'2000 积分加量包', price:'98000000', monthlyCredit:'2000000000'};
+    const offer = { id:'addon', productId:'superwagie', name:'200 积分加量包', accountKind:'both', kind:'addon', period:'once', price:'2000000', monthlyCredit:'200000000', validityMonths:1, rank:1, sandbox:false, salesReadiness:{ready:true} };
+    const middleOffer = {...offer, id:'middle-addon', name:'1,000 积分加量包', price:'10000000', monthlyCredit:'1000000000'};
+    const largerOffer = {...offer, id:'larger-addon', name:'2,000 积分加量包', price:'20000000', monthlyCredit:'2000000000'};
+    const availableOffers = [middleOffer, offer, largerOffer];
     const membership = {...offer, id:'membership', name:'Standard membership', kind:'membership', period:'month', validityMonths:1};
     let checkout = {...original}, intent, view = 'orders', sequence = 0;
     window.deferClosure = false;
+    window.expiredClosure = false;
     window.omitClosedFromSummary = false;
     window.confirmClosure = () => {
       checkout = {...checkout, payment_status:'CLOSED', close_pending:undefined, session:undefined};
@@ -30,10 +35,11 @@ test('checkout stays alongside the catalog and switches offers after confirmed c
     window.fetch=async(input,init)=>{
       const url=String(input instanceof Request?input.url:input);
       if(init?.method==='POST'){
-        window.writes.push(url);
+        window.writes.push(new URL(url, location.origin).pathname);
         if (url.endsWith('/checkouts')) {
           const { provider, idempotencyKey, offerId } = JSON.parse(init.body);
-          const purchased = offerId === largerOffer.id ? largerOffer : offer;
+          const purchased = availableOffers.find(item => item.id === offerId);
+          if (!purchased) throw new Error('Unexpected offer in checkout fixture');
           checkout = { ...original, id:'payment-'+(++sequence), provider, offer_name:purchased.name, amount:purchased.price,
             session: provider === 'alipay'
               ? { kind: 'qr', expires_at: alipaySessionExpiry, url: 'https://qr.alipay.com/fixture' }
@@ -43,22 +49,22 @@ test('checkout stays alongside the catalog and switches offers after confirmed c
         }
         if(url.endsWith('/close')) {
           if (window.deferClosure) {
-            checkout = {...checkout, payment_status:'UNKNOWN', close_pending:true, session:undefined, expires_at:new Date(Date.now()-600_000).toISOString()};
+            checkout = {...checkout, payment_status:'UNKNOWN', close_pending:true, session:undefined, expires_at:window.expiredClosure ? new Date(Date.now()-600_000).toISOString() : checkout.expires_at};
           } else {
             window.confirmClosure();
           }
         }
         return Response.json(checkout);
       }
-      return Response.json({accountId:'account',role:'owner',financialAccess:true,missingScopes:[],payments:{mode:'external',canPurchase:true,providers:['wechat','alipay']},wallets:[],offers:[offer, largerOffer, membership],orders:[],intents:intent?[intent]:[],checkouts:checkout && !(window.omitClosedFromSummary && checkout.payment_status === 'CLOSED') ? [checkout] : []});
+      return Response.json({accountId:'account',role:'owner',financialAccess:true,missingScopes:[],payments:{mode:'external',canPurchase:true,canTopUp:true,providers:['wechat','alipay']},wallets:[],productCreditWallet:true,offers:[...availableOffers, membership],orders:[],intents:intent?[intent]:[],checkouts:checkout && !(window.omitClosedFromSummary && checkout.payment_status === 'CLOSED') ? [checkout] : []});
     };
     useI18nStore.getState().setLocale('en');
     const root=createRoot(document.getElementById('root'));let version=0;
-    window.remount=()=>root.render(<I18nProvider><div className="@container p-4"><PlatformAccountCommerce key={++version} accountId="account" payer="Payer" view={view} hasActiveMembership={true} membershipSummary={({openAddon,disabled})=><button disabled={disabled} onClick={openAddon}>Open add-ons</button>} onAccountRefresh={()=>{}} /></div></I18nProvider>);
+    window.remount=()=>root.render(<I18nProvider><div className="@container p-4"><PlatformAccountCommerce key={++version} accountId="account" userId="actor" payer="Payer" view={view} hasActiveMembership={true} membershipSummary={({openAddon,disabled})=><button disabled={disabled} onClick={openAddon}>Open add-ons</button>} onAccountRefresh={()=>{}} /></div></I18nProvider>);
     window.result=(payment,fulfillment,refund='')=>{checkout={...checkout,payment_status:payment,fulfillment_status:fulfillment,refund_status:refund};};
     window.setState=(payment,fulfillment,refund)=>{window.result(payment,fulfillment,refund);window.remount();};
     window.alipay=()=>{checkout.provider='alipay';checkout.session={kind:'redirect',url:'https://openapi.alipay.com/gateway.do?sign=fixture',expires_at:checkout.expires_at};window.remount();};
-    window.startPurchase=()=>{view='overview';checkout=undefined;intent=undefined;window.writes=[];window.remount();};
+    window.startPurchase=(fresh=false)=>{if(fresh)localStorage.removeItem('superwagie.purchase-channel.v1:local:actor');view='overview';checkout=undefined;intent=undefined;window.writes=[];window.remount();};
     window.appearance=(dark,locale)=>{document.documentElement.classList.toggle('dark',dark);new CSSVariableGenerator().apply(getDefaultTheme(dark));useI18nStore.getState().setLocale(locale);};
     window.appearance(false,'en');window.remount();
   `);
@@ -114,27 +120,49 @@ test('checkout stays alongside the catalog and switches offers after confirmed c
     await click('Request original-channel refund');assert.equal(await evaluate('window.paymentWrites().length'),0);
     await click('Confirm refund');await until('window.paymentWrites().length===1');
     assert.match((await evaluate('window.paymentWrites()'))[0],/checkouts\/original-checkout\/refund$/);
+    const methodGroup = '[aria-label="Payment method"]';
+    const checkoutMethodGroup = '[data-purchase-checkout] ' + methodGroup;
     for (const [initialProvider, provider, width] of [['WeChat Pay', 'WeChat Pay', 1200], ['WeChat Pay', 'Alipay', 390], ['Alipay', 'WeChat Pay', 760]]) {
       await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:width === 390 ? 820 : 740,deviceScaleFactor:1,mobile:false});
-      await evaluate('window.startPurchase()');
+      await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: width === 390 ? 'reduce' : 'no-preference' }] });
+      await evaluate('window.startPurchase(true)');
       await until('[...document.querySelectorAll("button")].some(node=>node.textContent==="Open add-ons"&&!node.disabled)');
       await click('Open add-ons');
-      if (initialProvider === 'Alipay') await click(initialProvider);
-      assert.deepEqual(await evaluate('window.paymentWrites()'), [], 'Browsing and changing the method are read-only');
-      assert.equal(await evaluate('document.querySelectorAll("[data-platform-offer]").length'), 2);
+      assert.equal(await evaluate(`Boolean(document.querySelector(${JSON.stringify(methodGroup)}))`), false);
+      assert.deepEqual(await evaluate('window.paymentWrites()'), [], 'Browsing products is read-only');
+      assert.equal(await evaluate('document.querySelectorAll("[data-platform-offer]").length'), 3);
       if (width === 1200 && provider === initialProvider) {
+        assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-platform-offer]")].map(card => card.getAttribute("aria-label"))'), ['200 积分加量包', '1,000 积分加量包', '2,000 积分加量包']);
         await evaluate('window.appearance(false,"zh-CN")');
-        await until('document.querySelector("[data-platform-offer]").innerText.includes("扫码购买")');
+        await until('document.querySelector("[data-platform-offer]").innerText.includes("前往支付")');
         await capture('catalog-zh-CN-1200');
         await evaluate('window.appearance(false,"en")');
       }
       await evaluate('document.querySelector("[data-platform-offer]").click()');
+      await until(`Boolean(document.querySelector(${JSON.stringify(checkoutMethodGroup)}))`);
+      const movingCards = '[...document.querySelectorAll("[data-platform-offer]")].some(card=>getComputedStyle(card.parentElement).transform!=="none")';
+      if (width === 1200) await until(movingCards);
+      if (width === 390) {
+        assert.equal(await evaluate(movingCards), false);
+        assert.equal(await evaluate('getComputedStyle(document.querySelector("[data-purchase-checkout]")).opacity'), '1');
+      }
+      assert.equal(await evaluate(`document.querySelector(${JSON.stringify(checkoutMethodGroup)}).querySelectorAll("button:not(:disabled)").length`), 3);
+      assert.equal(await evaluate(`document.querySelector(${JSON.stringify(checkoutMethodGroup)}).querySelector("[aria-pressed=true]")?.textContent`), 'Shared cash balance');
+      assert.equal(await evaluate('Boolean(document.querySelector("[data-purchase-checkout] img"))'), false);
+      assert.deepEqual(await evaluate('window.paymentWrites()'), [], 'Selecting a product does not create a payment');
+      await evaluate('window.appearance(false,"zh-CN")');
+      await until('document.querySelector("[data-purchase-checkout]").innerText.includes("统一现金充值")');
+      await until(`!(${movingCards}) && getComputedStyle(document.querySelector("[data-purchase-checkout]")).opacity === "1"`);
+      await capture('choose-payment-zh-CN-' + width);
+      await evaluate('window.appearance(false,"en")');
+      await until('document.querySelector("[data-purchase-checkout]").innerText.includes("WeChat Pay")');
+      await click(initialProvider);
       await until('document.querySelector("[data-purchase-checkout] img")?.naturalWidth > 0');
       await evaluate('window.confirmation=document.querySelector("[data-purchase-checkout]");void 0');
-      assert.equal(await evaluate('document.querySelectorAll("[data-platform-offer]").length'), 2);
+      assert.equal(await evaluate('document.querySelectorAll("[data-platform-offer]").length'), 3);
       assert.equal(await evaluate('document.querySelector("[data-platform-offer][aria-current=true]").disabled'), true);
       assert.equal(await evaluate('document.querySelectorAll("[data-purchase-categories] button:not(:disabled)").length'), 2);
-      assert.equal(await evaluate('document.body.innerText.includes("2000 积分加量包")'), true);
+      assert.equal(await evaluate('document.body.innerText.includes("2,000 积分加量包")'), true);
       assert.deepEqual((await evaluate('window.paymentWrites()')).map(url => url.split('/').at(-1)), ['checkouts']);
       if (provider !== initialProvider) {
         const originalCheckoutId = await evaluate('window.confirmation.querySelector("[data-payment-checkout]").getAttribute("data-payment-checkout")');
@@ -178,6 +206,7 @@ test('checkout stays alongside the catalog and switches offers after confirmed c
       await evaluate('window.result("PAID","FULFILLED")');
       await until('window.confirmation.innerText.includes("Your purchase is active") && document.querySelectorAll("[data-purchase-categories] button:not(:disabled)").length === 2');
       assert.equal(await evaluate('window.confirmation.querySelector("img")'),null);
+      assert.equal(await evaluate(`Boolean(document.querySelector(${JSON.stringify(methodGroup)}))`), false);
       assert.equal(await evaluate('window.paymentWrites().length'), provider !== initialProvider ? 3 : 1);
       assert.deepEqual(await evaluate('window.opened'),[]);
       await category('Subscribe');
@@ -188,9 +217,10 @@ test('checkout stays alongside the catalog and switches offers after confirmed c
     await evaluate('window.startPurchase()');
     await until('[...document.querySelectorAll("button")].some(node=>node.textContent==="Open add-ons"&&!node.disabled)');
     await click('Open add-ons');
+    assert.deepEqual(await evaluate('window.paymentWrites()'), [], 'Restoring a remembered channel never creates a payment while browsing');
     await evaluate('document.querySelectorAll("[data-platform-offer]")[1].click()');
-    await until('document.querySelector("[data-purchase-checkout] img")?.naturalWidth > 0');
-    assert.equal(await evaluate('document.querySelector("[data-purchase-checkout]").innerText.includes("¥98.00")'), true);
+    await until('document.querySelector("[data-purchase-checkout] img")?.alt.includes("WeChat") && document.querySelector("[data-purchase-checkout] img").naturalWidth > 0');
+    assert.equal(await evaluate('document.querySelector("[data-purchase-checkout]").innerText.includes("¥10.00")'), true);
     await category('Subscribe');
     await until(`Boolean(document.querySelector("[data-platform-offer][aria-label='Standard membership']"))`);
     assert.equal(await evaluate('document.querySelector("[data-purchase-checkout] img")?.naturalWidth > 0'), true);
@@ -198,7 +228,7 @@ test('checkout stays alongside the catalog and switches offers after confirmed c
     await category('Buy extra credits');
     const otherOffer = 'document.querySelector("[data-platform-offer]")';
     await evaluate(otherOffer + '.click()');
-    await until(`document.querySelector("[data-purchase-checkout]").innerText.includes("¥9.80") && document.querySelector("[data-purchase-checkout] img")?.naturalWidth > 0`);
+    await until(`document.querySelector("[data-purchase-checkout]").innerText.includes("¥2.00") && document.querySelector("[data-purchase-checkout] img")?.naturalWidth > 0`);
     assert.deepEqual((await evaluate('window.paymentWrites()')).map(url => url.split('/').at(-1)), ['checkouts', 'close', 'checkouts']);
 
     await click('Alipay');
@@ -207,12 +237,43 @@ test('checkout stays alongside the catalog and switches offers after confirmed c
     await evaluate('document.querySelectorAll("[data-platform-offer]")[1].click()');
     await until('document.querySelector("[data-purchase-checkout]").innerText.includes("Waiting for closure confirmation")');
     assert.equal(await evaluate('Boolean(document.querySelector("[data-purchase-checkout] img"))'), false);
-    assert.equal(await evaluate('document.querySelectorAll("[data-platform-offer]").length'), 2);
-    assert.equal(await evaluate('document.querySelectorAll("[data-platform-offer]:not(:disabled)").length'), 0);
-    assert.deepEqual((await evaluate('window.paymentWrites()')).map(url => url.split('/').at(-1)), ['checkouts', 'close', 'checkouts', 'close', 'checkouts', 'close']);
+    assert.equal(await evaluate('document.querySelectorAll("[data-platform-offer]").length'), 3);
+    assert.equal(await evaluate('document.querySelectorAll("[data-platform-offer]:not(:disabled)").length'), 2);
+    const awaitingClosureWrites = ['checkouts', 'close', 'checkouts', 'close', 'checkouts', 'close'];
+    await evaluate('document.querySelectorAll("[data-platform-offer]")[2].click()');
+    await until('document.querySelector("[data-purchase-checkout]").innerText.includes("Next purchase: 2,000")');
+    assert.deepEqual((await evaluate('window.paymentWrites()')).map(url => url.split('/').at(-1)), awaitingClosureWrites);
+    await evaluate('window.appearance(false,"zh-CN")');
+    await until('document.querySelector("[data-purchase-checkout]").innerText.includes("待切换至 2,000") && document.querySelector("[data-purchase-checkout]").innerText.includes("原订单还有")');
+    await capture('switch-pending-zh-CN');
+    await evaluate('window.appearance(false,"en");window.confirmClosure()');
+    await until(`document.querySelector("[data-purchase-checkout]").innerText.includes("¥20.00") && document.querySelector("[data-purchase-checkout] img")?.alt.includes("Alipay")`);
+    assert.deepEqual((await evaluate('window.paymentWrites()')).map(url => url.split('/').at(-1)), [...awaitingClosureWrites, 'checkouts']);
+
+    // Reopening after expiry resumes reconciliation of the original order.
+    await evaluate('window.expiredClosure = true; document.querySelector("[data-platform-offer]").click()');
+    await until('document.querySelector("[data-purchase-checkout]").innerText.includes("Waiting for closure confirmation")');
+    await click('Cancel switch');
+    await until('!document.querySelector("[data-purchase-checkout]").innerText.includes("Next purchase:")');
+    await evaluate('window.remount()');
+    await until('document.querySelector("[data-purchase-checkout]")?.innerText.includes("The previous order has expired.")');
+    const reconcilesBefore = await evaluate('window.writes.filter(url=>url.endsWith("/reconcile")).length');
     await evaluate('window.confirmClosure()');
-    await until(`document.querySelector("[data-purchase-checkout]").innerText.includes("¥98.00") && document.querySelector("[data-purchase-checkout] img")?.alt.includes("Alipay")`);
-    assert.deepEqual((await evaluate('window.paymentWrites()')).map(url => url.split('/').at(-1)), ['checkouts', 'close', 'checkouts', 'close', 'checkouts', 'close', 'checkouts']);
+    await until(`window.writes.filter(url=>url.endsWith("/reconcile")).length > ${reconcilesBefore}`);
+    await until('document.querySelector("[data-purchase-checkout]").innerText.includes("Payment attempt closed.")');
+    assert.deepEqual((await evaluate('window.paymentWrites()')).map(url => url.split('/').at(-1)), [...awaitingClosureWrites, 'checkouts', 'close']);
+
+    await evaluate('window.expiredClosure = false; window.startPurchase()');
+    await until('[...document.querySelectorAll("button")].some(node=>node.textContent==="Open add-ons"&&!node.disabled)');
+    await click('Open add-ons');
+    await evaluate('document.querySelector("[data-platform-offer]").click()');
+    await until('document.querySelector("[data-purchase-checkout] img")?.alt.includes("Alipay")');
+    await click('Shared cash balance');
+    await until('document.querySelector("[data-purchase-checkout]").innerText.includes("You can confirm payment with your balance once the previous order closes.")');
+    assert.equal(await evaluate('Boolean(document.querySelector("[data-purchase-checkout] img"))'), false);
+    await evaluate('window.confirmClosure()');
+    await until('document.querySelector("[data-purchase-checkout] [aria-pressed=true]")?.textContent === "Shared cash balance"');
+    assert.deepEqual((await evaluate('window.paymentWrites()')).map(url => url.split('/').at(-1)), ['checkouts', 'close']);
     assert.deepEqual(browserErrors, [], 'Checkout browser flow must not raise unhandled exceptions');
   });
 });
