@@ -1,21 +1,18 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
 import { createPlatformCommerceRuntime } from '../../../../../web/server/lib/platform-account/commerce.js';
 import { registerPlatformCommerceRoutes } from '../../../../../web/server/lib/platform-account/commerce-routes.js';
-import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from '../../../../../../scripts/perf/cdp.mjs';
-
-const repo = path.resolve(import.meta.dirname, '../../../../../..');
+import { createBrowserFixture } from '../../../../../../scripts/perf/browser-test-fixture.mjs';
+import { wait } from '../../../../../../scripts/perf/cdp.mjs';
 
 test('rejected manual refunds cross the journal, HTTP parser and rendered UI without replaying payment', { timeout: 90_000 }, async (t) => {
-  const { createServer } = await import('vite');
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/platform-refund-rejected-'));
   let runtime;
-  t.after(async () => { await runtime?.close(); rmSync(fixture, { recursive: true, force: true }); });
+  t.after(() => runtime?.close());
+  const { directory: fixture, run } = createBrowserFixture(t, 'platform-refund-rejected');
   const records = new Map();
   const providerIO = [];
   const refunds = [];
@@ -69,16 +66,9 @@ test('rejected manual refunds cross the journal, HTTP parser and rendered UI wit
     window.purchase = idempotencyKey => createPlatformCheckout({ accountId:'account',offerId:'addon',provider:'wechat',idempotencyKey });
     window.load().catch(error => { window.loadError = error.message; });
   `);
-  const server = await createServer({ configFile: false, root: fixture, cacheDir: path.join(fixture, '.vite'), logLevel: 'error', css: { postcss: repo }, define: { 'process.env': {}, global: 'globalThis', __APP_VERSION__: '"fixture"' }, resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk/schemas': path.join(repo, 'packages/sdk/src/schemas.ts'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } }, plugins: [{ name: 'fixture-commerce-http', configureServer: server => { server.middlewares.use(app); } }], server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } } });
-  const profile = resolveProfileDir(undefined, 'platform-refund-rejected');
-  let chrome; let cdp;
-  try {
-    await server.listen(); const port = await reservePort(); chrome = launchChrome({ chrome: resolveChrome(), profileDir: profile.dir, port, headless: true });
-    const target = await createPageTarget(port); cdp = new CdpClient(target.webSocketDebuggerUrl); await cdp.connect(); await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
-    const errors = []; cdp.on('Runtime.exceptionThrown', event => errors.push(event.exceptionDetails?.text));
-    const evaluate = async expression => { const result = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); assert.equal(result.exceptionDetails, undefined, result.exceptionDetails?.exception?.description); return result.result.value; };
+  await run(async ({ cdp, errors, evaluate, navigate, url }) => {
     const until = async expression => { const deadline = Date.now() + 25000; while (Date.now() < deadline) { if (await evaluate(expression)) return; await wait(50); } assert.fail(`Timed out: ${expression}; ${await evaluate('window.loadError || document.body.innerText')}`); };
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] });
+    await navigate();
     await until('document.body.innerText.includes("This payment needs review")');
     assert.equal(await evaluate('document.body.innerText.includes("Request original-channel refund")'), false);
     checkout.refund_status = 'REJECTED';
@@ -87,7 +77,7 @@ test('rejected manual refunds cross the journal, HTTP parser and rendered UI wit
     assert.equal(await evaluate('window.snapshot.intents[0].status'), 'APPLIED');
     assert.equal(await evaluate('document.body.innerText.includes("Confirm refund") || document.body.innerText.includes("Request original-channel refund")'), false);
     assert.deepEqual(providerIO, ['create:checkout-1', 'refund:original-refund-id']);
-    const read = await fetch(`${server.resolvedUrls.local[0]}api/platform-account/commerce/checkouts/checkout-1?accountId=account`);
+    const read = await fetch(`${url}api/platform-account/commerce/checkouts/checkout-1?accountId=account`);
     assert.equal(read.status, 200); assert.equal((await read.json()).refund_status, 'REJECTED');
     assert.equal((await evaluate('window.replay()')).refund_status, 'REJECTED');
     assert.deepEqual(refunds[1], refunds[0]);
@@ -102,10 +92,8 @@ test('rejected manual refunds cross the journal, HTTP parser and rendered UI wit
     assert.equal(saved.status, 'APPLIED'); assert.equal(saved.refundKey, originalIntent.refundKey); assert.equal(saved.refundReason, originalIntent.refundReason);
     assert.deepEqual(providerIO, ['create:checkout-1', 'refund:original-refund-id', 'create:checkout-2']);
     assert.deepEqual(errors, []);
-  } finally {
-    if (cdp) { await cdp.send('Browser.close').catch(() => {}); cdp.close(); }
-    if (chrome) { chrome.kill(); await wait(300); }
-    await server.close();
-    if (profile.temporary) rmSync(profile.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  }
+  }, [{
+    name: 'fixture-commerce-http',
+    configureServer(server) { server.middlewares.use(app); },
+  }]);
 });
