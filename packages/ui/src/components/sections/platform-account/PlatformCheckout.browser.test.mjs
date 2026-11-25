@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from '../../../../../../scripts/perf/cdp.mjs';
-const repo = path.resolve(import.meta.dirname, '../../../../../..');
-test('both channels render in the purchase confirmation and show payment through fulfillment', { timeout: 90_000 }, async () => {
-  const { createServer } = await import('vite');
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/platform-checkout-'));
+import { createBrowserFixture } from '../../../../../../scripts/perf/browser-test-fixture.mjs';
+import { wait } from '../../../../../../scripts/perf/cdp.mjs';
+test('both channels render in the purchase confirmation and show payment through fulfillment', { timeout: 90_000 }, async (t) => {
+  const { directory: fixture, run } = createBrowserFixture(t, 'platform-checkout');
   writeFileSync(path.join(fixture, 'index.html'), '<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/fixture.tsx"></script></body></html>');
   writeFileSync(path.join(fixture, 'fixture.tsx'), `
     import React from 'react'; import { createRoot } from 'react-dom/client'; import '@/index.css';
@@ -52,15 +50,10 @@ test('both channels render in the purchase confirmation and show payment through
     window.appearance=(dark,locale)=>{document.documentElement.classList.toggle('dark',dark);new CSSVariableGenerator().apply(getDefaultTheme(dark));useI18nStore.getState().setLocale(locale);};
     window.appearance(false,'en');window.remount();
   `);
-  const server = await createServer({ configFile: false, root: fixture, cacheDir: path.join(fixture,'.vite'), logLevel:'error', css:{postcss:repo}, define:{'process.env':{},global:'globalThis',__APP_VERSION__:'"fixture"'}, resolve:{alias:{'@':path.join(repo,'packages/ui/src'),'@openchamber/sdk/schemas':path.join(repo,'packages/sdk/src/schemas.ts'),'@openchamber/sdk':path.join(repo,'packages/sdk/src/index.ts')}}, server:{host:'127.0.0.1',port:0,fs:{allow:[repo,fixture]}} });
-  const profile=resolveProfileDir(undefined,'platform-checkout'); let chrome; let cdp;
-  try {
-    await server.listen();const port=await reservePort();chrome=launchChrome({chrome:resolveChrome(),profileDir:profile.dir,port,headless:true});const target=await createPageTarget(port);cdp=new CdpClient(target.webSocketDebuggerUrl);await cdp.connect();await cdp.send('Page.enable');await cdp.send('Runtime.enable');
-    const browserErrors=[];cdp.on('Runtime.exceptionThrown',(event)=>browserErrors.push(event.exceptionDetails?.exception?.description ?? event.exceptionDetails?.text));
-    const evaluate=async(expression)=>{const result=await cdp.send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});assert.equal(result.exceptionDetails,undefined,result.exceptionDetails?.exception?.description);return result.result.value;};
+  await run(async ({ cdp, errors: browserErrors, evaluate, navigate }) => {
     const until=async(expression)=>{const deadline=Date.now()+25000;while(Date.now()<deadline){if(await evaluate(expression))return;await wait(50);}assert.fail('Timed out: '+expression+' '+await evaluate('document.body.innerText')+' '+JSON.stringify(browserErrors));};
     const click=async(text)=>{await evaluate(`(()=>{const button=[...document.querySelectorAll('button')].find(item=>item.textContent.trim()===${JSON.stringify(text)});if(!button)throw new Error('Button unavailable');button.click();})()`);};
-    await cdp.send('Page.navigate',{url:server.resolvedUrls.local[0]});
+    await navigate();
     await until('document.querySelector("img")?.naturalWidth > 0');
     assert.deepEqual(await evaluate('window.writes'),[]);
     assert.deepEqual(await evaluate('window.opened'),[]);
@@ -139,5 +132,5 @@ test('both channels render in the purchase confirmation and show payment through
       await until('!window.confirmation.querySelector("[data-payment-checkout]")');
     }
     assert.deepEqual(browserErrors, [], 'Checkout browser flow must not raise unhandled exceptions');
-  } finally {if(cdp){await cdp.send('Browser.close').catch(()=>{});cdp.close();}if(chrome){chrome.kill();await wait(300);}await server.close();rmSync(fixture,{recursive:true,force:true});if(profile.temporary)rmSync(profile.dir,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
+  });
 });
