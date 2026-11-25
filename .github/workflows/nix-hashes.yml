@@ -49,44 +49,18 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The bake PR is opened with the review app, not GITHUB_TOKEN: an
-      # App-opened PR gets normal CI (the eval check runs on it), and the
-      # repo doesn't need the "Allow GitHub Actions to create and approve
-      # pull requests" toggle. The token carries only the two permissions
-      # the bake needs, and exists only for the push and the PR.
-      - name: Mint the bake bot token
-        if: steps.bake.outputs.changed == 'true'
-        id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ secrets.OC_REVIEW_APP_ID }}
-          private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-
-      - name: Open or update the bake PR
-        if: steps.bake.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          GH_REPO: ${{ github.repository }}
+      - name: Verify and retain the exact dependency pins
         run: |
-          gh auth setup-git
-          git config user.name "openchamber-bake-bot"
-          git config user.email "openchamber-bake-bot@users.noreply.github.com"
-          git checkout -B nix/hash-bake
-          # flake.nix moves too when the OpenCode tag in packages/electron/package.json does.
-          git add nix/hashes.json flake.lock flake.nix
-          git commit \
-            -m "chore(nix): re-bake dependency hashes" \
-            -m "Automated re-bake after a change to bun.lock or packages/electron/package.json (${GITHUB_SHA})." \
-            -m "Reproduce locally with nix run .#update-hashes."
-          git push --force origin nix/hash-bake
-          if [ "$(gh pr list --head nix/hash-bake --state open --json number --jq 'length')" = "1" ]; then
-            echo "an open PR for nix/hash-bake already exists, the force-push updated it"
-            exit 0
-          fi
-          gh pr create \
-            --base main \
-            --head nix/hash-bake \
-            --title "chore(nix): re-bake dependency hashes" \
-            --body "Automated re-bake after a change to bun.lock or packages/electron/package.json (commit ${GITHUB_SHA}). Reproduce locally with nix run .#update-hashes; the script verifies each baked hash with a clean build before exiting, so the diff is the hash lines only."
+          nix eval --raw .#openchamber.drvPath
+          nix eval --raw .#openchamber-desktop.drvPath
+          nix eval --raw .#opencode-cli.drvPath
+          nix flake check --no-build
+          git diff --check
+          git diff --binary -- flake.nix flake.lock nix/hashes.json > "${RUNNER_TEMP}/nix-release.patch"
+          test -s "${RUNNER_TEMP}/nix-release.patch"
+      - name: Upload verified pins
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: nix-release-pins
+          path: ${{ runner.temp }}/nix-release.patch
+          if-no-files-found: error
