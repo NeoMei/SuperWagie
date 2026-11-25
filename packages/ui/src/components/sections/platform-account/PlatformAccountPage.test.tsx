@@ -217,6 +217,13 @@ const tab = async (text: string) => {
   if (!found) throw new Error(`Missing tab ${text}`);
   await act(async () => found.click());
 };
+const tabContent = () => {
+  const id = host.querySelector('[data-platform-account-tab][aria-current="page"]')?.getAttribute('aria-controls');
+  if (!id) throw new Error('Missing active account tab');
+  const content = document.getElementById(id);
+  if (!content) throw new Error('Missing account tab content');
+  return content;
+};
 const signOut = async () => {
   await tab('Personal details');
   await act(async () => button('Sign out').click());
@@ -325,7 +332,7 @@ describe('PlatformAccountPage', () => {
     expect(/UniHub|LLMRouter/i.test(host.textContent ?? '')).toBe(false);
     await tab('Orders');
     expect(host.textContent).toContain('Requests and purchase orders');
-    expect(host.textContent).not.toContain('Fixture plan');
+    expect(tabContent().textContent).not.toContain('Fixture plan');
     await tab('Membership and usage');
     expect(host.textContent).toContain('Fixture plan');
     expect(rechargeRequests).toBe(0);
@@ -334,8 +341,8 @@ describe('PlatformAccountPage', () => {
   test('renders native request billing without fabricating recorded token zero', async () => {
     useI18nStore.getState().setLocale('en'); nativeScenario = true;
     await render(false, 'usage');
-    expect([...host.querySelectorAll('dl dt')].map((item) => item.textContent)).toEqual(['Credits used', 'Calls', 'Settled calls']);
-    expect([...host.querySelectorAll('dl dd')].map((item) => item.textContent)).toEqual(['0 credits', '1', '1']);
+    expect([...tabContent().querySelectorAll('dl dt')].map((item) => item.textContent)).toEqual(['Credits used', 'Calls', 'Settled calls']);
+    expect([...tabContent().querySelectorAll('dl dd')].map((item) => item.textContent)).toEqual(['0 credits', '1', '1']);
     expect(host.textContent).not.toContain('CNY 0.000073');
     expect(host.textContent).not.toContain('Confirmed refund');
     expect(button('Billing details').getAttribute('aria-expanded')).toBe('false');
@@ -520,8 +527,8 @@ describe('PlatformAccountPage', () => {
     expect(button('Measurement details').getAttribute('aria-expanded')).toBe('false');
     await act(async () => button('Measurement details').click());
     expect(host.textContent).toContain('9007199254740993');
-    expect([...host.querySelectorAll('dl dt')].map((item) => item.textContent)).toEqual(['Credits used', 'Calls', 'Settled calls']);
-    expect([...host.querySelectorAll('dl dd')].map((item) => item.textContent)).toEqual(['Unavailable', '3', '2']);
+    expect([...tabContent().querySelectorAll('dl dt')].map((item) => item.textContent)).toEqual(['Credits used', 'Calls', 'Settled calls']);
+    expect([...tabContent().querySelectorAll('dl dd')].map((item) => item.textContent)).toEqual(['Unavailable', '3', '2']);
     expect(host.textContent).not.toContain('CNY 0.000081');
     expect(host.textContent).not.toContain('0.000017 credits');
     expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Billing details')).toBe(false);
@@ -893,9 +900,26 @@ describe('PlatformAccountPage', () => {
   });
   test('formats CREDIT/6 exactly and renders the selected account name and kind', async () => {
     useI18nStore.getState().setLocale('en'); signedIn.credits.available = '2999920'; await render();
-    expect(host.querySelector('dl dd')?.textContent).toBe('2'); expect(host.textContent).not.toContain('0.000007');
+    expect(tabContent().querySelector('dl dd')?.textContent).toBe('2');
+    expect(host.querySelector('[data-platform-account-summary] dd')?.textContent).toBe('2');
+    expect(host.textContent).not.toContain('0.000007');
     const picker = host.querySelector('[aria-label="Billing account"]');
     expect(picker?.textContent).toContain('Team A'); expect(picker?.textContent).toContain('Team'); expect(picker?.textContent).not.toContain('team-a');
+  });
+  test('keeps the confirmed expiry and zero spendable credits in the sidebar for an expired membership', async () => {
+    useI18nStore.getState().setLocale('en');
+    const paidThrough = '2025-01-01T16:30:00Z';
+    nextAccountResponse = Promise.resolve(Response.json({
+      ...signedIn,
+      productCreditWallet: true,
+      credits: { ...signedIn.credits, available: '0', activeMembership: false, membershipPaidThrough: paidThrough },
+    }));
+    await render(false, 'profile');
+    const summary = host.querySelector('[data-platform-account-summary]');
+    expect(summary?.querySelector('dd')?.textContent).toBe('0');
+    expect(summary?.textContent).toContain('Expired');
+    expect(summary?.querySelector('time')?.dateTime).toBe(paidThrough);
+    expect(summary?.querySelector('time')?.textContent).toBe('Paid through 1/2/2025');
   });
   test('shows enabled model status and reconciles an unknown call without model generation', async () => {
     useI18nStore.getState().setLocale('en'); modelEnabled = true; useSessionUIStore.setState({ currentSessionId: 'ses-platform' }); await render(false, 'usage');

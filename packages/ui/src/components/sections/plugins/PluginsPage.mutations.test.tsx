@@ -36,6 +36,7 @@ const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, ini
   if (request.method === 'GET' && url.pathname === '/api/fs/home') return Response.json({ home: '/fixture-home' });
   if (request.method === 'GET' && url.pathname === '/api/location') return Response.json({ data: { directory: '/shared' } });
   if (request.method === 'GET' && url.pathname === '/api/session') return Response.json({ data: [], cursor: {} });
+  if (request.method === 'GET' && url.pathname === '/api/session-folders') return Response.json({ exists: true, foldersMap: {}, updatedAt: 0 });
   if (request.method === 'GET' && url.pathname === '/api/plugin') return Response.json({ location: { directory: '/shared' }, data: [] });
   if (request.method === 'GET' && url.pathname === '/api/config/themes') return Response.json({ themes: [] });
   if (request.method === 'POST' && url.pathname === '/auth/url-token') return Response.json({ token: 'fixture-only', expiresAt: Date.now() + 60000, expiresIn: 60000 });
