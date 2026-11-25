@@ -17,6 +17,7 @@ const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, ini
   if (path === '/api/fs/home') return Response.json({ home: '/fixture-home' });
   if (path === '/api/location') return Response.json({ data: { directory: '/shared' } });
   if (path === '/api/session') return Response.json({ data: [], cursor: {} });
+  if (path === '/api/session-folders' && request.method === 'GET') return Response.json({ exists: true, foldersMap: {}, updatedAt: 0 });
   if (path === '/api/config/themes') return Response.json({ themes: [] });
   if (path === '/api/plugin') return Response.json({ location: { directory: '/shared' }, data: [] });
   if (path === '/api/config/plugins' && request.method === 'GET') return Response.json({ entries: [{ id: 'one', spec: catalogSpec, kind: 'config', parsedKind: 'npm', scope: 'user' }], files: [] });
