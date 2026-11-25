@@ -7,7 +7,7 @@ import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, 
 const repo = path.resolve(import.meta.dirname, '../..');
 const closeTimeout = 2_000;
 
-const closeChrome = async (chrome, cdp) => {
+export const closeChrome = async (chrome, cdp) => {
   if (cdp?.socket.readyState === WebSocket.OPEN) {
     await cdp.send('Browser.close', {}, { timeoutMs: closeTimeout }).catch(() => {});
   }
