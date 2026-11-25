@@ -141,7 +141,7 @@ test('opens existing connection settings while the authenticated app remains unm
   await settle();
   expect(document.body.textContent).not.toContain('Remote instances');
   expect(nativeWrites).toEqual([]);
-  expect(requests.every(path => ['/api/platform-account/session', '/api/platform-account/auth-methods', '/api/config/settings'].includes(path))).toBe(true);
+  expect(requests.filter(path => !['/api/platform-account/session', '/api/platform-account/auth-methods', '/api/config/settings'].includes(path))).toEqual([]);
 });
 
 test('keeps the authenticated host switcher on the normal Settings window path', async () => {
