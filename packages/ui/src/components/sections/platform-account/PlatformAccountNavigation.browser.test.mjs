@@ -12,6 +12,8 @@ test('user center opens outside Settings, navigation stays read-only and explici
     import React from 'react';
     import { createRoot } from 'react-dom/client';
     import '@/index.css';
+    // The desktop host fixes its surface before it renders, including in a narrow window.
+    window.__OPENCHAMBER_SURFACE__ = 'desktop';
     const user = { id: 'fixture-user', name: 'Fixture reviewer', email: 'reviewer@example.test' };
     const scenario = new URLSearchParams(location.search).get('scenario');
     const walletScenario = scenario === 'wallet';
