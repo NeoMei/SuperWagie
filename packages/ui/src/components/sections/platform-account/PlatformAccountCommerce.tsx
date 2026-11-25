@@ -16,6 +16,8 @@ type BuyingTask = 'membership' | 'addon';
 type Offer = NonNullable<PlatformCommerceState['offers']>[number];
 type CheckoutProvider = PlatformCheckout['provider'];
 type PurchaseChannel = CheckoutProvider | 'wallet';
+const PAYMENT_CHANNEL_LABELS = { wechat: 'platformAccount.wechatPay', alipay: 'platformAccount.alipay' } as const;
+
 const readPurchaseChannel = (key: string | null): PurchaseChannel | null => {
   if (!key) return null;
   try {
@@ -715,7 +717,7 @@ export const PlatformAccountCommerce: React.FC<{
                 <Input dir="ltr" inputMode="decimal" value={topUp} onChange={(event) => setTopUp(event.target.value)} disabled={topUpDisabled} />
               </label>
               <SettingsChipGroup className="justify-self-start" value={effectiveTopUpProvider} onChange={setTopUpProvider} aria-label={t('platformAccount.paymentChannel')} options={channels.map((channel) => ({
-                value: channel, label: t(channel === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay'), disabled: topUpDisabled,
+                value: channel, label: t(PAYMENT_CHANNEL_LABELS[channel]), disabled: topUpDisabled,
               }))} />
               <Button type="submit" className="h-auto min-h-9 whitespace-normal" disabled={topUpDisabled || !topUpAmount}>
                 {topUpAmount ? t('platformAccount.productWallet.confirmTopUp', { amount: money(topUpAmount) }) : t('platformAccount.productWallet.topUp')}
@@ -823,7 +825,7 @@ export const PlatformAccountCommerce: React.FC<{
                     className="aria-pressed:bg-interactive-selection aria-pressed:text-interactive-selection-foreground"
                     aria-pressed={membershipActive ? selectedChannel === provider : undefined}
                     disabled={purchaseBlocked || offerRestricted(selectedOffer)} onClick={() => choosePurchaseChannel(selectedOffer, provider)}>
-                    {t(provider === 'wechat' ? 'platformAccount.wechatPay' : 'platformAccount.alipay')}
+                    {t(PAYMENT_CHANNEL_LABELS[provider])}
                   </Button>)}
                   <Button type="button" size="sm" variant="outline" aria-pressed={selectedChannel === 'wallet'}
                     className="aria-pressed:bg-interactive-selection aria-pressed:text-interactive-selection-foreground"
