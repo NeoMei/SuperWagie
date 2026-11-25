@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readLegacyWindowsManifest, withWindowsMigrationNotes } from '../packages/electron/scripts/windows-update-feeds.mjs';
+import { assertSuperWagieReleaseCopy } from './release-copy.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_DIST = path.join(ROOT, 'packages/electron/dist');
@@ -62,12 +63,14 @@ export const buildManifests = async ({
   version,
   distDir = DEFAULT_DIST,
   notes = '',
+  notesSource = 'Release notes',
   repo = DEFAULT_REPO,
   publishedAt = new Date().toISOString(),
 } = {}) => {
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(String(version || ''))) {
     throw new Error('version must be a semver string, e.g. 2.7.3');
   }
+  assertSuperWagieReleaseCopy(notes, notesSource);
 
   const macDmg = await requireFile(distDir, `SuperWagie-${version}-mac-arm64.dmg`);
   const macZip = await requireFile(distDir, `SuperWagie-${version}-mac-arm64.zip`);
@@ -142,11 +145,13 @@ if (isDirectRun) {
   const distDir = path.resolve(readArg('--dist', DEFAULT_DIST));
   const repo = readArg('--repo', DEFAULT_REPO);
   const notesFile = readArg('--notes-file', '');
+  const releaseTitle = readArg('--release-title', `SuperWagie v${version}`);
   const outDir = path.resolve(readArg('--out', distDir));
 
   try {
     if (!version) throw new Error('--version is required');
     if (!notesFile) throw new Error('--notes-file is required and must contain Chinese and English release notes');
+    assertSuperWagieReleaseCopy(releaseTitle, 'GitHub release title');
     const notes = await fs.readFile(path.resolve(notesFile), 'utf8');
     const localeBlocks = [...notes.matchAll(/<!-- release-notes:(zh-CN|en) -->\s*([\s\S]*?)\s*<!-- \/release-notes -->/g)];
     for (const locale of ['zh-CN', 'en']) {
@@ -154,7 +159,7 @@ if (isDirectRun) {
         throw new Error(`Release notes require a non-empty ${locale} block: <!-- release-notes:${locale} --> ... <!-- /release-notes -->`);
       }
     }
-    const manifests = await buildManifests({ version, distDir, notes, repo });
+    const manifests = await buildManifests({ version, distDir, notes, notesSource: notesFile, repo });
     await fs.mkdir(outDir, { recursive: true });
     for (const [name, content] of Object.entries(manifests)) {
       await fs.writeFile(path.join(outDir, name), content);

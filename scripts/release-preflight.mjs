@@ -14,6 +14,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
+import { assertSuperWagieReleaseCopy } from './release-copy.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION_TAG = /^v?(\d+)\.(\d+)\.(\d+)$/;
@@ -88,6 +90,13 @@ export const checkExistingOwnTag = ({ version, tags, tagCommit, headCommit }) =>
 };
 
 const run = () => {
+  const { values } = parseArgs({
+    options: { 'notes-file': { type: 'string' }, 'release-title': { type: 'string' } },
+  });
+  const notesFile = values['notes-file'];
+  const title = values['release-title'];
+  if (title !== undefined) assertSuperWagieReleaseCopy(title, 'GitHub release title');
+  if (notesFile !== undefined) assertSuperWagieReleaseCopy(readFileSync(notesFile, 'utf8'), notesFile);
   if (process.env.RELEASE_PREFLIGHT_SKIP === '1') {
     console.warn('release:preflight 已按 RELEASE_PREFLIGHT_SKIP=1 跳过');
     return;
@@ -139,4 +148,11 @@ const run = () => {
   console.log(`release:preflight 通过（版本 ${version}）`);
 };
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) run();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    run();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
+}

@@ -155,6 +155,17 @@ The `--notes-file` argument is required. Its Markdown must contain nonempty
 `<!-- release-notes:en --> ... <!-- /release-notes -->` blocks. The generator
 rejects missing or incomplete language blocks before writing either feed.
 
+Before creating the release, run the preflight with the exact GitHub title and
+body. Use that same body as the generator's notes file. The preflight and feed
+generator reject `OpenChamber` and `OpenCode` in public release copy regardless
+of capitalization. Describe what changed for SuperWagie users. The website
+build applies the same rule to both release-notes pages, their metadata and the
+release introductions on the home and download pages.
+
+```bash
+bun run release:preflight --release-title "SuperWagie v2.7.3" --notes-file /tmp/release-notes.md
+```
+
 1. Build macOS arm64 locally and use the validated Windows x64 build. The
    Windows exe must be the complete build with embedded knowledge and
    SuperWeb; the `-INCOMPLETE-CI` artifact is not a release artifact.
