@@ -1,7 +1,16 @@
 <section class="section-tight">
   <div class="wrap prose">
     <h1>Release notes</h1>
-    <p class="lead">Current stable release 2.7.135 · 25 November 2026</p>
+    <p class="lead">Current stable release 2.7.136 · 25 November 2026</p>
+    <h2>2.7.136 · User Center and subscription checkout</h2>
+    <ul>
+      <li>The User Center shows the billing account, membership and available credits in a sidebar on wide windows and above the tabs on narrow ones.</li>
+      <li>Membership plans and credit packs show price, credit amounts and validity. Choose an offer to see the WeChat Pay or Alipay QR code and order status on the same page.</li>
+      <li>When you switch offers or payment methods, SuperWagie waits for the original unpaid order to close before creating another. If the original order was paid, its result stays visible.</li>
+      <li>The Apple silicon macOS installer is ad-hoc signed and has no Apple notarization. The Windows x64 installer is unsigned.</li>
+    </ul>
+    <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.136">View the full 2.7.136 release information</a></p>
+
     <h2>2.7.135 · Chat, account and library improvements</h2>
     <ul><li>Updated the built-in desktop engine to 2.4.1. SuperWagie keeps its settings, credentials and conversations in its own workspace.</li><li>First and queued messages carry <code>$skill</code> mentions and use message IDs to confirm delivery. Review comments open the source file or relevant diff line.</li><li>Lead sessions can hand off and take back work. Custom providers can import models from compatible local configuration.</li><li>The six User Center tabs share one payer selector. Previous-account data disappears during a switch, and Wallet keeps the QR code and Cancel button in view on narrow windows.</li><li>Fixed a macOS issue where the embedded knowledge process could keep using CPU after an external volume was unmounted.</li></ul>
     <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.135">View the full 2.7.135 release information</a></p>
