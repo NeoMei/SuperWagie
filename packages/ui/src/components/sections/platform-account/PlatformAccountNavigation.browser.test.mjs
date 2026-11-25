@@ -1,20 +1,19 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from '../../../../../../scripts/perf/cdp.mjs';
+import { createBrowserFixture } from '../../../../../../scripts/perf/browser-test-fixture.mjs';
+import { wait } from '../../../../../../scripts/perf/cdp.mjs';
 
-const repo = path.resolve(import.meta.dirname, '../../../../../..');
-
-test('user center opens outside Settings, navigation stays read-only and explicit key activation refreshes model settings', { timeout: 120_000 }, async () => {
-  const { createServer } = await import('vite');
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/platform-account-navigation-'));
+test('user center opens outside Settings, navigation stays read-only and explicit key activation refreshes model settings', { timeout: 120_000 }, async (t) => {
+  const { directory: fixture, run } = createBrowserFixture(t, 'account-navigation');
   writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/fixture.tsx"></script></body></html>');
   writeFileSync(path.join(fixture, 'fixture.tsx'), `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
     import '@/index.css';
+    // The desktop host fixes its surface before it renders, including in a narrow window.
+    window.__OPENCHAMBER_SURFACE__ = 'desktop';
     const user = { id: 'fixture-user', name: 'Fixture reviewer', email: 'reviewer@example.test' };
     const scenario = new URLSearchParams(location.search).get('scenario');
     const walletScenario = scenario === 'wallet';
@@ -206,45 +205,43 @@ test('user center opens outside Settings, navigation stays read-only and explici
     }
     createRoot(document.getElementById('root')).render(<RuntimeAPIContext.Provider value={createWebAPIs()}><I18nProvider><EntryPoints /></I18nProvider></RuntimeAPIContext.Provider>);
   `);
-  const server = await createServer({
-    configFile: false, root: fixture, cacheDir: path.join(fixture, '.vite'), logLevel: 'error',
-    css: { postcss: repo },
-    define: { 'process.env': {}, global: 'globalThis', __APP_VERSION__: '"fixture"' },
-    resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@web': path.join(repo, 'packages/web/src'), '@openchamber/ui': path.join(repo, 'packages/ui/src'), '@openchamber/sdk/schemas': path.join(repo, 'packages/sdk/src/schemas.ts'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
-  });
-  const profile = resolveProfileDir(undefined, 'account-navigation');
-  let chrome;
-  let cdp;
-  try {
-    await server.listen();
-    const port = await reservePort();
-    chrome = launchChrome({ chrome: resolveChrome(), profileDir: profile.dir, port, headless: true });
-    const target = await createPageTarget(port);
-    cdp = new CdpClient(target.webSocketDebuggerUrl); await cdp.connect();
-    await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
-    const browserErrors = [];
-    cdp.on('Runtime.exceptionThrown', (event) => browserErrors.push(event.exceptionDetails?.exception?.description ?? event.exceptionDetails?.text));
+  await run(async ({ cdp, errors: browserErrors, evaluate, navigate }) => {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-    const evaluate = async (expression) => {
-      const result = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-      assert.equal(result.exceptionDetails, undefined, result.exceptionDetails?.exception?.description);
-      return result.result.value;
-    };
     const until = async (expression, description, timeout = 30_000) => {
       const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         if (await evaluate(expression)) return;
         await wait(50);
       }
-      assert.fail(description + ': ' + (await evaluate('document.body.innerText')).slice(0, 2000) + browserErrors.join('\n'));
+      const context = await evaluate(`({
+        text: document.body.innerText.slice(0, 2000),
+        tab: document.querySelector('[data-platform-account-tab][aria-current="page"]')?.dataset.platformAccountTab,
+        reads: window.reads?.slice(-12),
+      })`);
+      assert.fail(description + ': ' + JSON.stringify(context) + '\n' + browserErrors.join('\n'));
     };
     const click = async (selector, scroll = true) => {
-      const point = await evaluate(`(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (${scroll}) element.scrollIntoView({ block: 'center' }); const rect = element.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`);
+      const position = `(() => {
+        const element = document.querySelector(${JSON.stringify(selector)});
+        if (!element || element.disabled) return null;
+        if (${scroll}) element.scrollIntoView({ block: 'center' });
+        const rect = element.getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        return element.contains(document.elementFromPoint(x, y)) ? { x, y } : null;
+      })()`;
+      let point;
+      const deadline = Date.now() + 5_000;
+      do {
+        point = await evaluate(position);
+        if (point) break;
+        await wait(50);
+      } while (Date.now() < deadline);
+      assert.ok(point, `Control could not be clicked: ${selector}`);
       await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
     };
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=settings' });
+    await navigate('?entry=settings');
     await until(`!!document.querySelector('[data-settings-search]') && window.settingsNavigationState().settingsPage === 'general'`, 'The retired account Settings page did not fall back to General', 60_000);
     for (const appearance of [{ dark: false, locale: 'en', query: 'user center' }, { dark: true, locale: 'zh-CN', query: '用户中心' }]) {
       await evaluate(`window.setAppearance(${appearance.dark}, ${JSON.stringify(appearance.locale)})`);
@@ -265,7 +262,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
     assert.deepEqual(await evaluate('window.mutations'), [], 'Opening Settings and searching must remain read-only');
 
     for (const entry of ['sidebar', 'funding']) {
-      await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=' + entry });
+      await navigate('?entry=' + entry);
       if (entry === 'sidebar') {
         await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Sidebar account entry did not render');
         await click('button[aria-label="User center"]');
@@ -337,16 +334,16 @@ test('user center opens outside Settings, navigation stays read-only and explici
         assert.deepEqual(await evaluate('window.settingsNavigationState()'), { isSettingsDialogOpen: false, settingsPage: 'appearance', settingsJumpRequest: null }, 'Closing account funding must preserve Settings navigation');
       }
     }
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=wallet' });
+    await navigate('?entry=sidebar&scenario=wallet');
     await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Wallet scenario entry did not render');
     await click('button[aria-label="User center"]');
-    await until(`!!document.querySelector('[data-platform-account-tab="wallet"]')`, 'Wallet navigation did not render');
+    await until(`!!document.querySelector('[data-platform-account-tab="wallet"]') && document.body.innerText.includes('Fixture membership')`, 'The wallet scenario did not load its account overview');
     assert.equal(await evaluate(`!!document.querySelector('[data-platform-account-tab="keys"]')`), true, 'Wallet capability must preserve the API Key navigation');
     for (const width of [1280, 390]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
       assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`), true, 'Account layout overflows the viewport');
       await click('[data-platform-account-tab="wallet"]');
-      await until(`document.querySelector('[data-platform-account-tab="wallet"]').getAttribute('aria-current') === 'page' && document.body.innerText.includes('13.20')`, 'Wallet tab did not display the wallet balance');
+      await until(`document.querySelector('[data-platform-account-tab="wallet"]').getAttribute('aria-current') === 'page' && document.querySelector('[data-wallet-page] bdi')?.innerText === '¥13.20' && document.body.innerText.includes('13.20')`, `Wallet tab did not display the team balance at ${width}px`);
       await click('[data-platform-account-tab="keys"]');
       await until(`document.querySelector('[data-platform-account-tab="keys"]').getAttribute('aria-current') === 'page' && document.body.innerText.includes('Activate and configure')`, 'API Key tab did not display its own content');
       assert.equal(await evaluate(`document.body.innerText.includes('13.20')`), false, 'Wallet content persisted after navigating to API Key');
@@ -492,7 +489,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
     }
     assert.equal(await evaluate(`window.mutations.filter(({path})=>path.endsWith('/close')).length`), 2);
 
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=managed' });
+    await navigate('?entry=sidebar&scenario=managed');
     await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Managed account entry did not render');
     await click('button[aria-label="User center"]');
     await until(`!!document.querySelector('[data-platform-account-tab="keys"]')`, 'Managed API Key navigation did not render');
@@ -520,7 +517,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
     assert.deepEqual(await evaluate('window.mutations'), [{ path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', action: 'retest', fundingMode: 'credits' } }]);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
     for (const scenario of ['activation', 'retry']) {
-      await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=' + scenario });
+      await navigate('?entry=sidebar&scenario=' + scenario);
       await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Sidebar account entry did not render');
       await click('button[aria-label="User center"]');
       await until(`!!document.querySelector('[data-platform-account-tab="keys"]')`, 'Key navigation did not render');
@@ -582,7 +579,7 @@ test('user center opens outside Settings, navigation stays read-only and explici
         await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
       }
     }
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?entry=sidebar&scenario=progress' });
+    await navigate('?entry=sidebar&scenario=progress');
     await until(`!!document.querySelector('button[aria-label="User center"]')`, 'Progress scenario entry did not render');
     await click('button[aria-label="User center"]');
     await until(`!!document.querySelector('[data-platform-account-tab="keys"]')`, 'Progress scenario navigation did not render');
@@ -696,10 +693,5 @@ test('user center opens outside Settings, navigation stays read-only and explici
       { path: '/api/model-configuration/bootstrap/account-key', method: 'POST', body: { accountId: 'fixture-team', fundingMode: 'credits', action: 'retest' } },
     ], 'Polling and process transitions must not issue another key or automatically retry a test');
     assert.deepEqual(browserErrors, [], 'Account navigation and key activation must not throw browser exceptions');
-  } finally {
-    if (cdp) { try { await cdp.send('Browser.close', {}, { timeoutMs: 2000 }); } catch {} cdp.close(); }
-    profile.removeAfter(chrome);
-    await server.close();
-    rmSync(fixture, { recursive: true, force: true });
-  }
+  });
 });

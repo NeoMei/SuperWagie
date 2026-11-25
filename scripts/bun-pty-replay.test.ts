@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { spawn } from 'bun-pty';
 
-const captureInitialOutput = async (text: string) => {
-  const terminal = spawn(process.execPath, ['-e', `process.stdout.write(${JSON.stringify(text)})`], {
+const captureInitialOutput = async (text: string, repetitions = 1) => {
+  // Generate large output in the child to stay within Linux argument limits.
+  const command = `process.stdout.write(${JSON.stringify(text)}.repeat(${repetitions}))`;
+  const terminal = spawn(process.execPath, ['-e', command], {
     cols: 80, rows: 24, cwd: process.cwd(), env: process.env,
   });
   try {
@@ -22,14 +24,14 @@ const captureInitialOutput = async (text: string) => {
 
 describe('bun-pty initial replay', () => {
   test('limits multibyte output to 512 KiB and replays it only to the first listener', async () => {
-    const { first, second } = await captureInitialOutput('─'.repeat(200_000));
+    const { first, second } = await captureInitialOutput('─', 200_000);
     expect(Buffer.byteLength(first, 'utf8')).toBeLessThanOrEqual(512 * 1024);
     expect(first).toBe('─'.repeat(174_762));
     expect(second).toBe('');
   }, 15_000);
 
   test('retains whole emoji and leaves short output intact', async () => {
-    const { first } = await captureInitialOutput('😀'.repeat(150_000));
+    const { first } = await captureInitialOutput('😀', 150_000);
     expect(first).toBe('😀'.repeat(131_072));
     expect(first).not.toContain('�');
     expect((await captureInitialOutput('犇马 ready')).first).toBe('犇马 ready');

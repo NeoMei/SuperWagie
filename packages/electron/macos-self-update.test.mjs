@@ -22,6 +22,14 @@ const withTemp = async (fn) => {
   }
 };
 
+// Linux exercises the same swap and rollback script with a directory copy.
+const copyCommandForTest = async (dir) => {
+  if (process.platform === 'darwin') return undefined;
+  const command = path.join(dir, 'test-copy');
+  await writeFile(command, '#!/bin/sh\nexec /bin/cp -R "$@"\n', { mode: 0o700 });
+  return command;
+};
+
 test('accepts a download that matches the feed and rejects tampering', async () => {
   await withTemp(async (dir) => {
     const file = path.join(dir, 'update.zip');
@@ -77,7 +85,7 @@ test('rejects a staged bundle that is a different app or version', async () => {
   );
 });
 
-test('the swap script replaces the bundle and restores it when the copy fails', async () => {
+test('the swap script replaces the installed bundle after copying succeeds', async () => {
   await withTemp(async (dir) => {
     const appPath = path.join(dir, 'SuperWagie.app');
     const stagedAppPath = path.join(dir, 'staged.app');
@@ -97,6 +105,7 @@ test('the swap script replaces the bundle and restores it when the copy fails', 
       pid: 999999,
       logPath,
       openCommand: '/usr/bin/true',
+      copyCommand: await copyCommandForTest(dir),
     });
     await writeFile(scriptPath, script);
 
@@ -126,6 +135,7 @@ test('the swap script puts the old bundle back when copying the new one fails', 
       pid: 999999,
       logPath,
       openCommand: '/usr/bin/true',
+      copyCommand: await copyCommandForTest(dir),
     });
     await writeFile(scriptPath, script);
 
