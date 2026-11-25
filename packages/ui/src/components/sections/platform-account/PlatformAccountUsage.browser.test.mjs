@@ -1,15 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from '../../../../../../scripts/perf/cdp.mjs';
+import { createBrowserFixture } from '../../../../../../scripts/perf/browser-test-fixture.mjs';
+import { wait } from '../../../../../../scripts/perf/cdp.mjs';
 
-const repo = path.resolve(import.meta.dirname, '../../../../../..');
-
-test('SuperWagie usage keeps summary and measurement details without a recent-call list', { timeout: 180_000 }, async () => {
-  const { createServer } = await import('vite');
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/platform-account-usage-'));
+test('SuperWagie usage keeps summary and measurement details without a recent-call list', { timeout: 180_000 }, async (t) => {
+  const { directory: fixture, run } = createBrowserFixture(t, 'account-usage');
   writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/fixture.tsx"></script></body></html>');
   writeFileSync(path.join(fixture, 'fixture.tsx'), `
     import React from 'react';
@@ -159,32 +156,9 @@ test('SuperWagie usage keeps summary and measurement details without a recent-ca
     }
     createRoot(document.getElementById('root')).render(<I18nProvider><main className="@container mx-auto max-w-3xl p-6"><UsageFixture /></main></I18nProvider>);
 `);
-  const server = await createServer({
-    configFile: false, root: fixture, cacheDir: path.join(fixture, '.vite'), logLevel: 'error',
-    css: { postcss: repo },
-    define: { 'process.env': {}, global: 'globalThis', __APP_VERSION__: '"fixture"' },
-    resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@web': path.join(repo, 'packages/web/src'), '@openchamber/ui': path.join(repo, 'packages/ui/src'), '@openchamber/sdk/schemas': path.join(repo, 'packages/sdk/src/schemas.ts'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
-  });
-  const profile = resolveProfileDir(undefined, 'account-usage');
-  let chrome;
-  let cdp;
-  try {
-    await server.listen();
-    const port = await reservePort();
-    chrome = launchChrome({ chrome: resolveChrome(), profileDir: profile.dir, port, headless: true });
-    const target = await createPageTarget(port);
-    cdp = new CdpClient(target.webSocketDebuggerUrl); await cdp.connect();
-    const browserErrors = [];
-    cdp.on('Runtime.exceptionThrown', ({ exceptionDetails }) => browserErrors.push(exceptionDetails.exception?.description ?? exceptionDetails.text));
+  await run(async ({ cdp, errors: browserErrors, evaluate, navigate }) => {
     cdp.on('Runtime.consoleAPICalled', event => { if (event.type === 'error') browserErrors.push(event.args.map(arg => arg.value ?? arg.description).join(' ')); });
-    await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-    const evaluate = async (expression) => {
-      const result = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-      assert.equal(result.exceptionDetails, undefined, result.exceptionDetails?.exception?.description);
-      return result.result.value;
-    };
     const until = async (expression, description) => {
       const deadline = Date.now() + 30_000;
       while (Date.now() < deadline) {
@@ -233,7 +207,7 @@ test('SuperWagie usage keeps summary and measurement details without a recent-ca
     for (const scenario of ['request', 'mixed', 'unknown', 'literal']) {
       for (const appearance of [{ theme: 'light', locale: 'en', width: 1440 }, { theme: 'dark', locale: 'zh-CN', width: 1440 }, ...(['request', 'literal'].includes(scenario) ? [{ theme: 'light', locale: 'en', width: 390 }] : [])]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width: appearance.width, height: 1000, deviceScaleFactor: 1, mobile: false });
-        await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario + '&theme=' + appearance.theme + '&locale=' + appearance.locale });
+        await navigate('?scenario=' + scenario + '&theme=' + appearance.theme + '&locale=' + appearance.locale);
         await until(`document.body.innerText.includes(${JSON.stringify(appearance.locale === 'en' ? 'Settled calls' : '已结算调用')})`, 'Actual component did not finish loading');
         await assertHeadline(appearance.locale, '0');
         const measurementsLabel = appearance.locale === 'en' ? 'Measurement details' : '计量详情';
@@ -279,7 +253,7 @@ test('SuperWagie usage keeps summary and measurement details without a recent-ca
         : [{ locale: 'en', theme: 'light', width: 1440 }];
       for (const appearance of appearances) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width: appearance.width, height: 1000, deviceScaleFactor: 1, mobile: false });
-        await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario + '&locale=' + appearance.locale + '&theme=' + appearance.theme });
+        await navigate('?scenario=' + scenario + '&locale=' + appearance.locale + '&theme=' + appearance.theme);
         const headlineLabel = appearance.locale === 'en' ? 'Credits used' : '积分消耗';
         await until(`document.querySelector('dl dt')?.textContent === ${JSON.stringify(headlineLabel)}`, 'Credit usage and its locale did not load');
         const amount = ['credits-unavailable', 'actor-hidden'].includes(scenario) ? null : ['credit-zero', 'empty-assets'].includes(scenario) ? '0' : scenario === 'credit-whole' ? '42' : '9007199254740993';
@@ -322,7 +296,7 @@ test('SuperWagie usage keeps summary and measurement details without a recent-ca
       }
     }
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=summary' });
+    await navigate('?scenario=summary');
     await until(`document.body.innerText.includes('Settled calls')`, 'Overview summary did not load');
     assert.deepEqual(await evaluate('window.reads'), ['/api/platform-account/usage/fixture-account/summary'], 'The overview must not fetch call lists or the native report');
     assert.equal(await evaluate(`document.querySelector('table') === null`), true);
@@ -330,7 +304,7 @@ test('SuperWagie usage keeps summary and measurement details without a recent-ca
     assert.equal(await evaluate(`document.body.innerText.includes('Billing details') || document.body.innerText.includes('CNY 0.000073')`), false);
     await assertHeadline('en', '0');
     await assertProductBoundary();
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=credit-refunds&view=summary' });
+    await navigate('?scenario=credit-refunds&view=summary');
     await until(`!!document.querySelector('dl')`, 'Credit overview summary did not load');
     await assertHeadline('en', '9007199254740993');
     assert.deepEqual(await evaluate('window.reads'), ['/api/platform-account/usage/fixture-account/summary']);
@@ -338,7 +312,7 @@ test('SuperWagie usage keeps summary and measurement details without a recent-ca
     await assertProductBoundary();
 
     for (const scenario of ['switch', 'runtime']) {
-      await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=' + scenario });
+      await navigate('?scenario=' + scenario);
       await until(`typeof window.releaseOldSummary === 'function'`, 'Old owner summary was not in flight');
       await click('#change-owner');
       await until(`document.body.innerText.includes('12 credits')`, 'Current owner report did not render');
@@ -350,7 +324,7 @@ test('SuperWagie usage keeps summary and measurement details without a recent-ca
       await assertProductBoundary();
     }
 
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=denied' });
+    await navigate('?scenario=denied');
     await until(`document.body.innerText.includes('You do not have permission')`, 'Summary authorization error was not visible');
     assert.equal(await evaluate(`document.body.innerText.includes('No calls are recorded')`), false);
     await evaluate(`window.allowSummary = true; [...document.querySelectorAll('button')].find(button => button.textContent === 'Refresh usage').click()`);
@@ -358,19 +332,14 @@ test('SuperWagie usage keeps summary and measurement details without a recent-ca
     assert.equal(await evaluate(`document.body.innerText.includes('You do not have permission')`), false);
     await assertProductBoundary();
 
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=summary-failed' });
+    await navigate('?scenario=summary-failed');
     await until(`document.body.innerText.includes('Could not read this consumption report')`, 'Summary read failure was not visible');
     assert.equal(await evaluate(`document.body.innerText.includes('No calls are recorded')`), false, 'Failure must not appear as an empty report');
     await assertProductBoundary();
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] + '?scenario=empty' });
+    await navigate('?scenario=empty');
     await until(`document.body.innerText.includes('No calls are recorded')`, 'Authoritative empty result did not render');
     assert.equal(await evaluate(`document.body.innerText.includes('Could not read')`), false);
     await assertProductBoundary();
     assert.deepEqual(browserErrors, []);
-  } finally {
-    if (cdp) { try { await cdp.send('Browser.close', {}, { timeoutMs: 2000 }); } catch {} cdp.close(); }
-    profile.removeAfter(chrome);
-    await server.close();
-    rmSync(fixture, { recursive: true, force: true });
-  }
+  });
 });

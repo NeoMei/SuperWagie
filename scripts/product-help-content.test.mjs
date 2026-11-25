@@ -100,6 +100,7 @@ test('standalone website build previews both formats and projects only public fi
   await cp(path.join(root, 'site/build.mjs'), path.join(directory, 'site/build.mjs'));
   await mkdir(path.join(directory, 'scripts'), { recursive: true });
   await cp(path.join(root, 'scripts/product-help-content-projection.mjs'), path.join(directory, 'scripts/product-help-content-projection.mjs'));
+  await cp(path.join(root, 'scripts/release-copy.mjs'), path.join(directory, 'scripts/release-copy.mjs'));
   const contentDirectory = path.join(directory, 'packages/web/server/lib/product-help');
   await mkdir(contentDirectory, { recursive: true });
   await cp(path.join(root, 'packages/web/server/lib/product-help/navigation-targets.js'), path.join(contentDirectory, 'navigation-targets.js'));
@@ -124,6 +125,7 @@ test('website rejects unsupported author schemas and targets before replacing th
   await cp(path.join(root, 'site/build.mjs'), path.join(directory, 'site/build.mjs'));
   await mkdir(path.join(directory, 'scripts'), { recursive: true });
   await cp(path.join(root, 'scripts/product-help-content-projection.mjs'), path.join(directory, 'scripts/product-help-content-projection.mjs'));
+  await cp(path.join(root, 'scripts/release-copy.mjs'), path.join(directory, 'scripts/release-copy.mjs'));
   const contentDirectory = path.join(directory, 'packages/web/server/lib/product-help');
   await mkdir(contentDirectory, { recursive: true });
   await cp(path.join(root, 'packages/web/server/lib/product-help/navigation-targets.js'), path.join(contentDirectory, 'navigation-targets.js'));

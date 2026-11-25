@@ -112,7 +112,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
   checkout, payer, switchingOffer = false, busy, channels = [], onSwitchChannel, channelSwitchPending, onRefresh, onRenew, onDismiss, onClose, onRefund, compact = false, walletLayout = false, walletHistory = false,
 }) => {
   const { t, locale } = useI18n();
-  const paymentCard = React.useRef<HTMLDivElement>(null);
+  const paymentActions = React.useRef<HTMLDivElement>(null);
   const [codeImage, setCodeImage] = React.useState<{ source: string; image: string } | null>(null);
   const [refundConfirmation, setRefundConfirmation] = React.useState(false);
   const waiting = WAITING.includes(checkout.payment_status) && !checkout.refund_status;
@@ -177,7 +177,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
     </div>;
   }
 
-  return <div ref={paymentCard} className="oc-tile rounded-xl p-4" data-payment-checkout={checkout.id}>
+  return <div className={`oc-tile rounded-xl px-4 ${walletLayout ? 'py-2.5 @xl:py-4' : 'py-4'}`} data-payment-checkout={checkout.id}>
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
       <div className="min-w-0">
         {walletLayout || purchaseLayout
@@ -194,9 +194,9 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
 
     {returnAmount && <p className={SETTINGS_HELPER_CLASS}>{returnAmount}</p>}
     {upgrade && waiting && appliedCreditAmount === undefined && <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.estimatedRefund')} {t('platformAccount.cny', { amount: formatPlatformMoney(upgrade.estimated_refund_amount) })} · {t(upgrade.refund_payment_source === 'wallet' ? 'platformAccount.productWallet.walletRefund' : 'platformAccount.productWallet.originalPaymentRefund')}</p>}
-    <div className={walletLayout ? 'mt-2 grid justify-items-center gap-2 text-center' : 'mt-3 flex flex-col gap-3 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6'}>
-      <div className={walletLayout ? 'grid min-w-0 justify-items-center gap-2' : 'min-w-0 space-y-2 @xl:space-y-3'}>
-        <div className="space-y-1">
+    <div className={walletLayout ? 'mt-1.5 grid justify-items-center gap-1.5 text-center @xl:mt-2 @xl:gap-2' : 'mt-3 flex flex-col gap-3 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6'}>
+      <div className={walletLayout ? 'grid min-w-0 justify-items-center gap-1.5 @xl:gap-2' : 'min-w-0 space-y-2 @xl:space-y-3'}>
+        <div className={walletLayout ? 'flex flex-wrap items-baseline justify-center gap-x-2 gap-y-1 @xl:block @xl:space-y-1' : 'space-y-1'}>
           {waiting && appliedCreditAmount !== undefined && <>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.netPlanPrice')} {t('platformAccount.cny', { amount: formatPlatformMoney(String(BigInt(checkout.amount) + BigInt(appliedCreditAmount))) })}</p>
             <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.productWallet.oldPlanCredit')} {t('platformAccount.cny', { amount: formatPlatformMoney(appliedCreditAmount) })}</p>
@@ -222,7 +222,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
             : t('platformAccount.qrValidFor', { time: clock(remaining) })}
         </p>}
       </div>
-      {codeUrl && <div className="flex min-w-0 max-w-full shrink-0 flex-col items-center gap-2 self-center">
+      {codeUrl && <div className="flex min-w-0 max-w-full shrink-0 flex-col items-center gap-1 self-center @xl:gap-2">
         {qr?.image
           ? <img
               src={qr.image}
@@ -230,7 +230,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
               height={224}
               className={walletLayout ? 'h-auto w-48 max-w-full rounded-lg bg-white' : 'h-auto max-w-full rounded-lg bg-white'}
               alt={scanHint}
-              onLoad={walletLayout ? () => paymentCard.current?.scrollIntoView({ block: 'nearest' }) : undefined}
+              onLoad={walletLayout ? () => paymentActions.current?.scrollIntoView({ block: 'nearest' }) : undefined}
             />
           : <p className={`${SETTINGS_HELPER_CLASS}${walletLayout ? ' grid h-48 w-48 max-w-full place-items-center' : ''}`} role={qr ? 'alert' : 'status'}>{t(qr ? 'platformAccount.commerceFailed' : 'platformAccount.loading')}</p>}
         {walletLayout && <p className={SETTINGS_HELPER_CLASS}>{scanHint}</p>}
@@ -239,7 +239,7 @@ export const PlatformPaymentPanel: React.FC<PlatformPaymentPanelProps> = ({
 
     {checkout.refund_status === 'REJECTED' && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.checkoutRefundRejected')}</p>}
     {codeUrl && !walletLayout && <p className={`${SETTINGS_HELPER_CLASS} mt-3`}>{t('platformAccount.paymentAutoConfirm')}</p>}
-    <div className={walletLayout ? 'mt-3 flex flex-wrap justify-center gap-2' : 'mt-2 flex flex-wrap items-center gap-2'}>{actions}</div>
+    <div ref={paymentActions} className={walletLayout ? 'mt-2 flex scroll-mb-2 flex-wrap justify-center gap-2 @xl:mt-3' : 'mt-2 flex flex-wrap items-center gap-2'}>{actions}</div>
     {refundConfirmation && refundable && <div className="mt-3 space-y-2">
       <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.refundConfirmation')}</p>
       <div className="flex flex-wrap gap-2">

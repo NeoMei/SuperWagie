@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { closeChrome } from './perf/browser-test-fixture.mjs';
 import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait } from './perf/cdp.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
@@ -14,7 +15,7 @@ test('wide CSV previews keep bounded rows, stable columns and a reachable final 
   let chrome;
   try { chrome = resolveChrome(); } catch { t.skip('Chrome is required for real layout verification'); return; }
   const scratch = await mkdtemp(join(tmpdir(), 'superwagie-csv-preview-'));
-  t.after(() => rm(scratch, { recursive: true, force: true }));
+  t.after(() => rm(scratch, { recursive: true, force: true, maxRetries: 3 }));
   await symlink(resolve(repo, 'node_modules'), join(scratch, 'node_modules'), 'dir');
   const component = process.env.CSV_PREVIEW_COMPONENT || resolve(repo, 'packages/ui/src/components/views/files/previews/TableArtifact.tsx');
   const entry = join(scratch, 'fixture.tsx');
@@ -111,9 +112,10 @@ test('wide CSV previews keep bounded rows, stable columns and a reachable final 
       await writeFile(join(process.env.CSV_PREVIEW_EVIDENCE_DIR, 'csv-browser.json'), JSON.stringify({ before, after }, null, 2));
     }
   } finally {
-    if (client) { await client.send('Browser.close', {}, { timeoutMs: 3000 }).catch(() => {}); client.close(); }
-    if (child.exitCode === null) { await wait(200); if (child.exitCode === null) child.kill(); }
-    await new Promise((done) => server.close(done));
-    await rm(scratch, { recursive: true, force: true });
+    try {
+      await closeChrome(child, client);
+    } finally {
+      await new Promise((done) => server.close(done));
+    }
   }
 });

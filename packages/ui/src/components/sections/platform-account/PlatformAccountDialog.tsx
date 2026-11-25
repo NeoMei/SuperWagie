@@ -19,7 +19,7 @@ export const PlatformAccountDialog: React.FC<React.PropsWithChildren<{
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {children}
-      <DialogContent className="h-[min(52rem,90dvh)] max-w-[64rem] gap-0 overflow-hidden p-0" aria-describedby={undefined}>
+      <DialogContent className="h-[min(52rem,90dvh)] max-w-[64rem] gap-0 overflow-hidden p-0 transition-[opacity,scale]" aria-describedby={undefined}>
         <DialogTitle className="sr-only">{t('sessions.sidebar.footer.accountMenu.userCenter')}</DialogTitle>
         {open && PlatformAccountPage ? <PlatformAccountPage /> : null}
       </DialogContent>

@@ -670,6 +670,13 @@ The test reports a skip if Chrome is unavailable. An explicit invalid Chrome pat
 
 `chat-quote-popover.browser.test.mjs` renders the real `ChatQuoteMarkPopover` with the UI stylesheet in an isolated Vite fixture that has its own optimizer cache, so it can run next to the JSON tree test. A short saved comment sits on a quote at the left and right edges, at 320, 390 and 1024 px, in both text directions. The test opens the editor and saves twice, and after every step it checks that the popover and its controls stay 12 px inside the viewport. Empty and long comments also remain contained when the viewport shrinks during editing. The popover measures its rendered width before first paint and observes width and viewport changes while mounted, so clamping includes the entire card in either mode. Like the JSON tree test, it stays on loopback and stops what it started.
 
+The account and model-configuration browser tests use
+`browser-test-fixture.mjs`. Each test owns its fixture directory, Vite optimizer
+cache and Chrome profile. The fixture seeds the generated React JSX
+runtime in Vite's dependency scan and waits for the new document's
+`DOMContentLoaded` before a test polls rendered state. Teardown bounds the
+Chrome shutdown and waits for the process to exit before removing its profile.
+
 ```bash
 node --test scripts/perf/chat-quote-popover.browser.test.mjs
 OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/chat-quote-popover.browser.test.mjs
