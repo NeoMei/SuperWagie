@@ -288,6 +288,7 @@ export const PlatformAccountPage: React.FC = () => {
               {!unsupported && signedIn.accountId && <PlatformAccountCommerce
                 key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`}
                 accountId={signedIn.accountId}
+                userId={signedIn.user.id}
                 view={tab === 'orders' ? 'orders' : visibleTab === 'wallet' ? 'wallet' : 'overview'}
                 payer={selectedAccountName ?? signedIn.accountId}
                 membershipSummary={membershipSummary}

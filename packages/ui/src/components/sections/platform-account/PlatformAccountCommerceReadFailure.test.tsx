@@ -54,7 +54,7 @@ let host: HTMLDivElement | undefined;
 const render = async () => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   useI18nStore.getState().setLocale('en');
-  await act(async () => root?.render(<I18nProvider><PlatformAccountCommerce accountId="team-a" payer="Team A" view="overview" hasActiveMembership={false} membershipSummary={({ openMembership, openAddon, membershipOpen, addonOpen, disabled }) => <><button type="button" disabled={disabled} aria-pressed={membershipOpen} onClick={openMembership}>Subscribe</button><button type="button" disabled={disabled} aria-pressed={addonOpen} onClick={openAddon}>Buy extra credits</button></>} onAccountRefresh={() => {}} /></I18nProvider>));
+  await act(async () => root?.render(<I18nProvider><PlatformAccountCommerce accountId="team-a" userId="actor-a" payer="Team A" view="overview" hasActiveMembership={false} membershipSummary={({ openMembership, openAddon, membershipOpen, addonOpen, disabled }) => <><button type="button" disabled={disabled} aria-pressed={membershipOpen} onClick={openMembership}>Subscribe</button><button type="button" disabled={disabled} aria-pressed={addonOpen} onClick={openAddon}>Buy extra credits</button></>} onAccountRefresh={() => {}} /></I18nProvider>));
 };
 const button = (text: string) => {
   const found = [...(host?.querySelectorAll('button') ?? [])].find(item => item.textContent === text);
@@ -101,8 +101,8 @@ test('a funding target received during a failed commerce read stays closed after
 
 test('a failed follow-up read after a channel switch disables purchase entries until an authoritative refresh', async () => {
   await render();
-  await act(async () => button('Alipay').click());
   await act(async () => host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="SuperWagie Plus"]')?.click());
+  await act(async () => button('Alipay').click());
   expect(mutations.filter((item) => item.path.endsWith('/api/platform-account/commerce/checkouts'))).toHaveLength(1);
   commerce.intents[0].status = 'PENDING';
   commerce.intents[0].resourceId = 'waiting-checkout';
