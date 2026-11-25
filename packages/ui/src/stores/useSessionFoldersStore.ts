@@ -576,7 +576,7 @@ const refreshFromServer = async (): Promise<void> => {
  * the local copy stays as it is and changes wait.
  */
 const hydrateFromServer = async (): Promise<void> => {
-  if (!isServerSyncAvailable() || serverHydrated || hydrationInFlight || importRejected) return;
+  if (!isServerSyncAvailable() || activeFolderRuntimeKey !== getRuntimeKey() || serverHydrated || hydrationInFlight || importRejected) return;
   const runtimeKey = activeFolderRuntimeKey;
   const generation = folderRuntimeGeneration;
   hydrationInFlight = true;
@@ -641,6 +641,11 @@ const hydrateFromServer = async (): Promise<void> => {
   }
 };
 
+/** The mounted workspace starts the first server read for this runtime. */
+export const startSessionFoldersSync = (): void => {
+  void hydrateFromServer();
+};
+
 /** Another client changed the folders; read them unless this answer is already shown. */
 export const handleSessionFoldersChanged = (updatedAt: number): void => {
   if (!isServerSyncAvailable()) return;
@@ -701,7 +706,6 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
             foldersMap: readPersistedFolders(runtimeKey),
             collapsedFolderIds: readPersistedCollapsed(runtimeKey),
           });
-          queueMicrotask(() => void hydrateFromServer());
         },
 
         getFoldersForScope: (scopeKey: string): SessionFolder[] => {
@@ -796,5 +800,3 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
     { name: 'session-folders-store' },
   ),
 );
-
-void hydrateFromServer();

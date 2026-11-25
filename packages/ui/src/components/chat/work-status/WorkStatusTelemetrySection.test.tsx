@@ -98,6 +98,9 @@ describe('mounted turn telemetry with live sync stores', () => {
             pendingMints.push(Promise.allSettled([refreshRuntimeUrlAuthToken(url.origin)]));
             return new Response(null, { status: 404 });
           }
+          if (method === 'GET' && url.pathname === '/api/session-folders') {
+            return Response.json({ exists: false, foldersMap: {}, updatedAt: 0 });
+          }
           if (method === 'GET' && unavailableReads.has(url.pathname)) {
             return new Response('Fixture runtime unavailable', { status: 503 });
           }

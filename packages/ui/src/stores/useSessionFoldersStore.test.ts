@@ -59,7 +59,7 @@ mock.module('@/lib/runtime-fetch', () => ({
 }));
 mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
 
-const { useSessionFoldersStore, handleSessionFoldersChanged, handleSessionFoldersStreamReady } = await import('./useSessionFoldersStore');
+const { useSessionFoldersStore, handleSessionFoldersChanged, handleSessionFoldersStreamReady, startSessionFoldersSync } = await import('./useSessionFoldersStore');
 
 const waitForPersist = () => new Promise((resolve) => setTimeout(resolve, 350));
 
@@ -173,11 +173,29 @@ describe('useSessionFoldersStore folder assignments', () => {
   const settle = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
   const folder = (id: string, name: string, sessionIds: string[] = []) => ({ id, name, sessionIds, createdAt: 1, parentId: null });
   const names = (scopeKey = '/repo') => useSessionFoldersStore.getState().getFoldersForScope(scopeKey).map((entry) => entry.name);
+
+  test('restores the runtime cache before the workspace starts server sync', withWindow(async () => {
+    storage.set('oc.sessions.folders.v2:runtime-a', JSON.stringify({ '/repo': [folder('cached', 'Cached')] }));
+    storage.set('oc.sessions.foldersShared.v2:runtime-a', '1');
+    respond = () => json({ exists: true, foldersMap: { '/repo': [folder('server', 'Server')] }, updatedAt: 10 });
+
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+    await settle();
+    expect(requests).toEqual([]);
+    expect(names()).toEqual(['Cached']);
+
+    startSessionFoldersSync();
+    await settle();
+    expect(requests.map((request) => request.method)).toEqual(['GET']);
+    expect(names()).toEqual(['Server']);
+  }));
+
   /** Start on a fresh server connection with this device's copy already in storage. */
   const connect = async (local: TestFoldersMap | null, shared: boolean) => {
     if (local) storage.set('oc.sessions.folders.v2:runtime-a', JSON.stringify(local));
     if (shared) storage.set('oc.sessions.foldersShared.v2:runtime-a', '1');
     useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+    startSessionFoldersSync();
     await settle();
     await settle();
   };
@@ -208,6 +226,7 @@ describe('useSessionFoldersStore folder assignments', () => {
     // Before the store reached the server, as the archive filing does on a fresh device.
     const local = useSessionFoldersStore.getState().createFolder('/repo', 'Bugs');
     useSessionFoldersStore.getState().addSessionToFolder('/repo', local.id, 'ses_1');
+    startSessionFoldersSync();
     await settle();
     await settle(250);
 

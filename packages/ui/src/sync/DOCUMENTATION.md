@@ -1222,7 +1222,9 @@ first data, independently of the fallback decision. Disconnect or a replay
 reset also clears live tool names whose completion might have been missed.
 
 Chat folders follow the same shape through `session-folders-sync.ts`: the
-provider subscribes for the runtime it mounted with, a
+provider starts the first server read when the workspace mounts for its runtime.
+Importing the store and resetting its runtime restore only the local cache, so
+the desktop connection recovery screen makes no folder request before sign-in. A
 `session-folders-changed` control event with a newer revision reads the
 server's folders again, and every control-stream connection reads them and
 sends the changes still queued. `useSessionFoldersStore` owns the revision

@@ -1,6 +1,6 @@
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { handleSessionFoldersChanged, handleSessionFoldersStreamReady } from '@/stores/useSessionFoldersStore';
+import { handleSessionFoldersChanged, handleSessionFoldersStreamReady, startSessionFoldersSync } from '@/stores/useSessionFoldersStore';
 
 // One return fires several of these signals at once; this makes them one read.
 const RETURN_READ_THROTTLE_MS = 2_000;
@@ -14,6 +14,7 @@ const RETURN_READ_THROTTLE_MS = 2_000;
  * and the heartbeat timer that would notice is throttled while it is hidden.
  */
 export const subscribeSessionFoldersSync = (runtimeKey: string): (() => void) => {
+  if (runtimeKey === getRuntimeKey()) startSessionFoldersSync();
   const unsubscribe = subscribeOpenchamberEvents((event) => {
     if (runtimeKey !== getRuntimeKey()) return;
     if (event.type === 'session-folders-changed') handleSessionFoldersChanged(event.updatedAt);

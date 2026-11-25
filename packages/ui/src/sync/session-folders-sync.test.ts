@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 
 let reads = 0;
+let starts = 0;
 let runtimeKey = 'runtime-a';
 let emit: (event: { type: string; updatedAt?: number }) => void = () => {};
 
@@ -14,6 +15,7 @@ mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }))
 mock.module('@/stores/useSessionFoldersStore', () => ({
   handleSessionFoldersChanged: () => {},
   handleSessionFoldersStreamReady: () => { reads += 1; },
+  startSessionFoldersSync: () => { starts += 1; },
 }));
 
 const originalWindow = globalThis.window;
@@ -37,6 +39,7 @@ describe('subscribeSessionFoldersSync', () => {
   beforeEach(() => {
     unsubscribe();
     reads = 0;
+    starts = 0;
     runtimeKey = 'runtime-a';
     fakeDocument.visibilityState = 'visible';
     Date.now = () => now;
@@ -46,6 +49,13 @@ describe('subscribeSessionFoldersSync', () => {
   afterAll(() => {
     unsubscribe();
     Date.now = originalNow;
+  });
+
+  test('starts server sync when the current runtime subscribes', () => {
+    expect(starts).toBe(1);
+    const stopStale = subscribeSessionFoldersSync('runtime-b');
+    expect(starts).toBe(1);
+    stopStale();
   });
 
   for (const signal of ['focus', 'pageshow', 'online', 'openchamber:system-resume']) {
