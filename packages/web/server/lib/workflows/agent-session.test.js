@@ -96,3 +96,23 @@ describe('workflow prompt admission and knowledge', () => {
     expect(prompt).toHaveBeenCalledTimes(1);
   });
 });
+
+it('records workflow results without waking an admission-managed parent', async () => {
+  const body = vi.fn();
+  const sessions = createWorkflowAgentSessions({
+    buildOpenCodeUrl: (path) => `http://fixture.invalid${path}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    globalEventHub: { subscribeEvent: () => () => {} },
+    createClient: () => ({ session: { get: async () => ({
+      id: 'ses_lead', model: { providerID: 'unihub', id: 'managed' }, location: { directory: '/repo' },
+    }) } }),
+    fetchImpl: async (_url, request) => {
+      body(JSON.parse(request.body), request.headers);
+      return new Response(null, { status: 204 });
+    },
+  });
+  await sessions.postSynthetic('ses_lead', { text: 'Finished', resume: true });
+  expect(body).toHaveBeenCalledWith({ text: 'Finished', resume: false }, expect.objectContaining({
+    'x-opencode-directory': encodeURIComponent('/repo'),
+  }));
+});

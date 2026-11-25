@@ -67,6 +67,12 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - The reusable upstream reader centralizes SSE fetch/parsing/reconnect behavior for the WS runtime and OpenCode watcher. Additional event consumers should move to it only with parity tests for their lifecycle and error semantics.
 - Browser transport concerns live in the WS bridge modules; server-side global stream ownership lives in `global-hub.js`.
 
+Durable turn starts, outcomes, retry schedules and step starts are admitted
+against the latest session sequence seen by the hub. The host and each isolated
+space have independent sequences. Stale status sources are dropped before
+translation and replay so they cannot run server-side turn-end effects or
+revive an ended turn on a browser. Other transcript events can still backfill.
+
 ## Delta coalescing
 OpenCode publishes one `message.part.delta` per token fragment. A 5.7 KB answer measured 3,402 delta events of 1.7 characters each, 97% of all frames and 1.3 MB on the wire. The hub merges them before replay and fan-out, which cut that stream to 483 frames and 197 KB with identical text. Replay holds merged frames too, so its 2,048 entries cover about seven times more streaming time.
 

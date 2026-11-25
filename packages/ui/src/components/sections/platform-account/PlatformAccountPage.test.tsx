@@ -15,7 +15,7 @@ for (const [name, value] of Object.entries({ window: browser, document: browser.
 const signedIn = {
   status: 'signed-in', user: { id: 'actor-a', name: 'Alice', email: 'alice@example.test' },
   accounts: [{ id: 'team-a', kind: 'team', name: 'Team A', role: 'member' }], accountId: 'team-a', expiresAt: '2026-10-24T15:00:00Z',
-  membership: [{ id: 'sub-a', product_id: 'superwagie', status: 'active', paid_through: '2026-11-24T00:00:00Z', offer: { name: 'Fixture plan' } }],
+  membership: [{ id: 'sub-a', product_id: 'superwagie', status: 'active', paid_through: new Date(Date.now() + 30 * 86_400_000).toISOString(), offer: { name: 'Fixture plan' } }],
   credits: { available: '9007199254740993', reserved: '7' }, consoleUrl: 'http://localhost:8088/?account=team-a', modelService: 'unavailable',
 };
 const profile = { id: 'actor-a', username: 'alice', displayName: 'Alice', email: 'alice@example.test', avatarAvailable: false, version: '1' };

@@ -11,7 +11,7 @@ import { resolveEffectiveConfig } from './store.js';
  * `req.body` when a middleware parsed it. These tests mount the rewrite ahead
  * of a stand-in proxy that records what it would forward.
  */
-const createApp = ({ routeSend, autoSessions = new Set() } = {}) => {
+const createApp = ({ routeSend, prepareSend, routePreparedSend, autoSessions = new Set() } = {}) => {
   const forwarded = [];
   const runtime = {
     noteModelSelection: vi.fn((sessionId, model) => {
@@ -21,6 +21,8 @@ const createApp = ({ routeSend, autoSessions = new Set() } = {}) => {
       return auto;
     }),
     isAutoSession: (sessionId) => autoSessions.has(sessionId),
+    prepareSend,
+    routePreparedSend,
     routeSend: routeSend ?? vi.fn(async ({ body }) => {
       if (typeof body?.command === 'string') body.model = { providerID: 'openai', id: 'gpt-6-astra' };
       return {};
@@ -162,6 +164,101 @@ describe('routing send rewrite', () => {
     expect(response.status).toBe(400);
     expect(response.body).toEqual({ error: 'no fallback' });
     expect(forwarded).toEqual([]);
+  });
+
+  it('uses Auto’s selected model and scoped kernel for attachment delivery before admitting context or forwarding', async () => {
+    const config = resolveEffectiveConfig(null);
+    config.enabled = true;
+    config.fallback = { model: { providerID: 'custom', modelID: 'text' }, variant: null };
+    const operations = [];
+    let failWrite = false;
+    const listCatalogModels = vi.fn(async () => [
+      { providerID: 'custom', modelID: 'text', variants: [], capabilities: { input: ['text'] } },
+    ]);
+    const runtime = createRoutingRuntime({
+      dataDir: '/unused', buildOpenCodeUrl: (route) => `http://opencode.test${route}`, getOpenCodeAuthHeaders: () => ({}),
+      store: { readConfig: async () => config, readToken: async () => null, readClassifierSource: async () => 'off', readCustomEndpoint: async () => null },
+      readProviderKeys: async () => ({}), enterpriseMode: () => false, readPinnedEndpoint: () => null,
+      listCatalogModels,
+      fetchImpl: async (input, init) => {
+        const req = new Request(input, init);
+        const url = new URL(req.url);
+        if (url.pathname === '/api/info') return Response.json({ paths: { tmp: '/kernel/tmp' } });
+        if (url.pathname === '/api/experimental/fs/write') {
+          const target = url.searchParams.get('path');
+          operations.push({ target, directory: req.headers.get('x-opencode-directory'), bytes: [...new Uint8Array(await req.arrayBuffer())] });
+          if (failWrite) return new Response(null, { status: 500 });
+          return Response.json({ location: { directory: '/repo' }, data: { path: target } });
+        }
+        if (url.pathname.endsWith('/model')) {
+          operations.push(await req.json());
+          return new Response(null, { status: 204 });
+        }
+        return new Response(null, { status: 404 });
+      },
+    });
+    runtime.noteModelSelection('s1', { providerID: 'openchamber', id: 'auto' }, '/repo');
+    const { app, forwarded } = createApp({
+      autoSessions: new Set(['s1']), routeSend: runtime.routeSend,
+      prepareSend: runtime.prepareSend, routePreparedSend: runtime.routePreparedSend,
+    });
+    const scope = '?directory=%2Frepo';
+    const preflight = '/api/routing/sessions/s1/prepare-send' + scope;
+    const prompt = '/api/session/s1/prompt' + scope;
+    const body = { id: 'msg_prompt', text: 'Read this', files: [
+      { name: 'scan.pdf', uri: 'data:application/pdf;base64,AQID' },
+      { name: 'notes.docx', uri: 'data:text/plain;base64,dGV4dA==' },
+    ] };
+
+    failWrite = true;
+    const failure = await request(app).post(preflight).send(body).expect(400);
+    expect(failure.body).toMatchObject({ _tag: 'InvalidRequestError', message: 'Could not prepare attachment paths.' });
+    expect(forwarded).toEqual([]);
+    expect(operations).toHaveLength(1);
+
+    failWrite = false;
+    operations.length = 0;
+    const { body: prepared } = await request(app).post(preflight).send(body).expect(200);
+    const [{ target }] = operations;
+    expect(operations).toEqual([
+      { target: expect.stringMatching(/^\/kernel\/tmp\/openchamber\/[a-f0-9]+\/1-scan\.pdf$/), directory: '%2Frepo', bytes: [1, 2, 3] },
+    ]);
+    expect(prepared).toMatchObject({
+      ticket: expect.stringMatching(/^oc-auto-/), text: `Read this\n\n[scan.pdf](<${target}>)`, files: [body.files[1]],
+    });
+    const dispatch = { id: body.id, text: prepared.text, files: prepared.files };
+    // A stale or modified dispatch may not fall through to legacy routing.
+    await request(app).post(prompt).set('Idempotency-Key', prepared.ticket).send({ ...dispatch, text: 'other text' }).expect(409);
+    await request(app).post('/api/session/s1/prompt?directory=%2Fother')
+      .set('Idempotency-Key', prepared.ticket).send(dispatch).expect(409);
+    expect(forwarded).toEqual([]);
+    expect(operations).toHaveLength(1);
+
+    const context = { id: 'msg_memory', text: 'remembered context', resume: false };
+    await request(app).post('/api/session/s1/synthetic' + scope).send(context).expect(204);
+    // Skill fallback can reuse this same preparation even when a new write
+    // would fail. Nothing in either dispatch reclassifies or writes files.
+    failWrite = true;
+    await request(app).post(prompt).set('Idempotency-Key', prepared.ticket).send({ ...dispatch, skills: [{ id: 'deploy' }] }).expect(204);
+    await request(app).post(prompt).set('Idempotency-Key', prepared.ticket).send(dispatch).expect(204);
+    expect(operations).toEqual([
+      expect.objectContaining({ target }),
+      { model: { providerID: 'custom', id: 'text' } },
+      { model: { providerID: 'custom', id: 'text' } },
+    ]);
+    expect(forwarded.map((entry) => entry.parsed ? entry.body : JSON.parse(entry.raw))).toEqual([
+      context, { ...dispatch, skills: [{ id: 'deploy' }] }, dispatch,
+    ]);
+    expect(listCatalogModels.mock.calls).toEqual([['/repo'], ['/repo']]);
+
+    failWrite = false;
+    const { body: command } = await request(app).post(preflight)
+      .send({ name: 'review', text: body.text, files: body.files }).expect(200);
+    const commandBody = { name: 'review', text: command.text, files: command.files };
+    await request(app).post(prompt).set('Idempotency-Key', command.ticket).send(commandBody).expect(409);
+    const commandRoute = '/api/session/s1/command' + scope;
+    await request(app).post(commandRoute).set('Idempotency-Key', command.ticket).send(commandBody).expect(204);
+    await request(app).post(commandRoute).set('Idempotency-Key', command.ticket).send(commandBody).expect(409);
   });
 
   it('refuses a stale Auto fallback before switching the kernel or forwarding the prompt', async () => {

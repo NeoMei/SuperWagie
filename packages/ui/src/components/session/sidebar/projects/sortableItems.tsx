@@ -1,3 +1,5 @@
+import { toast } from '@/components/ui';
+import { useLeadStrings } from '@/sync/session-lead';
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
@@ -118,6 +120,7 @@ interface SortableProjectItemProps extends ProjectIdentityProps {
   alwaysShowActions: boolean;
   onToggle: () => void;
   onNewSession: () => void;
+  onNewLead?: () => Promise<void>;
   onNewWorktreeSession?: () => void;
   onManageWorktrees?: () => void;
   /** The project's isolated spaces page; absent while the feature is off, and always in VS Code. */
@@ -156,6 +159,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   alwaysShowActions,
   onToggle,
   onNewSession,
+  onNewLead,
   onNewWorktreeSession,
   onManageWorktrees,
   onManageSpaces,
@@ -197,8 +201,19 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
   }, [menuInstanceKey, setOpenSidebarMenuKey]);
 
+  const leadText = useLeadStrings();
   const renderProjectMenuItems = (Item: React.ElementType) => (
     <>
+      {showCreateButtons && !hideDirectoryControls && onNewLead ? (
+        <Item onClick={() => {
+          void onNewLead().catch((error: Error) => {
+            toast.error(leadText['sessions.sidebar.session.lead.failed'], { description: error.message });
+          });
+        }}>
+          <Icon name="team" className="me-1 h-4 w-4" />
+          {leadText['sessions.sidebar.project.actions.newLead']}
+        </Item>
+      ) : null}
       {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
         <Item onClick={onNewSession}>
           <Icon name="add" className="me-1.5 h-4 w-4" />

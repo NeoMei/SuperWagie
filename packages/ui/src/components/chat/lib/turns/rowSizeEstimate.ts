@@ -122,11 +122,14 @@ type TurnRowOf<K extends TimelineRow['kind']> = Extract<TimelineRow, { kind: K }
 const hoistedPages = (row: TurnRowOf<'turn-message' | 'turn-pages'>) => {
     if (!row.underFold) return [];
     const finalMessage = row.finalMessageId ? row.entry.turn.assistantMessages.find((message) => message.info.id === row.finalMessageId) : undefined;
-    return getShownPages(row.entry.turn.assistantMessages, finalMessage);
+    return getShownPages(row.entry.turn.assistantMessages, finalMessage, row.keepText);
 };
 
 // SuperWagie renders recorded questions and pages as expanded cards.
-const hoistedHeight = (pages: ShownPart[]): number => pages.length * SHOWN_PAGE_PX;
+const hoistedHeight = (pages: ShownPart[], metrics: RowSizeMetrics, keepText: boolean): number => (
+    pages.reduce((height, part) => height + (keepText && part.type === 'text'
+        ? markdownHeight(part.text, metrics.columnWidth) : SHOWN_PAGE_PX), 0)
+);
 
 const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetrics): number | undefined => {
     const message = row.entry.turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
@@ -139,7 +142,7 @@ const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetric
     const answerStartsHere = firstText !== undefined
         && message.parts.find((part) => part.type === 'text' && !isEmptyTextPart(part))?.id === firstText.id
         && !(row.slice?.from?.partId === firstText.id && row.slice.from.offset > 0);
-    let height = answerStartsHere ? hoistedHeight(hoisted) : 0;
+    let height = answerStartsHere ? hoistedHeight(hoisted, metrics, row.keepText) : 0;
     let hasText = false;
     for (const part of parts) {
         if (part.type === 'text') {
@@ -177,8 +180,13 @@ export const estimateTimelineRowSize = (row: TimelineRow, metrics: RowSizeMetric
     switch (row.kind) {
         case 'ungrouped': return UNGROUPED_PX;
         case 'turn-head': height = promptHeight(row.entry.turn.userMessage, metrics); break;
-        case 'turn-fold': height = FOLD_HEADER_PX; break;
-        case 'turn-pages': height = hoistedHeight(hoistedPages(row)); break;
+        case 'turn-fold': {
+            const notes = row.keepText && !row.finalMessageId
+                ? getShownPages(row.entry.turn.assistantMessages, undefined, true) : [];
+            height = FOLD_HEADER_PX + hoistedHeight(notes, metrics, row.keepText);
+            break;
+        }
+        case 'turn-pages': height = hoistedHeight(hoistedPages(row), metrics, row.keepText); break;
         case 'turn-message': {
             const message = messageRowHeight(row, metrics);
             return message === undefined ? undefined : Math.round(message);

@@ -2,8 +2,13 @@ import fs from 'node:fs/promises';
 import { EventEmitter, once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
+import express from 'express';
+import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createOpenChamberControlService } from './service.js';
+import { registerOpenChamberControlRoutes } from './routes.js';
+import { createSavedSecretStore } from './secret-store.js';
 import { createSecretRequests } from './secret-request.js';
 import { createSecretLeases, redactSecrets, secretRunCommandLine, SECRET_LEASE_MS } from './secret-run.js';
 
@@ -13,13 +18,13 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-const createHarness = async ({ enabled = true, now, hasUnreadChat } = {}) => {
+const createHarness = async ({ enabled = true, now, hasUnreadChat, savedStore, projectForDirectory, resolveSessionDirectory } = {}) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-secret-run-'));
   temporaryDirectories.push(directory);
   const events = new EventEmitter();
   const onWaitChange = vi.fn((change) => events.emit(change.type));
   const leases = createSecretLeases({ now });
-  const requests = createSecretRequests({ isEnabled: async () => enabled, files: null, onWaitChange, hasUnreadChat, leases });
+  const requests = createSecretRequests({ isEnabled: async () => enabled, files: null, onWaitChange, hasUnreadChat, leases, savedStore, projectForDirectory, resolveSessionDirectory });
   return { directory, requests, onWaitChange, leases, waitForCard: () => once(events, 'waiting') };
 };
 
@@ -203,6 +208,198 @@ describe('secret.run', () => {
   it('answers 403 while the tool is off', async () => {
     const { directory, requests } = await createHarness({ enabled: false });
     await expect(requests.run(printToken, call(directory))).rejects.toMatchObject({ statusCode: 403 });
+  });
+});
+
+describe('saved secret consent', () => {
+  const input = { ...printToken, inputs: [printToken.inputs[0]] };
+  const identity = { sessionId: 'ses_1', callId: 'call_1' };
+  const project = { id: 'project-a', path: '/projects/a' };
+
+  const withSavedToken = async () => {
+    let currentDirectory;
+    let currentProject = project;
+    let entry = { scope: 'project', revision: 'v1', value: 'project-token-fixture' };
+    const harness = await createHarness({
+      savedStore: { read: () => ({ API_TOKEN: entry }) },
+      projectForDirectory: async () => currentProject,
+      resolveSessionDirectory: async () => currentDirectory,
+    });
+    currentDirectory = harness.directory;
+    const pending = harness.requests.run(input, call(harness.directory));
+    await harness.waitForCard();
+    return {
+      ...harness, pending,
+      moveSession: () => { currentDirectory = '/projects/b'; },
+      replaceProject: () => { currentProject = { id: 'project-b', path: '/projects/b' }; },
+      replaceToken: () => { entry = { ...entry, revision: 'v2', value: 'replacement-fixture' }; },
+    };
+  };
+
+  it('persists both scopes across service restarts and revokes only the selected saved credential', async () => {
+    let sessionDirectory;
+    let currentProject = project;
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-saved-secrets-'));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, 'private', 'saved-secrets.json');
+    const start = async () => {
+      const harness = await createHarness({
+        savedStore: createSavedSecretStore({ filePath }),
+        projectForDirectory: async () => currentProject,
+        resolveSessionDirectory: async () => sessionDirectory,
+      });
+      sessionDirectory = harness.directory;
+      return harness;
+    };
+
+    const first = await start();
+    const save = first.requests.run(printToken, call(first.directory, { sessionId: 'ses_old' }));
+    await first.waitForCard();
+    try {
+      const { consent } = first.requests.fields({ ...identity, sessionId: 'ses_old' });
+      await first.requests.answer({
+        ...identity, sessionId: 'ses_old', consent,
+        values: { API_TOKEN: 'project-fixture', API_USER: 'global-fixture' },
+        save: ['API_TOKEN'], saveGlobally: ['API_USER'],
+      });
+      await expect(save).resolves.toMatchObject({
+        stdout: 'token is [secret:API_TOKEN]\n', stderr: 'user [secret:API_USER]\n', remembered: [],
+      });
+      if (process.platform !== 'win32') {
+        expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
+        expect((await fs.stat(path.dirname(filePath))).mode & 0o777).toBe(0o700);
+      }
+    } finally {
+      await first.requests.answer({ ...identity, sessionId: 'ses_old', declined: true }).catch(() => undefined);
+      await save;
+    }
+
+    const next = await start();
+    currentProject = { id: 'project-b', path: '/projects/b' };
+    const otherProject = next.requests.run(printToken, call(next.directory));
+    await next.waitForCard();
+    try {
+      const fields = next.requests.fields(identity);
+      expect(fields.saved).toEqual({ API_USER: 'global' });
+      await next.requests.answer({ ...identity, consent: fields.consent, values: { API_TOKEN: 'once-fixture' } });
+      await expect(otherProject).resolves.toMatchObject({ stderr: 'user [secret:API_USER]\n' });
+    } finally {
+      await next.requests.answer({ ...identity, declined: true }).catch(() => undefined);
+      await otherProject;
+    }
+
+    currentProject = project;
+    const sameProject = next.requests.run(printToken, call(next.directory));
+    await next.waitForCard();
+    try {
+      const fields = next.requests.fields(identity);
+      expect(fields.saved).toEqual({ API_TOKEN: 'project', API_USER: 'global' });
+      const updated = await next.requests.answer({ ...identity, forgetSaved: 'API_TOKEN', consent: fields.consent });
+      expect(updated.saved).toEqual({ API_USER: 'global' });
+      await expect(next.requests.answer({
+        ...identity, consent: fields.consent, values: { API_TOKEN: 'once-fixture' },
+      })).rejects.toMatchObject({ statusCode: 409 });
+      await next.requests.answer({
+        ...identity, consent: updated.consent, values: { API_TOKEN: 'once-fixture' },
+      });
+      await expect(sameProject).resolves.toMatchObject({
+        stdout: 'token is [secret:API_TOKEN]\n', stderr: 'user [secret:API_USER]\n',
+      });
+    } finally {
+      await next.requests.answer({ ...identity, declined: true }).catch(() => undefined);
+      await sameProject;
+    }
+
+    const later = await start();
+    const run = later.requests.run(printToken, call(later.directory));
+    await later.waitForCard();
+    try {
+      expect(later.requests.fields(identity).saved).toEqual({ API_USER: 'global' });
+    } finally {
+      await later.requests.answer({ ...identity, declined: true });
+      await run;
+    }
+  });
+
+  it('delivers saved credentials through the control service and private HTTP card routes', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-secret-control-'));
+    temporaryDirectories.push(directory);
+    const store = createSavedSecretStore({ filePath: path.join(directory, 'private', 'saved-secrets.json') });
+    store.update(project.id, { set: [
+      { env: 'API_TOKEN', scope: 'global', value: 'global-http-fixture' },
+      { env: 'API_TOKEN', scope: 'project', value: 'project-http-fixture' },
+    ] });
+    const client = {
+      session: {
+        inbox: { list: async () => [] },
+        list: async () => ({ data: [{ id: identity.sessionId, location: { directory } }] }),
+      },
+    };
+    const events = new EventEmitter();
+    const service = createOpenChamberControlService({
+      savedSecretStore: store,
+      projectForSecretDirectory: async () => project,
+      createClient: () => client,
+      buildOpenCodeUrl: () => 'http://localhost',
+      getOpenCodeAuthHeaders: () => ({}),
+      onPageWaitChange: (change) => events.emit(change.type),
+    });
+    const app = express();
+    registerOpenChamberControlRoutes(app, { controlService: service });
+    const waiting = once(events, 'waiting');
+    const pending = service.execute('secret.run', input, directory, {
+      contextSessionId: identity.sessionId, contextCallId: identity.callId, authorized: true,
+    });
+    await waiting;
+    try {
+      const browser = request(app);
+      const fields = await browser.post('/api/openchamber/secret/fields').send(identity).expect(200);
+      expect(fields.body.saved).toEqual({ API_TOKEN: 'project' });
+      expect(fields.text).not.toContain('project-http-fixture');
+      await browser.post('/api/openchamber/secret/answer').send({ ...identity, values: {} }).expect(409);
+      const response = await browser.post('/api/openchamber/secret/answer')
+        .send({ ...identity, values: {}, consent: fields.body.consent }).expect(200);
+      expect(response.body).toEqual({ status: 'submitted' });
+      await expect(pending).resolves.toMatchObject({ stdout: 'token is [secret:API_TOKEN]\n' });
+    } finally {
+      await service.answerSecret({ ...identity, declined: true }).catch(() => undefined);
+      await pending;
+    }
+  });
+
+  it('shows only the saved scope and runs with the value only after explicit card consent', async () => {
+    const { requests, pending } = await withSavedToken();
+    try {
+      const fields = requests.fields(identity);
+      expect(fields).toMatchObject({
+        fields: ['API_TOKEN'], reused: [], saved: { API_TOKEN: 'project' },
+        projectPath: project.path, consent: expect.any(String),
+      });
+      expect(JSON.stringify(fields)).not.toContain('project-token-fixture');
+      await expect(requests.answer({ ...identity, values: {} })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(requests.answer({ ...identity, values: {}, consent: fields.consent })).resolves.toEqual({ status: 'submitted' });
+      await expect(pending).resolves.toMatchObject({ stdout: 'token is [secret:API_TOKEN]\n', remembered: [] });
+    } finally {
+      await requests.answer({ ...identity, declined: true }).catch(() => undefined);
+      await pending;
+    }
+  });
+
+  it.each([
+    ['session directory', 'moveSession'],
+    ['configured project', 'replaceProject'],
+    ['saved value', 'replaceToken'],
+  ])('refuses consent when the %s changed while the card was open', async (_changed, change) => {
+    const harness = await withSavedToken();
+    const { requests, pending } = harness;
+    try {
+      const { consent } = requests.fields(identity);
+      harness[change]();
+      await expect(requests.answer({ ...identity, values: {}, consent })).rejects.toMatchObject({ statusCode: 409 });
+    } finally {
+      await requests.answer({ ...identity, declined: true }).catch(() => undefined);
+    }
+    await expect(pending).resolves.toMatchObject({ answer: { status: 'declined' } });
   });
 });
 

@@ -85,6 +85,15 @@ describe('QueuedMessagesStrip', () => {
     expect(button('Remove from queue')).toBeDefined();
   });
 
+  test('unconfirmed delivery remains visible with remove as the only message action', async () => {
+    await setQueue({ ...queued('q1', 'Also pull main'), deliveryUnconfirmed: true });
+    expect(host.textContent).toContain('Also pull main');
+    expect(host.textContent).toContain('Delivery unconfirmed');
+    expect(button('edit')).toBeUndefined();
+    expect(button('send')).toBeUndefined();
+    expect(button('Remove from queue')).toBeDefined();
+  });
+
   test('several messages collapse into a count that expands into a reorderable list', async () => {
     await setQueue(queued('q1', 'First'), queued('q2', 'Second'));
     expect(host.textContent).toContain('Queued messages 2');

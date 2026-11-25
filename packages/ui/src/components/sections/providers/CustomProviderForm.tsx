@@ -35,6 +35,7 @@ import {
   type ModelFieldErrors,
 } from './custom-provider-form';
 import { CustomProviderModelDiscovery } from './CustomProviderModelDiscovery';
+import { LocalProviderImport } from './LocalProviderImport';
 import { CustomProviderModelRow, type ModelCapabilityList, type ModelTextField } from './CustomProviderModelRow';
 
 type CustomProviderFormProps = {
@@ -394,6 +395,12 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
             </Button>
             <SettingsInfoHint>{t('settings.providers.page.custom.discovery.info')}</SettingsInfoHint>
           </div>
+          <LocalProviderImport form={form} busy={busy} onApply={(next) => {
+            setForm(next);
+            setErr({});
+            setModelErrors([]);
+            setDiscoveredModels(null);
+          }} />
           {discoveryError ? <p className="typography-meta text-[var(--status-error)]" role="alert">{discoveryError}</p> : null}
           {discoveredModels ? (
             <CustomProviderModelDiscovery

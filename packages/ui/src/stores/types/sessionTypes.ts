@@ -28,7 +28,9 @@ export interface AttachedFile {
     sourceDocumentId?: string;
     /** The editor citation that owns this file, including extracted parts of a document. */
     composerAnchor?: string;
-    /** A queued item already carries this image's path in its delivery text. */
+    /** Save a runtime copy alongside inline media when the delivery model can read it. */
+    saveCopy?: boolean;
+    /** Persisted image fallback for queue items captured before delivery-time model checks. */
     deliverAsPath?: boolean;
 }
 

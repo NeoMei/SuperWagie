@@ -20,6 +20,7 @@ import {
   isSpaceRequest,
   parseSpaceRoute,
   spaceRouteOf,
+  validateDirectoryHeaders,
 } from './dispatcher.js';
 
 // The UI auth keeps its signing secret in the data directory, and reads that path when it loads.
@@ -147,6 +148,8 @@ const transportTo = (currentInside, { ids = [ID], token = TOKEN } = {}) => {
 const startHost = async (dispatcher, { commonMiddleware = false } = {}) => {
   const app = express();
   if (commonMiddleware) {
+    app.use(validateDirectoryHeaders);
+    app.get('/api/version', (_req, res) => res.json({ version: 'fixture' }));
     registerCommonRequestMiddleware(app, { express, skipBodyParsing: isSpaceRequest });
   }
   app.use('/api', (req, _res, next) => { req.authenticatedByHost = true; next(); });
@@ -268,7 +271,10 @@ describe('space dispatcher', () => {
   it('forwards a prefixed request with the prefix and the user\'s credentials removed, and the space session added', async () => {
     await start();
     const response = await fetch(host.url(`/api/spaces/${ID}/echo?a=1&oc_url_token=secret-url&b=2&oc_client_token=secret-client`), {
-      headers: { cookie: 'oc_ui_session_3000=user-cookie', authorization: 'Bearer user-bearer', 'x-custom': 'kept', origin: 'https://app.example' },
+      headers: {
+        cookie: 'oc_ui_session_3000=user-cookie', authorization: 'Bearer user-bearer',
+        'cf-access-client-secret': 'fixture', 'x-custom': 'kept', origin: 'https://app.example',
+      },
     });
 
     expect(response.status).toBe(200);
@@ -276,6 +282,7 @@ describe('space dispatcher', () => {
     expect(inside.seen).toHaveLength(1);
     const [request] = inside.seen;
     expect(request.headers.authorization).toBeUndefined();
+    expect(request.headers['cf-access-client-secret']).toBeUndefined();
     expect(request.headers.origin).toBeUndefined();
     expect(request.headers.cookie).toMatch(/^oc_ui_session_27600=[^;]+$/);
     expect(request.headers.cookie).not.toContain('user-cookie');
@@ -485,6 +492,39 @@ describe('space dispatcher', () => {
     }
     expect(inside.seen).toHaveLength(0);
     expect(transport.calls.connect).toBe(0);
+  });
+
+  it.each([false, true])('refuses repeated directory headers and preserves a comma in a single path with early validation %s', async (commonMiddleware) => {
+    await start({ host: { commonMiddleware } });
+    const request = (suffix, headers) => new Promise((resolve, reject) => {
+      http.get(host.url(suffix), { headers }, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks)) }));
+        response.on('error', reject);
+      }).on('error', reject);
+    });
+    const directory = `/spaces/${ID}/repo`;
+    if (commonMiddleware) {
+      expect((await request('/api/version', { 'X-OpenCode-Directory': ['/home/me', directory] })).status).toBe(400);
+      expect((await request('/api/version', { 'X-OpenCode-Directory': '/home/me' })).status).toBe(200);
+    }
+    for (const [suffix, headers] of [
+      ['/api/host', { 'X-OpenCode-Directory': ['/home/me', directory] }],
+      ['/api/host', { 'X-OpenCode-Directory': [directory, '/home/me'] }],
+      [`/api/spaces/${ID}/echo`, { 'X-OpenCode-Directory': [directory, directory] }],
+      ['/api/host', { 'X-OpenCode-Directory': ['/home/me', '/home/other'] }],
+    ]) {
+      const response = await request(suffix, headers);
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({ code: 'invalid_directory_header' });
+    }
+    expect(inside.seen).toHaveLength(0);
+    expect(transport.calls.connect).toBe(0);
+
+    const single = `${directory},one-file`;
+    expect((await request('/api/echo', { 'X-OpenCode-Directory': single })).status).toBe(200);
+    expect(inside.seen.at(-1).headers['x-opencode-directory']).toBe(single);
   });
 
   it('refuses host-only routes and the routes that do not cross the boundary, without asking the space', async () => {

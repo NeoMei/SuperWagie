@@ -21,7 +21,9 @@ import http from 'node:http';
 import path from 'node:path';
 import { pipeline } from 'node:stream';
 
+import { PROXY_CLIENT_CREDENTIAL_HEADERS } from '../../proxy-headers.js';
 import { writeSseChunkWithBackpressure } from '../opencode/proxy.js';
+import { stripClientCredentialQuery } from '../security/request-security.js';
 import { SpaceError } from './errors.js';
 import { isSpaceId } from './labels.js';
 import { SPACE_SERVER_HOST, SPACE_SERVER_PORT, spaceWorkPath } from './layout.js';
@@ -101,9 +103,7 @@ const SESSION_MOVE_ROUTE = /^\/api\/session\/[^/]+\/move(?:\/|$)/;
 // Request headers that never travel into a space: the user's credentials, hop-by-hop headers,
 // where the request came from, and the encoding, which is asked for again as identity.
 const DROPPED_REQUEST_HEADERS = new Set([
-  'cookie',
-  'authorization',
-  'proxy-authorization',
+  ...PROXY_CLIENT_CREDENTIAL_HEADERS,
   'host',
   'connection',
   'keep-alive',
@@ -139,9 +139,6 @@ const FORWARDED_RESPONSE_HEADERS = new Set([
   'x-accel-buffering',
   'x-next-cursor',
 ]);
-
-// Query parameters that carry the user's credentials on browser-owned URLs.
-const DROPPED_QUERY_PARAMETERS = ['oc_url_token', 'oc_client_token'];
 
 // Content types a browser would render as a page, with the space's script in it, under the
 // app's origin. A response from a space with one of these is served as plain text instead.
@@ -217,14 +214,26 @@ const safeDecode = (value) => {
 // will. The marker still says so for the values the UI encodes because they are not Latin-1.
 const PERCENT_ESCAPE = /%[0-9a-fA-F]{2}/;
 
+const directoryHeaderValues = (req) => {
+  const distinct = req.headersDistinct?.['x-opencode-directory'];
+  if (distinct?.length > 1) return distinct;
+  const header = req.headers['x-opencode-directory'];
+  if (header === undefined) return [];
+  return Array.isArray(header) ? header : [header];
+};
+
+export const directoryHeaderFailure = (req) => directoryHeaderValues(req).length > 1
+  ? { status: 400, code: 'invalid_directory_header', message: 'x-opencode-directory header must appear at most once' }
+  : null;
+
 /** Every directory a request names in its query or its directory header, as OpenCode reads them. */
 export function requestedDirectories(req, url) {
   const directories = [];
   for (const key of ['directory', 'location[directory]']) {
     for (const value of url.searchParams.getAll(key)) directories.push(value);
   }
-  const header = req.headers['x-opencode-directory'];
-  if (header !== undefined && header.length > 0) {
+  for (const header of directoryHeaderValues(req)) {
+    if (header.length === 0) continue;
     const encoded = req.headers['x-opencode-directory-encoding'] === 'uri' || PERCENT_ESCAPE.test(header);
     directories.push(encoded ? safeDecode(header) : header);
   }
@@ -257,6 +266,18 @@ const answer = (res, status, code, message) => {
     return;
   }
   res.status(status).json({ error: message, code });
+};
+
+const refuseRepeatedDirectoryHeader = (req, res, pathname) => {
+  if (!pathname.toLowerCase().startsWith('/api/')) return false;
+  const failure = directoryHeaderFailure(req);
+  if (!failure) return false;
+  answer(res, failure.status, failure.code, failure.message);
+  return true;
+};
+
+export const validateDirectoryHeaders = (req, res, next) => {
+  if (!refuseRepeatedDirectoryHeader(req, res, req.path)) next();
 };
 
 /** The status and code an error of the transport or of a place gets on the way back to the client. */
@@ -315,11 +336,6 @@ export const forwardRequestHeaders = (requestHeaders, cookie) => {
   headers.cookie = cookie;
   headers['accept-encoding'] = 'identity';
   return headers;
-};
-
-/** Takes the user's URL credentials off a query before it travels. */
-export const stripCredentialQuery = (url) => {
-  for (const parameter of DROPPED_QUERY_PARAMETERS) url.searchParams.delete(parameter);
 };
 
 /**
@@ -672,6 +688,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
    */
   const middleware = (req, res, next) => {
     const url = new URL(req.originalUrl ?? req.url, 'http://localhost');
+    if (refuseRepeatedDirectoryHeader(req, res, url.pathname)) return;
     const route = spaceRouteOf(req, url);
     if (!route) {
       next();
@@ -696,7 +713,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       answer(res, 400, 'directory_outside_space', `A request to space ${route.spaceId} may name a directory under ${spaceWorkPath(route.spaceId)} only.`);
       return;
     }
-    stripCredentialQuery(url);
+    stripClientCredentialQuery(url.searchParams);
     forward(req, res, route.spaceId, route.path, url.search).catch((error) => {
       const failure = describeFailure(error);
       answer(res, failure.status, failure.code, failure.message);

@@ -49,11 +49,20 @@ const shouldReturnTextBody = (headers: Headers): boolean => {
     || contentType.includes('+json');
 };
 
+const PROXY_ERROR_HEADER = 'x-openchamber-error';
+const OPENCODE_UNREACHABLE = 'opencode-unreachable';
+const PROMPT_PATH = /^\/api\/session\/[^/]+\/prompt$/;
+const isPreConnectFailure = ({ cause }: Error): boolean => {
+  if (!(cause instanceof Error) || !('code' in cause)) return false;
+  return cause.code === 'ECONNREFUSED' || cause.code === 'ENOTFOUND' || cause.code === 'EAI_AGAIN';
+};
+
 const collectProxyResponseHeaders = (headers: Headers, deps: Pick<ProxyRuntimeDeps, 'collectHeaders'>): Record<string, string> => {
   const result = deps.collectHeaders(headers);
   delete result['content-length'];
   delete result['content-encoding'];
   delete result['transfer-encoding'];
+  delete result[PROXY_ERROR_HEADER];
   return result;
 };
 
@@ -438,12 +447,6 @@ export async function handleProxyBridgeMessage(
     }
 
     case 'api:session:message': {
-      const apiUrl = await waitForApiUrl(ctx?.manager);
-      if (!apiUrl) {
-        const data = deps.buildUnavailableApiResponse();
-        return { id, type, success: true, data };
-      }
-
       const { path: requestPath, headers, bodyText } = (payload || {}) as ApiSessionMessageRequestPayload;
       const normalizedPath =
         typeof requestPath === 'string' && requestPath.trim().length > 0
@@ -452,13 +455,20 @@ export async function handleProxyBridgeMessage(
             : `/${requestPath.trim()}`
           : '/';
 
-      if (!/^\/api\/session\/[^/]+\/prompt(?:\?.*)?$/.test(normalizedPath)) {
+      if (!normalizedPath.startsWith('/api/session/') || !PROMPT_PATH.test(new URL(normalizedPath, RESOLVE_PROBE_BASE).pathname)) {
         const body = JSON.stringify({ error: 'Invalid session message proxy path' });
         const data: ApiProxyResponsePayload = {
           status: 400,
           headers: { 'content-type': 'application/json' },
           bodyBase64: deps.base64EncodeUtf8(body),
         };
+        return { id, type, success: true, data };
+      }
+
+      const apiUrl = await waitForApiUrl(ctx?.manager);
+      if (!apiUrl) {
+        const unavailable = deps.buildUnavailableApiResponse();
+        const data = { ...unavailable, headers: { ...unavailable.headers, [PROXY_ERROR_HEADER]: OPENCODE_UNREACHABLE } };
         return { id, type, success: true, data };
       }
 
@@ -486,13 +496,16 @@ export async function handleProxyBridgeMessage(
       const onTimeout = () => abortController.abort();
       timeoutSignal.addEventListener('abort', onTimeout, { once: true });
 
+      let receivedHeaders = false;
       try {
         const response = await fetch(targetUrl, {
           method: 'POST',
           headers: requestHeaders,
           body: typeof bodyText === 'string' ? bodyText : '',
           signal: abortController.signal,
+          redirect: 'error',
         });
+        receivedHeaders = true;
 
         const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
         if (shouldReturnTextBody(response.headers)) {
@@ -527,6 +540,9 @@ export async function handleProxyBridgeMessage(
           headers: { 'content-type': 'application/json' },
           bodyText: body,
         };
+        if (!receivedHeaders && !abortController.signal.aborted && !isTimeout && error instanceof Error && isPreConnectFailure(error)) {
+          data.headers[PROXY_ERROR_HEADER] = OPENCODE_UNREACHABLE;
+        }
         return { id, type, success: true, data };
       } finally {
         timeoutSignal.removeEventListener('abort', onTimeout);

@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { readDispatchOutcome } from '../dispatch-results/runtime.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { isAdmissionManagedProvider } from '../session-lead/runtime.js';
 
 // The idle event wakes a waiting agent at once; this is the fallback when an
 // event is missed, such as across a reconnect of the event hub.
@@ -84,10 +85,21 @@ export const createWorkflowAgentSessions = ({
    * caller can tell an id admitted before (409) and a gone session (404).
    */
   const postSynthetic = async (sessionId, body) => {
+    const headers = { Accept: 'application/json', 'Content-Type': 'application/json', ...getOpenCodeAuthHeaders() };
+    let payload = body;
+    if (body.resume === true) {
+      const client = await getClient();
+      const parent = sessionSchema.safeParse(await client.session.get({ sessionID: sessionId }, {
+        signal: AbortSignal.timeout(5_000),
+      }).catch(() => null)).data;
+      const provider = parent?.model?.providerID;
+      if (parent?.location?.directory) headers['x-opencode-directory'] = encodeURIComponent(parent.location.directory);
+      if (!provider || isAdmissionManagedProvider(provider)) payload = { ...body, resume: false };
+    }
     const response = await fetchImpl(buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, ''), {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...getOpenCodeAuthHeaders() },
-      body: JSON.stringify(body),
+      headers,
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) {

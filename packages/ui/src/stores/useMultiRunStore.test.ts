@@ -13,6 +13,8 @@ const dispatchedSessionIds: string[] = [];
 const deletedSessionIds: string[] = [];
 let createdCount = 0;
 let rejectNextMembership = false;
+let rejectPrompt = false;
+let dispatchedFiles: ReadonlyArray<{ filename: string; saveCopy?: boolean }> | undefined;
 let onCreate = () => {};
 let isGitRepository = false;
 let waitForWorktreeSetup = false;
@@ -79,7 +81,11 @@ const fakeOpencodeClient = {
 };
 
 mock.module('@/sync/session-ui-store', () => ({
-  routeMessage: async ({ sessionId }: { sessionId: string }) => { dispatchedSessionIds.push(sessionId); },
+  routeMessage: async ({ sessionId, files }: { sessionId: string; files?: typeof dispatchedFiles }) => {
+    dispatchedSessionIds.push(sessionId);
+    dispatchedFiles = files;
+    if (rejectPrompt) throw new Error('Attachment path write failed');
+  },
   useSessionUIStore: {
     getState: () => ({
       markSessionAsOpenChamberCreated: mock(() => undefined),
@@ -207,6 +213,8 @@ describe('useMultiRunStore', () => {
     deletedSessionIds.length = 0;
     createdCount = 0;
     rejectNextMembership = false;
+    rejectPrompt = false;
+    dispatchedFiles = undefined;
     activeClient = sdkClient;
     storedMetadata.clear();
     onCreate = () => {};
@@ -233,6 +241,18 @@ describe('useMultiRunStore', () => {
     expect(registeredDirectories).toEqual([{ sessionID: 'ses_multirun', directory: '/repo' }]);
     expect(ensureChildCalls).toEqual([{ directory: '/repo', bootstrap: false }]);
     expect(childState.session.map((session) => session.id)).toEqual(['ses_multirun']);
+  });
+
+  test('parallel dispatch preserves attachment copy intent and reports whether the bytes were delivered', async () => {
+    rejectPrompt = true;
+    const attachment = { filename: 'shot.png', mime: 'image/png', url: 'data:image/png;base64,AQID', saveCopy: true };
+    const result = await useMultiRunStore.getState().createMultiRun({
+      name: 'Review screenshot', isolateRuns: false, files: [attachment],
+      groups: [{ prompt: 'Review [shot.png]', models: [{ providerID: 'provider', modelID: 'model' }] }],
+    });
+
+    expect(await result?.promptsDelivered).toBe(false);
+    expect(dispatchedFiles).toEqual([{ ...attachment, type: 'file' }]);
   });
 
   test('membership failure does not dispatch that session or discard a successful sibling', async () => {

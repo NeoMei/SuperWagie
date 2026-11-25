@@ -44,6 +44,8 @@ import { useInputStore } from '@/sync/input-store';
 import { GlassPopupMotion } from './GlassPopupMotion';
 import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { isWholeFileComment } from '@/components/comments/wholeFileComment';
+import { useReviewCommentSource } from '@/components/comments/useReviewCommentSource';
+import { contextPayloadFromDraft } from '@/lib/messages/contextParts';
 
 interface ComposerContextChipsProps {
     draftTarget: InlineCommentDraftTarget | null;
@@ -94,9 +96,10 @@ const DraftPreviewEntry: React.FC<{
     /** Chat quotes: point at the quoted fragment in the transcript. */
     onFocusQuote: ((focused: boolean) => void) | null;
     onRevealQuote: (() => void) | null;
+    reviewSource?: { label: string; onReveal: () => void };
     /** Composer attachment names: images pasted into the comment render as file chips. */
     attachmentFilenames: readonly string[];
-}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onRemove, onSaveComment, onFocusQuote, onRevealQuote, attachmentFilenames }) => {
+}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onRemove, onSaveComment, onFocusQuote, onRevealQuote, reviewSource, attachmentFilenames }) => {
     const { t } = useI18n();
     const [editText, setEditText] = React.useState(draft.text);
     // Images pasted while editing join the composer's attachments on save.
@@ -147,6 +150,18 @@ const DraftPreviewEntry: React.FC<{
                 <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={title}>
                     {title}
                 </span>
+                {reviewSource && !editing ? (
+                    <button
+                        type="button"
+                        className={ENTRY_ACTION_CLASS}
+                        style={{ minHeight: 0, minWidth: 0 }}
+                        onClick={reviewSource.onReveal}
+                        aria-label={reviewSource.label}
+                        title={reviewSource.label}
+                    >
+                        <Icon name="external-link" className="h-3 w-3" />
+                    </button>
+                ) : null}
                 {onSaveComment ? (
                     <button
                         type="button"
@@ -221,6 +236,7 @@ const DraftPreviewEntry: React.FC<{
 
 function ComposerContextChipsView({ draftTarget, colors, previewHost }: ComposerContextChipsProps) {
     const { t } = useI18n();
+    const reviewSourceFor = useReviewCommentSource(draftTarget?.directory);
     const draftKey = draftTarget
         ? getInlineCommentDraftKey(getRuntimeKey(), draftTarget.directory, draftTarget.sessionKey)
         : null;
@@ -465,6 +481,7 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                                 onRevealQuote={quoteHighlights && draft.source === 'chat-quote' && draft.fileLabel
                                     ? () => quoteHighlights.reveal(draft.fileLabel, draft.anchor ?? legacyChatQuoteAnchor(draft.code))
                                     : null}
+                                reviewSource={reviewSourceFor(contextPayloadFromDraft(draft))}
                                 attachmentFilenames={attachmentFilenames}
                             />
                         ))}

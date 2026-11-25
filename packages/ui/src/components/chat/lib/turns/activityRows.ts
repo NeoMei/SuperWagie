@@ -57,4 +57,4 @@ export const planActivityTrim = (rowsPerMessage: readonly number[], visibleRows:
 };
 
 /** The message the trim cuts into, and how many of its first rows it hides. */
-export const ActivityRowSkipContext = createContext<{ messageId: string; rows: number } | null>(null);
+export const ActivityRowSkipContext = createContext<{ messageId: string; rows: number; excludeHoisted: boolean } | null>(null);

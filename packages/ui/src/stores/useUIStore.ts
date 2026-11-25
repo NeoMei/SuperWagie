@@ -41,8 +41,15 @@ import {
   type MovedZoneViews,
 } from '@/lib/workspace/zones';
 import { sanitizeWorkStatusSectionOrder, type WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
+import type { ReviewDiffDestination } from '@/lib/messages/contextParts';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
+export type ReviewDiffRequest = {
+  panelDirectory: string;
+  sourceDirectory: string;
+  destination: ReviewDiffDestination;
+  isCurrentRuntime: () => boolean;
+};
 export type { ContextPanelMode };
 
 // The docked column and the tree-only panel share one pixel width.
@@ -70,7 +77,7 @@ const persistedZoneSizesSchema = z.object({
 });
 type MermaidRenderingMode = 'svg' | 'ascii';
 type UserMessageRenderingMode = 'markdown' | 'plain';
-type ActivityRenderMode = 'collapsed' | 'summary';
+type ActivityRenderMode = 'collapsed' | 'text' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 type WeekStartPreference = 'auto' | 'sunday' | 'monday';
@@ -974,6 +981,7 @@ interface UIStore {
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
   pendingDiffScope: PendingDiffScope | null;
+  reviewDiffRequest: ReviewDiffRequest | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
@@ -1322,6 +1330,7 @@ interface UIStore {
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
+  setReviewDiffRequest: (request: ReviewDiffRequest | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
   navigateToDiff: (filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
@@ -1583,6 +1592,7 @@ export const useUIStore = create<UIStore>()(
         pendingDiffFile: null,
         pendingDiffStaged: false,
         pendingDiffScope: null,
+        reviewDiffRequest: null,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
         isMobile: false,
@@ -1922,6 +1932,8 @@ export const useUIStore = create<UIStore>()(
             return {
               contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20),
               contextEditorVisible: showsFile || state.contextEditorVisible,
+              reviewDiffRequest: nextTab.mode === 'diff' && state.reviewDiffRequest?.panelDirectory === normalizedDirectory
+                ? null : state.reviewDiffRequest,
             };
           });
         },
@@ -2264,6 +2276,8 @@ export const useUIStore = create<UIStore>()(
             return {
               contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20),
               contextEditorTreeVisible: returnedToTree || state.contextEditorTreeVisible,
+              reviewDiffRequest: state.reviewDiffRequest?.panelDirectory === normalizedDirectory
+                && closedTabs.some((tab) => tab.mode === 'diff') ? null : state.reviewDiffRequest,
             };
           });
 
@@ -2534,12 +2548,16 @@ export const useUIStore = create<UIStore>()(
           set({ pendingFileNavigation: navigation });
         },
 
+        setReviewDiffRequest: (reviewDiffRequest) => {
+          set({ reviewDiffRequest });
+        },
+
         setPendingFileFocusPath: (path) => {
           set({ pendingFileFocusPath: path });
         },
 
         navigateToDiff: (filePath, staged = false, scope = null) => {
-          set({ pendingDiffFile: filePath, pendingDiffStaged: staged, pendingDiffScope: scope });
+          set({ pendingDiffFile: filePath, pendingDiffStaged: staged, pendingDiffScope: scope, reviewDiffRequest: null });
         },
 
         consumePendingDiffFile: () => {

@@ -16,6 +16,7 @@ The web server owns starting and stopping it. `lib/opencode/env-runtime.js` reso
 
 - It behaves as `opencode serve` does for the managed lifecycle: `--version` prints the bare version, `serve` prints `server listening on <url>` (`{"url":"<url>"}` with `--stdio`) on stdout, takes its password from `OPENCODE_PASSWORD` or `OPENCODE_SERVER_PASSWORD`, and with `--stdio` exits when stdin closes, which is how Windows stops it.
 - `server.mjs` maps the environment to server options exactly as OpenCode's `packages/cli/src/server-process.ts` does for those two modes, and runs on the `latest` channel: the same `opencode.db`, `opencode.log` and data folders as the user's own release CLI. A bump of OpenCode diffs that file between the old and new tag (the `opencode-v2` skill, *Bumping the pinned OpenCode*).
+- The embedded server offers the OpenCode CLI's Bun-compatible TLS ciphers for `opencode.ai` and its subdomains. Explicit TLS settings and all other endpoints retain their existing ciphers.
 - It removes `ELECTRON_RUN_AS_NODE` from its environment before anything starts: tools, MCP servers and shells inherit it, and an Electron app they launch would otherwise start as plain Node.
 - In stdio mode the server removes both password environment variables after reading them so tools cannot inherit the lease credential.
 - It is a server script, never a command. The web server never puts its folder on `PATH` or its path in `OPENCODE_BINARY`, so a terminal or an agent's shell runs the user's own `opencode` or none.

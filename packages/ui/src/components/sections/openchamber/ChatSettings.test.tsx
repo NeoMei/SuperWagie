@@ -107,6 +107,23 @@ describe('ChatSettings', () => {
     });
   }
 
+  test('the Activity control and settings search name Show notes', async () => {
+    useChatSettingsTabStore.setState({ tab: 'messages' });
+    await act(async () => root.render(<I18nProvider><ChatSettings /></I18nProvider>));
+    const field = host.querySelector('[data-settings-item="chat.activity-default"]');
+    expect(field?.textContent).toContain('Collapsed');
+    expect(field?.textContent).toContain('Show notes');
+    expect(field?.textContent).toContain('Expanded');
+
+    const results = buildSettingsSearchResults({
+      query: 'show notes',
+      runtimeCtx,
+      t: (key, params) => formatMessage(enDict, key, params),
+      getPageTitle: (page) => page,
+    });
+    expect(results.some((result) => result.id === 'chat.activity-default')).toBe(true);
+  });
+
   test('the large-paste radios on the Composer tab select the fourth persisted choice', async () => {
     useChatSettingsTabStore.setState({ tab: 'composer' });
     await act(async () => root.render(

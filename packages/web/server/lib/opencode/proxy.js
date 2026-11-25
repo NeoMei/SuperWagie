@@ -7,17 +7,19 @@ import express from 'express';
 import {
   applyForwardProxyResponseHeaders,
   collectForwardProxyHeaders,
+  PROXY_CLIENT_CREDENTIAL_HEADERS,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
-import { createOpenCodeRequestReadiness } from './request-readiness.js';
+import { createOpenCodeRequestReadiness, markUnforwardedPrompt } from './request-readiness.js';
 import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/service.js';
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
 import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
 import { OPENCODE_TRUST_ROUTE } from '../opencode-trust/index.js';
 import { createTrustSessionDirectoryResolver } from '../opencode-trust/fetch.js';
+import { stripClientCredentialQuery } from '../security/request-security.js';
 
 /**
  * The abort signal for one upstream read.
@@ -84,6 +86,16 @@ const DIAGNOSTIC_PROXY_ERROR_CLASSES = new Map([
   ['ENOTFOUND', 'dns_failed'],
   ['EAI_AGAIN', 'dns_failed'],
 ]);
+const PROXY_PRECONNECT_ERRORS = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+
+const stripProxyCredentialQuery = (requestPath) => {
+  const queryStart = requestPath.indexOf('?');
+  if (queryStart === -1) return requestPath;
+  const search = new URLSearchParams(requestPath.slice(queryStart + 1));
+  if (!stripClientCredentialQuery(search)) return requestPath;
+  const query = search.toString();
+  return `${requestPath.slice(0, queryStart)}${query ? `?${query}` : ''}`;
+};
 
 const formatProxyFailure = (req, handler, error, timedOut = false) => {
   const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req?.method) ? req.method : 'OTHER';
@@ -721,7 +733,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
         ? req.originalUrl
         : (typeof req.url === 'string' ? req.url : '');
-      const upstreamPath = requestUrl;
+      const upstreamPath = stripProxyCredentialQuery(requestUrl);
       const headers = normalizeForwardedDirectoryHeaders(
         collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders())
       );
@@ -900,7 +912,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           ...getOpenCodeAuthHeaders(),
           'accept-encoding': 'identity',
         };
-    const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+    const upstream = await fetch(buildOpenCodeUrl(stripProxyCredentialQuery(upstreamPath), ''), {
       method: 'GET',
       headers,
       signal: signal ?? createUpstreamReadSignal({ timeoutMs }),
@@ -1210,17 +1222,11 @@ export const registerOpenCodeProxy = (app, deps) => {
     // The proxy is mounted on `/api`, so Express has already stripped that
     // prefix by the time the middleware sees the request. OpenCode 2.x serves
     // everything under `/api/*` itself, so put it back.
-    pathRewrite: (proxiedPath) => `/api${proxiedPath === '/' ? '' : proxiedPath}`,
+    pathRewrite: (proxiedPath) => `/api${proxiedPath === '/' ? '' : stripProxyCredentialQuery(proxiedPath)}`,
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
     on: {
       proxyReq: (proxyReq, req) => {
-        // Inject OpenCode auth headers
-        const authHeaders = getOpenCodeAuthHeaders();
-        if (authHeaders.Authorization) {
-          proxyReq.setHeader('Authorization', authHeaders.Authorization);
-        }
-
         if (req.headers?.['x-opencode-directory-encoding'] === 'uri') {
           const rawDirectory = req.headers['x-opencode-directory'];
           if (typeof rawDirectory === 'string') {
@@ -1233,15 +1239,12 @@ export const registerOpenCodeProxy = (app, deps) => {
           proxyReq.removeHeader?.('x-opencode-directory-encoding');
         }
 
-        // Defensive: request identity encoding from upstream OpenCode.
-        // This avoids compressed-body/header mismatches in multi-proxy setups.
-        proxyReq.setHeader('accept-encoding', 'identity');
-
         replayParsedBody(proxyReq, req);
       },
       proxyRes: (proxyRes) => {
+        // http-proxy streams the original bytes without decoding the body.
         for (const key of Object.keys(proxyRes.headers || {})) {
-          if (!shouldForwardProxyResponseHeader(key)) {
+          if (!shouldForwardProxyResponseHeader(key, { bodyDecoded: false })) {
             delete proxyRes.headers[key];
           }
         }
@@ -1261,6 +1264,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           return;
         }
         const statusCode = isProxyTimeoutError(err) ? 504 : 503;
+        if (statusCode === 503 && PROXY_PRECONNECT_ERRORS.has(err?.code)) markUnforwardedPrompt(req, res);
         sendProxyErrorResponse(res, statusCode);
       },
     },
@@ -1284,6 +1288,16 @@ export const registerOpenCodeProxy = (app, deps) => {
   });
 
   app.use('/api', applyProxyResponseDeadline);
+  // The host already handles 100 Continue. Removing Expect also lets the
+  // proxyReq hook replay any body parsed by a host middleware.
+  app.use('/api', (req, _res, next) => {
+    for (const name of PROXY_CLIENT_CREDENTIAL_HEADERS) delete req.headers[name];
+    delete req.headers.expect;
+    const { Authorization } = getOpenCodeAuthHeaders();
+    if (Authorization) req.headers.authorization = Authorization;
+    req.headers['accept-encoding'] = 'identity';
+    next();
+  });
   // v1's interactive provider/MCP OAuth callbacks are gone: v2 runs provider
   // connection through `/api/integration/*`, which answers immediately and
   // needs no special deadline.

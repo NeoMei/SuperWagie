@@ -14,6 +14,7 @@ import {
   GUEST_BADGE_MAX,
   GUEST_FRAME_HEIGHT_MAX,
   GUEST_COMMIT_SHA,
+  GUEST_WALKTHROUGH_BASE_MAX,
   GUEST_ITEM_MESSAGE_TEXT_MAX,
   GUEST_ITEM_SESSION_MAX,
   GUEST_RESOLVE_ERROR_MAX,
@@ -452,6 +453,10 @@ export const hostMessageSchema = z.union([
 
 const filePathSchema = z.string().min(1).max(GUEST_FILE_PATH_MAX).refine(isGuestFilePath);
 
+export const openWalkthroughRequestSchema = z.strictObject({
+  base: z.string().trim().min(1).max(GUEST_WALKTHROUGH_BASE_MAX),
+});
+
 export const guestMessageSchema = z.discriminatedUnion('type', [
   z.object({
     ...envelope,
@@ -687,6 +692,12 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     payload: z.object({
       sha: z.string().regex(GUEST_COMMIT_SHA),
     }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('open-walkthrough'),
+    id: z.string().min(1),
+    payload: openWalkthroughRequestSchema,
   }),
   z.object({
     ...envelope,

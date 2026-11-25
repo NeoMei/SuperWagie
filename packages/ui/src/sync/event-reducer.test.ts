@@ -200,6 +200,19 @@ describe("message events", () => {
     expect(draft.message.ses_1[0]).toMatchObject({ agent: "build", time: { created: 10, completed: 20 }, finish: "stop", cost: 0.5 })
   })
 
+  test("a successful step completion clears its previous retry and provider error", () => {
+    const error = { type: "rate_limited", message: "Wait" }
+    const failed = assistant({ error, retry: { attempt: 1, at: 15, error } })
+    const draft = state({ message: { ses_1: [failed] } })
+    apply(draft, {
+      type: "message.patched",
+      properties: { sessionID: "ses_1", messageID: "msg_a", patch: { time: { completed: 20 }, finish: "stop", error: null, retry: null } },
+    })
+    expect(draft.message.ses_1[0]).toMatchObject({ time: { completed: 20 }, finish: "stop" })
+    expect(draft.message.ses_1[0]).not.toHaveProperty("error")
+    expect(draft.message.ses_1[0]).not.toHaveProperty("retry")
+  })
+
   test("a reported completion lifts the local interruption mark", () => {
     // `interruptedTurnToolParts` closes an open turn locally when idle status
     // lands before the completion event flushes.

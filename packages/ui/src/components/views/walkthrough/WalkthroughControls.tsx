@@ -1,9 +1,12 @@
 import { Fragment, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { toast } from '@/components/ui';
+import { saveFile } from '@/components/chat/message/parts/saveFile';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -14,6 +17,7 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Spinner } from '@/components/ui/spinner';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { type Locale, useI18n } from '@/lib/i18n';
+import { walkthroughExportFile, type WalkthroughExportFormat } from '@/lib/walkthrough/export';
 import type { WalkthroughView } from '@/lib/walkthrough/model';
 import { cn } from '@/lib/utils';
 import type { WalkthroughReview } from './useWalkthroughReview';
@@ -325,6 +329,54 @@ export const WalkthroughEmptyState = ({ review, size = 'default' }: { review: Wa
   );
 };
 
+const EXPORT_FORMATS = ['markdown', 'html'] as const;
+
+type ExportableReview = Pick<WalkthroughReview, 'view' | 'blocked' | 'showStages'> & {
+  entry: Pick<WalkthroughReview['entry'], 'result'>;
+};
+
+const useWalkthroughExport = (review: ExportableReview, onActed?: () => void) => {
+  const { t } = useI18n();
+  const result = review.view && !review.blocked && !review.showStages ? review.entry.result : null;
+  if (!result) return null;
+  return async (format: WalkthroughExportFormat) => {
+    onActed?.();
+    try {
+      const file = walkthroughExportFile(result, format, t);
+      if (file) await saveFile(file);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      toast.error(t('walkthrough.export.failed'));
+    }
+  };
+};
+
+export function WalkthroughExportMenu({ review, className }: {
+  review: ExportableReview;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  const exportWalkthrough = useWalkthroughExport(review);
+  if (!exportWalkthrough) return null;
+  const label = t('walkthrough.export.menuAria');
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="ghost" size="sm" className={className} aria-label={label} title={label}>
+          <Icon name="download" className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {EXPORT_FORMATS.map((format) => (
+          <DropdownMenuItem key={format} onClick={() => void exportWalkthrough(format)}>
+            {t(format === 'markdown' ? 'walkthrough.export.markdown' : 'walkthrough.export.html')}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /**
  * The controls a narrow header has no room for, gathered in one place: the
  * model, the language, Generate, and the guide. The desktop header opens it
@@ -346,6 +398,7 @@ export const WalkthroughOptions = ({
   onActed?: () => void;
 }) => {
   const { t } = useI18n();
+  const exportWalkthrough = useWalkthroughExport(review, onActed);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
@@ -372,6 +425,13 @@ export const WalkthroughOptions = ({
           {t('contextPanel.mode.diff')}
         </Button>
       )}
+      {exportWalkthrough && EXPORT_FORMATS.map((format) => (
+        <Button key={format} type="button" variant="ghost" size={size === 'mobile' ? 'lg' : 'sm'}
+          className="w-full" onClick={() => void exportWalkthrough(format)}>
+          <Icon name={format === 'markdown' ? 'file-text' : 'file-code'} className="size-4" />
+          {t(format === 'markdown' ? 'walkthrough.export.markdown' : 'walkthrough.export.html')}
+        </Button>
+      ))}
       <Button
         type="button"
         variant="ghost"

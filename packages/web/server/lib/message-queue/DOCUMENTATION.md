@@ -49,10 +49,11 @@ send never re-resolves mutable UI state:
   contextPreview?, // bounded display-only summary captured by the UI
   text,           // text to deliver (agent mention stripped, file mentions resolved); defaults to content
   agentMention?,  // delivered as an `agent` part
-  attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, composerAnchor?, deliverAsPath?, dataUrl }],
+  skills?,        // explicit skill names, resolved in the target directory at delivery
+  attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, composerAnchor?, saveCopy?, deliverAsPath?, dataUrl }],
   context: [      // what the composer had attached, in send order
     { kind: 'context', text, metadata, instructions? },  // a draft chip or linked issue/PR; metadata is the UI's structured payload
-    { kind: 'instruction', text },                       // derived from the text (skill instruction)
+    { kind: 'instruction', text },                       // legacy skill instruction
     { kind: 'synthetic', text },                         // handed to the composer by another surface
   ],
   sendConfig: { providerID, modelID, agent?, variant? },  // required
@@ -79,18 +80,22 @@ context entry). Public snapshots and broadcasts strip the payloads —
 attachment `dataUrl` (megabytes of base64) and `context` (a PR diff, say) —
 so they do not ride every update; the only way to get them back is a `take`.
 
-### Preparing image paths at delivery
+### Preparing attachment paths at delivery
 
-`deliverAsPath` marks original image bytes captured for a known text-only
-model. The queue keeps those bytes with the editable text. At each delivery
-attempt, the queue uses its own directory-scoped OpenCode client to write the
-image to a fresh path under the kernel's temporary directory. This gives an
-isolated space a file in the same kernel that receives the message, and keeps
-persisted items usable after the temporary directory or the queue process is
-restarted. Confirmed paths accompany the prompt text or the slash command's
-arguments. Any failed or unconfirmed write keeps the original item and context
-available for editing and uses the queue's existing retry delay. All image
-writes finish before model changes, goal creation, or message admission.
+The queue retains original attachment bytes and copy intent. At delivery its
+OpenCode client reads the selected model's input capabilities in the queue
+directory. This runs after Auto resolves. Unsupported media, unsupported binary
+formats and Office originals travel as paths. Compatible media stays inline.
+An opted-in image copy also gets a path. An existing `file://` attachment uses
+its resolved path when the chosen model needs tools to read it. Legacy
+`deliverAsPath` image records remain usable when the catalog has no model
+capabilities.
+
+The owning runtime writes needed bytes under its OpenCode temp directory and
+confirms the resulting path before any model switch, context, goal or prompt.
+A failed write leaves the queue item available for editing and uses its existing
+retry delay. Queue projections omit bytes and a take returns them for editing
+or manual delivery.
 
 Snapshots retain `contextPreview`, capped at 100 characters plus an ellipsis.
 It carries the attached comment or context label when `content` is empty and
@@ -190,14 +195,25 @@ persisted "sending" flag would strand a message forever.
      OpenCode expands only on that route. The command lookup runs before
      anything is admitted, so a failed lookup fails the send without leaving
      context behind for the retry to duplicate;
-   - otherwise `POST /session/:id/prompt` with the user's text, files and
-     agent mention.
+   - otherwise `POST /api/session/:id/prompt` with a persisted message ID,
+     text, files, agent mention, and resolved skill IDs. The directory's
+     model catalog is read before its skill catalog to wait for location
+     plugins. Missing skills and command-only sends use synthetic instructions
+     with stable IDs. OpenCode's explicit `Skill not found` rejection permits
+     immediate fallback with the same prompt ID and attachments.
    Success removes the item, persists, broadcasts, and calls `onPromptSent`.
    Failure keeps the item, backs off
    2 s → 60 s (doubling per consecutive failure of that item), and re-arms.
 6. The next item goes out after the next busy → idle cycle.
 
-A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff.
+Before sending a prompt, the queue persists its ID and records that delivery
+may have started. A direct pre-connect refusal clears the checkpoint to retry
+using that ID. After any other failed response, including a successful HTTP
+response containing an HTML app shell, the queue checks for the same user
+message at `GET /api/session/:id/message/:messageId`. This check resumes after
+restart. A missing receipt keeps the item visible with unconfirmed delivery
+and only the lookup is retried. Single and bulk take exclude unconfirmed
+items so a manual flush cannot create a second turn.
 
 ## Holds
 
@@ -219,7 +235,7 @@ allowlists.
 | `POST .../sessions/:id/items` | Append `{ directory, item }`; returns `{ revision, session, itemId }` and arms a dispatch (the session may already be idle) |
 | `DELETE .../sessions/:id/items/:itemId` | Remove; `409` while that item is in flight |
 | `POST .../sessions/:id/items/:itemId/take` | Remove and return the full item (payloads included); `404`/`409` |
-| `POST .../sessions/:id/take` | Remove and return every item not in flight, in order |
+| `POST .../sessions/:id/take` | Remove and return ordinary items whose dispatch has not started or is known to have been refused before connection |
 | `PUT .../sessions/:id/order` | `{ itemIds }` must be a complete permutation |
 | `DELETE .../sessions/:id` | Clear; the in-flight item stays |
 | `PUT .../sessions/:id/hold` | `{ held, ttlMs? }` |

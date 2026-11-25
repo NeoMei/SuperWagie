@@ -42,6 +42,7 @@ import {
 import type { GuestFileProxyResult, GuestFileRequest } from '@/lib/guests/files';
 import type { GuestGenerateProxyResult } from '@/lib/guests/generate';
 import type { GuestOpenCommitResult } from '@/lib/guests/open-commit';
+import type { GuestOpenWalkthroughResult } from '@/lib/guests/open-walkthrough';
 import type { GuestOpenSurfaceResult } from '@/lib/guests/open-surface';
 import type { GuestRequestProxyResult } from '@/lib/guests/oauth';
 
@@ -110,6 +111,7 @@ type HostBridgeEffects = {
   setBadge: (count: number | null) => void;
   /** Show a commit of the open project in the Diff view; the pane owns directory and runtime support. */
   openCommit: (sha: string) => Promise<GuestOpenCommitResult>;
+  openWalkthrough: (base: string) => Promise<GuestOpenWalkthroughResult>;
   /** Content height the guest asked for; only the Work Status section sizes its frame from it. */
   resize: (height: number) => void;
   /** The guest answered a host `resolve` with this id. Not a request, so no `result` goes back. */
@@ -436,6 +438,10 @@ export const answerGuestMessage = async (
       return okResult(message.id);
     case 'open-commit': {
       const opened = await effects.openCommit(message.payload.sha);
+      return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
+    }
+    case 'open-walkthrough': {
+      const opened = await effects.openWalkthrough(message.payload.base);
       return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
     }
     case 'resize':

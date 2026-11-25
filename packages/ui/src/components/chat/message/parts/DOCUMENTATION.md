@@ -9,7 +9,7 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
 - `ShownPage` selects `UiPageFrame` for a recorded `ui` program and keeps the existing sandboxed HTML frame for an HTML page. Native UI programs use the app-owned block catalog; extension component contracts are not enabled by this renderer.
 - A waiting native page answers through the existing `/api/openchamber/render/answer` contract, with only the session, call, summary and answer data. Settled pages restore recorded choices when their answer matches the native block contract and keep controls disabled.
 - A program that cannot be parsed or drawn retains its errors and source. This runtime does not send unsupported `notDrawn` or decline requests, or add later-answer protocols to its backend.
-- Generated-image calls retain the ordinary tool row. Secret requests and secret runs use private cards when the managed server capability is available. Secret values never enter ordinary transcript answers, and command output is redacted before disclosure.
+- Generated-image calls retain the ordinary tool row. Secret requests and secret runs use private cards when the managed server capability is available. Secret values never enter ordinary transcript answers, and command output is redacted before disclosure. Secret runs default to one-time use. The server can offer session, project or all-project retention for each new value. A run with a saved value shows its scope and requires Run on that card. The same card can forget the displayed entry.
 
 ## High-level flow
 
@@ -671,6 +671,10 @@ Why: only navigation tools use the compact static path; all other tools need obs
   `tracker-item` of Linear (`lib/messages/contextParts.ts`). Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
   and `Linear issue context (JSON)` prefixes).
+- Review comments with a usable source have a separate action in the
+  transcript, including collapsed cards. The transcript directory resolves
+  the path for a pinned chat or nested transcript. Expanding the quote and
+  opening the source are independent actions.
 - Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `ToolRevealOnMount.tsx`, `GuestToolTable.tsx`
 - Reasoning: `ReasoningPart.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`; the dots after a busy label are `components/ui/busy-dots.tsx`

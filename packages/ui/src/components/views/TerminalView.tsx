@@ -200,7 +200,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
     const terminalSessionId = activeTab?.terminalSessionId ?? null;
     const terminalLifecycle = activeTab?.lifecycle ?? 'idle';
-    const isActionTab = activeTab?.purpose.type === 'project-action';
+    const isSingleRunTab = activeTab?.purpose.type === 'project-action' || activeTab?.mode === 'command';
     const isConnecting = activeTab?.isConnecting ?? false;
     const previewUrl = activeTab?.previewUrl ?? null;
 
@@ -438,7 +438,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                                 const currentTab = useTerminalStore.getState()
                                     .getDirectoryState(directory)
                                     ?.tabs.find((t) => t.id === tabId);
-                                const isActionTab = currentTab?.purpose.type === 'project-action';
+                                const isSingleRunTab = currentTab?.purpose.type === 'project-action' || currentTab?.mode === 'command';
                                 appendToBuffer(
                                     directory,
                                     tabId,
@@ -455,7 +455,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                                 );
                                 setTabLifecycle(directory, tabId, 'exited');
                                 setConnecting(directory, tabId, false);
-                                setConnectionError(isActionTab ? null : t('terminalView.error.sessionEnded'));
+                                setConnectionError(isSingleRunTab ? null : t('terminalView.error.sessionEnded'));
                                 setIsFatalError(false);
                                 setIsReconnectPending(false);
                                 disconnectStream();
@@ -722,7 +722,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const handleRestart = React.useCallback(async () => {
         if (!terminalDirectory) return;
         if (isRestarting) return;
-        if (isActionTab) return;
+        if (isSingleRunTab) return;
 
         const state = useTerminalStore.getState().getDirectoryState(terminalDirectory);
         const tabId = enableTabs
@@ -767,7 +767,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         } finally {
             setIsRestarting(false);
         }
-    }, [activeTabId, disconnectStream, terminalDirectory, enableTabs, isActionTab, isRestarting, resetTerminalPreviewScan, setTabLifecycle, setTabSessionId, startStream, t, terminal, terminalLoginShell, terminalShell]);
+    }, [activeTabId, disconnectStream, terminalDirectory, enableTabs, isSingleRunTab, isRestarting, resetTerminalPreviewScan, setTabLifecycle, setTabSessionId, startStream, t, terminal, terminalLoginShell, terminalShell]);
 
     const handleHardRestart = React.useCallback(async () => {
         // Keep semantics: “close tab -> new clean tab”.
@@ -1302,7 +1302,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                         </Button>
 
                         <div className="flex shrink-0 items-center gap-1 overflow-visible">
-                            <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleRestart()} disabled={isRestarting || isActionTab} title={t('terminalView.actions.restart')} aria-label={t('terminalView.actions.restart')}>
+                            <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleRestart()} disabled={isRestarting || isSingleRunTab} title={t('terminalView.actions.restart')} aria-label={t('terminalView.actions.restart')}>
                                 <Icon name="restart" className="h-4 w-4" />
                             </Button>
                             <Button

@@ -299,7 +299,7 @@ const FormDockPanel: React.FC<{
         respondingRef.current = true;
         setIsResponding(true);
         try {
-            if (recovered) noteLocalFormCancelled(form.id);
+            if (recovered) noteLocalFormCancelled(form.sessionID, form.id);
             else await sessionActions.cancelForm(form.sessionID, form.id);
             dropFormDraft(draftScope);
         } catch {

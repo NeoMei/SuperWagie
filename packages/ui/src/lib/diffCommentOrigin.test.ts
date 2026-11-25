@@ -2,6 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import { diffCommentOriginFromSource, diffCommentOriginKey, fileWithDiffCommentOrigin } from './diffCommentOrigin';
 
+test('two revisions of the same change request have distinct comment anchors', () => {
+    expect(diffCommentOriginKey({ kind: 'change-request', number: 7, revision: 'a'.repeat(40) }))
+        .not.toBe(diffCommentOriginKey({ kind: 'change-request', number: 7, revision: 'b'.repeat(40) }));
+});
+
 describe('diff comment origin', () => {
     test('uncommitted changes need none: their lines are the files on disk', () => {
         expect(diffCommentOriginFromSource({ kind: 'working-tree', scope: 'all' })).toBeUndefined();

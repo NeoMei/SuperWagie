@@ -93,6 +93,17 @@ describe('secret answer routes', () => {
     expect(answerSecret).toHaveBeenCalledWith(body);
   });
 
+  it('accepts a card with eight maximum-length values over the private route', async () => {
+    const answerSecret = vi.fn(() => ({ status: 'submitted' }));
+    const values = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`TOKEN_${index}`, 'a'.repeat(16_000)]));
+    const body = { sessionId: 'ses_1', callId: 'call_1', values };
+    await request(createApp(vi.fn(), vi.fn(), answerSecret))
+      .post('/api/openchamber/secret/answer')
+      .send(body)
+      .expect(200);
+    expect(answerSecret).toHaveBeenCalledWith(body);
+  });
+
   it('returns secret run fields for the private card', async () => {
     const secretFields = vi.fn(() => ({ fields: ['TOKEN'], reused: [] }));
     const body = { sessionId: 'ses_1', callId: 'call_1' };

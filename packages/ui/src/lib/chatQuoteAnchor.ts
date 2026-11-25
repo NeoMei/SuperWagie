@@ -74,12 +74,15 @@ export function findChatQuoteRoots(scope: ParentNode, messageId: string): Elemen
             || (left.compareDocumentPosition(right) & 4 ? -1 : 1));
 }
 
+const isKeptText = (root: Element): boolean =>
+    root.closest('[data-message-id]')?.hasAttribute('data-message-hoisted') === true;
+
 // The anchor's context around `index`, as far as `stream` reaches: a row of
 // a long answer that is not mounted leaves the stream short of it.
-function hasContextAt(stream: string, anchor: ChatQuoteAnchor, index: number): boolean {
+function hasContextAt(stream: string, anchor: ChatQuoteAnchor, index: number, low = 0, high = stream.length): boolean {
     const end = index + anchor.text.length;
-    const before = stream.slice(Math.max(0, index - anchor.prefix.length), index);
-    const after = stream.slice(end, end + anchor.suffix.length);
+    const before = stream.slice(Math.max(low, index - anchor.prefix.length), index);
+    const after = stream.slice(end, Math.min(high, end + anchor.suffix.length));
     return anchor.prefix.endsWith(before) && anchor.suffix.startsWith(after);
 }
 
@@ -113,12 +116,16 @@ export function captureChatQuoteAnchor(roots: Element | readonly Element[], rang
     const { stream, bases } = joinStreams(list);
     const start = bases[startIndex] + streamOffset(list[startIndex], range.startContainer, range.startOffset);
     const end = bases[endIndex] + streamOffset(list[endIndex], range.endContainer, range.endOffset);
+    const kept = list.some(isKeptText);
+    if (kept && startIndex !== endIndex) return null;
     const text = stream.slice(start, end);
     if (!text.trim()) return null;
+    const low = kept ? bases[startIndex] : 0;
+    const high = kept ? bases[endIndex + 1] ?? stream.length : stream.length;
     return {
         text,
-        prefix: stream.slice(Math.max(0, start - CONTEXT_LENGTH), start),
-        suffix: stream.slice(end, end + CONTEXT_LENGTH),
+        prefix: stream.slice(Math.max(low, start - CONTEXT_LENGTH), start),
+        suffix: stream.slice(end, Math.min(high, end + CONTEXT_LENGTH)),
         start,
     };
 }
@@ -153,8 +160,10 @@ function collectTextNodes(node: Node, into: Text[], messageId = getChatQuoteSour
         } else {
             // A disclosure may draw a later message's source inside this body.
             // SAFETY: nodeType 1 is ELEMENT_NODE.
-            const sourceId = child.nodeType === 1 ? (child as Element).getAttribute('data-chat-source-message-id') : null;
-            if (sourceId !== null && messageId !== null && sourceId !== messageId) continue;
+            const element = child.nodeType === 1 ? child as Element : null;
+            if (element?.hasAttribute('data-message-hoisted')) continue;
+            const sourceId = element?.getAttribute('data-chat-source-message-id');
+            if (sourceId != null && messageId !== null && sourceId !== messageId) continue;
             collectTextNodes(child, into, messageId);
         }
     }
@@ -236,10 +245,25 @@ function locateInPartialStream(stream: string, anchor: ChatQuoteAnchor): { start
  * is left out: the Ranges cover what is on the page.
  */
 export function resolveChatQuoteRanges(roots: readonly Element[], anchor: ChatQuoteAnchor): Range[] | null {
-    const { stream } = joinStreams(roots);
+    const { stream, bases } = joinStreams(roots);
     let start: number | null;
     let end: number;
-    if (isWholeMessage(roots)) {
+    if (roots.some(isKeptText)) {
+        const candidates: number[] = [];
+        for (const [index, low] of bases.entries()) {
+            const high = bases[index + 1] ?? stream.length;
+            if (!anchor.text || high - low < anchor.text.length) continue;
+            for (let at = stream.indexOf(anchor.text, low); at >= low && at + anchor.text.length <= high
+                && candidates.length < MAX_OCCURRENCES; at = stream.indexOf(anchor.text, at + 1)) {
+                if (hasContextAt(stream, anchor, at, low, high)) candidates.push(at);
+            }
+        }
+        start = candidates.length === 1 || anchor.prefix || anchor.suffix
+            ? candidates.reduce<number | null>((best, at) =>
+                best === null || Math.abs(at - anchor.start) < Math.abs(best - anchor.start) ? at : best, null)
+            : null;
+        end = (start ?? 0) + anchor.text.length;
+    } else if (isWholeMessage(roots)) {
         start = locateChatQuote(stream, anchor);
         end = (start ?? 0) + anchor.text.length;
     } else {

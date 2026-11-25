@@ -73,16 +73,17 @@ const continuesShownText = (part: ToolPart, previous: ShownPart | undefined): bo
  * `openchamber_render` calls, and forms only while they wait or when they
  * continue shown text, the workflow runs `workflow.run` calls proposed, and
  * text with a UI block that the agent wrote before a later step. The final
- * answer's own text is the answer, so it is never hoisted.
+ * answer's own text stays in its own row. Show notes also keeps ordinary
+ * intermediate text in view.
  */
-export function getShownPages(messages: readonly ChatMessageEntry[], finalMessage?: ChatMessageEntry): ShownPart[] {
+export function getShownPages(messages: readonly ChatMessageEntry[], finalMessage?: ChatMessageEntry, keepText = false): ShownPart[] {
     const shown: ShownPart[] = [];
     for (const message of messages) {
         for (const part of message.parts) {
             if (part.type === 'tool') {
                 const inView = isShownInPlace(part.tool, part.state) && !isSettledAsk(part);
                 if (inView || continuesShownText(part, shown.at(-1))) shown.push(part);
-            } else if (part.type === 'text' && message !== finalMessage && UI_BLOCK_FENCE.test(fenceUiBlocks(part.text))) {
+            } else if (part.type === 'text' && message !== finalMessage && (keepText ? !isInvisibleText(part.text) : UI_BLOCK_FENCE.test(fenceUiBlocks(part.text)))) {
                 shown.push(part);
             }
         }

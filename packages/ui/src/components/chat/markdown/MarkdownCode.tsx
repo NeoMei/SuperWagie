@@ -18,6 +18,8 @@ import { activateMarkdownFile, useOpenMarkdownFile } from './markdownFileReferen
 import type { MarkdownCodePlugin } from './streamdownCode';
 import { MarkdownDiff } from './MarkdownDiff';
 import { MarkdownSvg } from './MarkdownSvg';
+import { ReplyTerminalButton } from './ReplyTerminalButton';
+import { replyTerminalShell } from './replyTerminal';
 import { MarkdownSuggestionContext, isSuggestionLanguage, suggestionPatch } from './markdownSuggestion';
 
 // Complete prefix rows keep their identity in the worker client, so appending
@@ -173,6 +175,9 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
               data-streamdown="code-block-actions"
               className="pointer-events-auto flex shrink-0 items-center gap-2 rounded-md border border-sidebar bg-sidebar/80 px-1.5 py-1 supports-[backdrop-filter]:bg-sidebar/70 supports-[backdrop-filter]:backdrop-blur"
             >
+              {presentation.settledReply && presentation.directory && !incomplete && copySource.trim() && replyTerminalShell(language, 'auto') && (
+                <ReplyTerminalButton directory={presentation.directory} language={language} source={copySource} />
+              )}
               {!proposal && <Button
                 variant="ghost"
                 size="xs"

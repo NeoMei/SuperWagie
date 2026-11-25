@@ -3,7 +3,8 @@ import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-vers
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSnapshot, type GuestWorktreesSnapshot, type GuestSessionsSnapshot, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestStorageOptions, type GuestStorageRequest, type GuestStorageResult } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import { isGuestStatusControls } from './status-controls.ts';
-import type { JsonValue } from './contract.ts';
+import type { JsonValue, OpenWalkthroughRequest } from './contract.ts';
+import { openWalkthroughRequestSchema } from './protocol.ts';
 import { isGuestPopoverRequest, type GuestPopoverClosedEvent, type GuestPopoverRequest } from './popover.ts';
 import {
   GUEST_FILE_EDITOR_CONTENT_MAX,
@@ -20,6 +21,7 @@ import {
   GUEST_FILE_CONTENT_MAX,
   GUEST_CLIPBOARD_TEXT_MAX,
   GUEST_TOAST_MAX,
+  GUEST_WALKTHROUGH_BASE_MAX,
   GUEST_FILE_PATH_MAX,
   GUEST_GENERATE_OUTPUT_TOKENS_MAX,
   GUEST_GENERATE_PROMPT_MAX,
@@ -157,6 +159,8 @@ export type HostClient = {
    * Diff view `UNSUPPORTED`.
    */
   openCommit: (sha: string) => Promise<void>;
+  /** Opens the frame project's branch comparison in Changes Walkthrough. */
+  openWalkthrough: (request: OpenWalkthroughRequest) => Promise<void>;
   /**
    * Show a context panel surface (`git`, or `plugin:<panel id>`). Resolves once
    * it is on screen; one already open stays open. No chat or project yet is
@@ -947,6 +951,19 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       id: nextId(ids),
       payload: { sha },
     }) : Promise.reject(new HostRequestError('HOST_REJECTED', 'Commit id must be 7 to 64 hex characters.'))),
+    openWalkthrough: (input) => {
+      const parsed = openWalkthroughRequestSchema.safeParse(input);
+      if (!parsed.success) {
+        return Promise.reject(new HostRequestError('HOST_REJECTED', `Supply a base of 1 to ${GUEST_WALKTHROUGH_BASE_MAX} characters.`));
+      }
+      return request({
+        channel: OPENCHAMBER_SDK_CHANNEL,
+        v: OPENCHAMBER_SDK_API_VERSION,
+        type: 'open-walkthrough',
+        id: nextId(ids),
+        payload: parsed.data,
+      });
+    },
     openSurface: (surfaceId) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,

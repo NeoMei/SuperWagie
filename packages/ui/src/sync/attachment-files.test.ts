@@ -1,9 +1,8 @@
 import { describe, expect, mock, test } from "bun:test"
 import {
-  ACCEPTED_ATTACHMENT_EXTENSIONS,
-  ATTACHMENT_ACCEPT,
+  OFFICE_ATTACHMENT_EXTENSIONS,
+  getOfficeAttachmentMime,
   getAttachmentInputModality,
-  getUnsupportedAttachmentInputs,
   isReadOnSendMentionFilename,
   prepareAttachmentFile,
 } from "./attachment-files"
@@ -24,28 +23,10 @@ describe("attachment file preparation", () => {
     expect(getAttachmentInputModality("application/octet-stream")).toBe(undefined)
   })
 
-  test("returns only attachment inputs unsupported by the model", () => {
-    const attachments = [
-      { filename: "notes.txt", mimeType: "text/plain" },
-      { filename: "photo.jpg", mimeType: "image/jpeg" },
-      { filename: "report.pdf", mimeType: "application/pdf" },
-      { filename: "unknown.bin", mimeType: "application/octet-stream" },
-    ]
-
-    expect(getUnsupportedAttachmentInputs(attachments, ["TEXT", "pdf"])).toEqual([
-      { attachment: attachments[1], modality: "image" },
-    ])
-  })
-
-  test("exposes the expanded code and structured-text formats to pickers", () => {
-    for (const extension of [
-      "diff", "patch", "ipynb", "jsonl", "ndjson", "har", "svg", "drawio", "excalidraw",
-      "vue", "svelte", "php", "cs", "kt", "swift", "lua", "dart", "tf", "hcl", "proto",
-      "docx", "pptx", "xlsx", "odt", "odp", "ods",
-    ]) {
-      expect(ACCEPTED_ATTACHMENT_EXTENSIONS.includes(extension)).toBe(true)
-      expect(ATTACHMENT_ACCEPT.includes(`.${extension}`)).toBe(true)
-    }
+  test("recognizes Office originals with or without browser MIME metadata", () => {
+    expect(OFFICE_ATTACHMENT_EXTENSIONS).toEqual(["docx", "pptx", "xlsx", "odt", "odp", "ods"])
+    expect(getOfficeAttachmentMime("charts/Forecast.XLSX")).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    expect(getOfficeAttachmentMime("notes.txt")).toBeUndefined()
   })
 
   test("reads documents and images named by a mention on send", () => {

@@ -38,8 +38,9 @@ import { useChatSettingsTabStore, type ChatSettingsTab } from './chatSettingsTab
 
 type ChipOption<T extends string> = { id: T; labelKey: I18nKey };
 
-const ACTIVITY_RENDER_MODE_OPTIONS: ChipOption<'collapsed' | 'summary'>[] = [
+const ACTIVITY_RENDER_MODE_OPTIONS: ChipOption<ReturnType<typeof useUIStore.getState>['activityRenderMode']>[] = [
   { id: 'collapsed', labelKey: 'settings.openchamber.visual.option.activityRenderMode.collapsed.label' },
+  { id: 'text', labelKey: 'settings.openchamber.visual.option.activityRenderMode.text.label' },
   { id: 'summary', labelKey: 'settings.openchamber.visual.option.activityRenderMode.summary.label' },
 ];
 
@@ -129,7 +130,7 @@ const MessagesTab: React.FC = () => {
   const mermaidOptions = useChipOptions(MERMAID_RENDERING_OPTIONS);
   const diffLayoutOptions = useChipOptions(DIFF_LAYOUT_OPTIONS);
 
-  const handleActivityRenderModeChange = (mode: 'collapsed' | 'summary') => {
+  const handleActivityRenderModeChange = (mode: typeof activityRenderMode) => {
     setActivityRenderMode(mode);
     // A stored legacy 'sorted' chat mode reads as Collapsed until the user
     // picks a mode here; retire it so the choice sticks.

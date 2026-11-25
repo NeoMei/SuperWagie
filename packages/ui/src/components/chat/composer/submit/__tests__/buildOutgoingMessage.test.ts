@@ -113,6 +113,12 @@ describe('manual queue projection', () => {
         const queue = [ordinary, { ...ordinary, id: 'second' }];
         expect(selectComposerQueue(queue)).toBe(queue);
     });
+
+    test('the manual composer sends only items that can still be taken', () => {
+        const uncertain = { ...ordinary, id: 'uncertain', deliveryUnconfirmed: true };
+        expect(selectComposerQueue([uncertain, ordinary])).toEqual([ordinary]);
+        expect(selectComposerQueue([uncertain])).toEqual([]);
+    });
 });
 
 describe('queued messages', () => {
@@ -391,6 +397,15 @@ describe('synthetic context', () => {
         expect(result.additionalParts).toEqual([{ text: 'use: deploy', synthetic: true }]);
     });
 
+    test('merges captured queued skills with the composer skills in message order', () => {
+        const result = buildOutgoingMessage(input({
+            queued: [{ text: 'queued', skills: ['publish', 'audit'] }, { text: 'second', skills: ['publish'] }],
+            composerText: '/deploy and /audit',
+        }), deps());
+        expect(result.skillNames).toEqual(['publish', 'audit', 'deploy']);
+        expect(result.additionalParts).toEqual([]);
+    });
+
     test('context alone is still worth sending', () => {
         const result = buildOutgoingMessage(input({
             references: [{ kind: 'repository-issue', number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue body' }],
@@ -454,7 +469,7 @@ describe('capturing composer context for the queue', () => {
         ...overrides,
     });
 
-    test('captures everything attached, in send order, with the skill instruction last', () => {
+    test('captures attached context in send order', () => {
         const context = buildComposerContext(contextInput({
             inlineComments: [commentDraft()],
             syntheticTexts: ['conflict note'],
@@ -463,9 +478,9 @@ describe('capturing composer context for the queue', () => {
                 { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' },
                 { kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
             ],
-        }), 'use: deploy');
+        }));
 
-        expect(context.map((part) => part.kind)).toEqual(['context', 'synthetic', 'context', 'context', 'context', 'instruction']);
+        expect(context.map((part) => part.kind)).toEqual(['context', 'synthetic', 'context', 'context', 'context']);
         expect(context[0]?.kind).toBe('context');
         expect(context[0]?.text).toContain('Comment on `src/app.ts` lines 3-5 (modified):');
         expect(context[0]?.kind === 'context' ? context[0].metadata[CONTEXT_METADATA_KEY] : null)
@@ -475,7 +490,6 @@ describe('capturing composer context for the queue', () => {
             text: 'pr-diff',
             metadata: { [CONTEXT_METADATA_KEY]: { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7' } },
         });
-        expect(context.at(-1)).toEqual({ kind: 'instruction', text: 'use: deploy' });
     });
 
     test('a message queued with instructions before they were dropped still delivers them first', () => {
@@ -487,7 +501,7 @@ describe('capturing composer context for the queue', () => {
     });
 
     test('nothing attached captures nothing', () => {
-        expect(buildComposerContext(contextInput(), null)).toEqual([]);
+        expect(buildComposerContext(contextInput())).toEqual([]);
     });
 
     test('delivering captured context reproduces the composer parts exactly', () => {
@@ -496,11 +510,9 @@ describe('capturing composer context for the queue', () => {
             syntheticTexts: ['conflict note'],
             references: [{ kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' }],
         });
-        // The skill instruction is the one intended difference: a direct send
-        // attaches the skill to the prompt, a queued one carries the instruction.
-        const captured: QueuedContextPart[] = buildComposerContext(input, 'use: deploy');
+        const captured: QueuedContextPart[] = buildComposerContext(input);
         const direct = buildOutgoingMessage({ ...input, queued: [], composerText: 'use /deploy', composerAttachments: [] }, deps());
-        expect(queuedContextToParts(captured)).toEqual([...direct.additionalParts, { text: 'use: deploy', synthetic: true }]);
+        expect(queuedContextToParts(captured)).toEqual(direct.additionalParts);
         expect(direct.skillNames).toEqual(['deploy']);
     });
 });

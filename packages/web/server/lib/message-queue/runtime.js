@@ -13,14 +13,14 @@
 
 import fs from 'fs';
 import path from 'path';
-import { randomBytes } from 'node:crypto';
 import { OpenCode } from '@opencode/client';
-import { z } from 'zod';
+import { prepareAttachmentDelivery } from '../opencode/attachment-delivery.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
+import { createMessageId } from '../dispatch-results/runtime.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -53,6 +53,7 @@ const ATTACHMENT_SOURCES = new Set(['local', 'server', 'vscode']);
 // the other kinds are plain synthetic text.
 const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
+const PRE_CONNECT_ERRORS = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
 
 const getQueuedSendRetryDelayMs = (failures) =>
   Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
@@ -66,41 +67,36 @@ const asRecord = (value) => (value && typeof value === 'object' && !Array.isArra
 const asList = (value) => (Array.isArray(value) ? value : null);
 const asCount = (value) => (Number.isFinite(value) && value >= 0 ? Math.floor(value) : null);
 
-const queueImagePath = z.string().refine((value) => (path.posix.isAbsolute(value) || path.win32.isAbsolute(value))
-  && !/[<>\p{Cc}]/u.test(value));
-const queueImageKernelPaths = z.object({ paths: z.object({ tmp: queueImagePath }) });
-
-async function prepareQueuedImageLinks(client, images) {
-  const prepared = images.map((image, index) => {
-    const data = /^data:image\/([a-z\d.+-]+);base64,([a-z\d+/]+={0,2})$/i.exec(image.dataUrl);
-    const bytes = data && data[2].length % 4 === 0 && Buffer.from(data[2], 'base64');
-    if (!bytes?.length) throw new Error('Queued image bytes are unavailable. Edit the message to reattach the image.');
-    const extension = data[1].toLowerCase().split('+')[0];
-    const filename = `image-${index + 1}.${extension}`;
-    const label = path.win32.basename(image.filename).replace(/[\r\n<>[\]\\]/g, '-').trim() || filename;
-    return { bytes, filename, label };
-  });
-
-  const info = queueImageKernelPaths.safeParse(await client.server.info());
-  if (!info.success) throw new Error('OpenCode did not provide a temporary directory for the queued images.');
-  const folder = `${info.data.paths.tmp.replace(/[\\/]+$/, '')}/openchamber/${randomBytes(8).toString('hex')}`;
-
-  const links = [];
-  for (const { bytes, filename, label } of prepared) {
-    const destination = `${folder}/${filename}`;
-    const written = await client.experimental.file.write({ path: destination, payload: bytes });
-    const saved = queueImagePath.safeParse(written.data?.path);
-    if (!saved.success || saved.data.replaceAll('\\', '/') !== destination.replaceAll('\\', '/')) {
-      throw new Error('OpenCode did not confirm a queued image write.');
-    }
-    links.push(`[${label}](<${saved.data.replaceAll('\\', '/')}>)`);
-  }
-  return links.join(' ');
-}
-
 const isValidSessionId = (value) => SESSION_ID_PATTERN.test(asNonEmptyString(value));
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
+
+const parseSkillNames = (value) => [...new Set((asList(value) ?? []).map(asNonEmptyString).filter(Boolean))];
+
+const parseDelivery = (value) => {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const promptId = asNonEmptyString(raw.promptId);
+  const instructions = (asList(raw.instructions) ?? []).flatMap((entry) => {
+    const id = asNonEmptyString(entry?.id);
+    const names = parseSkillNames(entry?.names);
+    return id && names.length > 0 ? [{ id, names }] : [];
+  });
+  return { promptId, instructions, promptStarted: Boolean(promptId && raw.promptStarted === true) };
+};
+
+const skillMentionInstruction = (names) => (
+  `The user explicitly mentioned these skills in their message: ${names.map((name) => `$${name}`).join(', ')}. Use the corresponding skill tool when it is relevant to accomplishing the user's request.`
+);
+
+const isMissingSkillResponse = (detail) => {
+  try {
+    const body = asRecord(JSON.parse(detail));
+    return body?._tag === 'InvalidRequestError' && asText(body.message).startsWith('Skill not found');
+  } catch {
+    return false;
+  }
+};
 
 const parseSendConfig = (value) => {
   const raw = asRecord(value);
@@ -151,6 +147,7 @@ const parseAttachment = (value) => {
   const composerAnchor = asNonEmptyString(raw.composerAnchor);
   if (composerAnchor) attachment.composerAnchor = composerAnchor;
   if (raw.deliverAsPath === true && mimeType.toLowerCase().startsWith('image/')) attachment.deliverAsPath = true;
+  if (raw.saveCopy === true && mimeType.toLowerCase().startsWith('image/')) attachment.saveCopy = true;
   attachment.dataUrl = dataUrl;
   return attachment;
 };
@@ -199,6 +196,8 @@ export const parseQueuedItemInput = (value) => {
   const item = { content, text };
   const agentMention = asNonEmptyString(raw.agentMention);
   if (agentMention) item.agentMention = agentMention;
+  const skills = parseSkillNames(raw.skills);
+  if (skills.length > 0) item.skills = skills;
   item.attachments = attachments;
   item.context = context;
   const contextPreview = asNonEmptyString(raw.contextPreview).slice(0, 103);
@@ -218,7 +217,10 @@ const parseStoredItem = (value) => {
   const id = raw ? asNonEmptyString(raw.id) : '';
   if (!id) return null;
   try {
-    return { id, createdAt: asCount(raw.createdAt) ?? Date.now(), ...parseQueuedItemInput(raw) };
+    const item = { id, createdAt: asCount(raw.createdAt) ?? Date.now(), ...parseQueuedItemInput(raw) };
+    const delivery = parseDelivery(raw.delivery);
+    if (delivery) item.delivery = delivery;
+    return item;
   } catch {
     return null;
   }
@@ -232,6 +234,8 @@ const toPublicAttachment = ({ dataUrl: _dataUrl, ...attachment }) => attachment;
 const toPublicItem = (item) => {
   const publicItem = { id: item.id, createdAt: item.createdAt, content: item.content, text: item.text };
   if (item.agentMention) publicItem.agentMention = item.agentMention;
+  if (item.skills?.length) publicItem.skills = [...item.skills];
+  if (item.delivery?.promptStarted) publicItem.deliveryUnconfirmed = true;
   publicItem.attachments = item.attachments.map(toPublicAttachment);
   // Older persisted items have no UI summary. Prefer their attached comment
   // before falling back to the model-facing context text.
@@ -249,6 +253,8 @@ const toPublicItem = (item) => {
   if (item.scheduledTask) publicItem.scheduledTask = { ...item.scheduledTask };
   return publicItem;
 };
+
+const toTakenItem = ({ delivery: _delivery, ...item }) => item;
 
 const extractSessionStatus = (payload) => {
   if (payload.type !== 'session.status') return null;
@@ -400,20 +406,19 @@ export function createMessageQueueRuntime({
     return loadPromise;
   };
 
-  const persist = () => {
+  const persist = ({ required = false } = {}) => {
     const payload = JSON.stringify(serialize());
-    writePromise = writePromise
-      .then(async () => {
-        await fs.promises.mkdir(dataDir, { recursive: true });
-        const tmpPath = `${filePath}.${process.pid}.tmp`;
-        // Queued prompts are conversation content: readable by the owner only.
-        await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
-        await fs.promises.rename(tmpPath, filePath);
-      })
-      .catch((error) => {
-        console.warn('[message-queue] failed to persist queue:', error?.message ?? error);
-      });
-    return writePromise;
+    const write = writePromise.then(async () => {
+      await fs.promises.mkdir(dataDir, { recursive: true });
+      const tmpPath = `${filePath}.${process.pid}.tmp`;
+      // Queued prompts are conversation content: readable by the owner only.
+      await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
+      await fs.promises.rename(tmpPath, filePath);
+    });
+    writePromise = write.catch((error) => {
+      console.warn('[message-queue] failed to persist queue:', error?.message ?? error);
+    });
+    return required ? write : writePromise;
   };
 
   // --- snapshots -----------------------------------------------------------
@@ -474,15 +479,26 @@ export function createMessageQueueRuntime({
     if (directory) params.set('directory', directory);
     const search = params.toString();
     const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-    const init = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
+    const isPrompt = method === 'POST' && fetchPath.endsWith('/prompt');
+    const init = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), ...(isPrompt ? { redirect: 'error' } : {}) };
     if (body) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
     }
-    const response = await fetchImpl(search ? `${base}?${search}` : base, init);
+    let response;
+    try {
+      response = await fetchImpl(search ? `${base}?${search}` : base, init);
+    } catch (error) {
+      if (isPrompt && !init.signal.aborted && PRE_CONNECT_ERRORS.has(asRecord(error?.cause)?.code)) {
+        throw Object.assign(new Error('OpenCode prompt connection could not be established', { cause: error }), { promptNotForwarded: true });
+      }
+      throw error;
+    }
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
+      const error = httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
+      if (response.status === 400 && fetchPath.endsWith('/prompt') && isMissingSkillResponse(detail)) error.skillNotFound = true;
+      throw error;
     }
     if (method === 'POST') {
       await assertPromptResponse(response, 'OpenCode dispatch');
@@ -548,6 +564,68 @@ export function createMessageQueueRuntime({
     };
   };
 
+  const resolveSkills = async (names, directory) => {
+    if (names.length === 0) return { attached: [], unresolved: [] };
+    const locationDirectory = /^\/\/[^/]/.test(directory) ? directory.replace(/\//g, '\\') : directory;
+    const scope = { directory, query: { 'location[directory]': locationDirectory } };
+    let known;
+    try {
+      // Model discovery waits for location plugins before the skill catalog is read.
+      await openCodeFetch('/api/model', scope).catch(() => undefined);
+      known = (asList(await openCodeFetch('/api/skill', scope)) ?? []).map(asRecord).filter(Boolean);
+    } catch {
+      return { attached: [], unresolved: names };
+    }
+    const attached = [];
+    const unresolved = [];
+    for (const name of names) {
+      const match = known.find((skill) => skill.name === name) ?? known.find((skill) => skill.id === name);
+      const id = asNonEmptyString(match?.id);
+      if (!id) unresolved.push(name);
+      else if (!attached.some((skill) => skill.id === id)) attached.push({ id, name });
+    }
+    return { attached, unresolved };
+  };
+
+  const saveDelivery = async (item, delivery) => {
+    const previous = item.delivery;
+    item.delivery = delivery;
+    try {
+      await persist({ required: true });
+    } catch (error) {
+      if (previous) item.delivery = previous;
+      else delete item.delivery;
+      throw error;
+    }
+  };
+
+  const prepareSkillDelivery = async (sessionPath, directory, item, command) => {
+    const prior = item.delivery;
+    const names = (item.skills ?? []).filter((name) => !prior?.instructions.some((entry) => entry.names.includes(name)));
+    const { attached, unresolved } = command ? { attached: [], unresolved: names } : await resolveSkills(names, directory);
+    const saveInstructions = async (uncovered) => {
+      const delivery = item.delivery;
+      if (delivery && uncovered.length === 0) return;
+      const instructions = [...(delivery?.instructions ?? [])];
+      if (uncovered.length > 0) instructions.push({ id: createMessageId(now()), names: uncovered });
+      // The synthetic instructions and prompt have separate durable IDs.
+      // A queue backoff or a restart can revisit the same delivery.
+      await saveDelivery(item, { ...delivery, instructions });
+    };
+    const admit = async ({ id, names: covered }) => {
+      try {
+        await openCodeFetch(`${sessionPath}/synthetic`, {
+          directory, method: 'POST', body: { id, text: skillMentionInstruction(covered), resume: false },
+        });
+      } catch (error) {
+        // This synthetic ID was minted and persisted for this queue item.
+        if (error?.status !== 409) throw error;
+      }
+    };
+    if (item.skills?.length) await saveInstructions(unresolved);
+    return { attached, saveInstructions, admit };
+  };
+
   // v2 takes prompt attachments as URIs; a data URL is one.
   const toPromptFile = (attachment) => ({
     uri: attachment.dataUrl,
@@ -570,21 +648,17 @@ export function createMessageQueueRuntime({
   };
 
   const sendItem = async (sessionId, directory, item) => {
+    if (item.delivery?.promptStarted) throw new Error('Queued prompt receipt must be checked before dispatch');
+    const sessionPath = `/api/session/${encodeURIComponent(sessionId)}`;
     const { providerID, modelID, variant } = item.sendConfig;
     let agent = item.sendConfig.agent;
     let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
-    const queuedImages = item.attachments.filter((file) => file.deliverAsPath);
-    const promptFiles = item.attachments.filter((file) => !file.deliverAsPath).map(toPromptFile);
+    const sourceFiles = item.attachments.map((attachment) => ({
+      ...toPromptFile(attachment),
+      deliverAsPath: attachment.deliverAsPath,
+      saveCopy: attachment.saveCopy,
+    }));
     const contextMessages = item.context.flatMap(toContextMessages);
-    // Queue records retain the image bytes. Rebuild their paths in this
-    // kernel before any prompt, synthetic context, or goal can be admitted.
-    const links = queuedImages.length === 0 ? '' : await prepareQueuedImageLinks(OpenCode.make({
-      baseUrl: buildOpenCodeUrl('/', '').replace(/\/+$/, ''),
-      headers: { ...getOpenCodeAuthHeaders(), 'x-opencode-directory': encodeURIComponent(directory) },
-      fetch: (input, init) => fetchImpl(input, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }),
-    }), queuedImages);
-    const withImageLinks = (text) => [text, links].filter(Boolean).join('\n\n');
-    const text = withImageLinks(item.text);
 
     // Jev routing, when the queued send named the Auto sentinel. A failure
     // inside resolves to the fallback model; only a missing fallback throws.
@@ -593,12 +667,22 @@ export function createMessageQueueRuntime({
       directory,
       model,
       agent,
-      requestText: `${text}${attachmentHint({ files: promptFiles })}`.trim(),
+      requestText: `${item.text}${attachmentHint({ files: sourceFiles })}`.trim(),
     }) : null;
     if (routed) {
       model = routed.model;
       agent = routed.agent ?? agent;
     }
+
+    // Prepare only after the real model is known and before any write to
+    // the session. An unsuccessful path write leaves the queued item intact.
+    const delivery = await prepareAttachmentDelivery(OpenCode.make({
+      baseUrl: buildOpenCodeUrl('/', '').replace(/\/+$/, ''),
+      headers: { ...getOpenCodeAuthHeaders(), 'x-opencode-directory': encodeURIComponent(directory) },
+      fetch: (input, init) => fetchImpl(input, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }),
+    }), model, sourceFiles, routed?.inputModalities);
+    const { files: promptFiles } = delivery;
+    const text = delivery.text(item.text);
 
     // v2 selects model and agent on the session, not per prompt: the choice is
     // switched once and then persists.
@@ -618,15 +702,16 @@ export function createMessageQueueRuntime({
     // Resolved before anything is admitted: a failed command lookup fails the
     // whole send, so a retry does not admit the context twice.
     const command = await resolveSlashCommand(item.text, directory);
+    const skillDelivery = await prepareSkillDelivery(sessionPath, directory, item, command);
 
     // Standing project context is written into the session first, exactly as
     // a UI send does it; a failed write sends without it rather than not at all.
-    if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory, text);
+    if (!item.delivery?.promptId && sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory, text);
 
     // A message queued as a goal starts it now, as a direct send would. The
     // goal is saved before anything is admitted, so a failed save leaves
     // nothing in the session for the retry to duplicate.
-    if (item.goal) {
+    if (!item.delivery?.promptId && item.goal) {
       await createSessionGoal({
         persistSessionGoal,
         sessionID: sessionId,
@@ -644,16 +729,19 @@ export function createMessageQueueRuntime({
     // holds for a command too: its route takes file attachments only, and
     // sending "/name args" as a prompt instead would skip the template
     // OpenCode 2.x expands only on the command route.
-    for (const synthetic of contextMessages) {
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
-        directory,
-        method: 'POST',
-        body: synthetic,
-      });
+    if (!item.delivery?.promptId) {
+      for (const synthetic of contextMessages) {
+        await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
+          directory,
+          method: 'POST',
+          body: synthetic,
+        });
+      }
     }
+    for (const instruction of item.delivery?.instructions ?? []) await skillDelivery.admit(instruction);
 
     // The goal briefing goes last, right before the message the goal is about.
-    if (item.goal) {
+    if (!item.delivery?.promptId && item.goal) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
         method: 'POST',
@@ -668,21 +756,51 @@ export function createMessageQueueRuntime({
         body: {
           // OpenCode 2.0.8 renamed the command body field `command` to `name`.
           name: command.name,
-          text: withImageLinks(command.arguments),
+          text: delivery.text(command.arguments),
           ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
         },
       });
     } else {
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
-        directory,
-        method: 'POST',
-        body: {
-          text,
-          ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
-          ...(item.agentMention ? { agents: [{ name: item.agentMention }] } : {}),
-        },
-      });
+      const body = {
+        id: item.delivery?.promptId || createMessageId(now()),
+        text,
+        ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
+        ...(item.agentMention ? { agents: [{ name: item.agentMention }] } : {}),
+      };
+      const prompt = async (promptBody) => {
+        const delivery = { instructions: [], ...item.delivery, promptId: body.id };
+        // The write-ahead checkpoint survives a lost response or process
+        // death. Only evidence from before connection can release it.
+        if (stopped || !queues.get(sessionId)?.items.includes(item)) throw new Error('Queued prompt was removed before delivery');
+        await saveDelivery(item, { ...delivery, promptStarted: true });
+        try {
+          if (stopped || !queues.get(sessionId)?.items.includes(item)) {
+            throw Object.assign(new Error('Queued prompt was removed before forwarding'), { promptNotForwarded: true });
+          }
+          await openCodeFetch(`${sessionPath}/prompt`, { directory, method: 'POST', body: promptBody });
+        } catch (error) {
+          if (error?.promptNotForwarded || (promptBody.skills?.length && error?.skillNotFound)) {
+            await saveDelivery(item, { ...delivery, promptStarted: false });
+          }
+          throw error;
+        }
+      };
+      try {
+        const skills = skillDelivery.attached.map(({ id }) => ({ id }));
+        await prompt(skills.length > 0 ? { ...body, skills } : body);
+      } catch (error) {
+        if (!error?.skillNotFound || skillDelivery.attached.length === 0) throw error;
+        await skillDelivery.saveInstructions(skillDelivery.attached.map(({ name }) => name));
+        await skillDelivery.admit(item.delivery.instructions.at(-1));
+        await prompt(body);
+      }
     }
+  };
+
+  const confirmPromptReceipt = async (sessionId, directory, promptId) => {
+    const path = `/api/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(promptId)}`;
+    const record = asRecord(await openCodeFetch(path, { directory }));
+    if (record?.id !== promptId || record.type !== 'user') throw new Error('OpenCode prompt receipt could not be confirmed');
   };
 
   // --- dispatch loop -------------------------------------------------------
@@ -735,7 +853,8 @@ export function createMessageQueueRuntime({
       return;
     }
 
-    const idle = await isSessionIdle(sessionId, queue.directory);
+    const receiptPending = head.delivery?.promptStarted === true;
+    const idle = receiptPending ? true : await isSessionIdle(sessionId, queue.directory);
     if (idle === null) {
       if (head.scheduledTask && validateScheduledTaskTarget) {
         try {
@@ -760,7 +879,7 @@ export function createMessageQueueRuntime({
     // background subagent works and runs again when OpenCode hands the
     // result back, so the turn is only over once no subagent runs. That rerun
     // re-arms through its idle event; the recheck covers a missed one.
-    const subagentsWorking = await hasWorkingSubagents(sessionId);
+    const subagentsWorking = receiptPending ? false : await hasWorkingSubagents(sessionId);
     if (subagentsWorking !== false) {
       armDispatch(sessionId, subagentsWorking === null ? retryDelayMs(1) : SUBAGENT_RECHECK_MS);
       return;
@@ -769,12 +888,18 @@ export function createMessageQueueRuntime({
     // Re-read after the awaits — the user may have edited the queue meanwhile.
     const current = queues.get(sessionId);
     const item = current?.items[0];
-    if (!item || item.id !== head.id || sending.has(sessionId)) return;
+    if (!item || item.id !== head.id || sending.has(sessionId) || stopped || isHeld(sessionId)) return;
+    const latestFailure = failures.get(sessionId);
+    if (latestFailure?.itemId === item.id && latestFailure.nextAttemptAt > now()) {
+      armDispatch(sessionId, latestFailure.nextAttemptAt - now());
+      return;
+    }
+    const verifyingReceipt = item.delivery?.promptStarted === true;
 
     sending.set(sessionId, item.id);
     broadcast(sessionId);
     try {
-      if (item.scheduledTask) {
+      if (!verifyingReceipt && item.scheduledTask) {
         try {
           await beforeScheduledTaskSend?.(sessionId, current.directory, item);
         } catch (error) {
@@ -788,7 +913,8 @@ export function createMessageQueueRuntime({
           return;
         }
       }
-      await sendItem(sessionId, current.directory, item);
+      if (verifyingReceipt) await confirmPromptReceipt(sessionId, current.directory, item.delivery.promptId);
+      else await sendItem(sessionId, current.directory, item);
       const after = queues.get(sessionId);
       if (after) setQueueItems(sessionId, after.directory, after.items.filter((entry) => entry.id !== item.id), 'sent');
       failures.delete(sessionId);
@@ -800,9 +926,10 @@ export function createMessageQueueRuntime({
         // bookkeeping only
       }
       console.log(`[message-queue] sent queued message to ${sessionId}`);
+      if (verifyingReceipt) armDispatch(sessionId);
     } catch (error) {
       sending.delete(sessionId);
-      const count = (failure?.itemId === item.id ? failure.failures : 0) + 1;
+      const count = (latestFailure?.itemId === item.id ? latestFailure.failures : 0) + 1;
       const nextAttemptAt = now() + retryDelayMs(count);
       failures.set(sessionId, { itemId: item.id, failures: count, nextAttemptAt });
       console.warn(`[message-queue] send to ${sessionId} failed (attempt ${count}):`, error?.message ?? error);
@@ -846,20 +973,27 @@ export function createMessageQueueRuntime({
       ...parsed,
     };
     const existing = queues.get(sessionId);
-    const items = [...(existing?.items ?? []), item].slice(-MAX_ITEMS_PER_SESSION);
+    const protectItem = (entry) => entry.id === sending.get(sessionId) || entry.delivery?.promptStarted;
+    const items = [...(existing?.items ?? []), item];
+    if (items.length > MAX_ITEMS_PER_SESSION) {
+      const evictable = items.findIndex((entry) => entry !== item && !protectItem(entry));
+      if (evictable === -1) throw httpError('message queue is full', 409);
+      items.splice(evictable, 1);
+    }
+    const evictableSessions = !existing && queues.size >= MAX_SESSIONS
+      ? Array.from(queues.entries())
+        .filter(([id, queue]) => !sending.has(id) && !queue.items.some((entry) => entry.delivery?.promptStarted))
+        .sort((left, right) => (left[1].items[0]?.createdAt ?? 0) - (right[1].items[0]?.createdAt ?? 0))
+        .slice(0, queues.size - MAX_SESSIONS + 1)
+      : [];
+    if (!existing && queues.size - evictableSessions.length >= MAX_SESSIONS) throw httpError('message queue is full', 409);
     setQueueItems(sessionId, directory, items);
     directories.set(sessionId, directory);
-    if (queues.size > MAX_SESSIONS) {
-      const oldest = Array.from(queues.entries())
-        .filter(([id]) => id !== sessionId && !sending.has(id))
-        .sort((left, right) => (left[1].items[0]?.createdAt ?? 0) - (right[1].items[0]?.createdAt ?? 0))
-        .slice(0, queues.size - MAX_SESSIONS);
-      for (const [staleId] of oldest) {
-        setQueueItems(staleId, directories.get(staleId), []);
-        clearTimer(staleId);
-        broadcast(staleId);
-        directories.delete(staleId);
-      }
+    for (const [staleId] of evictableSessions) {
+      setQueueItems(staleId, directories.get(staleId), []);
+      clearTimer(staleId);
+      broadcast(staleId);
+      directories.delete(staleId);
     }
     const result = commit(sessionId);
     // The session may already be idle (queued from a busy-looking composer
@@ -889,8 +1023,9 @@ export function createMessageQueueRuntime({
     const item = queue?.items.find((entry) => entry.id === itemId);
     if (!queue || !item) throw httpError('queued message not found', 404);
     if (item.scheduledTask) throw httpError('scheduled messages cannot be taken', 409);
+    if (item.delivery?.promptStarted) throw httpError('queued prompt delivery is unconfirmed', 409);
     setQueueItems(sessionId, queue.directory, queue.items.filter((entry) => entry.id !== itemId));
-    return { ...commit(sessionId), item };
+    return { ...commit(sessionId), item: toTakenItem(item) };
   };
 
   /** Removes every item not currently being sent and hands them back in order. */
@@ -900,10 +1035,11 @@ export function createMessageQueueRuntime({
     const queue = queues.get(sessionId);
     if (!queue) return { revision, session: sessionSnapshot(sessionId), items: [] };
     const sendingId = sending.get(sessionId) ?? null;
-    const items = queue.items.filter((item) => item.id !== sendingId && !item.scheduledTask);
+    const isTakeable = (item) => item.id !== sendingId && !item.scheduledTask && !item.delivery?.promptStarted;
+    const items = queue.items.filter(isTakeable);
     if (items.length === 0) return { revision, session: sessionSnapshot(sessionId), items: [] };
-    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => item.id === sendingId || item.scheduledTask));
-    return { ...commit(sessionId), items };
+    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => !isTakeable(item)));
+    return { ...commit(sessionId), items: items.map(toTakenItem) };
   };
 
   const reorder = async (sessionIdInput, itemIds) => {

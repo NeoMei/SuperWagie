@@ -177,6 +177,7 @@ describe("translateWireEvent", () => {
           info: { id: "msg_a", sessionID: "ses_1", role: "assistant", time: { created: 1000 }, agent: "build", providerID: "p", modelID: "m" },
         },
       },
+      { type: "session.status", properties: { sessionID: "ses_1", status: { type: "busy" } } },
     ])
     const ended = translateWireEvent({
       ...base,
@@ -196,7 +197,7 @@ describe("translateWireEvent", () => {
         properties: {
           sessionID: "ses_1",
           messageID: "msg_a",
-          patch: { time: { completed: 1000 }, finish: "stop", cost: 0.1, tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } }, retry: null },
+          patch: { time: { completed: 1000 }, finish: "stop", error: null, cost: 0.1, tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } }, retry: null },
         },
       },
     ])
@@ -401,6 +402,9 @@ describe("translateWireEvent", () => {
       { ...base, type: "session.step.first-token", durable, data: { sessionID: "ses_1", assistantMessageID: "msg_a1" } },
       { ...base, type: "experimental.mcp.event", data: { id: "sub_1", server: "fixture", name: "changed", eventId: "remote_1",
         timestamp: "2026-11-13T12:00:00Z", data: { value: "plugin payload" }, cursor: null } },
+      { ...base, type: "experimental.job.updated", data: { info: {
+        id: "job_1", sessionID: "ses_1", kind: "codemode", status: "running", time: { started: 1000 },
+      } } },
       { ...base, type: "session.inbox.delivery.changed", durable, data: { sessionID: "ses_1", inboxID: "in_1", delivery: "queue" } },
       { ...base, type: "tui.toast.show", data: { message: "x", variant: "info" } },
       { ...base, type: "integration.updated", data: {} },

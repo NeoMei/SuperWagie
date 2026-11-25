@@ -39,6 +39,13 @@ const createOpenCode = () => {
     children: {},
     tail: [],
     commands: [],
+    models: [],
+    skills: [],
+    rejectSkillOnce: false,
+    promptConnectFailure: false,
+    losePromptResponse: false,
+    receipts: new Map(),
+    beforeActiveOnce: null,
     sent: [],
     switched: [],
     writes: [],
@@ -62,7 +69,12 @@ const createOpenCode = () => {
       return new Response('<!doctype html><title>OpenChamber</title>', { status: 200, headers: { 'content-type': 'text/html' } });
     }
     // Real shape: `{ data }` without a `location`, unlike directory-scoped routes.
-    if (pathname === '/api/session/active') return Response.json({ data: state.active });
+    if (pathname === '/api/session/active') {
+      const before = state.beforeActiveOnce;
+      state.beforeActiveOnce = null;
+      await before?.();
+      return Response.json({ data: state.active });
+    }
     if (pathname === '/api/session' && method === 'GET') {
       const parentID = new URL(url).searchParams.get('parentID');
       return Response.json({ data: (state.children[parentID] ?? []).map((id) => ({ id, parentID })), cursor: {} });
@@ -73,6 +85,12 @@ const createOpenCode = () => {
       return wrapped({ id, parentID });
     }
     if (pathname.endsWith('/message')) return Response.json({ data: state.tail, cursor: {} });
+    if (pathname.includes('/message/')) {
+      const receipt = state.receipts.get(pathname.split('/').at(-1));
+      return receipt ? wrapped(receipt) : new Response(null, { status: 404 });
+    }
+    if (pathname === '/api/model') return wrapped(state.models);
+    if (pathname === '/api/skill') return wrapped(state.skills);
     if (pathname === '/api/command') return wrapped(state.commands);
     if (pathname === '/api/info') return Response.json({ paths: { tmp: '/kernel/tmp' } });
     if (method === 'POST' && pathname === '/api/experimental/fs/write') {
@@ -86,7 +104,21 @@ const createOpenCode = () => {
       return new Response(null, { status: 204 });
     }
     if (method === 'POST' && (pathname.endsWith('/prompt') || pathname.endsWith('/command') || pathname.endsWith('/synthetic'))) {
-      state.sent.push({ path: pathname, body: JSON.parse(init.body) });
+      const body = JSON.parse(init.body);
+      if (pathname.endsWith('/prompt') && state.promptConnectFailure) {
+        state.promptConnectFailure = false;
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error('connection refused'), { code: 'ECONNREFUSED' }) });
+      }
+      state.sent.push({ path: pathname, body });
+      if (body.skills?.length && state.rejectSkillOnce) {
+        state.rejectSkillOnce = false;
+        return Response.json({ _tag: 'InvalidRequestError', message: 'Skill not found: removed', field: 'skills' }, { status: 400 });
+      }
+      if (pathname.endsWith('/prompt') && state.losePromptResponse) {
+        state.losePromptResponse = false;
+        state.receipts.set(body.id, { type: 'user', id: body.id });
+        throw new TypeError('lost response', { cause: Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }) });
+      }
       return wrapped({ id: `msg_${state.sent.length}` });
     }
     return new Response('not found', { status: 404 });
@@ -160,7 +192,7 @@ describe('scheduled task items', () => {
     await settle();
     expect(openCode.state.switched).toEqual([]);
     expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].body).toEqual({ text: 'follow up' });
+    expect(openCode.state.sent[0].body).toEqual({ id: expect.stringMatching(/^msg_/), text: 'follow up' });
     expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
     expect(results).toEqual([{ task: { projectId: 'project-1', taskId: 'task-1' }, status: 'sent' }]);
     runtime.stop();
@@ -220,7 +252,7 @@ describe('scheduled task items', () => {
   });
 
   it.each([
-    { operation: 'prompt', status: 500 },
+    { operation: 'prompt', status: 'pre-connect refusal' },
     { operation: 'model', status: 500 },
     { operation: 'model', status: 404 },
     { operation: 'model', status: 409 },
@@ -237,8 +269,8 @@ describe('scheduled task items', () => {
       onScheduledTaskResult: (_task, status) => results.push(status),
     });
     runtime.start();
-    openCode.state.failStatus = status;
-    if (operation === 'prompt') openCode.state.failNext = /\/prompt$/;
+    if (operation === 'prompt') openCode.state.promptConnectFailure = true;
+    else openCode.state.failStatus = status;
     if (operation === 'model') openCode.state.failNext = /\/model$/;
     await runtime.enqueue(SESSION, DIRECTORY, operation === 'model'
       ? scheduled('project-1', { sendConfig: { providerID: 'openai', modelID: 'chosen' } })
@@ -427,13 +459,13 @@ describe('a message queued as a goal', () => {
 
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1));
     expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['plain first']);
     expect(persisted).toEqual([]);
 
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).items).toEqual([]));
 
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toMatchObject({
@@ -446,7 +478,7 @@ describe('a message queued as a goal', () => {
     // The briefing goes ahead of the message, as for a scheduled goal.
     expect(openCode.state.sent.slice(1).map((entry) => [entry.path, entry.body])).toEqual([
       [`/api/session/${SESSION}/synthetic`, { text: expect.stringContaining('Goal mode is active'), resume: false }],
-      [`/api/session/${SESSION}/prompt`, { text: 'build the parser' }],
+      [`/api/session/${SESSION}/prompt`, { id: expect.stringMatching(/^msg_/), text: 'build the parser' }],
     ]);
     expect(openCode.state.sent[1].body.text).toContain('A token budget of 5000 tokens');
   });
@@ -481,6 +513,114 @@ describe('a message queued as a goal', () => {
 });
 
 describe('message queue runtime', () => {
+  it('rechecks a prompt checkpoint when an older idle probe finishes late', async () => {
+    const { runtime, openCode, emit } = createRuntime({ retryDelayMs: () => 1_000 });
+    let resumeIdleProbe;
+    const idleProbe = new Promise((resolve) => { resumeIdleProbe = resolve; });
+    openCode.state.beforeActiveOnce = () => idleProbe;
+    openCode.state.losePromptResponse = true;
+    runtime.start();
+    try {
+      await runtime.enqueue(SESSION, DIRECTORY, item());
+      await vi.waitFor(() => expect(openCode.state.beforeActiveOnce).toBeNull());
+      emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+      await vi.waitFor(() => {
+        expect(runtime.sessionSnapshot(SESSION).items[0]?.deliveryUnconfirmed).toBe(true);
+        expect(runtime.sessionSnapshot(SESSION).sendingId).toBeNull();
+      });
+      resumeIdleProbe();
+      await settle();
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(runtime.sessionSnapshot(SESSION).items[0]?.deliveryUnconfirmed).toBe(true);
+    } finally {
+      resumeIdleProbe();
+      runtime.stop();
+      await runtime.flush();
+    }
+  });
+
+  it('reconciles a lost prompt response by its persisted id after restart', async () => {
+    const openCode = createOpenCode();
+    const first = createRuntime({ openCode, retryDelayMs: () => 1000 });
+    openCode.state.losePromptResponse = true;
+    const { itemId } = await first.runtime.enqueue(SESSION, DIRECTORY, item());
+    try {
+      await vi.waitFor(() => {
+        expect(first.runtime.sessionSnapshot(SESSION).items[0]?.deliveryUnconfirmed).toBe(true);
+        expect(first.runtime.sessionSnapshot(SESSION).sendingId).toBeNull();
+      });
+      await expect(first.runtime.take(SESSION, itemId)).rejects.toMatchObject({ status: 409 });
+      expect((await first.runtime.takeAll(SESSION)).items).toEqual([]);
+    } finally {
+      first.runtime.stop();
+      await first.runtime.flush();
+    }
+    const [prompt] = openCode.state.sent;
+    expect(prompt.body.id).toMatch(/^msg_/);
+    const receipt = openCode.state.receipts.get(prompt.body.id);
+    openCode.state.receipts.clear();
+    const second = createRuntime({ openCode, dataDir: first.dataDir, retryDelayMs: () => 10 });
+    try {
+      second.runtime.start();
+      second.connect();
+      await settle(50);
+      expect(second.runtime.sessionSnapshot(SESSION).items[0]?.deliveryUnconfirmed).toBe(true);
+      expect(openCode.state.sent).toEqual([prompt]);
+      // The restored checkpoint excludes just the uncertain item from manual
+      // dispatch. A separate ordinary item is still eligible for a bulk take.
+      await second.runtime.enqueue(SESSION, DIRECTORY, item({ text: 'later' }));
+      expect((await second.runtime.takeAll(SESSION)).items.map(({ text }) => text)).toEqual(['later']);
+      expect(second.runtime.sessionSnapshot(SESSION).items.map(({ id }) => id)).toEqual([itemId]);
+      openCode.state.receipts.set(prompt.body.id, receipt);
+      await vi.waitFor(() => expect(second.runtime.sessionSnapshot(SESSION).items).toEqual([]));
+      expect(second.promptSent).toEqual([SESSION]);
+      expect(openCode.state.sent).toEqual([prompt]);
+    } finally {
+      second.runtime.stop();
+      await second.runtime.flush();
+    }
+  });
+
+  it('attaches the captured skill from the queued directory after restart', async () => {
+    const openCode = createOpenCode();
+    const first = createRuntime({ openCode });
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const queued = await first.runtime.enqueue(SESSION, DIRECTORY, item({ text: 'use $audit', skills: ['audit', 'audit'] }));
+    expect(queued.session.items[0]).toMatchObject({ skills: ['audit'] });
+    first.runtime.stop();
+    await first.runtime.flush();
+    openCode.state.active = {};
+    openCode.state.skills = [{ name: 'audit', id: 'local-audit' }];
+    const second = createRuntime({ openCode, dataDir: first.dataDir });
+    second.runtime.start();
+    second.connect();
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
+    expect(openCode.state.sent).toEqual([
+      { path: `/api/session/${SESSION}/prompt`, body: expect.objectContaining({ text: 'use $audit', skills: [{ id: 'local-audit' }] }) },
+    ]);
+    const catalog = openCode.fetchImpl.mock.calls.map(([url]) => new URL(url)).find((url) => url.pathname === '/api/skill');
+    expect(catalog?.searchParams.get('location[directory]')).toBe(DIRECTORY);
+    second.runtime.stop();
+    await second.runtime.flush();
+  });
+
+  it('falls back on a removed skill with the same prompt id and one instruction', async () => {
+    const openCode = createOpenCode();
+    const { runtime } = createRuntime({ openCode });
+    openCode.state.skills = [{ name: 'audit', id: 'removed' }];
+    openCode.state.rejectSkillOnce = true;
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'use $audit', skills: ['audit'] }));
+    await settle();
+    const [initial, fallback, retried] = openCode.state.sent;
+    expect(openCode.state.sent).toHaveLength(3);
+    expect(initial.body).toMatchObject({ id: expect.any(String), skills: [{ id: 'removed' }] });
+    expect(fallback).toEqual({ path: `/api/session/${SESSION}/synthetic`, body: {
+      id: expect.any(String), text: expect.stringContaining('$audit'), resume: false,
+    } });
+    expect(retried).toEqual({ path: initial.path, body: { id: initial.body.id, text: 'use $audit' } });
+    runtime.stop();
+    await runtime.flush();
+  });
   it('delivers the head of the queue when the session goes idle, in order', async () => {
     const { runtime, openCode, emit, promptSent, broadcasts } = createRuntime();
     runtime.start();
@@ -499,7 +639,7 @@ describe('message queue runtime', () => {
     expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/prompt`);
     // v2 selects model and agent on the session, so the prompt carries text
     // and attachments only.
-    expect(openCode.state.sent[0].body).toEqual({ text: 'first' });
+    expect(openCode.state.sent[0].body).toEqual({ id: expect.stringMatching(/^msg_/), text: 'first' });
     expect(promptSent).toEqual([SESSION]);
     expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.content)).toEqual(['second']);
     // Clients learned about the in-flight item and then the removal.
@@ -534,7 +674,7 @@ describe('message queue runtime', () => {
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
     expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].body).toEqual({ text: 'next' });
+    expect(openCode.state.sent[0].body).toEqual({ id: expect.stringMatching(/^msg_/), text: 'next' });
   });
 
   it('keeps queued messages until a nested background subagent finishes', async () => {
@@ -624,19 +764,19 @@ describe('message queue runtime', () => {
     expect(openCode.state.sent).toHaveLength(1);
   });
 
-  it('keeps a failed item and retries with backoff', async () => {
+  it('retries a prompt when the OpenCode connection was refused', async () => {
     const { runtime, openCode, emit, broadcasts } = createRuntime({ retryDelayMs: () => 20 });
     runtime.start();
-    await runtime.enqueue(SESSION, DIRECTORY, item());
-    openCode.state.failNext = /\/prompt$/;
+    await runtime.enqueue(SESSION, DIRECTORY, item({ context: [{ kind: 'synthetic', text: 'note' }] }));
+    openCode.state.promptConnectFailure = true;
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle(10);
-    expect(openCode.state.sent).toHaveLength(0);
+    expect(openCode.state.sent.filter(({ path }) => path.endsWith('/prompt'))).toHaveLength(0);
     expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
     expect(runtime.sessionSnapshot(SESSION).sendingId).toBeNull();
     expect(broadcasts.at(-1).properties.session.sendingId).toBeNull();
-    await settle(40);
-    expect(openCode.state.sent).toHaveLength(1);
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0));
+    expect(openCode.state.sent.map(({ body }) => body.text)).toEqual(['note', 'follow up']);
     expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0);
   });
 
@@ -714,7 +854,7 @@ describe('message queue runtime', () => {
     second.connect();
     await settle();
     expect(second.openCode.state.sent).toHaveLength(1);
-    expect(second.openCode.state.sent[0].body).toEqual({ text: 'persisted' });
+    expect(second.openCode.state.sent[0].body).toEqual({ id: expect.stringMatching(/^msg_/), text: 'persisted' });
   });
 
   it('moves an unreadable queue file aside instead of treating it as empty', async () => {
@@ -878,6 +1018,7 @@ describe('message queue runtime', () => {
       { text: 'use the skill', resume: false },
     ]);
     expect(openCode.state.sent.at(-1).body).toEqual({
+      id: expect.stringMatching(/^msg_/),
       text: 'follow up',
       files: [{ uri: 'data:text/plain,hi', name: 'f.txt' }],
       agents: [{ name: 'reviewer' }],
@@ -915,6 +1056,7 @@ describe('message queue runtime', () => {
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
     expect(openCode.state.sent.at(-1).body).toEqual({
+      id: expect.stringMatching(/^msg_/),
       text: 'follow up',
       files: [{ uri: 'data:text/plain,hi', name: '/Users/me/Documents/中 %25 report.txt  ' }],
     });
@@ -945,7 +1087,7 @@ describe('message queue runtime', () => {
       directory: encodeURIComponent(directory), bytes: [1, 2, 3],
     }]);
     const [{ target }] = openCode.state.writes;
-    expect(openCode.state.sent.at(-1).body).toEqual({ text: `Look at [shot.png]\n\n[shot.png](<${target}>)` });
+    expect(openCode.state.sent.at(-1).body).toEqual({ id: expect.stringMatching(/^msg_/), text: `Look at [shot.png]\n\n[shot.png](<${target}>)` });
     runtime.stop();
     await runtime.flush();
   });
@@ -980,6 +1122,52 @@ describe('message queue runtime', () => {
     }]);
     runtime.stop();
     await runtime.flush();
+  });
+
+  it('uses the routed model to prepare a queued Office original and unsupported media before admission', async () => {
+    const resolveAutoSelection = vi.fn(async () => ({ model: { providerID: 'custom', id: 'text' } }));
+    const { runtime, openCode } = createRuntime({ resolveAutoSelection });
+    openCode.state.models = [
+      { providerID: 'custom', modelID: 'text', capabilities: { input: ['text'] } },
+      { providerID: 'other', modelID: 'text', capabilities: { input: ['text', 'pdf'] } },
+    ];
+    const original = { filename: 'report.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', dataUrl: 'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,AAEC' };
+    const pdf = { filename: 'sheet.pdf', mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,AwQF' };
+    const extracted = { filename: 'extracted.docx', mimeType: 'text/plain', dataUrl: 'data:text/plain;base64,dGV4dA==' };
+    try {
+      await runtime.enqueue(SESSION, DIRECTORY, item({
+        sendConfig: { providerID: 'openchamber', modelID: 'auto' },
+        attachments: [original, pdf, extracted],
+      }));
+      await settle();
+      expect(openCode.state.writes.map(({ directory, bytes }) => [directory, bytes]))
+        .toEqual([[encodeURIComponent(DIRECTORY), [0, 1, 2]], [encodeURIComponent(DIRECTORY), [3, 4, 5]]]);
+      expect(openCode.state.sent.at(-1).body).toEqual({
+        id: expect.stringMatching(/^msg_/),
+        text: `follow up\n\n[report.docx](<${openCode.state.writes[0].target}>) [sheet.pdf](<${openCode.state.writes[1].target}>)`,
+        files: [{ uri: extracted.dataUrl, name: extracted.filename }],
+      });
+    } finally {
+      runtime.stop();
+      await runtime.flush();
+    }
+  });
+
+  it('leaves a new queued Office original with its exact bytes when its write fails', async () => {
+    const { runtime, openCode } = createRuntime({ retryDelayMs: () => 200 });
+    const original = { id: 'office', filename: 'report.odt', mimeType: 'application/vnd.oasis.opendocument.text',
+      dataUrl: 'data:application/vnd.oasis.opendocument.text;base64,AAEC', composerAnchor: 'report.odt' };
+    try {
+      openCode.state.failNext = /\/api\/experimental\/fs\/write$/;
+      const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item({ attachments: [original] }));
+      await settle();
+      expect(openCode.state.sent).toEqual([]);
+      expect(openCode.state.switched).toEqual([]);
+      expect((await runtime.take(SESSION, itemId)).item.attachments).toMatchObject([original]);
+    } finally {
+      runtime.stop();
+      await runtime.flush();
+    }
   });
 
   it('persists and delivers a large desktop reference as a bounded note', async () => {

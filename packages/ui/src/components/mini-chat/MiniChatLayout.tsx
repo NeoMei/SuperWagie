@@ -311,7 +311,9 @@ export const MiniChatLayout: React.FC<MiniChatLayoutProps> = ({ mode, autoOpenDr
           </ChatSurfaceProvider>
         )}
       </main>
-      <GuestHosts />
+      <ChatSurfaceProvider mode="mini-chat">
+        <GuestHosts />
+      </ChatSurfaceProvider>
     </div>
   );
 };

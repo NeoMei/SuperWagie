@@ -7,7 +7,7 @@ import { create } from "zustand"
 import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
-import { prepareAttachmentFiles } from "./attachment-files"
+import { getOfficeAttachmentMime, prepareAttachmentFiles, type OfficeAttachmentMode } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { pathForDroppedFile } from "@/lib/desktop"
 import { attachmentBasename } from "@/lib/attachmentIdentity"
@@ -18,6 +18,7 @@ const FILE_URI_PREFIX = "file://"
 // Past this a file is not read into the prompt: base64 makes it a third
 // larger, and the send fails long before 100 MB.
 const MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const MAX_OFFICE_ORIGINAL_BYTES = 20 * 1024 * 1024
 const INTAKE_REDACTED_FILENAME = /\.(har|ipynb)$/i
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
 const pendingVSCodeSelectionKeys = new Set<string>()
@@ -68,9 +69,10 @@ const readFileAsDataUrl = (file: File, mime: string): Promise<string> => new Pro
 export const prepareLocalAttachments = async (
   file: File,
   reservedFilenames: Iterable<string> = [],
+  officeMode: OfficeAttachmentMode = "extract",
 ): Promise<AttachedFile[] | undefined> => {
   if (INTAKE_REDACTED_FILENAME.test(file.name) && file.size > MAX_INLINE_ATTACHMENT_BYTES) return
-  const preparedOrPending = prepareAttachmentFiles(file, reservedFilenames)
+  const preparedOrPending = prepareAttachmentFiles(file, reservedFilenames, officeMode)
   const preparedFiles = preparedOrPending instanceof Promise ? await preparedOrPending : preparedOrPending
   if (!preparedFiles || preparedFiles.length === 0) return
 
@@ -246,7 +248,7 @@ export type InputState = {
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null, target?: string | null) => void
   consumePendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
   getPendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
-  addAttachedFile: (file: File, composerAnchor?: string, displayFilename?: string) => Promise<boolean>
+  addAttachedFile: (file: File, composerAnchor?: string, displayFilename?: string, officeMode?: OfficeAttachmentMode, saveCopy?: boolean) => Promise<boolean>
   removeAttachedFile: (id: string) => void
   setAttachedFiles: (files: AttachedFile[], target?: ChatDraftIdentity | null) => void
   clearAttachedFiles: (target?: ChatDraftIdentity | null) => void
@@ -379,7 +381,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     target === null ? get().pendingSyntheticParts : get().pinnedSyntheticParts.get(target) ?? null
   ),
 
-  addAttachedFile: async (file: File, composerAnchor?: string, displayFilename?: string) => {
+  addAttachedFile: async (file, composerAnchor, displayFilename, officeMode, saveCopy) => {
     const generation = attachmentReadGeneration
     const referencePath = INTAKE_REDACTED_FILENAME.test(file.name) ? null : pathForDroppedFile(file)
     const attachReference = async (path: string): Promise<boolean> => {
@@ -389,18 +391,20 @@ export const useInputStore = create<InputState>()((set, get) => ({
       set((state) => ({ attachedFiles: [...state.attachedFiles, reference] }))
       return true
     }
-    if (file.size > MAX_INLINE_ATTACHMENT_BYTES) {
-      if (referencePath) return attachReference(referencePath)
+    const originalOffice = officeMode === "original" && Boolean(getOfficeAttachmentMime(file.name))
+    const limit = originalOffice ? MAX_OFFICE_ORIGINAL_BYTES : MAX_INLINE_ATTACHMENT_BYTES
+    if (file.size > limit) {
+      if (referencePath && !originalOffice) return attachReference(referencePath)
       throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.tooLarge', {
         name: file.name,
-        size: formatFileSize(MAX_INLINE_ATTACHMENT_BYTES),
+        size: formatFileSize(limit),
       }))
     }
     for (let attempt = 0; attempt < MAX_ATTACHMENT_PREPARATION_ATTEMPTS; attempt += 1) {
       const reservedFilenames = get().attachedFiles.map((attachment) => attachment.filename)
       let attachedFiles: AttachedFile[] | undefined
       try {
-        attachedFiles = await prepareLocalAttachments(file, reservedFilenames)
+        attachedFiles = await prepareLocalAttachments(file, reservedFilenames, officeMode)
       } catch {
         return false
       }
@@ -413,6 +417,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
       // Keep the OS File for path lookup. Only the inline image payload's label
       // changes, and a converted image keeps the extension of its actual bytes.
       const first = attachedFiles[0]
+      if (saveCopy && first.mimeType.startsWith("image/")) first.saveCopy = true
       if (displayFilename && first.file === file && !first.agentPath) first.filename = displayFilename
       if (composerAnchor) for (const attachment of attachedFiles) attachment.composerAnchor = composerAnchor
       set((state) => ({ attachedFiles: [...state.attachedFiles, ...attachedFiles] }))
@@ -558,5 +563,8 @@ export const useDraftAttachedFiles = (target: ChatDraftIdentity | null | undefin
 }
 
 subscribeChatDraftDeletion((identity) => {
-  useInputStore.getState().setAttachedFiles([], identity)
+  const input = useInputStore.getState()
+  input.setAttachedFiles([], identity)
+  const draftKey = getChatDraftIdentityKey(identity)
+  if (input.getPendingSyntheticParts(draftKey)) input.setPendingSyntheticParts(null, draftKey)
 })

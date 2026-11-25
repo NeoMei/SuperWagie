@@ -17,6 +17,7 @@ import {
   noteQuestionFormSnapshot,
   noteQuestionToolSnapshot,
   questionToolLink,
+  recoverableQuestionKey,
   resetRecoverableQuestions,
   submitRecoveredAnswer,
   useRecoverableQuestionsStore,
@@ -220,6 +221,9 @@ describe("question eligibility", () => {
 describe("ask outcome classification", () => {
   test("reads turn death, shutdown and dismissal apart", () => {
     expect(classifyQuestionToolError("Tool execution interrupted", "aborted", false)).toBe("turn-death")
+    expect(classifyQuestionToolError("Tool execution interrupted during prompt", "unknown", false)).toBe("turn-death")
+    expect(classifyQuestionToolError("All fibers interrupted without error", "unknown", false)).toBe("turn-death")
+    expect(classifyQuestionToolError("The user dismissed this question", "unknown", false)).toBe("dismissed")
     expect(classifyQuestionToolError("Interaction cancelled because the location shut down", "aborted", false)).toBe("shutdown")
     expect(classifyQuestionToolError("Step interrupted", "aborted", false)).toBe("unresolved")
     expect(classifyQuestionToolError("form cancelled", "tool.execution", false)).toBe("dismissed")
@@ -321,7 +325,7 @@ describe("settlement beats recovery", () => {
 
   test("an explicit reply this client sent is final", () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
-    noteLocalFormReplied("frm_1")
+    noteLocalFormReplied("ses_ask", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
   })
 
@@ -359,9 +363,21 @@ describe("settlement beats recovery", () => {
     )).toEqual([])
   })
 
+  test("answering a request does not close a form with the same id in another session", () => {
+    const second = questionForm("frm_1", "ses_other")
+    second.metadata = { kind: "question", tool: { messageID: "msg_other", id: "tool_other" } }
+    applyRecoverableQuestionEvents("/repo", [
+      formCreated(questionForm("frm_1")), formCreated(second), formSettled("frm_1", "replied"),
+    ])
+    const interrupted = { ...turnDeathPart(), id: "tool_other", sessionID: "ses_other", messageID: "msg_other" }
+    const view = { form: {}, part: { msg_ask: [turnDeathPart()], msg_other: [interrupted] } }
+    const recovered = deriveRecoveredQuestions(view, recoveryView(), new Set(["ses_ask", "ses_other"]))
+    expect(recovered.map((item) => item.sessionID)).toEqual(["ses_other"])
+  })
+
   test("a local dismissal closes the card for good", () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
-    noteLocalFormCancelled("frm_1")
+    noteLocalFormCancelled("ses_ask", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
   })
 
@@ -428,14 +444,14 @@ describe("lifecycle", () => {
       const link = { messageID: `msg_${index}`, partID: `tool_${index}` }
       form.metadata = { kind: "question", tool: { messageID: link.messageID, id: link.partID } }
       applyRecoverableQuestionEvents("/repo", [formCreated(form), toolSucceeded(link)])
-      noteLocalFormReplied(form.id)
+      noteLocalFormReplied("ses_ask", form.id)
     }
     const state = recoveryView()
     expect(state.seen.size).toBe(100)
     expect(state.outcomes.size).toBe(100)
     expect(state.dispositions.size).toBe(100)
-    expect(state.seen.has("frm_0")).toBe(false)
-    expect(state.outcomes.has("frm_0")).toBe(false)
+    expect(state.seen.has(recoverableQuestionKey("ses_ask", "frm_0"))).toBe(false)
+    expect(state.outcomes.has(recoverableQuestionKey("ses_ask", "frm_0"))).toBe(false)
     expect(state.dispositions.has("msg_0\u0000tool_0")).toBe(false)
 
     applyRecoverableQuestionEvents("/repo", [{ type: "session.deleted", properties: { sessionID: "ses_ask" } }])
@@ -446,8 +462,8 @@ describe("lifecycle", () => {
 
   test("unobserved and evicted replies do not accumulate outcomes", () => {
     for (let index = 0; index < 160; index += 1) {
-      noteLocalFormReplied(`frm_${index}`)
-      noteLocalFormCancelled(`cancel_${index}`)
+      noteLocalFormReplied("ses_ask", `frm_${index}`)
+      noteLocalFormCancelled("ses_ask", `cancel_${index}`)
       applyRecoverableQuestionEvents("/repo", [formSettled(`remote_${index}`, "replied")])
     }
     expect(recoveryView().outcomes.size).toBe(0)
@@ -456,7 +472,7 @@ describe("lifecycle", () => {
   test("a repeated snapshot cannot reopen a dismissed captured question", () => {
     const form = questionForm("frm_1")
     noteQuestionFormSnapshot("/repo", [form])
-    noteLocalFormCancelled(form.id)
+    noteLocalFormCancelled("ses_ask", form.id)
     noteQuestionFormSnapshot("/repo", [form])
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
   })
@@ -464,9 +480,9 @@ describe("lifecycle", () => {
   test("dismissing a recovered card leaves a tombstone", () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
-    noteLocalFormCancelled("frm_1")
+    noteLocalFormCancelled("ses_ask", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_1")).toBe("dismissed")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get(recoverableQuestionKey("ses_ask", "frm_1"))).toBe("dismissed")
   })
 
   test("a session deletion drops its questions", () => {
@@ -510,22 +526,22 @@ describe("answer submissions", () => {
     let sends = 0
     const send = async () => {
       sends += 1
-      noteLocalFormReplied("frm_1")
+      noteLocalFormReplied("ses_ask", "frm_1")
     }
-    await submitRecoveredAnswer("frm_1", send)
-    await submitRecoveredAnswer("frm_1", send)
+    await submitRecoveredAnswer("ses_ask", "frm_1", send)
+    await submitRecoveredAnswer("ses_ask", "frm_1", send)
     expect(sends).toBe(1)
   })
 
   test("an old runtime's completion cannot release a new runtime's lock", async () => {
     let releaseOld = () => {}
     let releaseNew = () => {}
-    const old = submitRecoveredAnswer("frm_1", () => new Promise<void>((resolve) => { releaseOld = resolve }))
+    const old = submitRecoveredAnswer("ses_ask", "frm_1", () => new Promise<void>((resolve) => { releaseOld = resolve }))
     resetRecoverableQuestions()
-    const current = submitRecoveredAnswer("frm_1", () => new Promise<void>((resolve) => { releaseNew = resolve }))
+    const current = submitRecoveredAnswer("ses_ask", "frm_1", () => new Promise<void>((resolve) => { releaseNew = resolve }))
     releaseOld()
     await old
-    expect(useRecoverableQuestionsStore.getState().submissions.get("frm_1")).toBe(current)
+    expect(useRecoverableQuestionsStore.getState().submissions.get(recoverableQuestionKey("ses_ask", "frm_1"))).toBe(current)
     releaseNew()
     await current
     expect(useRecoverableQuestionsStore.getState().submissions.size).toBe(0)
@@ -541,14 +557,14 @@ describe("answer submissions", () => {
       sends += 1
       await gate
     }
-    const first = submitRecoveredAnswer("frm_1", send)
-    const second = submitRecoveredAnswer("frm_1", send)
+    const first = submitRecoveredAnswer("ses_ask", "frm_1", send)
+    const second = submitRecoveredAnswer("ses_ask", "frm_1", send)
     expect(sends).toBe(1)
     release()
     await Promise.all([first, second])
     expect(sends).toBe(1)
     // The lock is released afterwards: a later retry can send again.
-    await submitRecoveredAnswer("frm_1", async () => {
+    await submitRecoveredAnswer("ses_ask", "frm_1", async () => {
       sends += 1
     })
     expect(sends).toBe(2)
@@ -556,11 +572,11 @@ describe("answer submissions", () => {
 
   test("a rejected send keeps the question recoverable", async () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
-    await expect(submitRecoveredAnswer("frm_1", async () => {
+    await expect(submitRecoveredAnswer("ses_ask", "frm_1", async () => {
       throw new Error("send failed")
     })).rejects.toThrow("send failed")
     // No tombstone: the card and its draft stay for a retry.
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_1")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has(recoverableQuestionKey("ses_ask", "frm_1"))).toBe(false)
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
   })
 })

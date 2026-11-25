@@ -37,6 +37,7 @@ import { SessionMentionChipsContext, withSessionMentionChips, type SessionMentio
 import { appOwnOrigins } from '@/lib/router/appOrigins';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { withLineDirectionMarks } from './plainTextLineDirection';
+import { useChatTranscriptDirectory } from '../../chatColumnSession';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -109,6 +110,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     const skills = useSkillsStore((state) => state.skills);
     const openContextFile = useUIStore((state) => state.openContextFile);
     const effectiveDirectory = useEffectiveDirectory();
+    const transcriptDirectory = useChatTranscriptDirectory();
     const { t } = useI18n();
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
     const isCollapsed = collapsibleUserMessages && !messageExpanded;
@@ -369,6 +371,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
         return (
             <UserContextPart
                 payload={contextPayload}
+                directory={transcriptDirectory ?? effectiveDirectory}
                 attachmentFilenames={attachmentFilenames}
                 collapsed={isCollapsed}
                 onExpand={onExpandMessage}

@@ -114,6 +114,7 @@ const { ChatInput } = await import('../ChatInput');
 const { SyncProvider } = await import('@/sync/sync-context');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { useConfigStore } = await import('@/stores/useConfigStore');
+const { useSkillsStore } = await import('@/stores/useSkillsStore');
 const { useSessionUIStore, DraftSendError } = await import('@/sync/session-ui-store');
 const { useInputStore } = await import('@/sync/input-store');
 const { getSyncChildStores } = await import('@/sync/sync-refs');
@@ -222,6 +223,37 @@ test("sends the command with the prompts that apply in the session's directory",
   expect(sent).toHaveLength(1);
   expect(sent[0].content).toBe('Project review');
   expect(sent[0].synthetic).toContain('Project review rules');
+});
+
+test('loads a cold Skill catalog for a pasted mention before submitting', async () => {
+  const previous = useSkillsStore.getState();
+  const loadDirectories: Array<string | null | undefined> = [];
+  const submittedSkills: string[][] = [];
+  useSessionUIStore.setState({ sendMessage: async (...args) => {
+    submittedSkills.push([...(args[9]?.skills?.names ?? [])]);
+  } });
+  try {
+    await submitInComposer('Run $fixture-review on this change.', async () => {
+      await act(async () => {
+        useSkillsStore.setState({
+          skillsByDirectory: {},
+          policiesByDirectory: {},
+          loadSkills: async (directory) => {
+            loadDirectories.push(directory);
+            useSkillsStore.setState({ skillsByDirectory: { [WORKTREE]: [{
+              id: 'fixture-review', name: 'fixture-review', description: 'Fixture review',
+              scope: 'project', source: 'opencode', path: `${WORKTREE}/.opencode/skills/fixture-review/SKILL.md`,
+            }] } });
+            return true;
+          },
+        });
+      });
+    });
+    expect(loadDirectories).toEqual([WORKTREE]);
+    expect(submittedSkills).toEqual([['fixture-review']]);
+  } finally {
+    useSkillsStore.setState(previous);
+  }
 });
 
 for (const readOutcome of ['loaded', 'failed', 'queued'] as const) {
@@ -344,6 +376,83 @@ for (const entry of ['picker', 'drop', 'paste'] as const) {
     }
   });
 }
+
+test('the Office original picker keeps the bytes and citation after a send failure', async () => {
+  const filesAtSend: AttachedFile[][] = [];
+  useSessionUIStore.setState({ sendMessage: async (_text, _provider, _model, _agent, attachments) => {
+    filesAtSend.push(attachments ?? []);
+    throw new Error('Could not prepare attachment paths.');
+  } });
+  const previousReader = Object.getOwnPropertyDescriptor(globalThis, 'FileReader');
+  class OfficeReader {
+    result = 'data:application/octet-stream;base64,AAEC';
+    onload: (() => void) | null = null;
+    readAsDataURL() { queueMicrotask(() => this.onload?.()); }
+  }
+  Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: OfficeReader });
+  try {
+    const remaining = await submitInComposer('Review this file.', async (_view, form) => {
+      const trigger = form.querySelector<HTMLElement>('[aria-label="Add attachment"]');
+      if (!trigger) throw new Error('Missing attachment menu');
+      await act(async () => { trigger.click(); });
+      const originals = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+        .find((entry) => entry.textContent?.includes('Attach Office originals'));
+      if (!originals) throw new Error('Missing Office original picker action');
+      await act(async () => {
+        originals.click();
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      });
+      const picker = document.querySelector<HTMLInputElement>('input[type="file"]');
+      expect(picker?.accept).toContain('.docx');
+      if (!picker) throw new Error('Missing attachment picker');
+      await act(async () => {
+        const source = new File([new Uint8Array([0, 1, 2])], 'report.docx');
+        Object.defineProperty(picker, 'files', { configurable: true, value: [source] });
+        picker.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+    });
+    expect(remaining).toContain('[report.docx]');
+    expect(filesAtSend).toMatchObject([[{
+      filename: 'report.docx',
+      dataUrl: 'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,AAEC',
+    }]]);
+    expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe(filesAtSend[0][0].dataUrl);
+  } finally {
+    if (previousReader) Object.defineProperty(globalThis, 'FileReader', previousReader);
+    else Reflect.deleteProperty(globalThis, 'FileReader');
+    useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map() });
+  }
+});
+
+test('failed Auto attachment preflight keeps pending composer context for one retry', async () => {
+  const { OpencodeApiError } = await import('@/lib/opencode/client');
+  const attachment: AttachedFile = {
+    id: 'preflight-scan', file: new File(['fixture'], 'scan.pdf', { type: 'application/pdf' }),
+    dataUrl: 'data:application/pdf;base64,Zml4dHVyZQ==', mimeType: 'application/pdf',
+    filename: 'scan.pdf', composerAnchor: 'scan.pdf', size: 7, source: 'local',
+  };
+  const submissions: Array<{ context: string[]; attachments: string[] }> = [];
+  useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [attachment], attachmentDrafts: new Map() });
+  useInputStore.getState().setPendingSyntheticParts([{ text: 'recovered context' }]);
+  useSessionUIStore.setState({ sendMessage: async (_text, _provider, _model, _agent, files, _mention, context) => {
+    submissions.push({ context: (context ?? []).map(({ text }) => text), attachments: (files ?? []).map(({ id }) => id) });
+    if (submissions.length === 1) {
+      throw new OpencodeApiError('routing.prepareSend', 'Could not prepare attachment paths.', { status: 400 });
+    }
+  } });
+  try {
+    const remaining = await submitInComposer('Read [scan.pdf].');
+    expect(remaining).toBe('Read [scan.pdf].');
+    await submitInComposer(remaining);
+    const sentWithContext = { context: ['recovered context'], attachments: [attachment.id] };
+    expect(submissions).toEqual([sentWithContext, sentWithContext]);
+    await submitInComposer('next prompt');
+    expect(submissions[2]).toEqual({ context: [], attachments: [] });
+  } finally {
+    useInputStore.setState({ attachmentDraftKey: null, attachedFiles: [], attachmentDrafts: new Map(), pendingSyntheticParts: null, pinnedSyntheticParts: new Map() });
+  }
+});
 
 test('an action command keeps inline attachments and previously saved image links in the draft', async () => {
   const attachment = { id: 'action-image', file: new File(['fixture'], 'review.png', { type: 'image/png' }), dataUrl: 'data:image/png;base64,Zml4dHVyZQ==', mimeType: 'image/png', filename: 'review.png', composerAnchor: 'review.png', size: 7, source: 'local' as const };

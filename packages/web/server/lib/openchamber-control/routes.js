@@ -45,7 +45,7 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
     }
   });
 
-  app.post('/api/openchamber/secret/answer', express.json({ limit: '64kb' }), async (req, res) => {
+  app.post('/api/openchamber/secret/answer', express.json({ limit: '1mb' }), async (req, res) => {
     try {
       return res.json(await controlService.answerSecret(req.body ?? {}));
     } catch (error) {

@@ -94,7 +94,7 @@ export type QueuedContextPart =
         instructions?: string;
     }
     | {
-        /** Derived from the message text (the skill instruction); re-derived when the text is sent again, so never restored. */
+        /** Legacy skill instruction. Delivered as captured and re-derived from text if edited. */
         kind: 'instruction';
         text: string;
     }
@@ -112,6 +112,9 @@ export interface QueuedMessage {
     text: string;
     /** Agent mentioned at the start of `content`, delivered as an agent part. */
     agentMention?: string;
+    /** Explicit skill names captured with the text. Resolved by the delivery runtime. */
+    skills?: string[];
+    deliveryUnconfirmed?: boolean;
     attachments?: AttachedFile[];
     /** Absent on a server projection item; a take brings it back. */
     context?: QueuedContextPart[];
@@ -129,6 +132,7 @@ interface QueuedMessageInput {
     /** Defaults to `content`. */
     text?: string;
     agentMention?: string;
+    skills?: string[];
     attachments?: AttachedFile[];
     context?: QueuedContextPart[];
     sendConfig?: QueuedMessageSendConfig;
@@ -187,6 +191,7 @@ const serverAttachmentSchema = z.object({
     serverPath: z.string().optional(),
     composerAnchor: z.string().optional(),
     deliverAsPath: z.boolean().optional(),
+    saveCopy: z.boolean().optional(),
     /** The file's on-disk path, when the runtime resolved one; the model is handed it as the file identity. */
     agentPath: z.string().optional(),
     /** Present only on a taken item; broadcasts and snapshots omit payloads. */
@@ -210,6 +215,8 @@ const serverItemBaseSchema = z.object({
     content: z.string(),
     text: z.string(),
     agentMention: z.string().optional(),
+    skills: z.array(z.string().min(1)).optional(),
+    deliveryUnconfirmed: z.boolean().optional(),
     attachments: z.array(serverAttachmentSchema),
     /** Present only on a taken item; broadcasts and snapshots omit it like attachment payloads. */
     context: z.array(serverContextPartSchema).optional(),
@@ -289,6 +296,7 @@ const toAttachedFile = (attachment: ServerQueueAttachment): AttachedFile => {
     if (attachment.agentPath) file.agentPath = attachment.agentPath;
     if (attachment.composerAnchor) file.composerAnchor = attachment.composerAnchor;
     if (attachment.deliverAsPath) file.deliverAsPath = true;
+    if (attachment.saveCopy) file.saveCopy = true;
     return file;
 };
 
@@ -304,6 +312,8 @@ const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     if (item.goal) message.goal = item.goal;
     if ('scheduledTask' in item) message.scheduledTask = item.scheduledTask;
     if (item.agentMention) message.agentMention = item.agentMention;
+    if (item.skills?.length) message.skills = item.skills;
+    if (item.deliveryUnconfirmed) message.deliveryUnconfirmed = true;
     if (item.attachments.length > 0) message.attachments = item.attachments.map(toAttachedFile);
     if (item.context) message.context = item.context;
     if (item.contextPreview) message.contextPreview = item.contextPreview;
@@ -316,6 +326,7 @@ type ServerQueueItemInput = {
     content: string;
     text: string;
     agentMention?: string;
+    skills?: string[];
     attachments: ServerQueueAttachmentInput[];
     context: QueuedContextPart[];
     contextPreview?: string;
@@ -341,6 +352,7 @@ const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInpu
     if (attachment.agentPath) input.agentPath = attachment.agentPath;
     if (attachment.composerAnchor) input.composerAnchor = attachment.composerAnchor;
     if (attachment.deliverAsPath) input.deliverAsPath = true;
+    if (attachment.saveCopy) input.saveCopy = true;
     return input;
 };
 
@@ -353,6 +365,7 @@ const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessag
         sendConfig,
     };
     if (message.agentMention) item.agentMention = message.agentMention;
+    if (message.skills?.length) item.skills = message.skills;
     if (message.goal) item.goal = message.goal;
     const contextPreview = getQueuedMessagePreview({ content: '', context: message.context });
     if (contextPreview) item.contextPreview = contextPreview;
@@ -450,6 +463,7 @@ interface MessageQueueActions {
     forgetQueue: (target: MessageQueueTarget) => void;
     clearAllQueues: () => void;
     markSending: (target: MessageQueueTarget, messageId: string) => void;
+    markDeliveryUnconfirmed: (target: MessageQueueTarget, messageId: string) => void;
     clearSending: (target: MessageQueueTarget, messageId: string) => void;
     getSendableQueue: (target: MessageQueueTarget) => QueuedMessage[];
     setFollowUpBehavior: (behavior: FollowUpBehavior) => void;
@@ -655,6 +669,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             sendConfig: message.sendConfig,
                         };
                         if (message.agentMention) queuedMessage.agentMention = message.agentMention;
+                        if (message.skills?.length) queuedMessage.skills = message.skills;
                         if (message.attachments && message.attachments.length > 0) queuedMessage.attachments = message.attachments;
                         if (message.context && message.context.length > 0) queuedMessage.context = message.context;
                         if (message.goal) queuedMessage.goal = message.goal;
@@ -765,7 +780,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         const state = get();
                         const sending = state.sendingIds[key] ?? [];
                         const taken = (state.queuedMessages[key] ?? []).filter((message) => (
-                            (messageId ? message.id === messageId : true) && !sending.includes(message.id)
+                            (messageId ? message.id === messageId : true) && !sending.includes(message.id) && !message.deliveryUnconfirmed
                         ));
                         if (taken.length === 0) return [];
                         const takenIds = new Set(taken.map((message) => message.id));
@@ -814,6 +829,20 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             const current = state.sendingIds[key] ?? [];
                             if (current.includes(messageId)) return state;
                             return { sendingIds: { ...state.sendingIds, [key]: [...current, messageId] } };
+                        });
+                    },
+
+                    markDeliveryUnconfirmed: (target, messageId) => {
+                        const key = getMessageQueueKey(target);
+                        set((state) => {
+                            const queue = state.queuedMessages[key];
+                            if (!queue?.some((message) => message.id === messageId)) return state;
+                            return {
+                                queuedMessages: {
+                                    ...state.queuedMessages,
+                                    [key]: queue.map((message) => message.id === messageId ? { ...message, deliveryUnconfirmed: true } : message),
+                                },
+                            };
                         });
                     },
 

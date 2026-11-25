@@ -18,6 +18,7 @@ import type { OpenCodeClient, OpenCodeEvent } from "@opencode/client"
 import { z } from "zod"
 import { opencodeClient } from "@/lib/opencode/client"
 import { GLOBAL_EVENT_DIRECTORY, hostTurnStart, routeWireEvent, syncEventSessionID, type SyncEvent } from "@/lib/opencode/events"
+import { createTurnBoundaryOrder } from "@/lib/opencode/wire-admission"
 import type { Metadata } from "@/lib/opencode/model"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
@@ -352,12 +353,14 @@ function translateOpenchamberEvent(type: string, payload: unknown): SyncEvent | 
  * the directory the server bridge attached, used when the event itself does
  * not name a location.
  */
-function translateWirePayload(payload: unknown, frameDirectory: string | undefined): Array<{ directory: string; event: SyncEvent }> {
+function translateWirePayload(payload: unknown, frameDirectory: string | undefined, isStale?: ReturnType<typeof createTurnBoundaryOrder>): Array<{ directory: string; event: SyncEvent }> {
   if (!wireEventSchema.safeParse(payload).success) return []
   // SAFETY: the discriminator and location were validated above; the rest of
   // the shape is the server's generated contract, narrowed per `type` by the
   // translator.
-  const routed = routeWireEvent(payload as OpenCodeEvent)
+  const wire = payload as OpenCodeEvent
+  if (isStale?.(wire, frameDirectory)) return []
+  const routed = routeWireEvent(wire)
   if (!frameDirectory) return routed
   return routed.map((entry) => (entry.directory === GLOBAL_EVENT_DIRECTORY ? { ...entry, directory: frameDirectory } : entry))
 }
@@ -376,11 +379,11 @@ const NO_EVENTS: ClassifiedStreamPayload = { kind: "events", events: [] }
  * or the sync events it translates to. Dispatches on `type`, so each payload
  * is validated only against the schema its type names.
  */
-export function classifyStreamPayload(payload: unknown, frameDirectory: string | undefined): ClassifiedStreamPayload {
+export function classifyStreamPayload(payload: unknown, frameDirectory: string | undefined, isStale?: ReturnType<typeof createTurnBoundaryOrder>): ClassifiedStreamPayload {
   const typed = payloadTypeSchema.safeParse(payload)
   if (!typed.success) return NO_EVENTS
   const { type } = typed.data
-  if (!type.startsWith(OPENCHAMBER_TYPE_PREFIX)) return { kind: "events", events: translateWirePayload(payload, frameDirectory) }
+  if (!type.startsWith(OPENCHAMBER_TYPE_PREFIX)) return { kind: "events", events: translateWirePayload(payload, frameDirectory, isStale) }
 
   switch (type) {
     case "openchamber:space-stream": {
@@ -404,7 +407,7 @@ export function classifyStreamPayload(payload: unknown, frameDirectory: string |
   if (bridged) return { kind: "events", events: [{ directory: frameDirectory ?? GLOBAL_EVENT_DIRECTORY, event: bridged }] }
   // An OpenChamber type this client does not know may still be a wire event
   // shape; the wire translator ignores types it does not handle.
-  return { kind: "events", events: translateWirePayload(payload, frameDirectory) }
+  return { kind: "events", events: translateWirePayload(payload, frameDirectory, isStale) }
 }
 
 function buildGlobalEventWsUrl(lastEventId?: string): string {
@@ -516,6 +519,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   let wsFallbackUntil = 0
 
   const directories = new Map<string, DirectoryQueue>()
+  const isStaleTurnBoundary = createTurnBoundaryOrder()
 
   const getOrCreateDir = (directory: string): DirectoryQueue => {
     let d = directories.get(directory)
@@ -692,6 +696,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
   const markConnected = (replayReset = false) => {
     disconnected = false
+    if (replayReset) isStaleTurnBoundary.clear()
     consecutiveFailures = 0
     // Fire onReconnect on every successful connect — including the very
     // first one. Consumer state (isConnected) starts at false and needs
@@ -706,11 +711,14 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     const routedDirectory = routeDirectory?.(directory, event) || directory
     const d = getOrCreateDir(routedDirectory)
 
-    // A full part snapshot is a coalescing barrier for that part's deltas:
-    // drop its pending delta coalescing keys so a delta arriving after the
-    // snapshot starts a fresh queue entry instead of merging into a delta
-    // queued before the snapshot, which the snapshot would then overwrite and
-    // drop the later delta's text. The already-queued delta event stays.
+    // A restarted step replaces its message. Apply patches that follow it
+    // after the replacement, even if patches for the same ID are already queued.
+    if (event.type === "message.updated") {
+      const { sessionID, id } = event.properties.info
+      d.coalesced.delete(`message.patched:${sessionID}:${id}`)
+    }
+
+    // Preserve the order of deltas on either side of a full part snapshot.
     if (event.type === "message.part.updated") {
       const deltaPrefix = `message.part.delta:${event.properties.part.messageID}:${event.properties.part.id}:`
       for (const key of d.coalesced.keys()) {
@@ -750,7 +758,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const enqueuePayload = (payload: unknown, frameDirectory: string | undefined) => {
-    const classified = classifyStreamPayload(payload, frameDirectory)
+    const classified = classifyStreamPayload(payload, frameDirectory, isStaleTurnBoundary)
     if (classified.kind === "space-stream") {
       onSpaceStream?.(classified.properties)
       return

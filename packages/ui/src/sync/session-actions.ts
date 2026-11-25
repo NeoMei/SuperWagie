@@ -28,6 +28,7 @@ import {
   useRecoverableQuestionsStore,
   noteLocalFormCancelled,
   noteLocalFormReplied,
+  recoverableQuestionKey,
   submitRecoveredAnswer,
   type RecoveredQuestion,
 } from "./recoverable-questions"
@@ -2762,7 +2763,7 @@ async function replyToOwnedForm(sessionId: string, formId: string, answer: FormA
     settle()
     uncertainFormReplies.delete(key)
     removeFormRequestFromChildStores(sessionId, formId)
-    noteLocalFormReplied(formId)
+    noteLocalFormReplied(sessionId, formId)
   } catch (error) {
     if (requestSent && isAmbiguousSendFailure(error)) uncertainFormReplies.add(key)
     if (!isCurrentRuntime()) throw error
@@ -2785,7 +2786,7 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
     if (await opencodeClient.cancelForm(target.sessionId, formId, target.directory) !== true) throw new Error("Form cancellation failed")
     if (!isCurrentRuntime()) return
     removeFormRequestFromChildStores(target.sessionId, formId)
-    noteLocalFormCancelled(formId)
+    noteLocalFormCancelled(target.sessionId, formId)
   } catch (error) {
     if (isCurrentRuntime() && isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(target.sessionId, formId)
@@ -2882,13 +2883,13 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
   const assertAnswerable = () => {
     const recovery = useRecoverableQuestionsStore.getState()
     if (!isCurrentRuntime() || !owner || _childStores?.getChild(question.directory) !== owner
-      || recovery.seen.get(question.form.id)?.form !== question.form
+      || recovery.seen.get(recoverableQuestionKey(question.sessionID, question.form.id))?.form !== question.form
       || !deriveRecoveredQuestions(owner.getState(), recovery, new Set([question.sessionID]))
         .some((entry) => entry.form.id === question.form.id)) {
       throw new Error("This question no longer needs an answer")
     }
   }
-  await submitRecoveredAnswer(question.form.id, async () => {
+  await submitRecoveredAnswer(question.sessionID, question.form.id, async () => {
     assertAnswerable()
     const selection = recoveredAnswerSelection(question)
     const deferred = question.evidence === "deferred-on-send"
@@ -2910,7 +2911,7 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
         target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },
       },
     )
-    if (isCurrentRuntime() && _childStores?.getChild(question.directory) === owner) noteLocalFormReplied(question.form.id)
+    if (isCurrentRuntime() && _childStores?.getChild(question.directory) === owner) noteLocalFormReplied(question.sessionID, question.form.id)
   })
 }
 

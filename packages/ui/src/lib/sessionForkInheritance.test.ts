@@ -45,6 +45,10 @@ const harness = (fork: Session, overrides: Partial<ForkInheritanceDeps> = {}) =>
 };
 
 describe('withoutSourceOwnedLinks', () => {
+  test('drops Lead marks and associations from forks', () => {
+    expect(withoutSourceOwnedLinks({ openchamber: { lead: { at: 1 }, leadParentID: 'ses_lead' } })).toEqual({});
+  });
+
   test('pauses an active goal so the fork does not pursue it in parallel', () => {
     const result = withoutSourceOwnedLinks({ openchamber: { goal: { ...goal(false), status: 'active' } } });
     expect(result).toEqual({ openchamber: { goal: { ...goal(false), status: 'paused', statusReason: 'paused in fork' } } });

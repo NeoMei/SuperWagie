@@ -111,3 +111,27 @@ test('found models are reviewed once and added as collapsed rows next to the sav
   expect(added.textContent).toContain('200K');
   expect(buttonByText(container, 'tiny').getAttribute('aria-expanded')).toBe('false');
 });
+
+test('a selected local provider file previews models before applying them in the form', async () => {
+  let saves = 0;
+  const container = await render(
+    <CustomProviderForm existingProviderIDs={new Set()} mode="edit" initialValues={savedProvider}
+      allowExistingAuth onSubmit={() => { saves += 1; }} />,
+  );
+  const input = container.querySelector('input[type="file"]');
+  if (!input) throw new Error('Missing local model import file input');
+  const text = JSON.stringify({
+    providers: { campus: { baseUrl: savedProvider.baseURL, models: ['fast', 'backup'], apiKey: 'source-key' } },
+  });
+  Object.defineProperty(input, 'files', { value: [{ size: text.length, text: async () => text }] });
+
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  expect(container.querySelector('input[aria-label="Model ID"]')).toBeNull();
+  expect(container.textContent).toContain('Already added');
+  expect(container.textContent).not.toContain('source-key');
+
+  await act(async () => buttonByText(container, 'Add selected (1)').click());
+  expect(buttonByText(container, 'backup')).toBeDefined();
+  expect(buttonByText(container, 'Fast')).toBeDefined();
+  expect(saves).toBe(0);
+});

@@ -282,11 +282,12 @@ describe("server-owned message queue", () => {
   })
 
   test("addToQueue shows the message at once and settles on the server's copy", async () => {
-    respond = () => json({ revision: 5, session: session([serverItem("srv-1", "hi @reviewer", { agentMention: "reviewer" })]) })
+    respond = () => json({ revision: 5, session: session([serverItem("srv-1", "hi @reviewer", { agentMention: "reviewer", skills: ["audit"] })]) })
     const pending = useMessageQueueStore.getState().addToQueue(target, {
       content: "hi @reviewer",
       text: "hi",
       agentMention: "reviewer",
+      skills: ["audit"],
       attachments: [{ ...attachment, agentPath: '/Users/me/Documents/note.txt' }],
       sendConfig: { providerID: "p", modelID: "m", agent: "build" },
     })
@@ -303,6 +304,7 @@ describe("server-owned message queue", () => {
           content: "hi @reviewer",
           text: "hi",
           agentMention: "reviewer",
+          skills: ["audit"],
           attachments: [{ id: "att-1", filename: "note.txt", mimeType: "text/plain", size: 2, source: "local", dataUrl: attachment.dataUrl, agentPath: '/Users/me/Documents/note.txt' }],
           context: [],
           sendConfig: { providerID: "p", modelID: "m", agent: "build" },
@@ -310,6 +312,7 @@ describe("server-owned message queue", () => {
       },
     })
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["srv-1"])
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.[0]?.skills).toEqual(["audit"])
   })
 
   test("accepted queue history survives automatic delivery and manual take without recapture", async () => {
@@ -423,6 +426,7 @@ describe("server-owned message queue", () => {
       revision: 7,
       session: session([]),
       item: serverItem("q1", "with file", {
+        skills: ["audit"],
         attachments: [{ id: "att-1", filename: "note.txt", mimeType: "text/plain", size: 2, source: "local", dataUrl: "data:text/plain;base64,aGk=", agentPath: '/Users/me/Documents/note.txt' }],
       }),
     })
@@ -431,6 +435,7 @@ describe("server-owned message queue", () => {
     expect(calls[0]?.path).toBe("/api/message-queue/sessions/session-1/items/q1/take")
     expect(calls[0]?.method).toBe("POST")
     expect(taken?.content).toBe("with file")
+    expect(taken?.skills).toEqual(["audit"])
     expect(taken?.attachments?.[0]?.dataUrl).toBe("data:text/plain;base64,aGk=")
     expect(taken?.attachments?.[0]?.agentPath).toBe('/Users/me/Documents/note.txt')
     expect(taken?.attachments?.[0]?.file.size).toBe(2)

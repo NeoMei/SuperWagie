@@ -12,7 +12,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
-import { DraftSendError, ImagePathPreparationError, useSessionUIStore, type SendMessageOptions } from '@/sync/session-ui-store';
+import { DraftSendError, AttachmentPathPreparationError, useSessionUIStore, type SendMessageOptions } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useRetryModelPick } from '@/hooks/useRetryModelPick';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
@@ -22,13 +22,10 @@ import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
 import { useParallelComposer } from './composer/parallel/useParallelComposer';
 import { ParallelComposerStrip } from './composer/parallel/ParallelComposerStrip';
 import {
-    ACCEPTED_ATTACHMENT_EXTENSIONS,
-    ATTACHMENT_ACCEPT,
-    getAttachmentInputModality,
-    getUnsupportedAttachmentInputs,
+    OFFICE_ATTACHMENT_EXTENSIONS,
+    getOfficeAttachmentMime,
     isReadOnSendMentionFilename,
-    prepareAttachmentFile,
-    type AttachmentInputModality,
+    type OfficeAttachmentMode,
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
@@ -57,7 +54,7 @@ import { BtwPanel } from './btw/BtwPanel';
 import { btwHoldsDock, useBtwPanelState } from './btw/useBtwPanelState';
 import { btwModelAvailability, resolveBtwSelection, useBtwStore } from '@/stores/useBtwStore';
 import { buildBtwSyntheticTexts, preparePendingBtwSend, startBtwSession } from '@/lib/btw';
-import { needsImagePathFallback, selectComposerAttachments } from './composer/attachments/attachmentSubmission';
+import { selectComposerAttachments } from './composer/attachments/attachmentSubmission';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { ToolPopupContent } from './message/types';
@@ -125,7 +122,7 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { isGuestActive } from '@/lib/guests/capabilities';
 import { routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
-import { opencodeClient } from '@/lib/opencode/client';
+import { OpencodeApiError, opencodeClient } from '@/lib/opencode/client';
 import type { FormRequest } from '@/lib/opencode/model';
 import { buildSkillMentionInstruction } from '@/lib/skillMentionInstruction';
 import { useGitStore } from '@/stores/useGitStore';
@@ -152,11 +149,9 @@ import {
     allocateAttachmentAnchor,
     assignImageAttachmentFilenames,
     buildAttachmentCitationText,
-    buildImagePathCitationText,
     findAttachmentCitationRanges,
     findImagePathCitationNames,
     findLocalImagePathCitationRanges,
-    imageSaveModeForModel,
     nextPastedContextFilename,
 } from './attachmentCitations';
 import {
@@ -175,7 +170,7 @@ import {
     classifyMention,
     scanMentions,
 } from './composer/language/mentions';
-import { collectKnownTokenNames, lastPrefixSigilIndex } from './composer/language/prefixTokens';
+import { collectKnownTokenNames, lastPrefixSigilIndex, scanPrefixTokens } from './composer/language/prefixTokens';
 import { resolveAutocompleteTrigger, type AutocompleteKind } from './composer/language/triggers';
 import { type ComposerLanguageContext } from './composer/language/tokenize';
 import {
@@ -312,6 +307,19 @@ const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMen
 const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] =>
     collectKnownTokenNames(text, '$', skillNames, 'exact');
 
+async function loadComposerSkillNames(text: string, directory: string | null): Promise<Set<string>> {
+    const tokens = scanPrefixTokens(text, '$');
+    if (tokens.length === 0) return new Set();
+    const available = () => new Set(
+        selectAvailableSkillsForDirectory(useSkillsStore.getState(), directory).map((skill) => skill.name),
+    );
+    const current = available();
+    if (tokens.every(({ name }) => current.has(name))) return current;
+    // A pasted prompt can name a skill before autocomplete has loaded the catalog.
+    await useSkillsStore.getState().loadSkills(directory);
+    return available();
+}
+
 /** Which reference picker is open, and for the repository on which tab. */
 type ReferencePickerState = { source: 'repository'; kind?: 'issue' | 'pull' } | { source: TrackerReferenceSource } | null;
 
@@ -422,7 +430,6 @@ const AttachmentPickerInput = React.memo(function AttachmentPickerInput({ ref, o
             multiple
             className="hidden"
             onChange={onChange}
-            accept={ATTACHMENT_ACCEPT}
         />
     );
 });
@@ -638,14 +645,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const currentProviderId = pinnedComposerSelection?.model?.providerId ?? configProviderId;
     const currentModelId = pinnedComposerSelection?.model?.modelId ?? configModelId;
     useRetryModelPick(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
-    const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
-    // Subscribe to both sources read by getModelMetadata so async metadata and provider updates are observed.
-    useConfigStore((state) => state.modelsMetadata);
     const providerCatalog = useConfigStore((state) => state.providers);
     const autoReady = useRoutingStore(selectAutoReady);
-    const currentModelMetadata = currentProviderId && currentModelId
-        ? getModelMetadata(currentProviderId, currentModelId)
-        : undefined;
     const configVariant = useConfigStore((state) => state.currentVariant);
     const currentVariant = pinnedComposerSelection ? pinnedComposerSelection.variant ?? undefined : configVariant;
     const currentVariantSelection = useConfigStore((state) => state.currentVariantSelection);
@@ -761,55 +762,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setAttachmentPreviewMounted(true);
         }
     }, [attachmentPreview.open]);
-    const attachmentCompatibilityRef = React.useRef({
-        modelKey: `${currentProviderId ?? ''}/${currentModelId ?? ''}`,
-        modalitySignature: currentModelMetadata?.modalities?.input?.slice().sort().join(',') ?? null,
-        attachmentIds: new Set<string>(),
-    });
-
-    React.useEffect(() => {
-        const modelKey = `${currentProviderId ?? ''}/${currentModelId ?? ''}`;
-        const inputModalities = currentModelMetadata?.modalities?.input;
-        const modalitySignature = inputModalities?.slice().sort().join(',') ?? null;
-        const previous = attachmentCompatibilityRef.current;
-        const modelChanged = previous.modelKey !== modelKey;
-        const metadataBecameAvailable = previous.modalitySignature === null && modalitySignature !== null;
-        const filesToCheck = modelChanged || metadataBecameAvailable
-            ? attachedFiles
-            : attachedFiles.filter((file) => !previous.attachmentIds.has(file.id));
-
-        attachmentCompatibilityRef.current = {
-            modelKey,
-            modalitySignature,
-            attachmentIds: new Set(attachedFiles.map((file) => file.id)),
-        };
-
-        if (!inputModalities || filesToCheck.length === 0) return;
-
-        const incompatibleFiles = getUnsupportedAttachmentInputs(filesToCheck, inputModalities)
-            .filter(({ modality }) => modality !== 'image' || !needsImagePathFallback(inputModalities));
-        if (incompatibleFiles.length === 0) return;
-
-        const unsupportedModalities = Array.from(new Set(incompatibleFiles.map(({ modality }) => modality)));
-        const modalityLabels: Record<AttachmentInputModality, string> = {
-            text: t('chat.modelControls.modality.text'),
-            image: t('chat.modelControls.modality.image'),
-            pdf: t('chat.modelControls.modality.pdf'),
-            audio: t('chat.modelControls.modality.audio'),
-            video: t('chat.modelControls.modality.video'),
-        };
-        const filenames = incompatibleFiles.map(({ attachment }) => attachment.filename);
-        const fileSummary = filenames.length > 3
-            ? `${filenames.slice(0, 3).join(', ')} (+${filenames.length - 3})`
-            : filenames.join(', ');
-
-        toast.warning(t('chat.chatInput.toast.unsupportedAttachmentModalities', {
-            model: currentModelMetadata.name ?? currentModelId ?? '',
-            modalities: unsupportedModalities.map((modality) => modalityLabels[modality]).join(', '),
-            files: fileSummary,
-        }), { id: `attachment-modalities:${modelKey}` });
-    }, [attachedFiles, currentModelId, currentModelMetadata, currentProviderId, t]);
-
     const handleShowAttachmentPreview = React.useCallback((content: ToolPopupContent) => {
         if (!content.image) return;
         setAttachmentPreview(content);
@@ -916,6 +868,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [attachedFiles, handleShowAttachmentPreview]);
 
     const referenceDraftKey = chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null;
+    const consumeComposerSyntheticParts = React.useCallback(() => {
+        const recovered = referenceDraftKey ? consumePendingSyntheticParts(referenceDraftKey) ?? [] : [];
+        return [...recovered, ...(consumePendingSyntheticParts(mailboxTarget) ?? [])];
+    }, [consumePendingSyntheticParts, mailboxTarget, referenceDraftKey]);
     const [referenceDrafts, setReferenceDrafts] = React.useState(() => new Map<string, ComposerReference[]>());
     const linkedReferences = (referenceDraftKey ? referenceDrafts.get(referenceDraftKey) : undefined) ?? EMPTY_COMPOSER_REFERENCES;
     const setLinkedReferences = React.useCallback((update: (refs: ComposerReference[]) => ComposerReference[]) => {
@@ -1356,6 +1312,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         enabled: !isMobile && !isBtwActive,
         draftOpen: newSessionDraftOpen && newSessionDraft?.target !== 'chat',
         draftProjectId: newSessionDraft?.selectedProjectId ?? null,
+        attachmentDraft: chatDraftIdentity,
+        restoreDraft,
         message,
         setMessage,
     });
@@ -1371,11 +1329,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [parallelProject]);
     const enterParallel = parallel.enter;
     const { isActive: parallelActive, runCount: parallelRunCount, isLaunching: parallelLaunching, launch: launchParallel } = parallel;
-    const parallelRun = React.useMemo(() => (parallelActive ? {
-        runCount: parallelRunCount,
-        launching: parallelLaunching,
-        onLaunch: () => { void launchParallel(); },
-    } : null), [launchParallel, parallelActive, parallelLaunching, parallelRunCount]);
     React.useLayoutEffect(() => {
         largeTextPasteGesture.invalidate();
     }, [largeTextPasteGesture, parallel.state?.active, parallel.isActive, newSessionDraftOpen, newSessionDraft?.target, mobileComposerExpanded, isExpandedInput]);
@@ -1459,6 +1412,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     // Read the live editor and scoped attachments together, including changes
     // made while admission was waiting for a file read.
+    const launchParallelAfterIntake = React.useCallback(async () => {
+        const admission = waitForAttachmentIntake();
+        if (!admission || await admission) await launchParallel();
+    }, [launchParallel, waitForAttachmentIntake]);
+    const parallelRun = React.useMemo(() => (parallelActive ? {
+        runCount: parallelRunCount,
+        launching: parallelLaunching,
+        onLaunch: () => { void launchParallelAfterIntake(); },
+    } : null), [launchParallelAfterIntake, parallelActive, parallelLaunching, parallelRunCount]);
+
     const getCurrentInputSnapshot = React.useCallback(() => {
         const currentMessage = composerRef.current?.getValue() ?? messageRef.current;
         const files = getDraftAttachedFiles(chatDraftIdentity);
@@ -1509,10 +1472,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
         const composerAttachments = sanitizeAttachmentsForSend(selectComposerAttachments(messageToQueue, inputSnapshot.files));
 
-        // A queued message is resolved now, not at delivery: the server that
-        // sends it has no agent list, no confirmed mentions, and no way to read
-        // a file the user named — and the mention must match what was
-        // visible when the user typed it.
+        // Resolve agent and file mentions while the composer still has the
+        // selections and attachment data. Skill names travel with the item
+        // so the delivery runtime can resolve their ids in the target session.
         const readOnSendMentions = await prepareReadOnSendMentions(
             [messageToQueue],
             new Set(composerAttachments.map((attachment) => attachment.filename)),
@@ -1533,10 +1495,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             extractedMentionAttachments,
             opencodeClient,
         );
-        const availableSkillNames = new Set(
-            selectAvailableSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
-        );
-        const skillInstruction = buildSkillMentionInstruction(collectInlineSkillMentions(sanitizedText, availableSkillNames));
+        const availableSkillNames = await loadComposerSkillNames(sanitizedText, queueTarget.directory);
+        const skills = collectInlineSkillMentions(sanitizedText, availableSkillNames);
         // The server and the VS Code auto-send deliver `text` as is, so its
         // snippets expand now; `content` keeps them for editing.
         const textToQueue = await useSnippetsStore.getState().expandText(sanitizedText).catch((error) => {
@@ -1545,40 +1505,41 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         });
 
         const attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
-        const inputModalities = currentProviderId && currentModelId
-            ? useConfigStore.getState().getModelMetadata(currentProviderId, currentModelId)?.modalities?.input : undefined;
-        const shownDraft = currentChatDraftIdentityRef.current;
-        const latestInput = getCurrentInputSnapshot();
-        if (!isCurrentQueueRuntime() || latestInput.message !== inputSnapshot.message || latestInput.files !== inputSnapshot.files
-            || attachmentIntakesRef.current.get(referenceDraftKey)?.pending.size || !shownDraft
-            || getChatDraftIdentityKey(shownDraft) !== referenceDraftKey) return;
-        const prepareImagePathsOnDelivery = needsImagePathFallback(inputModalities);
-        const queuedAttachments = attachmentsToQueue.map((file) => ({
-            ...file,
-            deliverAsPath: prepareImagePathsOnDelivery && getAttachmentInputModality(file.mimeType) === 'image',
-        }));
-        const imageAnchors = new Set(queuedAttachments.flatMap(({ deliverAsPath, composerAnchor }) =>
-            deliverAsPath && composerAnchor ? [composerAnchor.toLowerCase()] : []));
-        let queuedText = textToQueue;
-        for (const { start, end, filename } of findLocalImagePathCitationRanges(textToQueue).reverse()) {
-            if (imageAnchors.has(filename.toLowerCase())) {
-                queuedText = queuedText.slice(0, start) + buildAttachmentCitationText([filename]) + queuedText.slice(end);
-            }
-        }
-
-        // The queue stores original bytes and creates image paths in its
-        // target directory at delivery, including after a server restart.
-        const syntheticParts = consumePendingSyntheticParts(mailboxTarget) ?? [];
+        const ownsQueueInput = () => {
+            const shownDraft = currentChatDraftIdentityRef.current;
+            const latestInput = getCurrentInputSnapshot();
+            return isCurrentQueueRuntime() && shownDraft && getChatDraftIdentityKey(shownDraft) === referenceDraftKey
+                && latestInput.message === inputSnapshot.message && latestInput.files === inputSnapshot.files
+                && !attachmentIntakesRef.current.get(referenceDraftKey)?.pending.size;
+        };
+        if (!ownsQueueInput()) return;
+        // Persist original attachment payloads. The delivery runtime can
+        // resolve Auto and prepare the matching paths after taking the item.
+        const syntheticParts = consumeComposerSyntheticParts();
         const draftTarget = inlineDraftTarget;
         const drafts = draftTarget ? consumeDrafts(draftTarget) : [];
+        const restoreQueuedDraftContext = () => {
+            if (draftTarget && drafts.length > 0) {
+                useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, drafts);
+            }
+            if (syntheticParts.length > 0) {
+                const inputState = useInputStore.getState();
+                const pending = inputState.getPendingSyntheticParts(mailboxTarget) ?? [];
+                inputState.setPendingSyntheticParts([...syntheticParts, ...pending], mailboxTarget);
+            }
+        };
         const linked = withReferencesFromText(selectAnchoredReferences(messageToQueue, linkedReferences), pastedReferences.manager.inText(messageToQueue));
         // Queued context is delivered as captured, so comment snippets expand now.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
+        if (!ownsQueueInput()) {
+            restoreQueuedDraftContext();
+            return;
+        }
         const context = buildComposerContext({
             inlineComments: expandedDrafts,
             syntheticTexts: syntheticParts.map((part) => part.text),
             references: linked.map(toContextReference),
-        }, skillInstruction);
+        });
         // An armed goal belongs to this message: it leaves with it and starts
         // when this message is delivered, whatever is sent in between.
         const goalArm = textToQueue.trim()
@@ -1596,6 +1557,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // parked mid-history.
         scrollToLatest?.();
 
+        const confirmedMentionsAtQueue = new Set(confirmedMentionsRef.current);
         // Clear the composer. The mentions it had confirmed were resolved
         // above, so nothing later needs them.
         setMessage('');
@@ -1611,9 +1573,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         try {
             await addToQueue(queueTarget, {
                 content: messageToQueue,
-                text: queuedText,
+                text: textToQueue,
                 agentMention: mention?.name,
-                attachments: queuedAttachments.length > 0 ? queuedAttachments : undefined,
+                skills,
+                attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
                 context: context.length > 0 ? context : undefined,
                 sendConfig: currentProviderId && currentModelId ? {
                     providerID: currentProviderId,
@@ -1629,28 +1592,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (goalArm.armed) useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride);
             // The composer was cleared on queueing; give everything back. The
             // text is appended if the user has already typed something new.
-            const currentInput = composerRef.current?.getValue() ?? messageRef.current;
-            if (!currentInput) {
-                setMessage(messageToQueue);
-            } else {
-                useInputStore.getState().setPendingInputText(messageToQueue, 'append', mailboxTarget);
-            }
+            restoreDraft(chatDraftIdentity, messageToQueue, confirmedMentionsAtQueue);
+
             if (composerAttachments.length > 0) {
                 useInputStore.getState().restoreAttachedFiles(composerAttachments, chatDraftIdentity);
             }
-            if (draftTarget && drafts.length > 0) {
-                useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, drafts);
-            }
-            if (syntheticParts.length > 0) {
-                useInputStore.getState().setPendingSyntheticParts(syntheticParts, mailboxTarget);
-            }
+            restoreQueuedDraftContext();
             // Anything attached while the queue write was out stays, after these.
             setLinkedReferences((current) => withComposerReferences(linked, current));
             return;
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [pastedReferences.manager, isBtwActive, getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, referenceDraftKey, setLinkedReferences, t, waitForAttachmentIntake]);
+    }, [pastedReferences.manager, isBtwActive, getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, consumeComposerSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, referenceDraftKey, restoreDraft, setLinkedReferences, t, waitForAttachmentIntake]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[], content: string) => {
@@ -1756,10 +1710,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const trackerDescriptors = useTrackerDescriptors();
     const trackerSources = useTrackerSources();
 
-    const getSubmitErrorMessage = (error: unknown, fallback: string) => {
+    const getSubmitErrorMessage = (error: unknown, fallback: string, attachments: readonly AttachedFile[] = []) => {
         const cause = error instanceof DraftSendError ? error.cause : error;
-        if (cause instanceof ImagePathPreparationError) {
-            return t('chat.chatInput.toast.imagePathFallbackFailed', { files: cause.filenames.join(', ') });
+        if (cause instanceof AttachmentPathPreparationError || (cause instanceof Error && cause.message.includes('Could not prepare attachment paths.'))) {
+            const files = cause instanceof AttachmentPathPreparationError
+                ? cause.filenames : [...new Set(attachments.map((file) => file.filename))];
+            if (files.length > 0) return t('chat.chatInput.toast.attachmentPathFallbackFailed', { files: files.join(', ') });
         }
         const message = error instanceof Error ? error.message : '';
         return message.toLowerCase().includes('runtime changed')
@@ -1775,7 +1731,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (pendingFirstSend) return;
         // "Run in parallel" launches the run instead of sending a message.
         if (parallel.isActive && !options?.queuedOnly) {
-            if (parallel.runCount >= 2) void parallel.launch();
+            if (parallel.runCount >= 2) void launchParallelAfterIntake();
             return;
         }
         const submitRuntimeKey = getRuntimeKey();
@@ -2143,6 +2099,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         }
 
+        const restoreTakenQueue = (target: ChatDraftIdentity | null) => {
+            for (const queued of queuedMessagesToSend) {
+                restoreDraft(target, queued.content, new Set());
+                restoreQueuedContext(queued.context ?? [], queued.content);
+                if (queued.attachments?.length) useInputStore.getState().restoreAttachedFiles(queued.attachments, target);
+            }
+        };
+        if (!isCurrentSubmitRuntime()) {
+            restoreTakenQueue(chatDraftIdentity);
+            return;
+        }
+
         const historySubmissions = buildChatInputHistorySubmissions({
             inputMode,
             // Server-owned items were recorded on acceptance. VS Code records
@@ -2159,7 +2127,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Inline review comments and synthetic context are consumed before
         // assembly so a failed send can restore exactly what it took. What is
         // here belongs to this send: queueing took its own context with it.
-        const syntheticParts = isBtwActive ? [] : consumePendingSyntheticParts(mailboxTarget);
+        const syntheticParts = isBtwActive ? [] : consumeComposerSyntheticParts();
         const consumedDraftTarget = inlineDraftTarget;
         const drafts: InlineCommentDraft[] = consumedDraftTarget
             ? consumeDrafts(consumedDraftTarget)
@@ -2169,31 +2137,34 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 useInlineCommentDraftStore.getState().restoreDrafts(consumedDraftTarget, drafts);
             }
         };
+        const restoreConsumedSynthetic = (target: string | null) => {
+            if (syntheticParts.length === 0) return;
+            const inputState = useInputStore.getState();
+            const pending = inputState.getPendingSyntheticParts(target) ?? [];
+            inputState.setPendingSyntheticParts([...syntheticParts, ...pending], target);
+        };
         // Everything a prompt command consumed comes back if it fails: the
         // attached context, the typed text, and the files.
         const restoreConsumedInput = () => {
             restoreConsumedDrafts();
-            if (syntheticParts?.length) {
-                const inputState = useInputStore.getState();
-                inputState.setPendingSyntheticParts([...syntheticParts, ...(inputState.getPendingSyntheticParts(mailboxTarget) ?? [])], mailboxTarget);
-            }
+            restoreConsumedSynthetic(referenceDraftKey ?? mailboxTarget);
             restoreComposerText();
             if (!queuedOnly && submissionFiles.length > 0) {
                 useInputStore.getState().restoreAttachedFiles(submissionFiles, chatDraftIdentity);
             }
         };
 
-        const availableSkillNames = new Set(
-            selectAvailableSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
-        );
-
         // Comments become synthetic context, which the send-time expansion
         // below skips, so their own words expand here.
-        const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
+        const composerText = !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null;
+        const [expandedDrafts, availableSkillNames] = await Promise.all([
+            expandCommentSnippets(drafts, useSnippetsStore.getState().expandText),
+            loadComposerSkillNames(composerText ?? '', magicPromptDirectory),
+        ]);
 
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
-            composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
+            composerText,
             composerAttachments: selectedAttachments,
             inlineComments: expandedDrafts,
             syntheticTexts: [
@@ -2243,6 +2214,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (!isCurrentSubmitRuntime()) {
             restoreConsumedDrafts();
+            restoreTakenQueue(chatDraftIdentity);
             return;
         }
         const recovery = !queuedOnly && !isBtwActive && inputMode === 'normal' && persistChatDraft
@@ -2308,7 +2280,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     );
                 } catch (error) {
                     restoreConsumedInput();
-                    toast.error(getSubmitErrorMessage(error, t(command.errorToastKey)));
+                    toast.error(getSubmitErrorMessage(error, t(command.errorToastKey), sendableAttachments));
                 } finally {
                     recovery?.settle();
                 }
@@ -2417,7 +2389,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 // first send never drops back into the parent draft.
                 useBtwStore.getState().setPanelState(currentSessionId, { pending: true, creating: false, collapsed: false, pendingSend: undefined });
                 restoreConsumedInput();
-                toast.error(getSubmitErrorMessage(error, t('chat.btw.toast.createFailed')));
+                toast.error(getSubmitErrorMessage(error, t('chat.btw.toast.createFailed'), sendableAttachments));
             }
             return;
         }
@@ -2502,16 +2474,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 clearChatDraft(failedSessionIdentity);
             }
             const restoreTarget = (failedDraftSend?.sessionCreated ? failedSessionIdentity : null) ?? chatDraftIdentity;
-            restoreComposerText(restoreTarget);
             const cause = failedDraftSend?.cause ?? error;
-            if (cause instanceof ImagePathPreparationError && queuedMessagesToSend.length > 0) {
-                for (const queued of queuedMessagesToSend) {
-                    restoreDraft(restoreTarget, queued.content, new Set());
-                    restoreQueuedContext(queued.context ?? [], queued.content);
-                    const files = queued.attachments ?? [];
-                    if (files.length > 0) useInputStore.getState().restoreAttachedFiles(files, restoreTarget);
-                }
+            if (cause instanceof OpencodeApiError && cause.operation === 'routing.prepareSend' && restoreTarget) {
+                restoreConsumedSynthetic(getChatDraftIdentityKey(restoreTarget));
             }
+            restoreComposerText(restoreTarget);
+            restoreTakenQueue(restoreTarget);
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
@@ -2564,12 +2532,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
             }
 
-            if (normalized.includes('returned a web page instead of an api response') || normalized.includes('runtime_unavailable')) {
+            if ((cause instanceof OpencodeApiError && cause.promptNotForwarded)
+                || normalized.includes('returned a web page instead of an api response') || normalized.includes('runtime_unavailable')) {
                 toast.error(t('chat.chatInput.toast.messageSendFailed'));
                 return;
             }
 
-            toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.messageSendFailed')));
+            toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.messageSendFailed'), allAttachments));
         }).finally(() => recovery?.settle());
 
         if (!isMobile) {
@@ -3118,118 +3087,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const attachReferences = useAttachReferences(referencePickerDirectory, addLinkedReferences);
 
     const savePastedImagesAsFiles = useUIStore((state) => state.savePastedImagesAsFiles);
-    const pendingSpaceTarget = isSpaceCreationRequest(newSessionDraft.pendingWorktreeRequestId ?? null);
-    const eagerImageDirectory = isBtwActive
-        ? btwDirectory ?? currentSessionDirectoryForSync
-        : newSessionDraftOpen ? newSessionDraft.directoryOverride ?? currentDirectory : currentSessionDirectoryForSync ?? currentDirectory;
-    const imageSaveMode = imageSaveModeForModel(savePastedImagesAsFiles && !pendingSpaceTarget, currentModelMetadata?.modalities?.input);
-    const currentModelName = currentModelMetadata?.name ?? currentModelId ?? '';
-    const currentModelKey = `${currentProviderId ?? ''}/${currentModelId ?? ''}`;
-
-    /**
-     * Saves the images where OpenCode runs and cites each saved one in the
-     * draft as `[name](path)`, so the model, a subagent or a tool opens it by
-     * path: in place of the attachment for a model that takes no images
-     * (#5087), next to it for one that does (#5218). Each image gets a name no
-     * attachment or link in the draft uses yet. Answers both groups under
-     * those names; the caller attaches the unsaved ones as before, and in
-     * `alongside` the saved ones too.
-     */
-    const saveImagesWithPathCitation = React.useCallback(async (
-        files: File[],
-        reservedNames: string[],
-        mode: 'instead' | 'alongside',
-        ownsDraft: () => boolean,
-    ): Promise<{ saved: Array<{ file: File; filename: string }>; unsaved: File[] }> => {
-        // A cold or remote OpenCode can take seconds; this toast says what is going on.
-        const savingToastId = toast.loading(t('chat.chatInput.toast.imagesSaving', { files: files.map((file) => file.name).join(', ') }));
-        const prepared = await Promise.all(files.map(async (file) => {
-            const output = await prepareAttachmentFile(file);
-            return output ? { file, name: output.file.name, type: output.mimeType, bytes: new Uint8Array(await output.file.arrayBuffer()) } : null;
-        }).map((entry) => entry.catch(() => null)));
-        const readable = prepared.filter((entry) => entry !== null);
-        const names = assignImageAttachmentFilenames(readable, reservedNames);
-        const entries = readable.map((entry, index) => ({ ...entry, filename: names[index] }));
-        let results: Awaited<ReturnType<typeof opencodeClient.writeOpenCodeTempFiles>>;
-        try {
-            results = ownsDraft() && entries.length > 0
-                ? await opencodeClient.writeOpenCodeTempFiles(eagerImageDirectory, entries.map(({ filename, bytes }) => ({ filename, bytes })))
-                : [];
-        } catch (error) {
-            results = entries.map(({ filename }) => ({ filename, error: error instanceof Error ? error : new Error(String(error)) }));
-        }
-        toast.dismiss(savingToastId);
-        if (!ownsDraft()) return { saved: [], unsaved: [] };
-
-        const saved = results.flatMap((result) => 'path' in result ? [result] : []);
-        const savedNames = new Set(saved.map((result) => result.filename));
-        const savedFiles = entries.filter((entry) => savedNames.has(entry.filename));
-        const savedOriginals = new Set(savedFiles.map((entry) => entry.file));
-        const unsaved = files.filter((file) => !savedOriginals.has(file));
-        if (results.some((result) => 'error' in result)) {
-            // The error text can carry the path; the name says what failed.
-            console.warn('[chat] Saving an image failed', results.flatMap((result) => 'error' in result ? [result.error.name] : []));
-        }
-
-        if (saved.length > 0) {
-            insertCitationAtSelection(buildImagePathCitationText(saved), '', true);
-            const firstPath = saved[0].path.replace(/\\/g, '/');
-            const savedFiles = saved.map((result) => result.filename).join(', ');
-            const folder = firstPath.slice(0, firstPath.lastIndexOf('/'));
-            if (mode === 'alongside') {
-                // One toast for a run of pastes; the newest names the latest folder.
-                toast.info(t('chat.chatInput.toast.imagesSaved', { files: savedFiles, folder }), { id: `images-saved:${currentModelKey}` });
-            } else {
-                // When some failed, the modality warning for those (attached next)
-                // takes the shared id, so this toast keeps its own.
-                toast.info(t('chat.chatInput.toast.imagesSavedForTextModel', {
-                    model: currentModelName,
-                    files: savedFiles,
-                    folder,
-                }), unsaved.length > 0 ? undefined : { id: `attachment-modalities:${currentModelKey}` });
-            }
-        }
-        if (unsaved.length > 0) {
-            const files = unsaved.map((file) => file.name).join(', ');
-            toast.error(mode === 'alongside'
-                ? t('chat.chatInput.toast.imageCopySaveFailed', { files })
-                : t('chat.chatInput.toast.imageSaveFailed', { files }));
-        }
-        return { saved: savedFiles, unsaved };
-    }, [currentModelKey, currentModelName, eagerImageDirectory, insertCitationAtSelection, t]);
-
-    /** Cite only files that the draft can send or open. */
-    const attachFilesWithCitation = React.useCallback((files: File[], leadingText = '') => {
-        // Preserve pasted text even if reading the files fails or the user
-        // leaves the draft while they are being prepared.
+    /** Attach bytes to the draft. The send target owns every eventual write. */
+    const attachFilesWithCitation = React.useCallback((files: File[], leadingText = '', officeMode: OfficeAttachmentMode = 'extract') => {
         if (leadingText) insertTextAtSelection(leadingText, getFileMentionInputSourceForInsertedText(leadingText));
         return startAttachmentIntake(async (ownsDraft) => {
-            let imageFiles = files.filter((file) => file.type.startsWith('image/'));
+            const imageFiles = files.filter((file) => file.type.startsWith('image/'));
             const otherFiles = files.filter((file) => !file.type.startsWith('image/'));
-
-            // With the setting on, links to saved images keep their names too, so an
-            // attachment after a failed save never repeats one.
             const usedNames = () => [
                 ...useInputStore.getState().attachedFiles.flatMap((file) => [file.filename, file.composerAnchor ?? file.filename]),
-                ...(savePastedImagesAsFiles ? findImagePathCitationNames(composerRef.current?.getValue() ?? messageRef.current) : []),
+                ...findImagePathCitationNames(composerRef.current?.getValue() ?? messageRef.current),
             ];
-
-            if (imageSaveMode !== 'attach' && imageFiles.length > 0) {
-                const { saved, unsaved } = await saveImagesWithPathCitation(imageFiles, usedNames(), imageSaveMode, ownsDraft);
-                if (!ownsDraft()) return false;
-                // Retain the original image behind the saved link so a later model
-                // change or a queued send can use it without relying on this file.
-                for (const { file, filename } of saved) {
-                    try {
-                        await addAttachedFile(file, filename, filename);
-                    } catch (error) {
-                        console.error('Clipboard image attach failed', error);
-                        toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.clipboardAttachFailed'));
-                    }
-                    if (!ownsDraft()) return false;
-                }
-                imageFiles = unsaved;
-            }
 
             const assignedImageNames = assignImageAttachmentFilenames(imageFiles, usedNames());
             let accepted = true;
@@ -3237,7 +3104,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 const imageName = assignedImageNames[index];
                 const anchor = imageName ?? allocateAttachmentAnchor(file.name, usedNames());
                 try {
-                    const attached = await addAttachedFile(file, anchor, imageName);
+                    const attached = await addAttachedFile(file, anchor, imageName, officeMode, savePastedImagesAsFiles && index < imageFiles.length);
                     if (!ownsDraft()) return false;
                     if (attached) {
                         insertCitationAtSelection(buildAttachmentCitationText([anchor]), '', true);
@@ -3253,7 +3120,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
             return accepted;
         });
-    }, [addAttachedFile, imageSaveMode, insertCitationAtSelection, insertTextAtSelection, savePastedImagesAsFiles, saveImagesWithPathCitation, startAttachmentIntake, t]);
+    }, [addAttachedFile, insertCitationAtSelection, insertTextAtSelection, savePastedImagesAsFiles, startAttachmentIntake, t]);
 
     const handlePaste = React.useCallback(async (event: ClipboardEvent) => {
         const clipboardData = event.clipboardData;
@@ -3845,16 +3712,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-    const attachFiles = React.useCallback((files: FileList | File[]) => (
-        attachFilesWithCitation(Array.from(files))
-    ), [attachFilesWithCitation]);
+    const pickerRequestRef = React.useRef<{ officeMode: OfficeAttachmentMode; isCurrent: () => boolean } | null>(null);
 
-    const handleVSCodePickFiles = React.useCallback(async () => {
+    const handleVSCodePickFiles = React.useCallback(async (officeMode: OfficeAttachmentMode, isCurrent: () => boolean) => {
         try {
-            const data = (await vscodeApi?.pickFiles?.({ extensions: ACCEPTED_ATTACHMENT_EXTENSIONS })) as {
+            const data = (await vscodeApi?.pickFiles?.(officeMode === 'original' ? { extensions: OFFICE_ATTACHMENT_EXTENSIONS } : {})) as {
                 files?: Array<{ name: string; mimeType?: string; dataUrl?: string }>;
                 skipped?: Array<{ name?: string; reason?: string }>;
             } | undefined;
+            if (!isCurrent()) return;
             const picked = Array.isArray(data?.files) ? data.files : [];
             const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
 
@@ -3887,28 +3753,49 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 .filter(Boolean) as File[];
 
             if (asFiles.length > 0) {
-                await attachFiles(asFiles);
+                await attachFilesWithCitation(asFiles.filter((file) => officeMode !== 'original' || getOfficeAttachmentMime(file.name)), '', officeMode);
             }
         } catch (error) {
             console.error('VS Code file pick failed', error);
             toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.vscodePickFailed'));
         }
-    }, [attachFiles, t, vscodeApi]);
+    }, [attachFilesWithCitation, t, vscodeApi]);
 
-    const handlePickLocalFiles = React.useCallback(() => {
+    const openLocalPicker = React.useCallback((officeMode: OfficeAttachmentMode) => {
+        const instanceIsCurrent = captureRuntimeInstance();
+        const lifetime = attachmentDraftLifetimeRef.current;
+        const isCurrent = () => {
+            const draft = currentChatDraftIdentityRef.current;
+            return instanceIsCurrent() && lifetime === attachmentDraftLifetimeRef.current
+                && Boolean(draft && getChatDraftIdentityKey(draft) === referenceDraftKey);
+        };
+        if (!isCurrent()) return;
         if (isVSCodeRuntime()) {
-            void handleVSCodePickFiles();
+            void handleVSCodePickFiles(officeMode, isCurrent);
             return;
         }
-        fileInputRef.current?.click();
-    }, [handleVSCodePickFiles]);
+        const picker = fileInputRef.current;
+        if (!picker) return;
+        pickerRequestRef.current = { officeMode, isCurrent };
+        picker.accept = officeMode === 'original' ? OFFICE_ATTACHMENT_EXTENSIONS.map((ext) => `.${ext}`).join(',') : '';
+        picker.click();
+    }, [handleVSCodePickFiles, referenceDraftKey]);
+    const handlePickLocalFiles = React.useCallback(() => openLocalPicker('extract'), [openLocalPicker]);
+    const handlePickOfficeOriginals = React.useCallback(() => openLocalPicker('original'), [openLocalPicker]);
 
-    const handleLocalFileSelect = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const files = event.target.files;
-        if (!files) return;
-        await attachFiles(files);
-        event.target.value = '';
-    }, [attachFiles]);
+    const handleLocalFileSelect = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const request = pickerRequestRef.current;
+        pickerRequestRef.current = null;
+        const files = Array.from(event.currentTarget.files ?? []);
+        event.currentTarget.value = '';
+        if (request && !request.isCurrent()) return;
+        const officeMode = request?.officeMode ?? 'extract';
+        void attachFilesWithCitation(
+            files.filter((file) => officeMode !== 'original' || getOfficeAttachmentMime(file.name)),
+            '',
+            officeMode,
+        );
+    }, [attachFilesWithCitation]);
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();
@@ -4820,6 +4707,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         dictationActive={mobileShell.dictationActive}
                         onOpenSettings={onOpenSettings}
                         onPickLocalFiles={handlePickLocalFiles}
+                        onPickOfficeOriginals={handlePickOfficeOriginals}
                         onOpenGitHubPicker={openGitHubPicker}
                         repositoryProvider={repositoryProvider}
                         trackerPickers={trackerPickers}
@@ -4988,6 +4876,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     >
                         <Icon name="attachment-2" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
                         {t('chat.chatInput.actions.attachFiles')}
+                    </button>
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            mobileShell.cancelOverlayCloseRestore();
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(handlePickOfficeOriginals);
+                        }}
+                    >
+                        <Icon name="attachment-2" className="size-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.attachOfficeOriginals')}
                     </button>
                     <button
                         type="button"

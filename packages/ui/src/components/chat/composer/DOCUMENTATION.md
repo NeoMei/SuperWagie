@@ -153,8 +153,8 @@ shows that agent before edit, because the item still sends as captured; the
 strip compares against the composer's `currentAgentName`, the same value
 queueing captures.
 
-`selectComposerQueue` in the submission builder excludes server-scheduled items
-before the composer counts manual content or reads captured send configuration.
+`selectComposerQueue` excludes server-scheduled items and prompts whose delivery
+is unconfirmed before the composer counts content or reads send configuration.
 Mixed queues use only ordinary items for manual send; a scheduled-only queue
 cannot trigger an empty composer send. Enter and Ctrl/Cmd+Enter in an empty
 composer send the whole queue now, as one visible message (#4746). While a turn
@@ -162,6 +162,8 @@ runs only Enter does this: the send button gives way to Stop until the turn
 ends, and a row's own Send sends just that message. Like any send, it dismisses
 open permission requests and forms. Scheduled items stay visible in the
 queue rows with reorder and remove, but no edit or send action.
+An unconfirmed prompt row shows its status and can be removed. It is excluded
+from edit, single send, and send-all while its original prompt may exist.
 
 While a turn runs and the composer has content, a follow-up button sits above
 Stop (inside the pill on collapsed mobile). It takes the same path as plain
@@ -325,6 +327,9 @@ positioned host outside the box: the autocomplete wrapper on desktop, the
 dictation host on mobile. The preview opens above that host, and its scrollable
 content is capped by the space between the host and the chat column's top edge,
 so a long preview does not hide its entry actions behind the chat header.
+An attached review comment exposes its source in the preview row. It resolves
+against the draft's directory and opens independently of editing or removing
+the comment.
 
 ## Layers
 
@@ -360,28 +365,21 @@ to read the declaration again when the composer takes focus, since the IME reads
 element takes focus and that can be before the report arrives. The paste handler re-checks
 focus as a backstop for that window. Every other runtime pastes images through `handlePaste` unchanged, and an IME
 without content insertion keeps refusing.
-With the profile setting `savePastedImagesAsFiles` on, pasted, dropped and
-picked images (`attachFilesWithCitation`, `attachFiles`) are written into a new
-folder under OpenCode's own temp folder (`opencodeClient.writeOpenCodeTempFiles`:
-`GET /api/info` names the folder, `POST /api/experimental/fs/write` writes it)
-and cited as `[name](absolute path)` (a plain link: a draft starting with `!`
-turns into a shell command), so the model, a subagent or a tool reads the file
-by path; OpenCode's agents may read that folder without asking.
-`imageSaveModeForModel` picks one of three cases. A model whose metadata lists
-no `image` input gets only the link, since it could not read the attachment
-(#5087), and the modality toast says where the images went. Any other model,
-unknown metadata included, also gets the image attached under the link's name,
-with no second `[name]` citation (#5218). An image that could not be saved
-attaches as before, with an error toast. With the setting off nothing is
-saved. One setting covers both cases: a split by model kind read as a puzzle of
-exceptions in Settings, and nobody needs the files for one kind of model only.
-The browser annotation screenshot and comment-field image pastes keep
-attaching. The bytes go through the active runtime's OpenCode route (the
-OpenChamber server's proxy, the VS Code bridge, the relay for a phone), so the
-file lands on the machine OpenCode runs on, which may not be the user's. Why
-OpenCode writes the file and not the OpenChamber server: only OpenCode knows
-its temp folder and its filesystem, and an external OpenCode or a space runs
-elsewhere than the server.
+The attachment menu offers **Attach Office originals** for DOCX, PPTX, XLSX,
+ODT, ODP and ODS. It holds the selected bytes as a single draft attachment.
+The regular picker, paste and drop keep Office text extraction and inline
+images. Closing the picker after leaving a draft cannot attach to the next one.
+
+With `savePastedImagesAsFiles` on, picked, dropped and pasted images carry
+copy intent in the draft. On send, the target OpenCode writes a copy and
+includes its path. A model with image input also gets the inline image
+(#5218). Unsupported media and Office originals reach the model as paths
+(#5087), including when the setting is off. The target runtime writes the
+files under its own OpenCode temporary directory. A failed write leaves the
+draft or queued payload available for retry. Parallel sends wait for attachment
+intake and use each lane’s own model and directory. A failed lane returns the
+attachments to the originating draft.
+
 Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 `largeTextPasteBehavior` (`ask` / `attach` / `inline` / `inline-double-paste`). Attaching creates an
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
@@ -606,12 +604,14 @@ and the send path reading the same grammar.
   (as `QueuedContextPart`s on the queue item), the server or the VS Code
   auto-send delivers them through `queuedContextToParts`, and editing the
   queued message puts them back. A queued message is placed as captured — its
-  mention, file mentions, and skill instruction were resolved when it was
-  queued, never at delivery — and its context follows it before the next
-  queued message.
-- **Skills named with `$name` are attached to the prompt, not hinted at.**
-  `buildOutgoingMessage` reports the composer text's skill names (deduped, in
-  order) as `skillNames`; `ChatInput` hands them to the send as
+  agent and file mentions were resolved when it was queued. Its context
+  follows it before the next queued message.
+- **Skills named with `$name` are attached to the prompt.**
+  A typed or pasted token missing from the composer's available names triggers
+  a catalog load for the target directory before send or enqueue. The catalog's
+  skill policy still determines which names can become attachments.
+  `buildOutgoingMessage` combines queued and composer skill names in message
+  order. `ChatInput` hands them to the send as
   `SkillMentions`, and `opencodeClient.sendMessage` maps each name to its
   OpenCode skill id (`GET /api/skill`; the id is the skill's folder and can
   differ from its frontmatter name) and sends them in the prompt's `skills`
@@ -627,9 +627,9 @@ and the send path reading the same grammar.
   these skills…") is per skill and never blocks the send: a name OpenCode
   does not list, a failed skill list, or a prompt rejected with
   `Skill not found` (resent once with the same message id, since preparation
-  fails before admission). Queued messages keep the instruction captured at
-  queue time, because the server and the VS Code auto-send deliver them
-  without the composer's registry. A `$skill` in a message that routes to
+  fails before admission). New queue items capture skill names and the session's
+  runtime resolves them to IDs at delivery. Older items retain their captured
+  synthetic instruction. A `$skill` in a message that routes to
   `session.command` (a leading `/command`) keeps the instruction too: that
   route takes no skill attachments. A hand-typed leading `/name` that matches
   a skill and no command still attaches the skill (`session-ui-store`), so the

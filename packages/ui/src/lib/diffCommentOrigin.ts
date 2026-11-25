@@ -9,12 +9,12 @@ import { z } from 'zod';
 import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
 import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
-import type { SourceControlProvider } from '@/lib/source-control/types';
+import type { ChangeRequest, SourceControlProvider } from '@/lib/source-control/types';
 import type { WalkthroughSource, WalkthroughTarget } from '@/lib/walkthrough/types';
 
 export const diffCommentOriginSchema = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('commit'), hash: z.string().min(1) }),
-    z.object({ kind: z.literal('branch'), baseRef: z.string().min(1), headRef: z.string().min(1) }),
+    z.object({ kind: z.literal('branch'), baseRef: z.string().min(1), headRef: z.string().min(1), revision: z.string().min(1).optional() }),
     z.object({
         kind: z.literal('change-request'),
         /** Absent when the surface did not know its host; read as a plain pull request. */
@@ -65,11 +65,22 @@ export function diffCommentOriginKey(origin: DiffCommentOrigin | undefined): str
         case 'commit':
             return `commit:${origin.hash}`;
         case 'branch':
-            return `branch:${origin.baseRef}...${origin.headRef}`;
+            return `branch:${origin.baseRef}...${origin.headRef}:${origin.revision ?? ''}`;
         case 'change-request':
-            return `cr:${origin.provider ?? ''}:${origin.repository ?? ''}:${origin.number}`;
+            return `cr:${origin.provider ?? ''}:${origin.repository ?? ''}:${origin.number}:${origin.revision ?? ''}`;
     }
 }
+
+export function changeRequestHeadForDiff(source: Extract<WalkthroughSource, { kind: 'pr' }> | null, requests: readonly ChangeRequest[]) {
+    if (!source) return undefined;
+    const { sourceRepo } = source;
+    const candidates = requests.filter((entry) => entry.number === source.number
+        && (!sourceRepo || (entry.project.owner === sourceRepo.owner && entry.project.name === sourceRepo.repo)));
+    return candidates.length === 1 ? candidates[0].headSha : undefined;
+}
+
+export const diffCommentOriginForFile = (origin: DiffCommentOrigin | undefined, revision: string | undefined) =>
+    origin?.kind === 'branch' && revision ? { ...origin, revision } : origin;
 
 const changeRequestReference = (origin: Extract<DiffCommentOrigin, { kind: 'change-request' }>) => (
     origin.provider ? formatChangeRequestReference(readSourceControlProvider(origin.provider), origin.number) : `#${origin.number}`

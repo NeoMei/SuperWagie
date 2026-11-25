@@ -29,6 +29,8 @@ export const findTermRanges = (messageRoot: Element, terms: readonly string[]): 
   if (terms.length === 0) return ranges;
   const document = messageRoot.ownerDocument;
   for (const container of messageRoot.querySelectorAll(SEARCHABLE_TEXT_SELECTOR)) {
+    const kept = container.closest('[data-message-hoisted]');
+    if (kept && kept !== messageRoot) continue;
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = node.nodeValue ?? '';

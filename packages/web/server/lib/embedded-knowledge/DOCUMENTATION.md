@@ -31,6 +31,17 @@ ingest policy, search merging, routes, the panel and the agent tool.
 - In the native lane a healthy instance on the port is adopted; a listener that is not this
   backend is reported as a port conflict. The supervisor never kills a
   process it did not start.
+- On macOS, each worker the supervisor starts has its own process group. A
+  system Bash watchdog blocks on a pipe held by the host. When the pipe
+  closes, the watchdog kills the group, including an unresponsive worker.
+  Normal shutdown sends SIGTERM to the worker first and waits for the group
+  to exit before probing the port for a replacement.
+- On macOS, a worker executable on a different volume from system temporary
+  storage runs from a private copy on the system volume. The watchdog removes
+  the copy when the host pipe closes.
+- While an owned worker runs, the supervisor checks its health repeatedly.
+  Two consecutive failures stop the worker before attempting a replacement.
+  An explicit stop cancels any replacement already in progress.
 - Restarts follow one ladder (`0, 5, 20, 60, 300` seconds) and then stop at
   `unavailable`. No data repair, no lock-file deletion.
 - A failed spawn, unexpected exit or startup timeout exposes a stable error
@@ -51,6 +62,14 @@ ingest policy, search merging, routes, the panel and the agent tool.
   current authority checks remain independent of this transport budget.
 
 ## Decisions
+
+### Why executable pages use the system volume on macOS
+
+After a forced eject, macOS could no longer page in executable code from the
+worker's source volume. The Go CGO signal trampoline was on that volume too,
+so handling the fault triggered another fault and the worker used nearly two
+cores. A local executable copy keeps those pages available. The worker still
+uses its original configuration paths and database location.
 
 ### Why the API key's `token` and not `api_key`
 
@@ -109,11 +128,9 @@ error already reaches the document row.
 
 ### Why the supervisor adopts instead of owning the port
 
-A previous instance can survive a desktop crash. Refusing to start while it
-is healthy would strand the feature until the user found the process; a
-blind spawn would fail with `EADDRINUSE` and look like a broken install.
-Adoption keeps the feature working, and the port-conflict state covers the
-case where something else holds the port.
+A manually started or older backend can already hold the port when the app
+launches. Adoption keeps the feature working with a healthy backend in the
+native lane. A listener that fails the health check is a port conflict.
 
 ## Unified model bindings
 

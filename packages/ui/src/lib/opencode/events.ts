@@ -63,7 +63,7 @@ export type SessionPatch = {
 export type MessagePatch = {
   time?: { created?: number; streamed?: number; completed?: number }
   finish?: Extract<Message, { role: "assistant" }>["finish"]
-  error?: StructuredError
+  error?: StructuredError | null
   cost?: number
   tokens?: TokenUsageInfo
   snapshot?: { start?: string; end?: string; files?: string[] }
@@ -514,6 +514,8 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
             }),
           },
         },
+        // A retry resumes inside the same execution. The step start ends its wait.
+        { type: "session.status", properties: { sessionID: event.data.sessionID, status: { type: "busy" } } },
       ]
     case "session.step.streamed":
       return [messagePatch(event.data.sessionID, event.data.assistantMessageID, { time: { streamed: event.created } })]
@@ -525,6 +527,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           compact({
             time: { completed: event.created },
             finish: event.data.finish,
+            error: event.data.finish === 'error' ? undefined : null,
             cost: event.data.cost,
             tokens: event.data.tokens,
             snapshot: event.data.snapshot ? { end: event.data.snapshot, files: event.data.files } : undefined,
@@ -552,6 +555,13 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
         messagePatch(event.data.sessionID, event.data.assistantMessageID, {
           retry: { attempt: event.data.attempt, at: event.data.at, error: event.data.error },
         }),
+        {
+          type: "session.status",
+          properties: {
+            sessionID: event.data.sessionID,
+            status: { type: "retry", attempt: event.data.attempt, message: event.data.error.message, next: event.data.at },
+          },
+        },
       ]
     // --- text and reasoning -------------------------------------------------
 
@@ -893,6 +903,10 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     // Experimental MCP subscription payloads belong to their subscriber, not
     // the app's session/catalog state. Existing mcp.* events own its refreshes.
     case "experimental.mcp.event":
+      return []
+    // Background jobs have their own experimental API. Session and shell
+    // events remain authoritative for live state.
+    case "experimental.job.updated":
       return []
     // --- shell commands -------------------------------------------------------
 

@@ -134,3 +134,10 @@ After covered results deliver, remaining entries retry with the existing
 failure backoff. Bounded settle checks apply only to authoritative reads with
 no completed run yet, so a recovered endpoint can finish delivery without a
 new idle event or restart.
+
+## Lead deliveries
+
+Lead registrations carry the watched and parent directories plus a resume
+policy. The runtime checks the authoritative parent model before it
+wakes a Lead. If the parent uses an admission-managed provider, the
+result is saved in its transcript for the next authenticated turn.

@@ -63,6 +63,7 @@ it('permits packaged knowledge idempotency preflight and retains origin and acco
     expect(response.headers.get('access-control-max-age')).toBe('7200');
     expect(response.headers.get('access-control-allow-headers').toLowerCase().split(',')).toContain('authorization');
     expect(response.headers.get('access-control-expose-headers')).toContain('x-next-cursor');
+    expect(response.headers.get('access-control-expose-headers')).toContain('x-openchamber-error');
     expect(response.headers.get('access-control-allow-headers').toLowerCase().split(','))
       .toContain('idempotency-key');
     const denied = await fetch(url, {

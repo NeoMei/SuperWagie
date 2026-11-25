@@ -5,7 +5,7 @@ import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection, SettingsFieldRow, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsFieldRow, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -119,6 +119,7 @@ export const PlatformAccountPage: React.FC = () => {
   const [identity, setIdentity] = React.useState<PlatformIdentitySession | null>(null);
   const [profileRevision, setProfileRevision] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
+  const [switchingAccount, setSwitchingAccount] = React.useState(false);
   const [error, setError] = React.useState<I18nKey | null>(null);
   const tab = usePlatformAccountTabStore((store) => store.tab);
   const setTab = usePlatformAccountTabStore((store) => store.setTab);
@@ -136,9 +137,9 @@ export const PlatformAccountPage: React.FC = () => {
       }
     }
   }, []);
-  const perform = React.useCallback(async (operation: () => Promise<PlatformAccountState>) => {
+  const perform = React.useCallback(async (operation: () => Promise<PlatformAccountState>, switching = false) => {
     const key = getRuntimeKey(); const current = ++generation.current;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setSwitchingAccount(switching);
     try {
       const next = await operation();
       if (key === getRuntimeKey() && current === generation.current) setState(next);
@@ -148,12 +149,17 @@ export const PlatformAccountPage: React.FC = () => {
         setState(cause instanceof PlatformAccountError && recoverableSessionError(cause) ? { status: 'signed-out' } : null);
       }
     }
-    finally { if (key === getRuntimeKey() && current === generation.current) setBusy(false); }
+    finally {
+      if (key === getRuntimeKey() && current === generation.current) {
+        setBusy(false);
+        setSwitchingAccount(false);
+      }
+    }
   }, []);
   React.useEffect(() => {
     if (!unsupported) { void refreshIdentity(); void perform(readPlatformAccount); }
     return subscribeRuntimeEndpointChanged(() => {
-      ++generation.current; ++identityGeneration.current; setState(null); setIdentity(null); setError(null); setBusy(false);
+      ++generation.current; ++identityGeneration.current; setState(null); setIdentity(null); setError(null); setBusy(false); setSwitchingAccount(false);
       if (!unsupported) { void refreshIdentity(); void perform(readPlatformAccount); }
     });
   }, [unsupported, perform, refreshIdentity]);
@@ -165,15 +171,20 @@ export const PlatformAccountPage: React.FC = () => {
     setState(next);
     setError(null);
     setBusy(false);
+    setSwitchingAccount(false);
   }), []);
   React.useEffect(() => () => { ++generation.current; ++identityGeneration.current; }, []);
   const signedInIdentity = identity?.status === 'signed-in' ? identity : null;
-  const signedIn = state?.status === 'signed-in' && state.user.id === signedInIdentity?.user.id ? state : null;
+  const accountState = state?.status === 'signed-in' && state.user.id === signedInIdentity?.user.id ? state : null;
+  const signedIn = switchingAccount ? null : accountState;
   const modelLockError = signedIn?.modelService === 'unavailable' && (signedIn.modelUnavailableReason === 'platform_store_busy' || signedIn.modelUnavailableReason === 'platform_store_lock_unavailable') ? signedIn.modelUnavailableReason : null;
-  const selectedAccount = signedIn?.accounts.find((account) => account.id === signedIn.accountId);
+  const selectedAccount = accountState?.accounts.find((account) => account.id === accountState.accountId);
+  const accountKind = (account: NonNullable<typeof selectedAccount>) => t(account.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal');
+  const accountName = (account: NonNullable<typeof selectedAccount>) => t('platformAccount.accountName', { name: account.name, kind: accountKind(account) });
+  const selectedAccountName = selectedAccount ? accountName(selectedAccount) : undefined;
   const currentMembership = signedIn?.credits.activeMembership === false ? undefined : signedIn?.membership.find((membership) => membership.product_id === 'superwagie' && membership.status === 'active' && Date.parse(membership.paid_through) > Date.now());
   const membershipSummary = (actions: Parameters<React.ComponentProps<typeof PlatformAccountCommerce>['membershipSummary']>[0] | null) => signedIn ? <PlatformMembershipSummary account={signedIn} actions={actions} /> : null;
-  const hasWallet = signedIn?.productCreditWallet === true || Boolean(signedInIdentity && tab === 'wallet' && state === null);
+  const hasWallet = accountState?.productCreditWallet === true || Boolean(signedInIdentity && tab === 'wallet' && state === null);
   const visibleTab = tab === 'wallet' && !hasWallet ? 'billing' : tab;
   React.useLayoutEffect(() => { scrollRegion.current?.scrollTo?.({ top: 0 }); }, [visibleTab]);
   const tabs: Array<{ id: typeof tab; label: string; icon: IconName }> = [
@@ -192,7 +203,7 @@ export const PlatformAccountPage: React.FC = () => {
   const signOut = async () => {
     const key = getRuntimeKey(); const current = ++identityGeneration.current;
     ++generation.current;
-    setIdentity(null); setState(null); setBusy(true); setError(null);
+    setIdentity(null); setState(null); setBusy(true); setError(null); setSwitchingAccount(false);
     try {
       const next = await logoutPlatformAccount();
       if (key === getRuntimeKey() && current === identityGeneration.current) setIdentity(next);
@@ -205,23 +216,31 @@ export const PlatformAccountPage: React.FC = () => {
   const refreshAccount = () => { setProfileRevision((value) => value + 1); void refreshIdentity(); void perform(readPlatformAccount); };
   const refreshAction = !unsupported && identity?.status !== 'unsupported' && identity?.status !== 'unconfigured'
     && <Button size="sm" variant="ghost" disabled={busy} onClick={refreshAccount}>{t('platformAccount.refresh')}</Button>;
-  const accountPicker = signedIn && (
-    <Select value={signedIn.accountId ?? ''} disabled={busy} onValueChange={(id) => { if (id && id !== signedIn.accountId && !busy) { setState(null); void perform(() => selectPlatformAccount(id)); } }}>
-      <SelectTrigger className={`${SETTINGS_SELECT_ROW_TRIGGER_CLASS} max-w-full`} aria-label={t('platformAccount.account')}><SelectValue>{selectedAccount ? t('platformAccount.accountName', { name: selectedAccount.name, kind: t(selectedAccount.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') }) : t('platformAccount.chooseAccount')}</SelectValue></SelectTrigger>
-      <SelectContent>{signedIn.accounts.map((account) => <SelectItem key={account.id} value={account.id}>{t('platformAccount.accountName', { name: account.name, kind: t(account.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') })}</SelectItem>)}</SelectContent>
+  const accountPicker = accountState && (
+    <Select value={accountState.accountId ?? ''} disabled={busy} onValueChange={(id) => {
+      if (id && id !== accountState.accountId && !busy) void perform(() => selectPlatformAccount(id), true);
+    }}>
+      <SelectTrigger className={`${SETTINGS_SELECT_TRIGGER_CLASS} min-w-0 max-w-full`} aria-label={t('platformAccount.account')} title={selectedAccountName}>
+        <SelectValue className="flex items-center gap-1.5">
+          {selectedAccount ? <>
+            <bdi className="min-w-0 truncate">{selectedAccount.name}</bdi>
+            <span className="shrink-0 text-muted-foreground">{accountKind(selectedAccount)}</span>
+          </> : t('platformAccount.chooseAccount')}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>{accountState.accounts.map((account) => <SelectItem key={account.id} value={account.id}>{accountName(account)}</SelectItem>)}</SelectContent>
     </Select>
   );
   const activeTab = tabs.find((item) => item.id === visibleTab);
   return <div className="@container/account flex h-full min-h-0 flex-col">
     <div className="shrink-0 border-b border-border/60">
-      <div className="mx-auto flex min-h-14 max-w-4xl items-center justify-between gap-3 ps-4 pe-12 @2xl/account:ps-6 @2xl/account:pe-14">
+      <div className="flex min-h-12 items-center justify-between gap-2 ps-4 pe-12 @2xl/account:ps-6">
         <span className="min-w-0 truncate typography-ui-label font-semibold">{t('sessions.sidebar.footer.accountMenu.userCenter')}</span>
-        {signedInIdentity && <div className="flex min-w-0 items-center gap-1.5">
-          <PlatformAccountIdentity key={JSON.stringify([getRuntimeKey(), signedInIdentity.user.id])} user={signedInIdentity.user} revision={profileRevision} />
-          {visibleTab !== 'profile' && accountPicker && <Button size="icon" variant="ghost" className="size-8 shrink-0" disabled={busy} title={t('platformAccount.refreshAccount')} aria-label={t('platformAccount.refreshAccount')} onClick={refreshAccount}>
+        {signedInIdentity && (accountPicker
+          ? <Button size="icon" variant="ghost" className="size-8 shrink-0" disabled={busy} title={t('platformAccount.refreshAccount')} aria-label={t('platformAccount.refreshAccount')} onClick={refreshAccount}>
             <Icon name="refresh" className="size-4" />
-          </Button>}
-        </div>}
+          </Button>
+          : refreshAction)}
       </div>
       {signedInIdentity && <nav aria-label={t('settings.page.platform-account.title')} className="mx-auto grid max-w-4xl grid-cols-3 gap-1 px-3 pb-2 @2xl/account:grid-cols-6 @2xl/account:px-6">
         {tabs.map((item) => <Button key={item.id} type="button" variant="ghost" data-platform-account-tab={item.id} aria-controls={contentId} aria-current={visibleTab === item.id ? 'page' : undefined}
@@ -232,45 +251,50 @@ export const PlatformAccountPage: React.FC = () => {
         </Button>)}
       </nav>}
     </div>
-    <SettingsPageLayout scrollRef={scrollRegion} outerClassName="min-h-0 min-w-0 flex-1" className="max-w-4xl px-4 py-4 @2xl:px-6 @3xl:px-6 @3xl:py-5" title={signedInIdentity ? activeTab?.label : undefined}
-      headerEnd={signedInIdentity && visibleTab !== 'profile' ? accountPicker ? <div className="flex min-w-0 flex-wrap items-center gap-2" data-settings-item="platform-account.account">
-        <span className={SETTINGS_HELPER_CLASS}>{t('platformAccount.account')}</span>
-        {accountPicker}
-      </div> : refreshAction : undefined}
-      showSaveStatus={visibleTab === 'profile'}>
-      <div id={contentId} className="min-w-0 space-y-5">
-        {!signedInIdentity && <SettingsSection title={t('platformAccount.identity')} divider={false}><SettingsFieldRow label={statusText} settingsItem="platform-account.login">{refreshAction}</SettingsFieldRow></SettingsSection>}
-        {signedInIdentity && !signedIn && visibleTab !== 'profile' && !error && <p role="status" className={SETTINGS_HELPER_CLASS}>{t(busy || state === null ? 'platformAccount.loading' : 'platformAccount.failed')}</p>}
-        {signedIn && !signedIn.accountId && visibleTab !== 'profile' && visibleTab !== 'billing' && <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.chooseAccount')}</p>}
-        {error && <p className="pb-4 text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
-        {modelLockError && <p className={`pb-4 ${SETTINGS_HELPER_CLASS}`} role="alert">{t(modelLockError === 'platform_store_busy' ? 'platformAccount.modelLockBusy' : 'platformAccount.modelLockUnavailable')}</p>}
-        {!signedInIdentity && !unsupported && identity && identity.status !== 'unconfigured' && identity.status !== 'unsupported' && <SettingsSection title={t('platformAccount.authentication')} contentClassName="space-y-4">
-          <PlatformAccountAuth key={`${getRuntimeKey()}:${generation.current}`} onSignedIn={(next) => { setIdentity(next); void perform(readPlatformAccount); }} />
-        </SettingsSection>}
-        {signedInIdentity && visibleTab === 'profile' && <PlatformAccountProfile key={`${getRuntimeKey()}:${signedInIdentity.user.id}`} userId={signedInIdentity.user.id} onProfileUpdated={() => setProfileRevision((value) => value + 1)} />}
-        {signedInIdentity && visibleTab === 'profile' && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
-          <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.session', { time: new Date(signedInIdentity.expiresAt).toLocaleString(locale) })}</p>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void signOut()}>{t('platformAccount.signOut')}</Button>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col @3xl/account:flex-row">
+      {signedInIdentity && <aside aria-label={t('platformAccount.identity')} data-platform-account-sidebar className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-2 border-b border-border/60 bg-muted/20 px-4 py-2 @3xl/account:block @3xl/account:w-52 @3xl/account:space-y-5 @3xl/account:overflow-y-auto @3xl/account:border-e @3xl/account:border-b-0 @3xl/account:px-5 @3xl/account:py-6">
+        <PlatformAccountIdentity key={JSON.stringify([getRuntimeKey(), signedInIdentity.user.id])} user={signedInIdentity.user} revision={profileRevision} />
+        {accountPicker && <div className="min-w-0 space-y-0.5" data-settings-item="platform-account.account">
+          <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.account')}</p>
+          {accountPicker}
         </div>}
-        {signedIn && (visibleTab === 'billing' || tab === 'orders' || visibleTab === 'wallet') && <>
-          {visibleTab === 'billing' && (!signedIn.accountId || unsupported) && membershipSummary(null)}
-          {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} view={tab === 'orders' ? 'orders' : visibleTab === 'wallet' ? 'wallet' : 'overview'} payer={selectedAccount ? t('platformAccount.accountName', { name: selectedAccount.name, kind: t(selectedAccount.kind === 'team' ? 'platformAccount.team' : 'platformAccount.personal') }) : signedIn.accountId} membershipSummary={membershipSummary} hasActiveMembership={signedIn.credits.activeMembership ?? Boolean(currentMembership)} currentMembership={currentMembership} onAccountRefresh={() => void perform(readPlatformAccount)} />}
-        </>}
-        {visibleTab === 'billing' && !unsupported && signedIn?.accountId && <>
-          <PlatformAccountUsageSummary key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} />
-          <Button size="sm" variant="ghost" onClick={() => setTab('usage')}>{t('platformAccount.viewUsage')}</Button>
-        </>}
-        {visibleTab === 'keys' && !unsupported && signedIn?.accountId && (
-          <PlatformAccountApiKeys key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} onConfigured={refreshModelConfiguration} />
-        )}
-        {signedIn && visibleTab === 'usage' && <>
-          {!unsupported && signedIn.accountId && <PlatformAccountUsage
-            key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} />}
-          {!unsupported && signedIn.accountId && <PlatformAccountUsageChart key={`activity:${JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])}`} accountId={signedIn.accountId} />}
-          {!unsupported && (signedIn.modelService === 'available' || signedIn.modelRecoveryAvailable) && sessionID && <PlatformTaskStatus key={`${getRuntimeKey()}:${sessionID}:${signedIn.user.id}`} sessionID={sessionID} accounts={signedIn.accounts} />}
-          {!unsupported && signedIn.modelRecoveryAvailable && signedIn.accountId && <PlatformMediaHistory key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accounts={signedIn.accounts} />}
-        </>}
-      </div>
-    </SettingsPageLayout>
+      </aside>}
+      <SettingsPageLayout scrollRef={scrollRegion} outerClassName="min-h-0 min-w-0 flex-1" className="max-w-4xl px-4 py-4 @2xl:px-6 @3xl:px-6 @3xl:py-5" title={signedInIdentity ? activeTab?.label : undefined}
+        showSaveStatus={!!signedInIdentity && visibleTab === 'profile'}>
+        <div id={contentId} className="min-w-0 space-y-5">
+          {!signedInIdentity && <SettingsSection title={t('platformAccount.identity')} divider={false}><SettingsFieldRow label={statusText} settingsItem="platform-account.login">{refreshAction}</SettingsFieldRow></SettingsSection>}
+          {signedInIdentity && !signedIn && visibleTab !== 'profile' && !error && <p role="status" className={SETTINGS_HELPER_CLASS}>{t(busy || state === null ? 'platformAccount.loading' : 'platformAccount.failed')}</p>}
+          {signedIn && !signedIn.accountId && visibleTab !== 'profile' && visibleTab !== 'billing' && <p role="status" className={SETTINGS_HELPER_CLASS}>{t('platformAccount.chooseAccount')}</p>}
+          {error && <p className="pb-4 text-[var(--status-error-text)]" role="alert">{t(error)}</p>}
+          {modelLockError && <p className={`pb-4 ${SETTINGS_HELPER_CLASS}`} role="alert">{t(modelLockError === 'platform_store_busy' ? 'platformAccount.modelLockBusy' : 'platformAccount.modelLockUnavailable')}</p>}
+          {!signedInIdentity && !unsupported && identity && identity.status !== 'unconfigured' && identity.status !== 'unsupported' && <SettingsSection title={t('platformAccount.authentication')} contentClassName="space-y-4">
+            <PlatformAccountAuth key={`${getRuntimeKey()}:${generation.current}`} onSignedIn={(next) => { setIdentity(next); void perform(readPlatformAccount); }} />
+          </SettingsSection>}
+          {signedInIdentity && visibleTab === 'profile' && <PlatformAccountProfile key={`${getRuntimeKey()}:${signedInIdentity.user.id}`} userId={signedInIdentity.user.id} onProfileUpdated={() => setProfileRevision((value) => value + 1)} />}
+          {signedInIdentity && visibleTab === 'profile' && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
+            <p className={SETTINGS_HELPER_CLASS}>{t('platformAccount.session', { time: new Date(signedInIdentity.expiresAt).toLocaleString(locale) })}</p>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void signOut()}>{t('platformAccount.signOut')}</Button>
+          </div>}
+          {signedIn && (visibleTab === 'billing' || tab === 'orders' || visibleTab === 'wallet') && <>
+            {visibleTab === 'billing' && (!signedIn.accountId || unsupported) && membershipSummary(null)}
+            {!unsupported && signedIn.accountId && <PlatformAccountCommerce key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accountId={signedIn.accountId} view={tab === 'orders' ? 'orders' : visibleTab === 'wallet' ? 'wallet' : 'overview'} payer={selectedAccountName ?? signedIn.accountId} membershipSummary={membershipSummary} hasActiveMembership={signedIn.credits.activeMembership ?? Boolean(currentMembership)} currentMembership={currentMembership} onAccountRefresh={() => void perform(readPlatformAccount)} />}
+          </>}
+          {visibleTab === 'billing' && !unsupported && signedIn?.accountId && <>
+            <PlatformAccountUsageSummary key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} />
+            <Button size="sm" variant="ghost" onClick={() => setTab('usage')}>{t('platformAccount.viewUsage')}</Button>
+          </>}
+          {visibleTab === 'keys' && !unsupported && signedIn?.accountId && (
+            <PlatformAccountApiKeys key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} onConfigured={refreshModelConfiguration} />
+          )}
+          {signedIn && visibleTab === 'usage' && <>
+            {!unsupported && signedIn.accountId && <PlatformAccountUsage
+              key={JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])} accountId={signedIn.accountId} />}
+            {!unsupported && signedIn.accountId && <PlatformAccountUsageChart key={`activity:${JSON.stringify([getRuntimeKey(), signedIn.user.id, signedIn.accountId])}`} accountId={signedIn.accountId} />}
+            {!unsupported && (signedIn.modelService === 'available' || signedIn.modelRecoveryAvailable) && sessionID && <PlatformTaskStatus key={`${getRuntimeKey()}:${sessionID}:${signedIn.user.id}`} sessionID={sessionID} accounts={signedIn.accounts} />}
+            {!unsupported && signedIn.modelRecoveryAvailable && signedIn.accountId && <PlatformMediaHistory key={`${getRuntimeKey()}:${signedIn.user.id}:${signedIn.accountId}`} accounts={signedIn.accounts} />}
+          </>}
+        </div>
+      </SettingsPageLayout>
+    </div>
   </div>;
 };

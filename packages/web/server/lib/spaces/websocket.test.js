@@ -239,6 +239,11 @@ describe('the WebSocket forwarder', () => {
     expect(first.hello).toBe(`/api/terminal/ws?directory=${directory}`);
     expect(first.headers.origin).toBe('http://127.0.0.1:27600');
     socket.close();
+    const repeated = await open(host.url('/api/terminal/ws'), {
+      headers: { 'x-opencode-directory': ['/home/me', directory] },
+    });
+    expect(repeated.status).toBe(400);
+    expect(repeated.body).toMatchObject({ code: 'invalid_directory_header' });
     for (const [suffix, status, code] of [
       [`/api/terminal/ws?directory=${directory}&directory=/home/me`, 400, 'directory_outside_space'],
       [`/api/terminal/ws?directory=/home/me&directory=${directory}`, 400, 'directory_outside_space'],

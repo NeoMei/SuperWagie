@@ -11,7 +11,7 @@ import { ChildStoreManager } from "./child-store"
 import { sendRecoveredFormAnswer, setActionRefs, setOptimisticRefs } from "./session-actions"
 import { applyRecoverableQuestionEvents, noteQuestionFormSnapshot, resetRecoverableQuestions } from "./recoverable-questions"
 import { SessionMessageLoader, setImperativeSessionMessageLoader, type SessionMessagePageSource } from "./session-message-loader"
-import { DraftSendError, ImagePathPreparationError, routeMessage, useSessionUIStore, type NewSessionDraftState, type PendingDraftSend } from "./session-ui-store"
+import { DraftSendError, AttachmentPathPreparationError, routeMessage, useSessionUIStore, type NewSessionDraftState, type PendingDraftSend } from "./session-ui-store"
 import { setSyncRefs } from "./sync-refs"
 
 // The first message of a new session, sent from the draft. The real stores,
@@ -241,10 +241,61 @@ test("routes image paths using the captured model and authoritative session dire
       .toEqual([["/actual", [["shot.png", [1, 2, 3]]]]])
     expect(delivered[0]).toMatchObject({ text: "Review [shot.png](/actual/tmp/shot.png)", files: [], directory: "/actual" })
     opencodeClient.writeOpenCodeTempFiles = async () => [{ filename: "shot.png", error: new Error("offline") }]
-    await expect(routeMessage(params)).rejects.toBeInstanceOf(ImagePathPreparationError)
+    await expect(routeMessage(params)).rejects.toBeInstanceOf(AttachmentPathPreparationError)
     expect(delivered).toHaveLength(1)
   } finally {
     useConfigStore.setState({ getModelMetadata: getMetadata })
+    opencodeClient.writeOpenCodeTempFiles = originalWrite
+    opencodeClient.sendMessage = originalSend
+  }
+})
+
+test("routes original and extracted Office attachments and uses the live scoped model for PDFs", async () => {
+  const target = { ...sessionRecord("ses_route_report", "/actual"), model: { providerID: "provider", id: "text-only" } }
+  childStores.ensureChild("/actual", { bootstrap: false }).setState({ session: [target] })
+  const getMetadata = useConfigStore.getState().getModelMetadata
+  const originalModalities = opencodeClient.getModelInputModalities
+  const originalWrite = opencodeClient.writeOpenCodeTempFiles
+  const originalSend = opencodeClient.sendMessage
+  const writes: Array<[string | null | undefined, string, number[]]> = []
+  let delivered: Parameters<typeof opencodeClient.sendMessage>[0] | undefined
+  useConfigStore.setState({
+    getModelMetadata: (provider, model) => ({ id: model, name: model, providerId: provider, modalities: { input: ["text"] } }),
+  })
+  opencodeClient.getModelInputModalities = async () => undefined
+  opencodeClient.writeOpenCodeTempFiles = async (directory, files) => files.map(({ filename, bytes }) => {
+    writes.push([directory, filename, [...bytes]])
+    return { filename, path: `/actual/tmp/${filename}` }
+  })
+  opencodeClient.sendMessage = async (params) => { delivered = params; return "msg_route" }
+  const original = { type: "file" as const, mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename: "original.docx", url: "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,AAEC" }
+  const pdf = { type: "file" as const, mime: "application/pdf", filename: "report.pdf", url: "data:application/pdf;base64,AQID" }
+  const extracted = { type: "file" as const, mime: "text/plain", filename: "extract.docx", url: "data:text/plain;base64,dGV4dA==" }
+  try {
+    await routeMessage({
+      sessionId: target.id, directory: DIRECTORY, content: "Review [original.docx]",
+      providerID: "provider", modelID: "text-only", files: [original, pdf, extracted],
+    })
+    expect(writes).toEqual([["/actual", "original.docx", [0, 1, 2]], ["/actual", "report.pdf", [1, 2, 3]]])
+    expect(delivered).toMatchObject({
+      directory: "/actual",
+      text: "Review [original.docx](/actual/tmp/original.docx)\n\n[report.pdf](/actual/tmp/report.pdf)",
+      files: [extracted],
+    })
+    opencodeClient.getModelInputModalities = async (provider, model, directory) => {
+      expect([provider, model, directory]).toEqual(["provider", "text-only", "/actual"])
+      return ["text", "pdf"]
+    }
+    writes.length = 0
+    await routeMessage({
+      sessionId: target.id, directory: DIRECTORY, content: "Review",
+      providerID: "provider", modelID: "text-only", files: [pdf],
+    })
+    expect(writes).toEqual([])
+    expect(delivered).toMatchObject({ directory: "/actual", text: "Review", files: [pdf] })
+  } finally {
+    useConfigStore.setState({ getModelMetadata: getMetadata })
+    opencodeClient.getModelInputModalities = originalModalities
     opencodeClient.writeOpenCodeTempFiles = originalWrite
     opencodeClient.sendMessage = originalSend
   }

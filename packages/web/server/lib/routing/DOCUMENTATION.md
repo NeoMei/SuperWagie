@@ -77,6 +77,15 @@ Auto. There is no env gate — the feature shipped dark behind
   (`openchamber-sessions/routes.js`) talks to OpenCode through the SDK and can
   pick Auto up from Session Defaults, so it calls `resolveAutoSelection` itself
   before switching the session.
+- A foreground Auto send with files preflights through
+  `POST /api/routing/sessions/:sessionId/prepare-send`. The owning runtime
+  classifies the original request and prepares its attachments before the
+  client admits any synthetic context. The prompt or command carries the
+  prepared body and a short-lived `Idempotency-Key`. The server binds this
+  checkpoint to the session, directory, kernel, selected model, and prepared
+  body. The client can reuse it when the same prompt retries without a missing
+  skill. That retry performs no classification or attachment write. Commands
+  use their checkpoint once. An invalid checkpoint stops the send.
 - The mark lives in process memory. A server restart between the model switch
   and the next send drops it (see the TODO in `runtime.js`).
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown

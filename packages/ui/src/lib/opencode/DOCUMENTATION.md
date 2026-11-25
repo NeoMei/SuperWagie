@@ -44,9 +44,29 @@ and execution state.
   malformed data, timeouts and read failures cannot establish idleness.
 - Session placement reads accept a caller signal so a queued-move confirmation
   deadline also bounds the in-flight response body.
-- `session.step.first-token` and `experimental.mcp.event` explicitly produce no
-  sync events. Existing content/execution and MCP status/catalog events retain
-  their authority.
+- `session.step.first-token`, `experimental.mcp.event` and
+  `experimental.job.updated` explicitly produce no sync events. Session,
+  shell and MCP events retain authority over their corresponding live state.
+
+- Durably sequenced execution boundaries, retry schedules and step starts
+  can change live status only while current in their OpenCode event sequence.
+  Space sequences are scoped separately from the host.
+
+- Foreground Auto prompts and commands with attachments complete routing
+  preflight before admitting synthetic context, including memory and skill
+  instructions. A failed preflight returns staged context to the owning
+  composer draft. The SDK sends the context records in their original order,
+  and a missing-skill retry uses the prepared attachment result for the same
+  prompt ID.
+- Prompt sends and commands within a session dispatch in order. For a prompt,
+  only a runtime-proxy `503` carrying
+  `x-openchamber-error: opencode-unreachable` permits a transport resend. The
+  bounded resend uses the same message ID, prepared attachments and Auto ticket,
+  and does not send context again. An interrupt or a runtime change stops
+  resends. Ambiguous transport failures go to the existing receipt check.
+- When a prompt explicitly names skills, directory-scoped model defaults wait
+  for location plugins before the skill catalog is read. Built-in creation
+  skills that were activated on the session remain separate.
 
 ## Decisions
 

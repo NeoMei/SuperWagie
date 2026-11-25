@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { get as httpGet, request as httpRequest } from 'node:http';
 import net from 'node:net';
+import { gzipSync } from 'node:zlib';
 import express from 'express';
 import path from 'path';
 
@@ -85,14 +87,18 @@ describe('OpenCode proxy SSE forwarding', () => {
   });
 
   it('forwards event streams with nginx-safe headers', async () => {
-    let seenAuthorization = null;
+    let seenHeaders;
+    let seenQuery;
 
     const upstream = express();
     upstream.get('/api/event', (req, res) => {
-      seenAuthorization = req.headers.authorization ?? null;
+      seenHeaders = req.headers;
+      seenQuery = req.query;
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'private, max-age=0');
       res.setHeader('X-Upstream-Test', 'ok');
+      res.setHeader('Set-Cookie', 'fixture=upstream; Path=/');
+      res.setHeader('Clear-Site-Data', '"cookies"');
       res.write('data: {"ok":true}\n\n');
       res.end();
     });
@@ -118,8 +124,8 @@ describe('OpenCode proxy SSE forwarding', () => {
     proxyServer = await listen(app);
     const proxyPort = proxyServer.address().port;
 
-    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/global/event`, {
-      headers: { Accept: 'text/event-stream' },
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/global/event?oc_url_token=fixture&directory=%2Ftmp%2Ffixture`, {
+      headers: { Accept: 'text/event-stream', Cookie: 'fixture=client', Authorization: 'Bearer client-fixture' },
     });
 
     expect(response.status).toBe(200);
@@ -127,8 +133,99 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(response.headers.get('cache-control')).toBe('no-cache, no-transform');
     expect(response.headers.get('x-accel-buffering')).toBe('no');
     expect(response.headers.get('x-upstream-test')).toBe('ok');
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(response.headers.get('clear-site-data')).toBeNull();
     expect(await response.text()).toBe('data: {"ok":true}\n\n');
-    expect(seenAuthorization).toBe('Bearer test-token');
+    expect(seenHeaders.authorization).toBe('Bearer test-token');
+    expect(seenHeaders.cookie).toBeUndefined();
+    expect(seenQuery).toEqual({ directory: '/tmp/fixture' });
+  });
+
+  it.each([null, 'Basic engine-fixture'])('isolates credentials and response headers on generic proxy requests with engine auth %s', async (authorization) => {
+    const upstream = express();
+    upstream.get('/api/example', (req, res) => {
+      res.setHeader('Set-Cookie', 'fixture=upstream; Path=/');
+      res.setHeader('Clear-Site-Data', '"cookies"');
+      res.setHeader('x-openchamber-error', 'opencode-unreachable');
+      res.status(503).json({
+        cookie: req.headers.cookie ?? null,
+        authorization: req.headers.authorization ?? null,
+        accessSecret: req.headers['cf-access-client-secret'] ?? null,
+        query: req.query,
+      });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {}, os: {}, path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({ openCodePort: upstreamPort, isOpenCodeReady: true }),
+      getOpenCodeAuthHeaders: () => authorization ? { Authorization: authorization } : {},
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const url = `http://127.0.0.1:${proxyServer.address().port}/api/example?oc_url_token=fixture&oc_client_token=fixture&keep=one&keep=two`;
+    for (const expectHeader of [{}, { Expect: '100-continue' }]) {
+      const response = await new Promise((resolve, reject) => {
+        const request = httpGet(url, {
+          headers: { Cookie: 'fixture=client', Authorization: 'Bearer client-fixture', 'CF-Access-Client-Secret': 'fixture', ...expectHeader },
+        }, (reply) => {
+          const chunks = [];
+          reply.on('data', (chunk) => chunks.push(chunk));
+          reply.on('end', () => resolve({ headers: reply.headers, body: JSON.parse(Buffer.concat(chunks)) }));
+          reply.on('error', reject);
+        });
+        request.on('error', reject);
+      });
+      expect(response.headers['set-cookie']).toBeUndefined();
+      expect(response.headers['clear-site-data']).toBeUndefined();
+      expect(response.headers['x-openchamber-error']).toBeUndefined();
+      expect(response.body).toEqual({ cookie: null, authorization, accessSecret: null, query: { keep: ['one', 'two'] } });
+    }
+  });
+
+  it('replays a parsed POST after local 100 Continue and preserves encoded upstream bytes', async () => {
+    const payload = { text: 'local fixture' };
+    const upstream = express();
+    upstream.use(express.json());
+    upstream.post('/api/example', (req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Encoding', 'gzip');
+      res.end(gzipSync(JSON.stringify({ body: req.body, expect: req.headers.expect ?? null })));
+    });
+    upstreamServer = await listen(upstream);
+    const port = upstreamServer.address().port;
+    const app = express();
+    app.use(express.json());
+    registerOpenCodeProxy(app, {
+      fs: {}, os: {}, path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      LONG_REQUEST_TIMEOUT_MS: 1000,
+      getRuntime: () => ({ openCodePort: port, isOpenCodeReady: true }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${port}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const url = `http://127.0.0.1:${proxyServer.address().port}/api/example`;
+    const body = JSON.stringify(payload);
+    const reply = await new Promise((resolve, reject) => {
+      const request = httpRequest(url, {
+        method: 'POST',
+        headers: { Expect: '100-continue', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        signal: AbortSignal.timeout(2000),
+      }, resolve);
+      request.on('continue', () => request.end(body));
+      request.on('error', reject);
+      request.flushHeaders();
+    });
+    expect(reply.statusCode).toBe(200);
+    expect(reply.headers['content-encoding']).toBe('gzip');
+    const chunks = [];
+    for await (const chunk of reply) chunks.push(chunk);
+    expect(Buffer.concat(chunks)).toEqual(gzipSync(JSON.stringify({ body: payload, expect: null })));
   });
 
   it('closes downstream SSE when the OpenCode upstream stalls despite proxy heartbeats', async () => {
@@ -1165,7 +1262,7 @@ describe('OpenCode proxy SSE forwarding', () => {
 
   it('uses the long proxy timeout budget for slow upstream responses', async () => {
     const upstream = express();
-    upstream.get('/api/slow', (_req, _res) => {
+    upstream.post('/api/session/abc/prompt', (_req, _res) => {
       // Leave the response open so the proxy timeout path is exercised.
     });
     upstreamServer = await listen(upstream);
@@ -1193,11 +1290,13 @@ describe('OpenCode proxy SSE forwarding', () => {
     proxyServer = await listen(app);
     const proxyPort = proxyServer.address().port;
 
-    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/slow`, {
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/session/abc/prompt`, {
+      method: 'POST',
       signal: AbortSignal.timeout(2000),
     });
 
     expect(response.status).toBe(504);
+    expect(response.headers.get('x-openchamber-error')).toBeNull();
     await expect(response.json()).resolves.toMatchObject({ error: 'OpenCode upstream timed out' });
   });
 
@@ -1258,7 +1357,7 @@ describe('OpenCode proxy SSE forwarding', () => {
     const upstream = express();
     let upstreamBody;
     upstream.use(express.json());
-    upstream.post('/api/reset', (req) => {
+    upstream.post('/api/session/abc/prompt', (req) => {
       upstreamBody = req.body;
       req.socket.destroy();
     });
@@ -1289,7 +1388,7 @@ describe('OpenCode proxy SSE forwarding', () => {
     const proxyPort = proxyServer.address().port;
 
     const startedAt = Date.now();
-    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/reset`, {
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/session/abc/prompt`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ prompt: 'hello' }),
@@ -1297,9 +1396,34 @@ describe('OpenCode proxy SSE forwarding', () => {
     });
 
     expect(response.status).toBe(503);
+    expect(response.headers.get('x-openchamber-error')).toBeNull();
     expect(Date.now() - startedAt).toBeLessThan(1000);
     await expect(response.json()).resolves.toMatchObject({ error: 'OpenCode service unavailable' });
     expect(upstreamBody).toEqual({ prompt: 'hello' });
-    expect(errorSpy).toHaveBeenCalledWith('[proxy] OpenCode proxy error: method=POST route=/api/other function=onApiProxyError class=connection_reset message="socket hang up"');
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('function=onApiProxyError class=connection_reset message="socket hang up"'));
+  });
+
+  it.each([true, false])('only marks a prompt proven unforwarded when readiness is %s', async (isOpenCodeReady) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const reservation = await listen(express());
+    const openCodePort = reservation.address().port;
+    await closeServer(reservation);
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {}, os: {}, path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({ openCodePort, isOpenCodeReady, isRestartingOpenCode: !isOpenCodeReady }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${openCodePort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const base = `http://127.0.0.1:${proxyServer.address().port}/api/session/abc`;
+    for (const [path, expected] of [['/prompt?directory=%2Ftmp', 'opencode-unreachable'], ['/generate', null]]) {
+      const response = await fetch(`${base}${path}`, { method: 'POST' });
+      expect(response.status).toBe(503);
+      expect(response.headers.get('x-openchamber-error')).toBe(expected);
+      await response.text();
+    }
   });
 });

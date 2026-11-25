@@ -126,7 +126,8 @@ import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createSessionTodosRuntime } from './lib/session-todos/runtime.js';
-import { isSpaceDirectory } from './lib/spaces/dispatcher.js';
+import { isSpaceDirectory, validateDirectoryHeaders } from './lib/spaces/dispatcher.js';
+import { OPENCODE_PROXY_ERROR_HEADER } from './proxy-headers.js';
 import { createSessionWarmingRuntime } from './lib/session-warming/runtime.js';
 import { createTrackerRegistry } from './lib/trackers/registry.js';
 import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
@@ -228,6 +229,7 @@ import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
 import { createFileOpenRequester } from './lib/openchamber-control/file-open.js';
 import { createSecretFiles } from './lib/openchamber-control/secret-request.js';
+import { createSavedSecretStore } from './lib/openchamber-control/secret-store.js';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
 import { applySystemCertificates } from './lib/system-ca.js';
@@ -1257,6 +1259,12 @@ const openCodeSessionClient = (directory) => createOpenCodeClient({
  * asks it — the UI over HTTP, scheduled tasks and agent-dispatched sessions in
  * process — so the answer cannot differ between them.
  */
+const isManagedControlToolEnabled = async () => {
+  if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
+  const settings = await readSettingsFromDiskMigrated().catch(() => null);
+  return settings?.agentControlToolEnabled !== false;
+};
+
 const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   projectContextRuntime,
   agentMemoryRuntime,
@@ -1272,11 +1280,7 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   },
   isAgentMemoryEnabled,
   // The plugin carrying the tool exists only in an OpenCode we launched.
-  isSessionLinkingAvailable: async () => {
-    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentControlToolEnabled !== false;
-  },
+  isSessionLinkingAvailable: isManagedControlToolEnabled,
   readCheckoutBranch: getCheckedOutBranch,
   readPlaceholderBranch: readRenameableGeneratedBranch,
   isPageRenderingAvailable: async () => {
@@ -1615,6 +1619,11 @@ globalMessageStreamHub.subscribeEvent((event) => {
     // gives the plugin no abort signal, so this is where the cancel lands.
     if (payload.type === 'session.idle' && payload.properties?.aborted === true) {
       agentToolRuntime?.abortSession?.(payload.properties.sessionID);
+    }
+    if (payload.type === 'session.deleted') {
+      void openChamberSessionService.lead.removeBrief(payload.properties?.sessionID).catch((error) => {
+        console.warn('[session-lead] brief cleanup failed:', error?.code ?? 'unknown error');
+      });
     }
     sessionLineage.observe(payload);
     turnDurationRecorder.processPayload(payload, directory || payload.properties?.directory || '');
@@ -2178,6 +2187,8 @@ const openChamberSessionService = createOpenChamberSessionService({
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
   resolveAutoSelection: (input) => routingRuntime.resolveAutoSelection(input),
   isAutoReady: async () => (await routingRuntime.describe()).autoReady,
+  dispatchResults: dispatchResultsRuntime,
+  isLeadEnabled: isManagedControlToolEnabled,
 });
 // Browser actions are published to whichever OpenChamber clients are connected;
 // the one owning the browser panel answers. `emitRequest` returns the number of
@@ -2319,6 +2330,10 @@ const openChamberControlService = createOpenChamberControlService({
     return settings?.agentRenderToolEnabled !== false;
   },
   secretFiles,
+  savedSecretStore: process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE
+    ? null
+    : createSavedSecretStore({ filePath: path.join(OPENCHAMBER_DATA_DIR, 'saved-secrets', 'credentials.json') }),
+  projectForSecretDirectory: environmentRuntime.projectForDirectory,
   isSecretToolEnabled: async () => {
       const settings = await readSettingsFromDiskMigrated().catch(() => null);
       return settings?.agentSecretToolEnabled !== false;
@@ -2860,7 +2875,7 @@ async function main(options = {}) {
       // different origin, so every custom request header must be listed here or
       // the browser refuses the request at preflight, before it reaches a route.
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,Idempotency-Key,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells');
-      res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
+      res.setHeader('Access-Control-Expose-Headers', `x-next-cursor, ${OPENCODE_PROXY_ERROR_HEADER}`);
       res.setHeader('Access-Control-Max-Age', '7200');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') {
@@ -2868,7 +2883,7 @@ async function main(options = {}) {
         return;
       }
     }
-    next();
+    return spacesHost ? validateDirectoryHeaders(req, res, next) : next();
   });
   // After CORS, before bootstrap installs any business route. This also makes
   // login refusals readable by packaged desktop and mobile clients.

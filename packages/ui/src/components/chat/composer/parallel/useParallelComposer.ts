@@ -3,8 +3,11 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useInputStore } from '@/sync/input-store';
+import { getDraftAttachedFiles, useInputStore } from '@/sync/input-store';
 import { attachmentWireName } from '@/lib/attachmentIdentity';
+import { getChatDraftIdentityKey, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
+import { selectComposerAttachments } from '../attachments/attachmentSubmission';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -59,15 +62,19 @@ export function useParallelComposer(input: {
   enabled: boolean;
   draftOpen: boolean;
   draftProjectId: string | null;
+  attachmentDraft: ChatDraftIdentity | null;
+  restoreDraft: (target: ChatDraftIdentity | null, text: string, mentions: Set<string>) => void;
   message: string;
   setMessage: (text: string) => void;
 }) {
   const { t } = useI18n();
-  const { enabled, draftOpen, draftProjectId, message, setMessage } = input;
+  const { enabled, draftOpen, draftProjectId, attachmentDraft, restoreDraft, message, setMessage } = input;
   const [state, setState] = React.useState<ParallelComposerState | null>(null);
   const [isLaunching, setIsLaunching] = React.useState(false);
   const messageRef = React.useRef(message);
   messageRef.current = message;
+  const attachmentDraftRef = React.useRef(attachmentDraft);
+  attachmentDraftRef.current = attachmentDraft;
 
   const enter = React.useCallback((text = '') => {
     const config = useConfigStore.getState();
@@ -141,7 +148,8 @@ export function useParallelComposer(input: {
 
   const addVariant = React.useCallback(() => {
     update((current) => {
-      const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+      const activeText = messageRef.current;
+    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: activeText } : variant));
       const source = variants[current.active];
       const next: ParallelVariant = { id: variantId(variants.length), text: source.text, models: source.models.map((model) => ({ ...model })) };
       return { ...current, variants: [...variants, next], active: variants.length };
@@ -151,7 +159,8 @@ export function useParallelComposer(input: {
   const switchVariant = React.useCallback((target: number) => {
     const current = state;
     if (!current || target === current.active || !current.variants[target]) return;
-    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+    const activeText = messageRef.current;
+    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: activeText } : variant));
     setState({ ...current, variants, active: target });
     setMessage(variants[target].text);
   }, [setMessage, state]);
@@ -174,7 +183,8 @@ export function useParallelComposer(input: {
   const launch = React.useCallback(async () => {
     const current = state;
     if (!current || isLaunching) return;
-    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+    const activeText = messageRef.current;
+    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: activeText } : variant));
     const ready = variants.filter((variant) => variant.text.trim() && variant.models.length > 0);
     if (ready.length !== variants.length) {
       toast.error(t('chat.parallel.toast.incomplete'));
@@ -189,7 +199,9 @@ export function useParallelComposer(input: {
     if (projectId !== projects.activeProjectId) projects.setActiveProjectIdOnly(projectId);
 
     const title = runTitleFrom(variants[0].text) || t('chat.parallel.defaultTitle');
-    const attachments = useInputStore.getState().attachedFiles;
+    const isCurrentRuntime = captureRuntimeInstance();
+    const attachmentText = variants.map((variant) => variant.text).join('\n\n');
+    const attachments = selectComposerAttachments(attachmentText, getDraftAttachedFiles(attachmentDraft));
     const config = useConfigStore.getState();
     const params: CreateMultiRunParams = {
       name: title,
@@ -207,7 +219,10 @@ export function useParallelComposer(input: {
       isolateRuns: current.isolate,
       worktreeBaseBranch: current.isolate ? current.baseBranch || undefined : undefined,
       files: attachments.length > 0
-        ? attachments.map((file) => ({ mime: file.mimeType, filename: attachmentWireName(file), url: file.dataUrl }))
+        ? attachments.map((file) => ({
+          mime: file.mimeType, filename: attachmentWireName(file), url: file.dataUrl,
+          composerAnchor: file.composerAnchor, saveCopy: file.saveCopy,
+        }))
         : undefined,
       setupCommands: current.isolate ? current.setupCommands?.filter((command) => command.trim()) : undefined,
       autoFusion: current.fuse
@@ -218,19 +233,32 @@ export function useParallelComposer(input: {
     setIsLaunching(true);
     try {
       const result = await useMultiRunStore.getState().createMultiRun(params);
+      if (!isCurrentRuntime()) return;
       if (!result) {
         toast.error(useMultiRunStore.getState().error ?? t('chat.parallel.toast.failed'));
         return;
       }
       if (result.failedCount > 0) toast.error(t('multirun.launcher.toast.partialFailure', { failed: result.failedCount }));
-      setMessage('');
-      useInputStore.getState().clearAttachedFiles();
-      setState(null);
+      const shown = attachmentDraftRef.current;
+      if (shown && attachmentDraft && getChatDraftIdentityKey(shown) === getChatDraftIdentityKey(attachmentDraft)) {
+        if (messageRef.current === activeText) setMessage('');
+        setState(null);
+      }
+      if (attachments.length > 0) {
+        const ids = new Set(attachments.map((file) => file.id));
+        const remaining = getDraftAttachedFiles(attachmentDraft).filter((file) => !ids.has(file.id));
+        useInputStore.getState().setAttachedFiles(remaining, attachmentDraft);
+        void result.promptsDelivered.then((delivered) => {
+          if (delivered && result.failedCount === 0) return;
+          useInputStore.getState().restoreAttachedFiles(attachments, attachmentDraft);
+          restoreDraft(attachmentDraft, attachmentText, new Set());
+        });
+      }
       useUIStore.getState().setRunOverviewKey(result.groupKey);
     } finally {
       setIsLaunching(false);
     }
-  }, [draftProjectId, isLaunching, setMessage, state, t]);
+  }, [attachmentDraft, draftProjectId, isLaunching, restoreDraft, setMessage, state, t]);
 
   return {
     state,

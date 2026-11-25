@@ -110,6 +110,43 @@ describe("createEventPipeline", () => {
     expect(events.map(describeEvent)).toEqual(["updated:a", "delta:b", "updated:ab"])
   })
 
+  test("keeps native retry and resume status while dropping late turn outcomes", async () => {
+    const sessionID = "ses_1"
+    const assistantMessageID = "msg_1"
+    const event = (id: string, seq: number) => ({ ...base, id, durable: { ...durable, seq } })
+    const model = { providerID: "provider", id: "model" }
+    const { events } = await collect([
+      { ...event("start", 1), type: "session.execution.started", data: { sessionID } },
+      { ...event("retry", 4), type: "session.retry.scheduled",
+        data: { sessionID, assistantMessageID, attempt: 2, at: 1200, error: { type: "rate_limited", message: "Wait" } } },
+      { ...event("old-failure", 3), type: "session.execution.failed",
+        data: { sessionID, error: { type: "rate_limited", message: "Wait" } } },
+      { ...event("step", 5), type: "session.step.started", data: { sessionID, assistantMessageID, agent: "build", model, started: 1000 } },
+      { ...event("stale-retry", 4), type: "session.retry.scheduled",
+        data: { sessionID, assistantMessageID, attempt: 2, at: 1200, error: { type: "rate_limited", message: "Wait" } } },
+      { ...event("end", 7), type: "session.execution.succeeded", data: { sessionID } },
+      { ...event("late-start", 6), type: "session.execution.started", data: { sessionID } },
+      { ...event("late-step", 6), type: "session.step.started", data: { sessionID, assistantMessageID, agent: "build", model, started: 1000 } },
+    ], 5)
+    expect(events.filter((item) => item.type === "session.status").map((item) => item.properties.status.type))
+      .toEqual(["busy"])
+    expect(events[0]).toMatchObject({ properties: { turnStart: { source: "live" } } })
+    expect(events.filter((item) => item.type === "session.error")).toHaveLength(0)
+    expect(events.filter((item) => item.type === "message.updated")).toHaveLength(1)
+    expect(events.at(-1)).toMatchObject({ type: "session.idle", properties: { outcome: "succeeded" } })
+  })
+
+  test("publishes retry status and the owning message marker from the raw event", async () => {
+    const { events } = await collect([{
+      ...base, durable, type: "session.retry.scheduled",
+      data: { sessionID: "ses_1", assistantMessageID: "msg_1", attempt: 2, at: 1200, error: { type: "rate_limited", message: "Wait" } },
+    }], 2)
+    expect(events).toMatchObject([
+      { type: "message.patched", properties: { messageID: "msg_1", patch: { retry: { attempt: 2, at: 1200 } } } },
+      { type: "session.status", properties: { status: { type: "retry", attempt: 2, message: "Wait", next: 1200 } } },
+    ])
+  })
+
   test("merges consecutive deltas for one part", async () => {
     const { events } = await collect([textEnded(""), textDelta("b"), textDelta("c")], 2)
     expect(events.map(describeEvent)).toEqual(["updated:", "delta:bc"])

@@ -57,6 +57,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   setBadge: overrides.setBadge ?? (() => {}),
   resize: overrides.resize ?? (() => {}),
   openCommit: overrides.openCommit ?? (async () => ({ ok: true })),
+  openWalkthrough: overrides.openWalkthrough ?? (async () => ({ ok: true })),
   resolveResult: overrides.resolveResult ?? (() => {}),
   openPopover: overrides.openPopover ?? (() => {}),
   closePopover: overrides.closePopover ?? (() => {}),
@@ -64,6 +65,22 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
 });
 
 describe('answerGuestMessage', () => {
+  test('routes only the base through the host-owned walkthrough effect', async () => {
+    const message: GuestMessage = {
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'open-walkthrough', id: 'compare-1',
+      payload: { base: 'refs/heads/main' },
+    };
+    const bases: string[] = [];
+    const result = await answerGuestMessage(message, effects({
+      openWalkthrough: async (base) => {
+        bases.push(base);
+        return { ok: false, code: 'NOT_FOUND', message: 'No such branch' };
+      },
+    }));
+    expect(bases).toEqual(['refs/heads/main']);
+    expect(result).toMatchObject({ id: 'compare-1', ok: false, code: 'NOT_FOUND' });
+  });
+
   test('publishes status controls through the frame owner and reports unsupported owners', async () => {
     const controls: GuestStatusControl[] = [{ kind: 'button', id: 'refresh', label: 'Refresh' }];
     const seen: GuestStatusControl[][] = [];

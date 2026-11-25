@@ -120,6 +120,17 @@ other.
   `secret.request`, `secret.run` and `secret.forget` are disabled together by
   `agentSecretToolEnabled`, and callers reaching `secret.run` outside the
   managed agent tool are refused.
+- `secret-store.js` owns the durable values explicitly saved on a
+  `secret.run` card. The store is a server-local JSON file under
+  `<dataDir>/saved-secrets`, with mode `0600` and atomic replacement.
+  A project entry takes precedence over an all-project entry with the same
+  environment name. Both scopes require a new card approval for each run.
+  The server binds that approval to the calling session's current directory,
+  configured project, tool call and the credential revisions the card showed.
+  A stale approval leaves the card open and does not start the command.
+  The card can forget the displayed entry without running the command.
+  Its metadata and answer acknowledgement carry no stored values. Values
+  enter the child environment only for an explicitly approved invocation.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
@@ -346,3 +357,11 @@ looking up a directory later or omitting it would leave the original alert.
 The shared lifecycle handler forwards one complete envelope to both UI fanout
 and the notification trigger, since UI broadcasting alone does not settle a
 notification.
+
+### Why saved secrets have a separate file
+
+Environment settings feed ordinary terminal, Git and OpenCode processes.
+Saved secrets have a separate lifetime and require card approval each time a
+command uses them. The store runs on the managed server shared by web, Electron
+and mobile clients. Isolated space servers keep the temporary Secret flow.
+VS Code has no managed server for this tool.

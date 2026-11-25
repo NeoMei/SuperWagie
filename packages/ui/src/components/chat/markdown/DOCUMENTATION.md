@@ -41,6 +41,16 @@ external resources, processing instructions, document types and entities also
 reject the image path. No SVG markup enters page DOM.
 Ordinary chat fences, standalone SVG files and Mermaid keep their prior paths.
 
+## Shell fences in settled replies
+
+The run button is shown for complete shell fences in an assistant reply on
+a chat surface with server-backed terminals. It starts a command-mode PTY in
+the reply directory only after the user clicks. The returned PTY identity and
+mode are reconciled into the terminal store so even an already-exited command
+keeps its output. A command tab does not become an interactive shell on reload
+or restart. A reply from a different runtime instance cannot activate a tab.
+The phone opens its existing terminal drawer.
+
 ## Chat and file text parsing
 
 Chat messages and chat exports keep single tildes literal; double tildes still

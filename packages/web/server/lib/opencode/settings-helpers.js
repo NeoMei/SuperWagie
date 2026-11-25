@@ -803,6 +803,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentNotifyToolEnabled === 'boolean') {
       result.agentNotifyToolEnabled = candidate.agentNotifyToolEnabled;
     }
+    if (candidate.agentSecretToolEnabled === true || candidate.agentSecretToolEnabled === false) {
+      result.agentSecretToolEnabled = candidate.agentSecretToolEnabled;
+    }
     if (candidate.agentRenderToolEnabled === true || candidate.agentRenderToolEnabled === false) {
       result.agentRenderToolEnabled = candidate.agentRenderToolEnabled;
     }
@@ -854,7 +857,7 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.activityRenderMode === 'string') {
       const mode = candidate.activityRenderMode.trim();
-      if (mode === 'collapsed' || mode === 'summary') {
+      if (mode === 'collapsed' || mode === 'text' || mode === 'summary') {
         result.activityRenderMode = mode;
       }
     }

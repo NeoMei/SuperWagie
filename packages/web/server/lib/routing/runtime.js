@@ -12,6 +12,7 @@
  * and is swallowed, and every prompt in that session is routed until a real
  * model is selected.
  */
+import { createHash, randomUUID } from 'node:crypto';
 import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
 import { AUTO_MODEL_REF, BUILTIN_CATEGORIES, ZEN_JEV_PROMOTION_ACTIVE, isAutoModel } from './defaults.js';
@@ -27,6 +28,7 @@ import {
 } from './classifier.js';
 import { loadRoutingHistory } from './history.js';
 import { PROMPT_CACHE_TTL_MS, cacheHoldCategory, warmWindowMs } from './cache.js';
+import { prepareRoutedAttachments } from '../opencode/attachment-delivery.js';
 import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 
@@ -87,6 +89,17 @@ export const attachmentHint = (body) => {
 /** What the classifier sees for this send: the user's words plus the attachment fact. */
 export const routingRequestTextOf = (body) => `${requestTextOf(body)}${attachmentHint(body)}`.trim();
 
+const preparedSendBodySchema = z.object({
+  id: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  text: z.string(),
+  files: z.array(z.object({ uri: z.string(), name: z.string().optional() })).default([]),
+  delivery: z.enum(['steer', 'queue']).optional(),
+});
+
+const fingerprintPreparedSend = (body) => createHash('sha256').update(JSON.stringify(body)).digest('hex');
+const preparedSendConflict = () => Object.assign(new Error('Auto attachment preparation is no longer valid.'), { status: 409 });
+
 const agentBodySchema = z.object({ agent: z.string().trim().min(1) });
 
 // v2 serves one flat model catalogue; a model's thinking levels are `{ id }[]`.
@@ -95,6 +108,7 @@ const catalogResponseSchema = z.object({
     providerID: z.string(),
     modelID: z.string(),
     variants: z.array(z.object({ id: z.string() })).default([]),
+    capabilities: z.object({ input: z.array(z.string()) }).optional(),
   })),
 });
 
@@ -172,6 +186,11 @@ export function createRoutingRuntime({
   // the client resend the sentinel with every send.
   const autoSessions = new Map();
   const AUTO_SESSION_LIMIT = 1000;
+  // Hold only selection and a digest. Attachment bytes stay in the caller
+  // or in the confirmed runtime files, including during skill fallback.
+  const preparedSends = new Map();
+  const PREPARED_SEND_LIMIT = 256;
+  const PREPARED_SEND_TTL_MS = 5 * 60 * 1000;
 
   const broadcast = (type, properties) => {
     try {
@@ -261,7 +280,7 @@ export function createRoutingRuntime({
     // v2 scopes by header and rejects non-ASCII header values.
     const scope = z.string().trim().min(1).safeParse(directory);
     if (scope.success) headers['x-opencode-directory'] = encodeURIComponent(scope.data);
-    return OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers });
+    return OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers, fetch: fetchImpl });
   };
 
   const readHistory = readSessionHistory ?? (async ({ sessionId, directory }) => {
@@ -423,7 +442,9 @@ export function createRoutingRuntime({
     selection = withKnownVariant(selection, models);
     Object.assign(decision, selection.decision);
     broadcast('openchamber:routing.decision', decision);
-    return { model: selection.model, agent: selection.agent, decision };
+    const inputModalities = models?.find((entry) => entry.providerID === selection.model.providerID
+      && entry.modelID === selection.model.id)?.capabilities?.input;
+    return { model: selection.model, agent: selection.agent, decision, inputModalities };
   };
 
   /**
@@ -436,8 +457,9 @@ export function createRoutingRuntime({
       autoSessions.delete(sessionId);
       return false;
     }
+    const mark = autoSessions.get(sessionId) ?? { directory: directory ?? null, at: now() };
     autoSessions.delete(sessionId);
-    autoSessions.set(sessionId, { directory: directory ?? null, at: now() });
+    autoSessions.set(sessionId, mark);
     while (autoSessions.size > AUTO_SESSION_LIMIT) autoSessions.delete(autoSessions.keys().next().value);
     return true;
   };
@@ -451,21 +473,70 @@ export function createRoutingRuntime({
     if (selection.agent) await client.session.switchAgent({ sessionID: sessionId, agent: selection.agent });
   };
 
+  const resolveForegroundSend = ({ sessionId, directory, body }) => resolveAutoSelection({
+    sessionId,
+    directory,
+    model: AUTO_MODEL_REF,
+    agent: agentBodySchema.safeParse(body).data?.agent ?? null,
+    requestText: routingRequestTextOf(body),
+  });
+
   /**
-   * One send in a routed session: asks Jev on the request text, switches the
-   * session onto the answer, and keeps the body in step with it.
+   * Resolve and prepare attachments before the caller admits any context.
+   * The prompt then reuses this exact prepared result, including when a
+   * missing skill requires retrying the same prompt with different skills.
    */
-  const routeSend = async ({ sessionId, directory, body }) => {
-    const resolved = await resolveAutoSelection({
-      sessionId,
-      directory,
-      model: AUTO_MODEL_REF,
-      agent: agentBodySchema.safeParse(body).data?.agent ?? null,
-      requestText: routingRequestTextOf(body),
+  const prepareSend = async ({ sessionId, directory, body }) => {
+    const parsed = preparedSendBodySchema.safeParse(body);
+    if (!parsed.success || Boolean(parsed.data.id) === Boolean(parsed.data.name) || parsed.data.files.length === 0) {
+      throw Object.assign(new Error('Invalid Auto attachment preparation request.'), { status: 400 });
+    }
+    const mark = autoSessions.get(sessionId);
+    if (!mark) throw preparedSendConflict();
+    const upstream = buildOpenCodeUrl('/', '');
+    const prepared = parsed.data;
+    const selection = await resolveForegroundSend({ sessionId, directory, body: prepared });
+    const assertCurrent = () => {
+      if (autoSessions.get(sessionId) !== mark || buildOpenCodeUrl('/', '') !== upstream) throw preparedSendConflict();
+    };
+    assertCurrent();
+    await prepareRoutedAttachments(openCodeClient(directory), selection.model, prepared, selection.inputModalities);
+    assertCurrent();
+    const files = prepared.files ?? [];
+    const ticket = `oc-auto-${randomUUID()}`;
+    preparedSends.set(ticket, {
+      sessionId, directory, mark, upstream, selection,
+      proof: fingerprintPreparedSend(preparedSendBodySchema.parse(prepared)),
+      expiresAt: now() + PREPARED_SEND_TTL_MS,
     });
+    while (preparedSends.size > PREPARED_SEND_LIMIT) preparedSends.delete(preparedSends.keys().next().value);
+    return { ticket, text: prepared.text, files };
+  };
+
+  const routePreparedSend = async ({ sessionId, directory, body, ticket, command }) => {
+    const previous = preparedSends.get(ticket);
+    if (!previous) throw preparedSendConflict();
+    const isCurrent = () => autoSessions.get(sessionId) === previous.mark && buildOpenCodeUrl('/', '') === previous.upstream;
+    const parsed = preparedSendBodySchema.safeParse(body);
+    if (previous.expiresAt <= now() || previous.sessionId !== sessionId
+      || previous.directory !== directory || !isCurrent() || !parsed.success
+      || Boolean(parsed.data.name) !== command || fingerprintPreparedSend(parsed.data) !== previous.proof) {
+      throw preparedSendConflict();
+    }
+    if (command) preparedSends.delete(ticket);
+    // The digest covers these projected fields. Forward those same fields,
+    // since the raw SDK body may contain other file properties.
+    if (parsed.data.files.length > 0) body.files = parsed.data.files;
+    else delete body.files;
+    await applySessionSelection(sessionId, directory, previous.selection);
+    if (!isCurrent()) throw preparedSendConflict();
+  };
+
+  /** Direct SDK or older clients can still route the ordinary prompt body. */
+  const routeSend = async ({ sessionId, directory, body }) => {
+    const resolved = await resolveForegroundSend({ sessionId, directory, body });
     if (!resolved) return null;
-    // v2 prompt and command bodies carry neither model nor agent: switching
-    // the session is the whole application of the decision.
+    await prepareRoutedAttachments(openCodeClient(directory), resolved.model, body, resolved.inputModalities);
     await applySessionSelection(sessionId, directory, resolved);
     return resolved.decision;
   };
@@ -652,6 +723,8 @@ export function createRoutingRuntime({
     resolveAutoSelection,
     applySessionSelection,
     routeSend,
+    prepareSend,
+    routePreparedSend,
     evaluatePermission,
     forgetPermission,
     heldPermissions,

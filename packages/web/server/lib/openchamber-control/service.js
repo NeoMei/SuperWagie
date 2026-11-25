@@ -242,6 +242,8 @@ export const createOpenChamberControlService = (dependencies) => {
     isRenderToolEnabled = async () => true,
     isSecretToolEnabled = async () => true,
     secretFiles = null,
+    savedSecretStore = null,
+    projectForSecretDirectory,
     // Hears when a page an agent shows starts and stops waiting for the
     // user's answer (render.page with awaitAnswer).
     onPageWaitChange = () => {},
@@ -383,6 +385,9 @@ export const createOpenChamberControlService = (dependencies) => {
   const secretRequests = createSecretRequests({
     isEnabled: isSecretToolEnabled,
     files: secretFiles,
+    savedStore: savedSecretStore,
+    projectForDirectory: projectForSecretDirectory,
+    resolveSessionDirectory: (sessionId) => resolveSessionDirectory(sessionId),
     onWaitChange: onPageWaitChange,
     hasUnreadChat,
   });
@@ -895,6 +900,15 @@ export const createOpenChamberControlService = (dependencies) => {
     try {
       if (!CONTROL_ACTIONS.has(action)) {
         throw new OpenChamberControlError(`Unsupported SuperWagie action: ${action || 'missing'}`, 400);
+      }
+      if (action.startsWith('lead.')) {
+        if (options.authenticatedAgent !== true) {
+          throw new OpenChamberControlError('Lead actions require an authenticated SuperWagie tool call', 403);
+        }
+        if (!sessionService?.lead) throw new OpenChamberControlError('Leads are unavailable on this server', 503);
+        return await sessionService.lead.executeTool(action, input, contextDirectory, {
+          contextSessionId: options.contextSessionId,
+        });
       }
       if (OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action)) {
         return await knowledgeActions.execute(action, input, contextDirectory, options.contextSessionId);

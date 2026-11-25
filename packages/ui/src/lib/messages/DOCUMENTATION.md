@@ -30,3 +30,16 @@ diagnostics retain the original error and response body.
 Persisting or returning translated sentences fixes an old error to the language
 active when it occurred. Semantic keys let the current renderer choose the
 language while preserving the original diagnostic evidence.
+
+## Review comment source anchors
+
+`contextParts.ts` keeps the path, range, side and comparison origin across
+draft, send, transcript and restore. Diff comments can also carry a staging
+flag and a nested repository path relative to the owning chat directory.
+Older OpenCode comment metadata still supplies the file and selection when
+the OpenChamber payload is absent. A whole-file anchor has no line.
+
+The source action uses structured paths. Table quote labels and unsaved plan
+names stay as display text. An isolated-space source must resolve inside the
+session directory and within the same space. Source navigation reads this
+metadata locally. The model-facing comment format stays the same.

@@ -1,5 +1,16 @@
 import { sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
 
+/** Remove OpenChamber client credentials before an authenticated request crosses an upstream boundary. */
+export const stripClientCredentialQuery = (searchParams) => {
+  let removed = false;
+  for (const name of ['oc_url_token', 'oc_client_token']) {
+    if (!searchParams.has(name)) continue;
+    searchParams.delete(name);
+    removed = true;
+  }
+  return removed;
+};
+
 /**
  * A sandboxed page (an HTML file preview, an extension frame) sends
  * `Origin: null`. No OpenChamber client connects that way, so every socket

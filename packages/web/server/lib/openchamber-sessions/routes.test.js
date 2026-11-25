@@ -25,6 +25,7 @@ const sessionCreateMock = vi.fn(async () => ({ id: 'ses_123' }));
 const sessionForkMock = vi.fn(async () => ({ id: 'ses_fork', title: 'Forked session' }));
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
 const sessionGetMock = vi.fn(async ({ sessionID }) => ({ id: sessionID, location: { directory: '/repo/app' } }));
+const sessionInstructionPut = vi.fn(async () => undefined);
 const sessionUpdateMock = vi.fn(async () => undefined);
 const sessionMoveMock = vi.fn(async () => undefined);
 const sessionPromptMock = vi.fn(async () => ({ id: 'msg_dispatched' }));
@@ -101,6 +102,7 @@ vi.mock('@opencode/client', () => ({
           fork: sessionForkMock,
           get: sessionGetMock,
           update: sessionUpdateMock,
+          instructions: { entry: { put: sessionInstructionPut, remove: async () => {} } },
           move: sessionMoveMock,
           command: sessionCommandMock,
           prompt: sessionPromptMock,
@@ -223,7 +225,7 @@ const createApp = (overrides = {}, options = {}) => {
   const archiveStore = overrides.archiveStore ?? createMemoryArchiveStore();
   const sessionMetadataStore = overrides.sessionMetadataStore ?? createMemorySessionMetadataStore();
   const broadcastGlobalUiEvent = overrides.broadcastGlobalUiEvent ?? vi.fn();
-  registerOpenChamberSessionRoutes(app, {
+  const sessionService = createOpenChamberSessionService({
     archiveStore,
     sessionMetadataStore,
     broadcastGlobalUiEvent,
@@ -237,7 +239,8 @@ const createApp = (overrides = {}, options = {}) => {
     hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
     ...overrides,
   });
-  return { app, calls, archiveStore, sessionMetadataStore, broadcastGlobalUiEvent };
+  registerOpenChamberSessionRoutes(app, { sessionService });
+  return { app, calls, archiveStore, sessionMetadataStore, broadcastGlobalUiEvent, sessionService };
 };
 
 describe('openchamber session routes', () => {
@@ -287,6 +290,43 @@ describe('openchamber session routes', () => {
     agentListMock.mockImplementation(async () => ({ data: [] }));
     configGetMock.mockReset();
     useCatalog();
+  });
+
+  it('runs the Lead HTTP and tool flow with a persisted brief, dispatched child, and scoped delivery', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-lead-route-'));
+    try {
+      const dispatchResults = { register: vi.fn(async () => ({ id: 'pending' })) };
+      const { app, sessionService, broadcastGlobalUiEvent } = createApp({ dataDir, isLeadEnabled: async () => true, dispatchResults });
+      const route = '/api/openchamber/sessions/ses_lead/lead';
+      await request(app).get('/api/openchamber/sessions/lead-capability').expect(200, { enabled: true });
+      await request(app).post(route).send({ action: 'mark' }).expect(200, { lead: true });
+      expect(sessionInstructionPut).toHaveBeenCalledWith(expect.objectContaining({
+        sessionID: 'ses_lead', key: 'openchamber.lead', value: expect.stringContaining('lead.dispatch'),
+      }));
+      const tool = (action, input) => sessionService.lead.executeTool(action, input, '/repo/app', { contextSessionId: 'ses_lead' });
+      await tool('lead.brief', { brief: '# Verify the release' });
+      await request(app).get(route).expect(200, { brief: '# Verify the release' });
+      await tool('lead.digest', { now: ['Verifying the release'] });
+      expect(broadcastGlobalUiEvent).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'openchamber:session-metadata',
+        properties: expect.objectContaining({ sessionID: 'ses_lead', metadata: expect.objectContaining({
+          openchamber: expect.objectContaining({ lead: expect.objectContaining({
+            digest: expect.objectContaining({ now: ['Verifying the release'] }),
+          }) }),
+        }) }),
+      }));
+      await expect(tool('lead.dispatch', { prompt: 'Check the release', model: 'unihub/managed' }))
+        .rejects.toMatchObject({ statusCode: 400 });
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+      await expect(tool('lead.dispatch', { prompt: 'Check the release', model: 'openai/gpt-5.5' }))
+        .resolves.toMatchObject({ sessionId: 'ses_123', resultDelivery: { status: 'pending' } });
+      expect(sessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({ metadata: { openchamber: { leadParentID: 'ses_lead' } } }));
+      expect(dispatchResults.register).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'ses_123', parentSessionId: 'ses_lead', directory: '/repo/app', parentDirectory: '/repo/app',
+      }));
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   describe('archiving a batch of sessions', () => {

@@ -24,6 +24,8 @@ import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { chatQuoteAnchorSchema, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { appendTerminalContexts } from './terminalContext';
 import { describeDiffCommentOrigin, diffCommentOriginSchema, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { getRelativeFilePath, isAbsoluteFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 
 export const CONTEXT_METADATA_KEY = 'openchamberContext';
 const OPENCODE_COMMENT_METADATA_KEY = 'opencodeComment';
@@ -40,7 +42,57 @@ export type CodeCommentContext = {
     text: string;
     /** The diff a `diff` comment was written on; absent for uncommitted changes and older messages. */
     origin?: DiffCommentOrigin;
+    staged?: boolean;
+    /** The repository relative to the owning chat directory, when nested. */
+    repositoryPath?: string;
 };
+
+export type ReviewDiffDestination = {
+    kind: 'diff';
+    path: string;
+    line?: number;
+    side: 'additions' | 'deletions';
+    origin?: DiffCommentOrigin;
+    staged?: boolean;
+    repositoryPath?: string;
+};
+
+/** Resolve source labels against the directory that owns the comment. */
+export function reviewCommentDestination(payload: ContextPartPayload, directory: string) {
+    if (payload.kind !== 'code-comment' && payload.kind !== 'file-quote') return null;
+    if (!directory || !validReviewPath(payload.fileLabel)) return null;
+    // Table quotes and unsaved plan labels are display text without a file anchor.
+    if ((payload.kind === 'file-quote' && payload.startLine === undefined || payload.kind === 'code-comment' && payload.source === 'plan')
+        && !isAbsoluteFilePath(payload.fileLabel)) return null;
+    const repositoryPath = payload.kind === 'code-comment' && payload.source === 'diff' ? payload.repositoryPath : undefined;
+    if (repositoryPath && (!validReviewPath(repositoryPath) || isAbsoluteFilePath(repositoryPath))) return null;
+    const repository = repositoryPath ? toAbsoluteFilePath(directory, repositoryPath) : directory;
+    const path = toAbsoluteFilePath(repository, payload.fileLabel);
+    const space = spaceIdOfDirectory(directory);
+    if (space !== spaceIdOfDirectory(path) || (space && !isFilePathWithinDirectory(path, directory))) return null;
+    const start = payload.startLine;
+    const line = start !== undefined && Number.isSafeInteger(start) && start > 0 ? start : undefined;
+    if (payload.kind === 'code-comment' && payload.source === 'diff'
+        && (payload.origin || payload.side === 'original' || payload.staged)) {
+        const relative = getRelativeFilePath(path, repository);
+        if (isAbsoluteFilePath(relative) || relative === '.') return null;
+        const destination: ReviewDiffDestination = {
+            kind: 'diff',
+            path: relative,
+            side: payload.side === 'original' ? 'deletions' : 'additions',
+            ...(line ? { line } : {}),
+            ...(payload.origin ? { origin: payload.origin } : {}),
+            ...(payload.staged ? { staged: true } : {}),
+            ...(repositoryPath ? { repositoryPath } : {}),
+        };
+        return destination;
+    }
+    return { kind: 'file' as const, path, ...(line ? { line } : {}) };
+}
+
+const validReviewPath = (path: string): boolean => Boolean(path.trim()) && !path.includes('\0')
+    && (isAbsoluteFilePath(path) || !/^[A-Za-z][A-Za-z\d+.-]*:/.test(path))
+    && !/(?:^|[/\\])\.\.(?:[/\\]|$)/.test(path);
 
 type TerminalContextPayload = {
     kind: 'terminal';
@@ -370,6 +422,8 @@ export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartP
             };
             if (draft.source === 'diff' && draft.side) payload.side = draft.side;
             if (draft.source === 'diff' && draft.origin) payload.origin = draft.origin;
+            if (draft.source === 'diff' && draft.staged) payload.staged = true;
+            if (draft.source === 'diff' && draft.repositoryPath) payload.repositoryPath = draft.repositoryPath;
             return payload;
         }
     }
@@ -391,6 +445,8 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         code: z.string(),
         text: z.string(),
         origin: diffCommentOriginSchema.optional(),
+        staged: z.boolean().optional().catch(undefined),
+        repositoryPath: z.string().min(1).optional().catch(undefined),
     }),
     z.object({
         kind: z.literal('terminal'),
@@ -618,6 +674,8 @@ export function draftFromContextPayload(
             };
             if (payload.side) draft.side = payload.side;
             if (payload.origin) draft.origin = payload.origin;
+            if (payload.staged) draft.staged = true;
+            if (payload.repositoryPath) draft.repositoryPath = payload.repositoryPath;
             return draft;
         }
         case 'terminal':

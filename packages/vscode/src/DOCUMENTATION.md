@@ -101,6 +101,10 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.
+  - The dedicated prompt bridge marks a local pre-forwarding failure with
+    `503` and `x-openchamber-error: opencode-unreachable` when it has no API URL
+    or the connection was refused before it opened. It strips upstream copies
+    of the header and leaves timeouts and lost responses for receipt lookup.
   - The webview rejects `/api/product-help` routes with 501 before the generic proxy. Product help needs the SuperWagie server and its reviewed catalog; the server-only assistant entry is hidden in VS Code.
   - The webview forwards the request path unchanged (`/api/<x>` → `/api/<x>`): OpenCode 2.x serves its own routes under `/api`, so nothing strips the prefix.
   - SSE routes are intentionally excluded from the generic proxy and use `sseProxy.ts`, whose upstream-only stall watchdog closes a quiet OpenCode stream so the webview can reconnect instead of trusting an open but silent response.

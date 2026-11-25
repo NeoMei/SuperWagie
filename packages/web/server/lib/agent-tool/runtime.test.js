@@ -346,6 +346,15 @@ describe('managed agent tool runtime', () => {
     expect(executeAction.mock.calls[1][2]).toBeUndefined();
   });
 
+  it('scopes a secret run to the reported calling session and its server-resolved directory', async () => {
+    const { runtime, executeAction } = await createRuntime({ resolveSessionDirectory: async (id) => id === 'ses_real' ? '/real' : null });
+    const input = { action: 'secret.run', program: 'fixture' };
+    await runtime.execute({ tool: 'openchamber_secret', input, sessionID: 'ses_real', callID: 'call', contextDirectory: '/other', contextSessionId: 'other' });
+    expect(executeAction).toHaveBeenCalledWith('secret.run', input, '/real', { contextSessionId: 'ses_real', contextCallId: 'call', authorized: true });
+    await runtime.execute({ tool: 'openchamber_secret', input, sessionID: 'missing', callID: 'call', contextDirectory: '/other', contextSessionId: 'other' });
+    expect(executeAction).toHaveBeenLastCalledWith('secret.run', input, undefined, { contextSessionId: 'missing', contextCallId: 'call', authorized: true });
+  });
+
   it('tells an agent how to recover from a knowledge save conflict', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeKnowledge: true });
@@ -1054,6 +1063,34 @@ describe('managed agent tool runtime', () => {
     // The other session's action is untouched until it is told otherwise.
     expect(runtime.abortSession('ses_other')).toBe(1);
     await other;
+  });
+
+  it('exposes Lead fields and only dispatches through authenticated caller context', async () => {
+    const executeTool = vi.fn(async () => ({ saved: true }));
+    const service = createOpenChamberControlService({ sessionService: { lead: { executeTool } } });
+    const { runtime, dataDir } = await createRuntime({
+      executeAction: service.execute,
+      resolveSessionDirectory: async (id) => id === 'ses_lead' ? '/work/current' : null,
+    });
+    const env = await prepareManagedEnv(runtime);
+    const { openchamber } = await loadTools(dataDir, 'lead');
+    expect(openchamber.input.properties.action.enum).toContain('lead.brief');
+    expect(Object.keys(openchamber.input.properties.parameters.properties)).toEqual(expect.arrayContaining([
+      'brief', 'edits', 'needsYou', 'now', 'news', 'suggestions',
+    ]));
+    const input = { action: 'lead.brief', brief: 'Plan', sessionId: 'ses_other' };
+    const payload = { tool: 'openchamber', input, sessionID: 'ses_lead', contextSessionId: 'ses_other', contextDirectory: '/other' };
+    await expect(service.execute('lead.brief', input, '/work/current', { contextSessionId: 'ses_lead' })).rejects.toMatchObject({ statusCode: 403 });
+    expect((await runtime.execute(payload)).ok).toBe(false);
+    expect(executeTool).not.toHaveBeenCalled();
+
+    const app = express();
+    runtime.registerRoutes(app, express);
+    const response = await request(app).post('/api/openchamber/agent-tool')
+      .set('authorization', `Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}`)
+      .send(payload).expect(200);
+    expect(response.body).toMatchObject({ ok: true, data: { saved: true } });
+    expect(executeTool).toHaveBeenCalledWith('lead.brief', input, '/work/current', { contextSessionId: 'ses_lead' });
   });
 
   it('requires the per-child token on the loopback route', async () => {

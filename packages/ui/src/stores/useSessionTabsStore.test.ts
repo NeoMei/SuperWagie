@@ -91,14 +91,14 @@ describe('useSessionTabsStore', () => {
     expect(state().tabIds).toBe(before);
   });
 
-  test('caps pinned tabs at 10, evicting the oldest pinned one', () => {
+  test('keeps all pinned tabs when pinning beyond the former limit', () => {
     useSessionTabsStore.setState({ tabIds: Array.from({ length: 10 }, (_, i) => `s${i}`) });
     state().ensureTab('s-new');
     expect(state().tabIds).toHaveLength(11);
     state().pinTab('s-new');
     const ids = state().tabIds;
-    expect(ids).toHaveLength(10);
-    expect(ids[0]).toBe('s1');
+    expect(ids).toHaveLength(11);
+    expect(ids[0]).toBe('s0');
     expect(ids.at(-1)).toBe('s-new');
   });
 

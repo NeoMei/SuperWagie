@@ -332,6 +332,7 @@ describe('buildQueuedAutoSendPayload', () => {
         id: 'queued-raw',
         text: '/plan feature from raw queue',
         content: '/plan feature from raw queue',
+        skills: ['audit'],
         createdAt: 1,
         attachments: [attachment],
       },
@@ -361,7 +362,7 @@ describe('buildQueuedAutoSendPayload', () => {
     });
 
     expect(sendMessageCalls[0]?.[0]).toBe('sanitized transport text');
-    expect(sendMessageCalls[0]?.[9]).toEqual({
+    expect(sendMessageCalls[0]?.[9]).toMatchObject({
       target: {
         runtimeKey: 'runtime-original',
         sessionId: 'session-original',
@@ -375,6 +376,7 @@ describe('buildQueuedAutoSendPayload', () => {
           },
         ],
         queuedGoal: null,
+        skills: { names: ['audit'] },
     });
   });
 

@@ -1609,7 +1609,7 @@ const AssistantMessageBody = React.memo(({
                 continue;
             }
             const activityGroup = activityGroups?.get(part.id);
-            if (rowsToSkip > 0 && isActivityRowPart(part)) {
+            if (rowsToSkip > 0 && isActivityRowPart(part) && !(activityRowSkip?.excludeHoisted && hoistedPages?.has(part.id))) {
                 rowsToSkip -= 1;
                 i += 1;
                 continue;

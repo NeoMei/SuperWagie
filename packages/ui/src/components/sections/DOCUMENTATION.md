@@ -259,6 +259,8 @@ are available for review. Selecting them opens the existing editor and Save
 applies the change. A failed query keeps the configured models visible.
 SuperWagie managed providers use their product catalog.
 
+The custom-provider editor accepts a user-selected JSON or JSONC model configuration from OpenCode, OpenCodex, or a portable provider list. It previews allowlisted connection and model fields and stages only the selected absent models. In edit mode the endpoint and protocol must match the existing provider. Source keys, headers, and variant request overrides are excluded before preview. Applying the preview populates the form. The existing save action persists the configuration, and the regular auth card owns credentials.
+
 The custom-provider form also supports “Find models” before saving through
 `POST /api/provider/discover-models`. Provider metadata wins field by field
 and models.dev fills the gaps. Discovery failure does not block saving.

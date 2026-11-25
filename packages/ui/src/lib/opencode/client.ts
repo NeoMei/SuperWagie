@@ -25,7 +25,7 @@ import type {
 import { z } from "zod"
 import { withFolderTrust } from "@/lib/opencodeTrust"
 import type { FilesAPI } from "../api/types"
-import { getDesktopHomeDirectory } from "../desktop"
+import { getDesktopHomeDirectory, isVSCodeRuntime } from "../desktop"
 import { isAmbiguousTransportFailure, isDefiniteTransportFailure, markAmbiguousTransportFailure, markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-errors"
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
@@ -146,7 +146,7 @@ export class OpencodeApiError extends Error {
       surface can quote something that can be searched for. */
   readonly ref: string | undefined
 
-  constructor(operation: string, message: string, options: { status?: number; tag?: string; ref?: string; cause?: unknown }) {
+  constructor(operation: string, message: string, options: { status?: number; tag?: string; ref?: string; cause?: unknown }, readonly promptNotForwarded = false) {
     super(`${operation} failed${options.status ? ` (${options.status})` : ""}: ${message}`, { cause: options.cause })
     this.name = "OpencodeApiError"
     this.operation = operation
@@ -161,17 +161,20 @@ const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optio
 const managedRefusalSchema = z.object({ error: z.enum(["platform_model_scope_restart_required", "platform_dispatch_suspended"]) })
 
 class RuntimeRoutingResponseError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly promptNotForwarded = false) {
     super(message)
     this.name = 'RuntimeRoutingResponseError'
   }
 }
 
-const validateRuntimeResponse = (response: Response): Response => {
-  const unavailable = response.headers.get('x-openchamber-error') === 'runtime-unavailable'
+const validateRuntimeResponse = (response: Response, isPrompt = false): Response => {
+  const marker = response.headers.get('x-openchamber-error')
+  const unavailable = marker === 'runtime-unavailable'
+  const promptNotForwarded = isPrompt && response.status === 503 && marker === 'opencode-unreachable'
   const html = response.ok && (response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')
-  if (!unavailable && !html) return response
+  if (!unavailable && !html && !promptNotForwarded) return response
   void response.body?.cancel().catch(() => undefined)
+  if (promptNotForwarded) throw new RuntimeRoutingResponseError(503, 'OpenCode could not be reached', true)
   throw new RuntimeRoutingResponseError(response.status, unavailable
     ? 'runtime_unavailable'
     : 'the runtime returned a web page instead of an API response')
@@ -222,7 +225,7 @@ export function normalizeOpencodeError(operation: string, error: unknown): Openc
   if (routingError) {
     return markDefiniteTransportFailure(new OpencodeApiError(operation, routingError.message, {
       status: routingError.status, cause: error,
-    }))
+    }, routingError.promptNotForwarded))
   }
   if (error instanceof ClientError) {
     if (error.reason === "UnexpectedStatus") {
@@ -353,6 +356,19 @@ const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; cleanup:
  * are excluded in {@link createRuntimeOpencodeClient}.
  */
 const OPENCODE_REQUEST_TIMEOUT_MS = 30_000
+const PROMPT_RETRY_DELAYS_MS = [500, 1000, 2000, 4000]
+const PROMPT_RETRY_WINDOW_MS = 10_000
+
+const waitForPromptRetry = (delayMs: number, signal: AbortSignal): Promise<void> => new Promise((resolve) => {
+  if (signal.aborted) return resolve()
+  const done = () => {
+    clearTimeout(timer)
+    signal.removeEventListener("abort", done)
+    resolve()
+  }
+  const timer = setTimeout(done, delayMs)
+  signal.addEventListener("abort", done, { once: true })
+})
 
 const isEventStreamUrl = (url: URL): boolean => url.pathname.endsWith("/event") || url.pathname.endsWith("/log")
 
@@ -396,7 +412,8 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url)
       const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
       if (isEventStreamUrl(url) || method === "POST") {
-        const response = validateRuntimeResponse(await runtimeFetch(input, init))
+        const isPrompt = method === "POST" && /\/api\/session\/[^/]+\/prompt$/.test(url.pathname)
+        const response = validateRuntimeResponse(await runtimeFetch(input, init), isPrompt)
         await checkManagedModelRefusal(response, input, init)
         return response
       }
@@ -488,6 +505,29 @@ type FileInputLite = {
   mime: string
   filename?: string
   url: string
+  /** Auto attachment MIME is interpreted after the server resolves the model. */
+  preserveMime?: boolean
+}
+
+const autoAttachmentPreparationSchema = z.object({
+  ticket: z.string().startsWith("oc-auto-"),
+  text: z.string(),
+  files: z.array(z.object({ uri: z.string(), name: z.string().optional() })),
+})
+const autoAttachmentFailureSchema = z.object({ message: z.string().optional(), error: z.string().optional() })
+
+type SendFile = { uri: string; name?: string }
+type AttachmentPreparationInput = {
+  id?: string
+  name?: string
+  text: string
+  files: SendFile[]
+  delivery?: SessionInboxDelivery
+}
+type PreparedSendAttachments = {
+  text: string
+  files: SendFile[]
+  requestOptions?: { headers: HeadersInit }
 }
 
 type DirectorySwitchResult = {
@@ -725,6 +765,8 @@ class OpencodeService {
   private configCache: Map<string, { config: Config; expiresAt: number }> = new Map()
   private configCacheGeneration = 0
   private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map()
+  private sessionSends = new Map<string, { isCurrent: () => boolean; settled: Promise<void> }>()
+  private promptRetries = new Map<string, { isCurrent: () => boolean; controller: AbortController }>()
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
     const runtimeBase = resolveRuntimeBaseUrl()
@@ -742,6 +784,29 @@ class OpencodeService {
   private assertRuntimeUnchanged(runtimeKey?: string): void {
     if (runtimeKey && runtimeKey !== getRuntimeKey()) {
       throw new Error("Message was not sent because the runtime changed.")
+    }
+  }
+
+  private captureSendRuntime(runtimeKey?: string): () => void {
+    const isCurrent = captureRuntimeInstance()
+    return () => {
+      this.assertRuntimeUnchanged(runtimeKey)
+      if (!isCurrent()) throw new Error("Message was not sent because the runtime changed.")
+    }
+  }
+
+  private async runInSessionSendOrder<T>(id: string, isCurrent: () => boolean, send: () => Promise<T>): Promise<T> {
+    const earlier = this.sessionSends.get(id)
+    const pending = (async () => {
+      if (earlier?.isCurrent()) await earlier.settled
+      return send()
+    })()
+    const entry = { isCurrent, settled: pending.then(() => undefined, () => undefined) }
+    this.sessionSends.set(id, entry)
+    try {
+      return await pending
+    } finally {
+      if (this.sessionSends.get(id) === entry) this.sessionSends.delete(id)
     }
   }
 
@@ -1369,7 +1434,7 @@ class OpencodeService {
   }
 
   private async toPromptFile(file: FileInputLite): Promise<{ uri: string; name?: string }> {
-    const normalized = await this.normalizeFilePart(file)
+    const normalized = file.preserveMime ? file : await this.normalizeFilePart(file)
     return { uri: normalized.url, name: normalized.filename }
   }
 
@@ -1383,11 +1448,7 @@ class OpencodeService {
     directory: string | null | undefined,
     runtimeKey: string | undefined,
   ): Promise<void> {
-    const isCurrentRuntime = captureRuntimeInstance()
-    const assertCurrent = () => {
-      this.assertRuntimeUnchanged(runtimeKey)
-      if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
-    }
+    const assertCurrent = this.captureSendRuntime(runtimeKey)
     if (selection.model) {
       assertCurrent()
       await this.switchSessionModel(sessionID, selection.model, directory)
@@ -1397,6 +1458,45 @@ class OpencodeService {
       await this.switchSessionAgent(sessionID, selection.agent, directory)
     }
     assertCurrent()
+  }
+
+  private async prepareAutoAttachments(
+    params: { id: string; model?: ModelSelection; files?: FileInputLite[]; directory?: string | null },
+    input: AttachmentPreparationInput,
+  ): Promise<PreparedSendAttachments> {
+    const auto = isAutoModel(params.model?.providerID, params.model?.id)
+      || params.files?.some((file) => file.preserveMime)
+    if (!auto || input.files.length === 0 || isVSCodeRuntime()) return input
+
+    const isCurrent = captureRuntimeInstance()
+    const directory = this.resolveDirectory(params.directory)
+    const scope = directory ? `?directory=${encodeURIComponent(toOpenCodeDirectory(directory))}` : ""
+    const route = `/api/routing/sessions/${encodeURIComponent(params.id)}/prepare-send${scope}`
+    try {
+      const response = validateRuntimeResponse(await withFolderTrust(runtimeFetch, directory)(route, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }))
+      const payload = await response.json().catch(() => null)
+      if (!isCurrent()) throw new Error("Message was not sent because the runtime changed.")
+      if (!response.ok) {
+        const failure = autoAttachmentFailureSchema.safeParse(payload).data
+        throw new OpencodeApiError("routing.prepareSend", failure?.message ?? failure?.error ?? "Auto attachment preparation failed", {
+          status: response.status,
+        })
+      }
+      const prepared = autoAttachmentPreparationSchema.safeParse(payload)
+      if (!prepared.success) throw new Error("Invalid response from Auto attachment preparation.")
+      return {
+        text: prepared.data.text,
+        files: prepared.data.files,
+        requestOptions: { headers: { "Idempotency-Key": prepared.data.ticket } },
+      }
+    } catch (error) {
+      // The dispatch has yet to leave, even if the preflight response was lost.
+      throw markDefiniteTransportFailure(normalizeOpencodeError("routing.prepareSend", error))
+    }
   }
 
   /**
@@ -1415,6 +1515,8 @@ class OpencodeService {
     model?: ModelSelection
     /** Switch the session to this agent before sending; omit when unchanged. */
     agent?: string
+    /** Reads the session selection on its turn, after earlier sends settle. */
+    resolveSelection?: () => Promise<{ model?: ModelSelection; agent?: string }>
     /** Provider the prompt will run on, for the provider circuit breaker. */
     providerID: string
     text: string
@@ -1435,13 +1537,13 @@ class OpencodeService {
     /** Skills named inline; attached to the prompt so OpenCode loads them with it. */
     skills?: SkillMentions
     /**
-     * Runs right before the prompt request leaves, after the context ahead of
-     * it was admitted: from here on a later send to the session lands after
-     * this one.
+     * Runs once before the first prompt attempt, after its context is admitted.
      */
     beforeSend?: () => void
   }): Promise<string> {
-    this.assertRuntimeUnchanged(params.runtimeKey)
+    const isCurrent = captureRuntimeInstance()
+    const assertCurrent = this.captureSendRuntime(params.runtimeKey)
+    assertCurrent()
 
     // Context ids are minted before the prompt's, so the transcript's id order
     // matches the order the records are admitted in.
@@ -1464,7 +1566,7 @@ class OpencodeService {
     assertProviderCircuitClosed(params.providerID)
 
     const admitSynthetic = async (item: SyntheticContextInput) => {
-      this.assertRuntimeUnchanged(params.runtimeKey)
+      assertCurrent()
       await call("session.synthetic", () =>
         this.clientFor(params.directory).session.synthetic({
           sessionID: params.id,
@@ -1477,46 +1579,79 @@ class OpencodeService {
         }),
       )
     }
-    const prompt = (skills: readonly SkillAttachmentRef[]) => {
-      this.assertRuntimeUnchanged(params.runtimeKey)
-      params.beforeSend?.()
+    let notified = false
+    const prompt = (skills: readonly SkillAttachmentRef[], prepared: PreparedSendAttachments) => {
+      assertCurrent()
+      if (!notified) {
+        params.beforeSend?.()
+        notified = true
+      }
       return call("session.prompt", () =>
         this.clientFor(params.directory).session.prompt({
           sessionID: params.id,
           id: messageId,
-          text: params.text,
-          files: files.length > 0 ? files : undefined,
+          text: prepared.text,
+          files: prepared.files.length > 0 ? prepared.files : undefined,
           agents: agents.length > 0 ? agents : undefined,
           skills: skills.length > 0 ? skills.map((skill) => ({ id: skill.id })) : undefined,
           metadata: params.metadata,
           delivery: params.delivery,
-        }),
+        }, prepared.requestOptions),
       )
     }
 
     try {
-      await this.applySendSelection(params.id, { model: params.model, agent: params.agent }, params.directory, params.runtimeKey)
-      const skills = await this.resolveSkillMentions(params.skills?.names ?? [], params.directory)
-      const unresolvedInstruction = params.skills?.instructionFor(skills.unresolved) ?? null
-      for (const item of context) {
-        await admitSynthetic(item)
-      }
-      if (unresolvedInstruction) await admitSynthetic({ text: unresolvedInstruction })
-      try {
-        await prompt(skills.attached)
-      } catch (error) {
-        // The skill list and the prompt are two requests: a skill removed in
-        // between fails preparation before anything is admitted, so the same
-        // message id is safe to send again without the attachment.
-        if (skills.attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
-        const instruction = params.skills?.instructionFor(skills.attached.map((skill) => skill.name)) ?? null
-        if (instruction) await admitSynthetic({ text: instruction })
-        await prompt([])
-      }
+      await this.runInSessionSendOrder(params.id, isCurrent, async () => {
+        assertCurrent()
+        const selection = params.resolveSelection ? await params.resolveSelection() : params
+        assertCurrent()
+        await this.applySendSelection(params.id, selection, params.directory, params.runtimeKey)
+        assertCurrent()
+        const prepared = await this.prepareAutoAttachments({ ...params, model: selection.model }, {
+          id: messageId, text: params.text, files, delivery: params.delivery,
+        })
+        const skills = await this.resolveSkillMentions(params.skills?.names ?? [], params.directory, assertCurrent)
+        const unresolvedInstruction = params.skills?.instructionFor(skills.unresolved) ?? null
+        for (const item of context) await admitSynthetic(item)
+        if (unresolvedInstruction) await admitSynthetic({ id: ascendingId("msg"), text: unresolvedInstruction })
+
+        const controller = new AbortController()
+        const retry = { isCurrent, controller }
+        this.promptRetries.set(params.id, retry)
+        const deadline = Date.now() + PROMPT_RETRY_WINDOW_MS
+        let retries = 0
+        const sendPrompt = async (attachments: readonly SkillAttachmentRef[]) => {
+          for (;;) {
+            try {
+              await prompt(attachments, prepared)
+              return
+            } catch (error) {
+              if (!(error instanceof OpencodeApiError) || !error.promptNotForwarded) throw error
+              const delayMs = PROMPT_RETRY_DELAYS_MS[retries++]
+              if (delayMs === undefined || Date.now() + delayMs > deadline) throw error
+              await waitForPromptRetry(delayMs, controller.signal)
+              if (controller.signal.aborted || Date.now() >= deadline) throw error
+            }
+          }
+        }
+        try {
+          try {
+            await sendPrompt(skills.attached)
+          } catch (error) {
+            // A skill removed between catalog lookup and prompt validation
+            // leaves the message id unused. Name the skill in context and
+            // reuse the same prompt id and prepared attachments.
+            if (controller.signal.aborted || skills.attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
+            const instruction = params.skills?.instructionFor(skills.attached.map((skill) => skill.name)) ?? null
+            if (instruction) await admitSynthetic({ id: ascendingId("msg"), text: instruction })
+            await sendPrompt([])
+          }
+        } finally {
+          if (this.promptRetries.get(params.id) === retry) this.promptRetries.delete(params.id)
+        }
+      })
     } catch (error) {
-      // Do not retry a prompt after a transport failure: through a remote
-      // tunnel the POST may already be running server-side even though the
-      // client lost the response.
+      // An ambiguous response goes to the caller's message receipt check.
       if (!(error instanceof Error && isDefiniteTransportFailure(error))) {
         recordProviderError(params.providerID, error instanceof OpencodeApiError ? error.status : undefined)
       }
@@ -1538,6 +1673,7 @@ class OpencodeService {
     id: string
     model?: ModelSelection
     agent?: string
+    resolveSelection?: () => Promise<{ model?: ModelSelection; agent?: string }>
     command: string
     arguments?: string
     files?: Array<FileInputLite>
@@ -1547,39 +1683,52 @@ class OpencodeService {
     /** As `sendMessage`'s: runs right before the command request leaves. */
     beforeSend?: () => void
   }): Promise<void> {
-    this.assertRuntimeUnchanged(params.runtimeKey)
+    const isCurrent = captureRuntimeInstance()
+    const assertCurrent = this.captureSendRuntime(params.runtimeKey)
+    assertCurrent()
     const files = await Promise.all((params.files ?? []).map((file) => this.toPromptFile(file)))
-    await this.applySendSelection(params.id, { model: params.model, agent: params.agent }, params.directory, params.runtimeKey)
-    for (const item of params.context ?? []) {
-      if (!item.text.trim()) continue
-      this.assertRuntimeUnchanged(params.runtimeKey)
-      await call("session.synthetic", () =>
-        this.clientFor(params.directory).session.synthetic({
+    await this.runInSessionSendOrder(params.id, isCurrent, async () => {
+      assertCurrent()
+      const selection = params.resolveSelection ? await params.resolveSelection() : params
+      assertCurrent()
+      await this.applySendSelection(params.id, selection, params.directory, params.runtimeKey)
+      assertCurrent()
+      const prepared = await this.prepareAutoAttachments({ ...params, model: selection.model }, {
+        name: params.command, text: params.arguments ?? "", files, delivery: params.delivery,
+      })
+      for (const item of params.context ?? []) {
+        if (!item.text.trim()) continue
+        assertCurrent()
+        await call("session.synthetic", () =>
+          this.clientFor(params.directory).session.synthetic({
+            sessionID: params.id,
+            id: item.id,
+            text: item.text,
+            description: item.description,
+            metadata: item.metadata ? toJsonRecord(item.metadata) : undefined,
+            delivery: params.delivery,
+            resume: false,
+          }),
+        )
+      }
+      assertCurrent()
+      params.beforeSend?.()
+      await call("session.command", () =>
+        this.clientFor(params.directory).session.command({
           sessionID: params.id,
-          id: item.id,
-          text: item.text,
-          description: item.description,
-          metadata: item.metadata ? toJsonRecord(item.metadata) : undefined,
+          name: params.command,
+          text: prepared.text,
+          files: prepared.files.length > 0 ? prepared.files : undefined,
           delivery: params.delivery,
-          resume: false,
-        }),
+        }, prepared.requestOptions),
       )
-    }
-    this.assertRuntimeUnchanged(params.runtimeKey)
-    params.beforeSend?.()
-    await call("session.command", () =>
-      this.clientFor(params.directory).session.command({
-        sessionID: params.id,
-        name: params.command,
-        text: params.arguments ?? "",
-        files: files.length > 0 ? files : undefined,
-        delivery: params.delivery,
-      }),
-    )
+    })
   }
 
   /** Interrupts the running turn. Resolves false when nothing was running. */
   async abortSession(id: string, directory?: string | null): Promise<boolean> {
+    const retry = this.promptRetries.get(id)
+    if (retry?.isCurrent()) retry.controller.abort()
     const result = await call("session.interrupt", () => this.clientFor(directory).session.interrupt({ sessionID: id }))
     return result.interrupted
   }
@@ -2194,9 +2343,14 @@ class OpencodeService {
    */
   private async resolveSkillMentions(
     names: readonly string[],
-    directory?: string | null,
+    directory: string | null | undefined,
+    assertCurrent: () => void,
   ): Promise<{ attached: SkillAttachmentRef[]; unresolved: string[] }> {
     if (names.length === 0) return { attached: [], unresolved: [] }
+    assertCurrent()
+    // Model defaults wait for location plugins, which can contribute skills.
+    await call("model.default", () => this.clientFor(directory).model.default()).catch(() => undefined)
+    assertCurrent()
     let known: Skill[]
     try {
       known = await this.listSkills(directory)
@@ -2272,6 +2426,11 @@ class OpencodeService {
     }
   }
 
+  async getModelInputModalities(providerID: string, modelID: string, directory?: string): Promise<string[] | undefined> {
+    const catalog = await call("model.list", () => this.clientFor(directory).model.list({}, { signal: AbortSignal.timeout(5_000) }))
+    return catalog.data.find((model) => model.providerID === providerID && model.modelID === modelID)?.capabilities.input
+  }
+
   // -------------------------------------------------------------------------
   // Files on the machine OpenCode runs on
   // -------------------------------------------------------------------------
@@ -2298,7 +2457,11 @@ class OpencodeService {
     for (const { filename, bytes } of files) {
       if (!isCurrent()) throw new Error("Runtime changed while saving attachments")
       try {
-        const written = await call("file.write", () => client.experimental.file.write({ path: `${folder}/${filename}`, payload: bytes }))
+        const destination = `${folder}/${filename}`
+        const written = await call("file.write", () => client.experimental.file.write({ path: destination, payload: bytes }))
+        if (written.data.path.replaceAll("\\", "/") !== destination.replaceAll("\\", "/")) {
+          throw new Error("OpenCode did not confirm the requested attachment path")
+        }
         results.push({ filename, path: written.data.path })
       } catch (error) {
         results.push({ filename, error: error instanceof Error ? error : new Error(String(error)) })

@@ -50,6 +50,7 @@ import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 // into the eager startup graph even when no such tab is open.
 const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((m) => ({ default: m.WalkthroughView })));
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((m) => ({ default: m.DiffView })));
+const ReviewDiffView = lazyWithChunkRecovery(() => import('@/components/views/ReviewDiffView').then((m) => ({ default: m.ReviewDiffView })));
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((m) => ({ default: m.FilesView })));
 const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
 const GuestSurfacePane = React.lazy(() => import('./GuestSurfacePane').then((module) => ({ default: module.GuestSurfacePane })));
@@ -283,6 +284,8 @@ export const ContextSurfacePanes: React.FC = () => {
     [effectiveDirectory],
   );
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const reviewDiffRequest = useUIStore((state) => state.reviewDiffRequest);
+  const isReviewDiff = reviewDiffRequest !== null && reviewDiffRequest.panelDirectory === directoryKey && reviewDiffRequest.isCurrentRuntime();
   // A draft waiting for a new space keeps its tabs here, under the project's folder, while what they
   // show comes from the space: nothing while the space is made, the space once it runs.
   const draftSpace = useDraftSpaceTarget();
@@ -701,20 +704,28 @@ export const ContextSurfacePanes: React.FC = () => {
             className={cn('absolute inset-0', !active && 'hidden')}
           >
             <React.Suspense fallback={null}>
-              <ContextPanelHeaderSlotProvider value={headerSlotFor(diffZone.zone, active)}>
-                {spacePreparing && !tab.targetDirectory ? <SpacePreparing /> : <DiffView
-                  directory={tab.targetDirectory ?? draftSpaceDirectory}
-                  visible={diffZone.isOpen && active}
-                  hideStackedFileSidebar
-                  stackedDefaultCollapsedAll
-                  pinSelectedFileHeaderToTopOnNavigate
-                  showOpenInEditorAction
-                  diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : null)}
-                  onDiffScopeChange={handleDiffScopeChange}
-                  targetFilePath={tab.targetPath}
-                  flushContent
-                />}
+              <ContextPanelHeaderSlotProvider value={isReviewDiff ? null : headerSlotFor(diffZone.zone, active)}>
+                {spacePreparing && !tab.targetDirectory ? <SpacePreparing /> : (
+                  <div className={cn('h-full', isReviewDiff && 'hidden')}>
+                    <DiffView
+                      directory={tab.targetDirectory ?? draftSpaceDirectory}
+                      visible={diffZone.isOpen && active && !isReviewDiff}
+                      hideStackedFileSidebar
+                      stackedDefaultCollapsedAll
+                      pinSelectedFileHeaderToTopOnNavigate
+                      showOpenInEditorAction
+                      diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : null)}
+                      onDiffScopeChange={handleDiffScopeChange}
+                      targetFilePath={tab.targetPath}
+                      flushContent
+                    />
+                  </div>
+                )}
               </ContextPanelHeaderSlotProvider>
+              {isReviewDiff ? (
+                <ReviewDiffView request={reviewDiffRequest} visible={diffZone.isOpen && active}
+                  onBack={() => useUIStore.getState().setReviewDiffRequest(null)} />
+              ) : null}
             </React.Suspense>
           </ZonePane>
         );

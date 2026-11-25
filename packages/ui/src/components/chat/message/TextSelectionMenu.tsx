@@ -82,8 +82,13 @@ const normalizeDistilledInsight = (insight: string): string => (
 const ownsSelection = (container: HTMLElement, range: Range): boolean => {
   const messageId = getChatQuoteSourceMessageId(range.startContainer);
   if (messageId !== getChatQuoteSourceMessageId(range.endContainer)) return false;
+  const keptRoot = (node: Node) => (node instanceof Element ? node : node.parentElement)
+    ?.closest('[data-message-hoisted] [data-chat-quote-root]');
+  const kept = keptRoot(range.startContainer);
+  const endKept = keptRoot(range.endContainer);
+  if (kept || endKept) return kept === container && kept === endKept;
   const commonAncestor = range.commonAncestorContainer;
-  if (commonAncestor instanceof Element && [...commonAncestor.querySelectorAll('[data-chat-source-message-id]')]
+  if (commonAncestor instanceof Element && [...commonAncestor.querySelectorAll('[data-chat-source-message-id], [data-message-hoisted]')]
     .some((source) => getChatQuoteSourceMessageId(source) !== messageId && range.intersectsNode(source))) return false;
   if (container.contains(range.commonAncestorContainer)) return true;
   if (!container.contains(range.startContainer)) return false;

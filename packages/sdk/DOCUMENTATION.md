@@ -23,6 +23,11 @@ Public author pages live in `packages/docs/content/docs/sdk.mdx`, `sdk/host.mdx`
 
 ## Invariants
 
+- `openWalkthrough({ base })` adds a version 1 host request. The guest and
+  host use the same bounded base parser. The frame supplies only a base
+  string and the host resolves the project, repository and checked-out
+  branch. The request has no path, model or generation inputs.
+
 - `contributes.tools[].output: "card"` is a passive, host-rendered tool result. Its strict `card` schema accepts bounded output-only templates, theme tones and at most 8 fields. A link names one whole output field and renders only as credential-free HTTPS after host URL parsing. Missing fields, invalid links and unrecognized output retain readable text or the existing result fallback. It grants no service, network, model, filesystem, wait or answer capability.
 - `setResultCards({ directory, cards })` is additive to API version 1. The host advertises `features.resultCards` only to the bundled workbench and creation page/panel. Up to 8 cards carry plain title, text, version, project-relative path and optional task ID. Cards do not read or execute the named file. The host checks the current directory and frame authority, clears cards on session, directory and frame replacement, and renders no guest HTML. Existing guest controls and older hosts retain their text result. Creation publishes its existing sample or delivery; workbench publishes only its explicitly selected project task.
 - Workspace session snapshots optionally include `unread`, nullable `pendingReply` and nullable `tool`. Unread uses OpenCode's persisted idle/viewed watermarks. Pending reply uses authoritative live permission/form coverage. Tool names come only from live `message.part.updated` events, with no arguments, commands or paths, and disappear on completion, idle, deletion and runtime reset. History/bootstrap cannot establish a running tool. Missing tool evidence displays as unknown. A turn outcome remains separate from task or project acceptance.

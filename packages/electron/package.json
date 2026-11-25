@@ -1,13 +1,13 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.7.134",
+  "version": "2.7.135",
   "private": true,
   "description": "Desktop client for SuperWagie",
   "author": "QUUKK",
   "type": "module",
   "main": "./dist-bundle/entry.mjs",
   "opencodeCli": {
-    "version": "2.3.2"
+    "version": "2.4.1"
   },
   "dependencies": {
     "@openchamber/web": "workspace:*",
@@ -19,10 +19,10 @@
   "devDependencies": {
     "@effect/platform-node": "4.1.0",
     "@electron/rebuild": "^4.2.0",
-    "@opencode/plugin": "2.3.2",
-    "@opencode/schema": "2.3.2",
-    "@opencode/server": "2.3.2",
-    "@opencode/util": "2.3.2",
+    "@opencode/plugin": "2.4.1",
+    "@opencode/schema": "2.4.1",
+    "@opencode/server": "2.4.1",
+    "@opencode/util": "2.4.1",
     "effect": "4.1.0",
     "electron": "^44.9.3",
     "electron-builder": "^26.0.0",

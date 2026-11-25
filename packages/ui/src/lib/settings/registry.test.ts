@@ -188,6 +188,14 @@ describe('settings registry', () => {
     expect(parseSettingsDocument({ activityRenderMode: 'summary' })).toEqual({ activityRenderMode: 'summary' });
   });
 
+  test('round-trips Show notes through the profile registry', () => {
+    const parsed = parseSettingsDocument({ chatRenderMode: 'live', activityRenderMode: ' text ' });
+    expect(parsed?.activityRenderMode).toBe('text');
+    if (parsed) applySettingsToStores(parsed);
+    expect(useUIStore.getState().activityRenderMode).toBe('text');
+    expect(parseSettingsDocument({ activityRenderMode: 'notes' })).toEqual({});
+  });
+
   test('applies only the fields a snapshot carries and leaves the rest alone', () => {
     useUIStore.getState().setTerminalShell('fish');
     useUIStore.getState().setShowReasoningTraces(true);

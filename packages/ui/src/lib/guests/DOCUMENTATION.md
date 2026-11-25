@@ -61,3 +61,21 @@ The native result is rechecked after awaited controller IO, and the host checks 
 ### Why approval dispatch stays in the host
 
 Returning a dispatch token to a guest would let a reloaded or replaced frame reuse it after its source ownership ended. The host holds the original frame lifetime and sends through the existing session prompt flow once. Native account authentication supplies verified ownership and leaves the session's existing model and payer selection unchanged.
+
+
+## Opening a branch walkthrough
+
+The host verifies the guest frame and its document, project and runtime
+before resolving a comparison base. A change to any of these owners or the
+selected nested repository retires the request. The Git read uses fresh
+status and locally held refs from the target repository, with the same
+bound-remote rules as the Changes base picker. An explicit tracking ref
+requires an exact match. If the runtime reads disagree about the checked-out
+branch, the request fails and leaves the existing comparison selected.
+
+The host opens the same tab and branch picker state used by Changes
+Walkthrough. The tab lives under the frame's project and the requested
+comparison belongs to its Git repository. Generation remains a separate
+user action. The host exposes this request on desktop web and in Electron's
+main window. Mini Chat, VS Code, hosted mobile and Capacitor return
+`UNSUPPORTED`.

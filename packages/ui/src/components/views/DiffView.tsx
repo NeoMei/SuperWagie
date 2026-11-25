@@ -89,7 +89,7 @@ import { DiffFindBar } from './diffFind/DiffFindBar';
 import { resolveFindDiff, useDiffFind, type DiffFindLayout, type DiffFindNestedSources, type DiffFindSource } from './diffFind/useDiffFind';
 import { useDiffFindSurface } from './diffFind/useDiffFindSurface';
 import { createFindDiffBatchReader } from './diffFind/findDiffBatch';
-import { diffCommentOriginFromSource, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { changeRequestHeadForDiff, diffCommentOriginForFile, diffCommentOriginFromSource, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useWholeFileComment, WholeFileCommentButton } from '@/components/comments';
 
 // Minimum width for side-by-side diff view (px)
@@ -484,6 +484,7 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
 });
 
 interface InlineDiffViewerProps {
+  directory: string;
   filePath: string;
   diff: DiffData;
   /** The diff this is, for comments; absent for uncommitted changes. */
@@ -503,6 +504,7 @@ interface InlineDiffViewerProps {
 }
 
 const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
+  directory,
   filePath,
   diff,
   commentOrigin,
@@ -550,6 +552,8 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
         language={language}
         fileName={filePath}
         commentOrigin={commentOrigin}
+        commentStaged={!commentOrigin && staged}
+        commentRepositoryDirectory={directory}
         renderSideBySide={renderSideBySide}
         wrapLines={wrapLines}
         hideWhitespace={hideWhitespace}
@@ -694,6 +698,7 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
     }
     return (
         <InlineDiffViewer
+            directory={directory}
             filePath={file.path}
             diff={result.data}
             staged={staged}
@@ -964,7 +969,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
 }) => {
     const { t } = useI18n();
     const { git } = useRuntimeAPIs();
-    const wholeFileComment = useWholeFileComment({ fileLabel: file.path, origin: rangeComparisonDiff ? commentOrigin : undefined });
+    const wholeFileComment = useWholeFileComment({
+        fileLabel: file.path, origin: rangeComparisonDiff ? commentOrigin : undefined,
+        staged: !rangeComparisonDiff && staged, repositoryDirectory: directory,
+    });
     const cachedDiff = useGitStore(
         React.useCallback((state) => {
             return state.directories.get(directory)?.diffCache.get(file.path) ?? null;
@@ -1474,6 +1482,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     {isMounted && diffData && (forceRenderLarge || (file.insertions + file.deletions) <= LARGE_DIFF_CHANGED_LINES) ? (
                         <>
                             <InlineDiffViewer
+                                directory={directory}
                                 filePath={file.path}
                                 diff={diffData}
                                 commentOrigin={rangeComparisonDiff ? commentOrigin : undefined}
@@ -1861,7 +1870,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         }
         return null;
     }, [activeDiffScope, qualifiedBranchBase, currentBranch, selectedCommitHash, selectedPr, prComparison.diffUnavailable]);
-    const selectedPrHead = selectedPr ? prComparison.prs.find((pr) => pr.number === selectedPr.number)?.headSha : undefined;
+    const selectedPrHead = changeRequestHeadForDiff(selectedPr, prComparison.prs);
     const commentOrigin = React.useMemo(
         () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }),
         [comparisonSource, prComparison.provider, selectedPrHead],
@@ -1871,6 +1880,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const commitFiles = activeDiffScope === 'commit' ? comparison.files : null;
     const commitFilesError = activeDiffScope === 'commit' ? comparison.error : null;
     const branchFiles = activeDiffScope === 'branch' ? comparison.files : null;
+    const branchFileRevisions = React.useMemo(() => new Map(branchFiles?.map((file) => [file.path, file.revision])), [branchFiles]);
     const branchFilesError = activeDiffScope === 'branch' ? comparison.error : null;
 
     // Range diffs are fetched per expanded file: unlike working/staged diffs
@@ -2831,7 +2841,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 comparisonDiff={activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr'
                     ? comparisonDiffData.get(file.path) ?? EMPTY_COMPARISON_DIFF
                     : undefined}
-                commentOrigin={commentOrigin}
+                commentOrigin={diffCommentOriginForFile(commentOrigin, branchFileRevisions.get(file.path))}
                 onRetryComparisonDiff={handleRetryComparisonDiff}
                 loadFullComparisonDiff={loadFullComparisonDiff}
                 initialDiffData={

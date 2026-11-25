@@ -351,11 +351,13 @@ describe('getShownPages', () => {
 });
 
 
-test('unsupported image and secret calls remain ordinary tools rather than disappearing into shown cards', () => {
+test('keeps a supported secret request in view and leaves unsupported calls as ordinary tools', () => {
     const secret = tool('secret', 'openchamber_secret', { status: 'running', input: { action: 'secret.request', parameters: { label: 'Token', reason: 'Use it' } } });
     const image = tool('image', 'openchamber_image', { metadata: { openchamber: { ok: true } } });
     const generated: ToolPart = { ...image, state: { ...image.state, status: 'completed', input: {}, output: JSON.stringify({ ok: true, action: 'image.generate', data: { images: [{ path: '/tmp/result.png' }] } }), time: { start: 1, end: 2 } } };
-    expect(isShownInPlace(secret.tool, secret.state)).toBe(false);
+    const unsupported = tool('unsupported', 'openchamber_secret', { status: 'running', input: { action: 'secret.unknown' } });
+    expect(isShownInPlace(secret.tool, secret.state)).toBe(true);
+    expect(isShownInPlace(unsupported.tool, unsupported.state)).toBe(false);
     expect(isShownInPlace(generated.tool, generated.state)).toBe(false);
-    expect(getShownPages([assistant('step', [secret, generated, tool('read', 'read')])])).toEqual([]);
+    expect(getShownPages([assistant('step', [secret, unsupported, generated, tool('read', 'read')])])).toEqual([secret]);
 });
