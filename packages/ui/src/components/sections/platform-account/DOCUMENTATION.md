@@ -162,7 +162,9 @@ An unconfirmed submission with no known checkout is retried
 only by explicit action with its original key. Closed attempts are in history.
 A pending or reviewed refund blocks new purchases and hides refund submission;
 users can check a pending refund on the same checkout. Read failure preserves
-the last checkout state and surfaces a recovery action.
+the last checkout state and surfaces a recovery action. If the read after a
+confirmed offer closure fails, refreshing keeps the original checkout receipt
+even if the summary omits it. The replacement still requires a usable catalog.
 Verified fulfillment refreshes account benefits and never replays a model task.
 A `REJECTED` manual refund preserves the confirmed purchase status and shows
 that the request was declined without a refund. A paid, fulfilled purchase

@@ -547,7 +547,9 @@ export const PlatformAccountCommerce: React.FC<{
     : scopedWallet ? "grid gap-3 @xl/catalog:grid-cols-2 @4xl/catalog:grid-cols-3" : "grid gap-3 @xl/catalog:grid-cols-2";
   const collapsedOverview = view === 'overview' && !checkoutOpen && buyingTask === null;
   const commerceTitle = view === 'orders' ? t('platformAccount.history') : undefined;
-  const refreshAction = <Button size="sm" variant="ghost" disabled={busy} onClick={() => void refresh()}>{t('platformAccount.refreshCommerce')}</Button>;
+  // A recovered summary may omit a checkout whose closure we already confirmed.
+  const switchReceipt = switchedCheckout && !waitingCheckout(switchedCheckout) ? switchedCheckout : undefined;
+  const refreshAction = <Button size="sm" variant="ghost" disabled={busy} onClick={() => void refresh(switchReceipt)}>{t('platformAccount.refreshCommerce')}</Button>;
   const commerceUnavailable = !state || commerceReadFailed;
   const channelSwitchPending = error === 'platformAccount.error.channelSwitchPending';
   const summaryError = channelSwitchPending ? null : error;

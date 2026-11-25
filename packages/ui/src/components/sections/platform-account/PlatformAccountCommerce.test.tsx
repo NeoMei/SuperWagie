@@ -723,6 +723,29 @@ test('another product card waits for Alipay closure before creating its checkout
   expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ offerId: 'addon-a', provider: 'alipay' });
 });
 
+test('a refresh recovers the confirmed offer closure when the failed read hid its receipt', async () => {
+  const checkout = { id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'alipay', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z' } as const;
+  commerce.checkouts = [checkout];
+  await render('overview');
+  await act(async () => button('Buy extra credits').click());
+
+  const replacement = host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="Buy extra credits"]');
+  expect(replacement?.disabled).toBe(false);
+  commerceReadFailures = 1;
+  await act(async () => replacement?.click());
+  expect(host?.querySelector('[role="alert"]')).not.toBeNull();
+  expect(paymentMutations().map((item) => item.path)).toEqual(['/api/platform-account/commerce/checkouts/waiting-checkout/close']);
+
+  commerce.checkouts = [{ ...checkout, payment_status: 'CLOSED' }];
+  omitClosedFromSummary = true;
+  await act(async () => button('Refresh wallets and orders').click());
+  expect(paymentMutations().map((item) => item.path)).toEqual([
+    '/api/platform-account/commerce/checkouts/waiting-checkout/close',
+    '/api/platform-account/commerce/checkouts',
+  ]);
+  expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ accountId: 'team-a', offerId: 'addon-a', provider: 'alipay' });
+});
+
 test('browsing purchase categories leaves a pending wallet recharge alone', async () => {
   commerce.checkouts = [{ id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', walletTopUp: true, offer_name: '', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z' }];
   await render('overview');
