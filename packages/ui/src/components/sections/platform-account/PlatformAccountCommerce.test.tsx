@@ -96,7 +96,7 @@ let host: HTMLDivElement | undefined;
 const render = async (view: 'overview' | 'orders') => {
   if (!root) { host = document.createElement('div'); document.body.append(host); root = createRoot(host); }
   useI18nStore.getState().setLocale('en');
-  await act(async () => root?.render(<I18nProvider><PlatformAccountCommerce accountId="team-a" payer="Team A" view={view} hasActiveMembership={activeMembership} currentMembership={currentMembership} membershipSummary={({ openMembership, openAddon, membershipOpen, addonOpen, disabled }) => <><p>Current membership</p><button type="button" disabled={disabled} aria-pressed={membershipOpen} onClick={openMembership}>Subscribe</button><button type="button" disabled={disabled} aria-pressed={addonOpen} onClick={openAddon}>Buy extra credits</button></>} onAccountRefresh={() => { accountRefreshes++; }} /></I18nProvider>));
+  await act(async () => root?.render(<I18nProvider><PlatformAccountCommerce accountId="team-a" userId="actor-a" payer="Team A" view={view} hasActiveMembership={activeMembership} currentMembership={currentMembership} membershipSummary={({ openMembership, openAddon, membershipOpen, addonOpen, disabled }) => <><p>Current membership</p><button type="button" disabled={disabled} aria-pressed={membershipOpen} onClick={openMembership}>Subscribe</button><button type="button" disabled={disabled} aria-pressed={addonOpen} onClick={openAddon}>Buy extra credits</button></>} onAccountRefresh={() => { accountRefreshes++; }} /></I18nProvider>));
 };
 const button = (text: string) => {
   const found = [...(host?.querySelectorAll('button') ?? [])].find(item => item.textContent === text);
@@ -195,6 +195,7 @@ test('a failed follow-up read after a purchase disables purchase entries until a
   purchaseFailure = 'read';
   paymentMutationsBeforePurchase = paymentMutations().length;
   await act(async () => purchase()?.click());
+  await act(async () => button('WeChat Pay').click());
   expect(paymentMutations()).toHaveLength(1);
   expect(host?.querySelector('[role="alert"]')?.textContent).toContain('Could not read wallets or orders. Refresh to check the authoritative status.');
   expect(purchase()).toBeNull();
@@ -221,6 +222,7 @@ test('an uncertain checkout keeps the catalog visible and prevents another purch
   const purchase = () => host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="SuperWagie Plus"]');
   purchaseFailure = 'operation';
   await act(async () => purchase()?.click());
+  await act(async () => button('WeChat Pay').click());
   expect(paymentMutations()).toHaveLength(1);
   expect(host?.querySelector('[role="alert"]')?.textContent).toContain('This payment has no confirmed result yet');
   expect(host?.querySelector('[data-purchase-checkout]')).not.toBeNull();
@@ -399,15 +401,17 @@ test('scoped cards show the annual plan due date and the pack terms before payme
   await act(async () => button('Subscribe').click());
   const annualCard = host?.querySelector('[data-platform-offer][aria-label="SuperWagie Annual"]')?.parentElement;
   expect(annualCard?.textContent).toContain('Current plan');
-  expect(annualCard?.textContent).toContain('CNY 120.00');
+  expect(annualCard?.textContent).toContain('¥120.00');
   expect(annualCard?.textContent).toContain('Paid through');
   await act(async () => button('Monthly').click());
   expect(host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="SuperWagie Plus"]')?.disabled).toBe(true);
   expect(host?.textContent).toContain('You can change billing periods after your current subscription expires.');
   await act(async () => button('Buy extra credits').click());
   const pack = host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="One-month pack"]');
-  expect(pack?.textContent).toContain('Valid through the same day next month');
-  expect(pack?.textContent).toContain('1000 credits');
+  expect(pack?.textContent).toContain('valid for 1 month');
+  expect(pack?.textContent).toContain('1,000 credits');
+  expect(host?.querySelector('[data-purchase-catalog]')?.textContent).toContain('Valid through the same day next month');
+  expect(pack?.textContent).not.toContain('Valid through the same day next month');
   expect(pack?.disabled).toBe(false);
   expect(writes).toBe(0);
 });
@@ -439,15 +443,18 @@ test('a legacy plan upgrade shows the list price, applied credit and net amount 
   if (!offer) throw new Error('Missing fixture membership');
   commerce.productCreditWallet = true;
   currentMembership = { id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-08T00:00:00Z', offer: { id: 'previous-plan', name: 'Standard', period: 'month', rank: 0 } };
-  upgradeQuote = {
+  const externalQuote: PlatformUpgradeQuote = {
     paymentSource: 'external', id: 'quote-net', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1,
     offer, amount: '7000000', originalAmount: '6999999', roundingRule: 'cny_cent_ceil_v1', additionalCredits: offer.monthlyCredit,
     periodStart: '2026-11-08T00:00:00Z', createdAt: '2026-11-08T00:00:00Z', expiresAt: '2099-12-08T00:00:00Z',
     productCreditUpgrade: { previousOrderId: 'old-order', estimatedRefundAmount: '0', refundPaymentSource: 'external', appliedCreditAmount: '3000000' },
   };
+  upgradeQuote = { ...externalQuote, paymentSource: 'wallet' };
   await render('overview');
   await act(async () => button('Subscribe').click());
   await act(async () => host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="SuperWagie Plus"]')?.click());
+  upgradeQuote = externalQuote;
+  await act(async () => button('WeChat Pay').click());
   const panel = host?.querySelector('[data-purchase-checkout]');
   expect(panel?.textContent).toContain('Plan price · CNY 10.00');
   expect(panel?.textContent).toContain('Old plan credit · CNY 3.00');
@@ -455,7 +462,7 @@ test('a legacy plan upgrade shows the list price, applied credit and net amount 
   expect(panel?.textContent).toContain('A new subscription period starts when payment is confirmed.');
   expect(panel?.textContent).not.toContain('Estimated refund');
   await act(async () => button('Confirm upgrade for CNY 7.00').click());
-  expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ quoteId: 'quote-net', provider: 'wechat' });
+  expect(JSON.parse(paymentMutations()[2].body)).toMatchObject({ quoteId: 'quote-net', provider: 'wechat' });
 });
 
 test('an active Standard member sees their plan as current and can explicitly buy a Professional upgrade', async () => {
@@ -465,7 +472,8 @@ test('an active Standard member sees their plan as current and can explicitly bu
   const professional = { ...standard, id: 'professional-month', name: 'Professional', rank: 2, price: '99000000', monthlyCredit: '3000000000' };
   commerce.offers.push(professional);
   currentMembership = { id: 'subscription-a', product_id: 'superwagie', status: 'active', paid_through: '2099-12-10T12:00:00Z', offer: { id: standard.id, name: standard.name, period: standard.period, rank: standard.rank } };
-  upgradeQuote = { paymentSource: 'external', id: 'quote-pro', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1, offer: professional, amount: '42000000', originalAmount: '41999999', roundingRule: 'cny_cent_ceil_v1', additionalCredits: '2000000000', periodStart: '2099-11-10T12:00:00Z', createdAt: '2099-11-18T12:00:00Z', expiresAt: '2099-11-18T12:15:00Z' };
+  const externalQuote: PlatformUpgradeQuote = { paymentSource: 'external', id: 'quote-pro', accountId: 'team-a', subscriptionId: currentMembership.id, subscriptionVersion: 1, offer: professional, amount: '42000000', originalAmount: '41999999', roundingRule: 'cny_cent_ceil_v1', additionalCredits: '2000000000', periodStart: '2099-11-10T12:00:00Z', createdAt: '2099-11-18T12:00:00Z', expiresAt: '2099-11-18T12:15:00Z' };
+  upgradeQuote = { ...externalQuote, paymentSource: 'wallet' };
 
   await render('overview');
   await act(async () => button('Subscribe').click());
@@ -475,14 +483,16 @@ test('an active Standard member sees their plan as current and can explicitly bu
   expect(host?.querySelector('[data-purchase-checkout]')).toBeNull();
   expect(writes).toBe(0);
 
-  await act(async () => button('Alipay').click());
-  expect(writes).toBe(0);
   await act(async () => host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="Professional"]')?.click());
-  expect(paymentMutations()).toHaveLength(1);
-  expect(JSON.parse(paymentMutations()[0].body)).toMatchObject({ subscriptionId: 'subscription-a', offerId: professional.id, paymentSource: 'external' });
+  expect(paymentMutations().map((request) => request.path.split('/').at(-1))).toEqual(['upgrade-quotes']);
+  expect(JSON.parse(paymentMutations()[0].body).paymentSource).toBeUndefined();
+  upgradeQuote = externalQuote;
+  await act(async () => button('Alipay').click());
+  expect(paymentMutations().map((request) => request.path.split('/').at(-1))).toEqual(['upgrade-quotes', 'upgrade-quotes']);
+  expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ subscriptionId: 'subscription-a', offerId: professional.id, paymentSource: 'external' });
   await act(async () => button('Confirm upgrade for CNY 42.00').click());
-  expect(paymentMutations()).toHaveLength(2);
-  expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ quoteId: 'quote-pro', provider: 'alipay' });
+  expect(paymentMutations()).toHaveLength(3);
+  expect(JSON.parse(paymentMutations()[2].body)).toMatchObject({ quoteId: 'quote-pro', provider: 'alipay' });
 });
 
 for (const lostResponse of [false, true]) test(`upgrade confirms the authoritative difference and preserves its original request when response is ${lostResponse ? 'lost' : 'received'}`, async () => {
@@ -652,16 +662,22 @@ test('a source-unavailable account keeps its authoritative total without inventi
 });
 
 
-test('external channel selection stays read-only until a product is activated and unknown checkout blocks another payment', async () => {
+test('payment methods appear after selecting an offer and an unknown checkout blocks another payment', async () => {
   commerce.payments = { mode: 'external', canPurchase: true, providers: ['wechat', 'alipay'] };
   commerce.wallets = [];
   activeMembership = false;
   await render('overview');
-  await act(async () => button('Alipay').click());
+  expect(Boolean(host?.querySelector('[aria-label="Payment method"]'))).toBe(false);
   expect(writes).toBe(0);
   const purchase = host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="SuperWagie Plus"]');
   expect(purchase?.disabled).toBe(false);
   await act(async () => purchase?.click());
+  const choices = host?.querySelector('[data-purchase-checkout] [aria-label="Payment method"]');
+  expect(choices?.textContent).toContain('WeChat Pay');
+  expect(choices?.textContent).toContain('Alipay');
+  expect(choices?.querySelector('[aria-pressed="true"]')?.textContent).toBe('Existing cash balances');
+  expect(writes).toBe(0);
+  await act(async () => button('Alipay').click());
   expect(paymentMutations()).toHaveLength(1);
   expect(paymentMutations()[0].path.endsWith('/checkouts')).toBe(true);
   expect(JSON.parse(paymentMutations()[0].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
@@ -691,9 +707,10 @@ test('switching a restored waiting checkout uses its checkout intent to recreate
   expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ accountId: 'team-a', provider: 'alipay', offerId: 'membership-a' });
 });
 
-test('another product card waits for Alipay closure before creating its checkout', async () => {
+test('the most recent product selection wins while Alipay confirms closure', async () => {
   const checkout = { id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'alipay', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z', session: { kind: 'qr', url: 'https://qr.alipay.com/fixture', expires_at: '2099-01-01T00:00:00Z' } } as const;
   commerce.checkouts = [checkout];
+  commerce.offers?.push({ id: 'another-addon', productId: 'superwagie', kind: 'addon', accountKind: 'both', name: 'Another pack', period: 'once', price: '10000000', monthlyCredit: '1000000000', validityMonths: 1, rank: 2, sandbox: false });
   commerce.intents = [{ idempotencyKey: 'restored-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: '10000000', offerId: 'membership-a', resourceId: checkout.id, provider: 'alipay', status: 'PENDING', createdAt: checkout.created_at }];
   await render('overview');
   expect(host?.querySelector('[data-payment-checkout]')?.textContent).toContain('Open Alipay on your phone and scan the code to pay');
@@ -708,19 +725,24 @@ test('another product card waits for Alipay closure before creating its checkout
   expect(host?.querySelector('[data-payment-checkout]')?.textContent).toContain('Waiting for closure confirmation');
   expect(host?.querySelector('[role="alert"]')).toBeNull();
   expect(host?.querySelector('[data-payment-checkout] img')).toBeNull();
-  expect(replacement()?.disabled).toBe(true);
+  const another = host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="Another pack"]');
+  expect(another?.disabled).toBe(false);
+  await act(async () => another?.click());
+  expect(another?.getAttribute('aria-current')).toBe('true');
   expect(paymentMutations().map((item) => item.path)).toEqual(['/api/platform-account/commerce/checkouts/waiting-checkout/close']);
 
   commerce.checkouts = [{ ...checkout, payment_status: 'CLOSED', session: undefined }];
   commerce.intents = [];
   omitClosedFromSummary = true;
-  await act(async () => button('Refresh status').click());
-  expect(replacement()?.getAttribute('aria-current')).toBe('true');
+  checkoutCloseStatus = 'CLOSED';
+  await act(async () => button('Retry closing payment').click());
+  expect(another?.getAttribute('aria-current')).toBe('true');
   expect(paymentMutations().map((item) => item.path)).toEqual([
+    '/api/platform-account/commerce/checkouts/waiting-checkout/close',
     '/api/platform-account/commerce/checkouts/waiting-checkout/close',
     '/api/platform-account/commerce/checkouts',
   ]);
-  expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ offerId: 'addon-a', provider: 'alipay' });
+  expect(JSON.parse(paymentMutations()[2].body)).toMatchObject({ offerId: 'another-addon', provider: 'alipay' });
 });
 
 test('a refresh recovers the confirmed offer closure when the failed read hid its receipt', async () => {
@@ -755,9 +777,9 @@ test('a completed external receipt leaves balance available for the next purchas
   await act(async () => button('Refresh status').click());
   expect(host?.querySelector('[data-purchase-checkout]')?.textContent).toContain('Your purchase is active');
 
-  await act(async () => button('Existing cash balances').click());
-  expect(host?.querySelector('[data-purchase-checkout]')?.textContent).toContain('Your purchase is active');
+  expect(Boolean(host?.querySelector('[aria-label="Payment method"]'))).toBe(false);
   await act(async () => host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="Buy extra credits"]')?.click());
+  expect(host?.querySelector('[data-purchase-checkout] [aria-pressed="true"]')?.textContent).toBe('Existing cash balances');
   expect(paymentMutations()).toHaveLength(0);
 
   await act(async () => button('Buy Buy extra credits for CNY 10.00').click());
@@ -770,8 +792,8 @@ test('changing the membership period clears the unsubmitted balance purchase', a
   commerce.offers?.push({ ...monthly, id: 'annual-a', name: 'SuperWagie Annual', period: 'year', price: '120000000' });
   activeMembership = false;
   await render('overview');
-  await act(async () => button('Existing cash balances').click());
   await act(async () => host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="SuperWagie Plus"]')?.click());
+  await act(async () => button('Existing cash balances').click());
   expect(host?.querySelector('[data-purchase-checkout]')?.textContent).toContain('SuperWagie Plus');
 
   await act(async () => button('Annual').click());
@@ -890,15 +912,17 @@ for (const rejection of ['failed','http','conflict'] as const) test(`external up
   commerce.payments={mode:'external',canPurchase:true,providers:['wechat','alipay']};
   const offer=commerce.offers?.find(item=>item.id==='membership-a');if(!offer)throw new Error('Missing offer');
   currentMembership={id:'subscription-a',product_id:'superwagie',status:'active',paid_through:'2099-12-08T00:00:00Z',offer:{id:'old',name:'Old',period:'month',rank:0}};
-  upgradeQuote={id:'quote-a',accountId:'team-a',subscriptionId:'subscription-a',subscriptionVersion:1,offer,amount:'5000000',additionalCredits:'100000000',periodStart:'2026-11-08T00:00:00Z',createdAt:'2026-11-08T00:00:00Z',expiresAt:'2099-11-09T00:00:00Z',paymentSource:'external',originalAmount:'5000000',roundingRule:'cny_cent_ceil_v1'};
+  upgradeQuote={id:'quote-a',accountId:'team-a',subscriptionId:'subscription-a',subscriptionVersion:1,offer,amount:'5000000',additionalCredits:'100000000',periodStart:'2026-11-08T00:00:00Z',createdAt:'2026-11-08T00:00:00Z',expiresAt:'2099-11-09T00:00:00Z',paymentSource:'wallet',originalAmount:'5000000',roundingRule:'cny_cent_ceil_v1'};
   await render('overview');await act(async()=>button('Subscribe').click());await act(async()=>host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="SuperWagie Plus"]')?.click());
+  upgradeQuote = { ...upgradeQuote, paymentSource: 'external' };
+  await act(async () => button('WeChat Pay').click());
   upgradeRejection=rejection;await act(async()=>button('Confirm upgrade for CNY 5.00').click());
-  expect(paymentMutations()).toHaveLength(2);const oldKey=JSON.parse(paymentMutations()[1].body).idempotencyKey;
+  expect(paymentMutations()).toHaveLength(3);const oldKey=JSON.parse(paymentMutations()[2].body).idempotencyKey;
   if(rejection==='conflict'){await render('orders');expect(host?.textContent).toContain('has no confirmed result yet');return;}
   expect(host?.textContent).not.toContain('Confirm upgrade for CNY 5.00');expect(button('Check upgrade price').disabled).toBe(false);
-  upgradeQuote={...upgradeQuote,id:'quote-b'};await act(async()=>button('Check upgrade price').click());expect(paymentMutations()).toHaveLength(3);
-  await act(async()=>button('Confirm upgrade for CNY 5.00').click());expect(paymentMutations()).toHaveLength(4);
-  expect(JSON.parse(paymentMutations()[3].body)).toMatchObject({quoteId:'quote-b',provider:'wechat'});expect(JSON.parse(paymentMutations()[3].body).idempotencyKey).not.toBe(oldKey);
+  upgradeQuote={...upgradeQuote,id:'quote-b'};await act(async()=>button('Check upgrade price').click());expect(paymentMutations()).toHaveLength(4);
+  await act(async()=>button('Confirm upgrade for CNY 5.00').click());expect(paymentMutations()).toHaveLength(5);
+  expect(JSON.parse(paymentMutations()[4].body)).toMatchObject({quoteId:'quote-b',provider:'wechat'});expect(JSON.parse(paymentMutations()[4].body).idempotencyKey).not.toBe(oldKey);
 });
 
 
