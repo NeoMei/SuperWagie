@@ -155,3 +155,32 @@ test('release CLI accepts complete bilingual notes and writes the same copy to b
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('release CLI rejects prohibited names in either language or the release title before writing feeds', async () => {
+  const cleanNotes = '<!-- release-notes:zh-CN -->中文更新。<!-- /release-notes -->\n<!-- release-notes:en -->English notes.<!-- /release-notes -->';
+  const dir = await withDist({
+    'SuperWagie-9.9.9-mac-arm64.dmg': 'mac-bytes',
+    'SuperWagie-9.9.9-mac-arm64.zip': 'mac-zip!',
+    'SuperWagie-9.9.9-win-x64.exe': 'win-bytes',
+  });
+  const notesPath = path.join(dir, 'notes.md');
+  const outDir = path.join(dir, 'feeds');
+  try {
+    for (const [notes, title] of [
+      [cleanNotes.replace('中文更新。', '更新 OPENCODE。'), 'SuperWagie 9.9.9'],
+      [cleanNotes.replace('English notes.', 'Updated OpenChamber.'), 'SuperWagie 9.9.9'],
+      [cleanNotes, 'SuperWagie 9.9.9 · openchamber'],
+    ]) {
+      await writeFile(notesPath, notes);
+      const result = spawnSync(process.execPath, [
+        manifestScript, '--version', '9.9.9', '--dist', dir, '--out', outDir,
+        '--notes-file', notesPath, '--release-title', title,
+      ], { encoding: 'utf8' });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /prohibited name/i);
+      await assert.rejects(readFile(path.join(outDir, 'latest.json')), { code: 'ENOENT' });
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

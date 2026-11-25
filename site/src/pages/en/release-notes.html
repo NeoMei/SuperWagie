@@ -2,8 +2,8 @@
   <div class="wrap prose">
     <h1>Release notes</h1>
     <p class="lead">Current stable release 2.7.135 · 25 November 2026</p>
-    <h2>2.7.135 · OpenChamber 2.8 integration</h2>
-    <ul><li>The desktop app bundles OpenCode 2.4.1 with its own configuration, credentials and conversation database.</li><li>First and queued messages carry <code>$skill</code> mentions and use message IDs to confirm delivery. Review comments open the source file or relevant diff line.</li><li>Lead sessions can hand off and take back work. Custom providers can import models from compatible local configuration.</li><li>The six User Center tabs share one payer selector. Previous-account data disappears during a switch, and Wallet keeps the QR code and Cancel button in view on narrow windows.</li><li>Fixed a macOS issue where the embedded knowledge process could keep using CPU after an external volume was unmounted.</li></ul>
+    <h2>2.7.135 · Chat, account and library improvements</h2>
+    <ul><li>Updated the built-in desktop engine to 2.4.1. SuperWagie keeps its settings, credentials and conversations in its own workspace.</li><li>First and queued messages carry <code>$skill</code> mentions and use message IDs to confirm delivery. Review comments open the source file or relevant diff line.</li><li>Lead sessions can hand off and take back work. Custom providers can import models from compatible local configuration.</li><li>The six User Center tabs share one payer selector. Previous-account data disappears during a switch, and Wallet keeps the QR code and Cancel button in view on narrow windows.</li><li>Fixed a macOS issue where the embedded knowledge process could keep using CPU after an external volume was unmounted.</li></ul>
     <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.135">View the full 2.7.135 release information</a></p>
     <h2>2.7.134 · Discover new provider models on demand</h2>
     <ul><li>Opening a saved custom provider queries its upstream model list. Select new models and save to use them in chat.</li><li>The model filter uses the loaded list. Configured models remain available if the upstream query fails.</li></ul>
@@ -36,24 +36,24 @@
     </ul>
     <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.130">View the full 2.7.130 release information</a></p>
 
-    <h2>2.7.126 · production payment capability, whole points and bundled OpenCode detection</h2>
+    <h2>2.7.126 · production payment capability, whole points and bundled engine detection</h2>
     <ul>
       <li>Expose WeChat Pay and Alipay recharge channels only when UniHub reports that real merchant payments are configured, avoiding orders that cannot complete in production.</li>
       <li>Display spendable credit balances as whole points instead of exposing fractional values in the UI.</li>
-      <li>Fix the desktop runtime probe for the bundled OpenCode version so its launch environment is passed through.</li>
+      <li>Fix the desktop runtime probe for the bundled engine version so its launch environment is passed through.</li>
       <li>This public candidate provides Apple silicon Mac and Windows x64 installers. The Mac package is ad-hoc signed and not notarised by Apple.</li>
     </ul>
     <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.126">View the full 2.7.126 release information</a></p>
 
     <h2>2.7.125 · Private credentials and inline forms</h2>
-    <p>Enter credentials in a private card that keeps their values out of the conversation. Waiting forms appear beside the messages that requested them. The desktop app starts the bundled OpenCode server directly.</p>
+    <p>Enter credentials in a private card that keeps their values out of the conversation. Waiting forms appear beside the messages that requested them. The desktop app starts the bundled engine server directly.</p>
     <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.125">View the full 2.7.125 release information</a></p>
 
-    <h2>2.7.124 · OpenCode 2.3.2, chat and user center improvements</h2>
+    <h2>2.7.124 · Engine update, chat and user center improvements</h2>
     <ul>
-      <li>Updates the bundled OpenCode to 2.3.2. Projects with executable OpenCode configuration prompt for review, and changes to that configuration prompt for another review.</li>
+      <li>Updates the bundled engine to 2.3.2. Projects with executable engine configuration prompt for review, and changes to that configuration prompt for another review.</li>
       <li>Fixes the Wallet tab covering API Keys. Both tabs in the user center can be opened independently.</li>
-      <li>Checks whether OpenCode received an interrupted send before deciding whether to restore the draft. Existing chats can load older messages and the interface shows connection loss and recovery.</li>
+      <li>Checks whether the bundled engine received an interrupted send before deciding whether to restore the draft. Existing chats can load older messages and the interface shows connection loss and recovery.</li>
       <li>Insert attachments at the cursor, undo removal and keep original attachments when editing queued messages. Preview PDFs, copy selected messages as Markdown or export them as one image.</li>
       <li>See the tools active subagents are using and answer pending questions after a follow-up message.</li>
     </ul>
@@ -187,12 +187,12 @@
     <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.109">View the full 2.7.109 release information</a></p>
     <h2>2.7.108 · Restore the chat flow and unify command folding</h2>
     <ul>
-      <li>Restore OpenChamber 2.7.2 message text, independent reasoning, tool results, footers and status presentation.</li>
+      <li>Restore chat message text, independent reasoning, tool results, footers and status presentation.</li>
       <li>Show consecutive commands in one bounded disclosure. Interleaved reasoning or prose keeps its source order. The command header retains its breathing indicator and shows no repeated command content while folded.</li>
       <li>Keep results after completion so they can be expanded again. Automatic expansion follows the thinking preference; explicit reader choices take precedence. Direct <code>!</code> commands use the same presentation.</li>
       <li>Restore native structured UI messages, reference links, quote navigation and scrolling while preserving product themes and file previews.</li>
     </ul>
-    <p>Apple silicon Mac and Windows x64 installers include OpenCode 2.3.0. Open About in the app to check for updates, or visit the <a href="/en/download/">download page</a> for installers and checksums.</p>
+    <p>Apple silicon Mac and Windows x64 installers include built-in engine version 2.3.0. Open About in the app to check for updates, or visit the <a href="/en/download/">download page</a> for installers and checksums.</p>
     <p><a href="https://github.com/NeoMei/SuperWagie/releases/tag/v2.7.108">View the full release information</a></p>
     <h2>2.7.107 · Load plugin pages when opened</h2>
     <p>Saved plugin pages load when first opened in the current window and retain their state afterwards, reducing hidden-page work at startup. This fix is included in 2.7.108.</p>
