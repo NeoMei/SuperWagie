@@ -764,6 +764,39 @@ test('a completed external receipt leaves balance available for the next purchas
   expect(paymentMutations().map((item) => item.path)).toEqual(['/api/platform-account/commerce/purchases']);
 });
 
+test('changing the membership period clears the unsubmitted balance purchase', async () => {
+  const monthly = commerce.offers?.find((offer) => offer.id === 'membership-a');
+  if (!monthly) throw new Error('Missing fixture membership');
+  commerce.offers?.push({ ...monthly, id: 'annual-a', name: 'SuperWagie Annual', period: 'year', price: '120000000' });
+  activeMembership = false;
+  await render('overview');
+  await act(async () => button('Existing cash balances').click());
+  await act(async () => host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="SuperWagie Plus"]')?.click());
+  expect(host?.querySelector('[data-purchase-checkout]')?.textContent).toContain('SuperWagie Plus');
+
+  await act(async () => button('Annual').click());
+  expect(Boolean(host?.querySelector('[data-platform-offer][aria-label="SuperWagie Annual"]'))).toBe(true);
+  expect(Boolean(host?.querySelector('[data-purchase-checkout]'))).toBe(false);
+  expect(paymentMutations()).toHaveLength(0);
+});
+
+test('changing the membership period preserves an existing payment and its offer', async () => {
+  const monthly = commerce.offers?.find((offer) => offer.id === 'membership-a');
+  if (!monthly) throw new Error('Missing fixture membership');
+  commerce.offers?.push({ ...monthly, id: 'annual-a', name: 'SuperWagie Annual', period: 'year', price: '120000000' });
+  activeMembership = false;
+  const checkout = { id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: monthly.name, amount: monthly.price, currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z' } as const;
+  commerce.checkouts = [checkout];
+  commerce.intents = [{ idempotencyKey: 'restored-checkout', kind: 'checkout', accountId: 'team-a', productId: 'superwagie', amount: monthly.price, offerId: monthly.id, resourceId: checkout.id, provider: 'wechat', status: 'PENDING', createdAt: checkout.created_at }];
+  await render('overview');
+
+  await act(async () => button('Annual').click());
+  expect(Boolean(host?.querySelector('[data-platform-offer][aria-label="SuperWagie Annual"]'))).toBe(true);
+  expect(host?.querySelector('[data-payment-checkout]')?.getAttribute('data-payment-checkout')).toBe(checkout.id);
+  expect(host?.querySelector('[data-purchase-checkout]')?.textContent).toContain(monthly.name);
+  expect(paymentMutations()).toHaveLength(0);
+});
+
 test('browsing purchase categories leaves a pending wallet recharge alone', async () => {
   commerce.checkouts = [{ id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', walletTopUp: true, offer_name: '', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z' }];
   await render('overview');

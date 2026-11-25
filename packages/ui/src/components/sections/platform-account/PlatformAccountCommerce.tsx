@@ -429,6 +429,13 @@ export const PlatformAccountCommerce: React.FC<{
     setQuote(null);
     setBuyingTask(next);
   };
+  const changeBillingPeriod = (period: 'month' | 'year') => {
+    setBillingPeriod(period);
+    if (!payment && !unresolved && selectedOffer?.kind === 'membership' && selectedOffer.period !== period) {
+      setOfferId('');
+      setQuote(null);
+    }
+  };
   const summary = () => membershipSummary({
     openMembership: () => toggleCatalog('membership'),
     openAddon: () => toggleCatalog('addon'),
@@ -691,7 +698,7 @@ export const PlatformAccountCommerce: React.FC<{
             </div>}
             {visibleCategory === 'membership' && <SettingsControlGroup description={t(state.productCreditWallet ? 'platformAccount.productWallet.membershipRules' : 'platformAccount.membershipRules')}>
               {availableTerms.length > 1 && <SettingsFieldRow label={t('platformAccount.billingPeriod')}>
-                <SettingsChipGroup value={visibleTerm} onChange={setBillingPeriod} aria-label={t('platformAccount.billingPeriod')} options={availableTerms.map((term) => ({
+                <SettingsChipGroup value={visibleTerm} onChange={changeBillingPeriod} aria-label={t('platformAccount.billingPeriod')} options={availableTerms.map((term) => ({
                   value: term, label: t(term === 'month' ? 'platformAccount.monthly' : 'platformAccount.yearly'),
                 }))} />
               </SettingsFieldRow>}
