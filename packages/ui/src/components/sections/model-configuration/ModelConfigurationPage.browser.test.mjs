@@ -1,15 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from '../../../../../../scripts/perf/cdp.mjs';
+import { createBrowserFixture } from '../../../../../../scripts/perf/browser-test-fixture.mjs';
+import { wait } from '../../../../../../scripts/perf/cdp.mjs';
 
-const repo = path.resolve(import.meta.dirname, '../../../../../..');
-
-test('purpose connection tests animate while pending and retain explicit results without replay', { timeout: 120_000 }, async () => {
-  const { createServer } = await import('vite');
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/model-test-feedback-'));
+test('purpose connection tests animate while pending and retain explicit results without replay', { timeout: 120_000 }, async (t) => {
+  const { directory: fixture, run } = createBrowserFixture(t, 'model-test-feedback');
   writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/fixture.tsx"></script></body></html>');
   writeFileSync(path.join(fixture, 'fixture.tsx'), `
     import React from 'react';
@@ -62,30 +59,8 @@ test('purpose connection tests animate while pending and retain explicit results
     window.setModelAppearance = (dark, locale) => { new CSSVariableGenerator().apply(getDefaultTheme(dark)); document.documentElement.classList.toggle('dark', dark); useI18nStore.getState().setLocale(locale); };
     createRoot(document.getElementById('root')).render(<RuntimeAPIContext.Provider value={createWebAPIs()}><I18nProvider><main style={{ height: '100vh' }}><ModelConfigurationPage /></main></I18nProvider></RuntimeAPIContext.Provider>);
   `);
-  const server = await createServer({
-    configFile: false, root: fixture, cacheDir: path.join(fixture, '.vite'), logLevel: 'error', css: { postcss: repo },
-    define: { 'process.env': {}, global: 'globalThis', __APP_VERSION__: '"fixture"' },
-    resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@web': path.join(repo, 'packages/web/src'), '@openchamber/ui': path.join(repo, 'packages/ui/src'), '@openchamber/sdk/schemas': path.join(repo, 'packages/sdk/src/schemas.ts'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
-  });
-  const profile = resolveProfileDir(undefined, 'model-test-feedback');
-  let chrome;
-  let cdp;
-  try {
-    await server.listen();
-    const port = await reservePort();
-    chrome = launchChrome({ chrome: resolveChrome(), profileDir: profile.dir, port, headless: true });
-    const target = await createPageTarget(port);
-    cdp = new CdpClient(target.webSocketDebuggerUrl); await cdp.connect();
-    await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
+  await run(async ({ cdp, errors, evaluate, navigate }) => {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
-    const errors = [];
-    cdp.on('Runtime.exceptionThrown', event => errors.push(event.exceptionDetails?.exception?.description ?? event.exceptionDetails?.text));
-    const evaluate = async expression => {
-      const result = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-      assert.equal(result.exceptionDetails, undefined, result.exceptionDetails?.exception?.description);
-      return result.result.value;
-    };
     const until = async (expression, message) => {
       const deadline = Date.now() + 20_000;
       while (Date.now() < deadline) { if (await evaluate(expression)) return; await wait(50); }
@@ -134,7 +109,7 @@ test('purpose connection tests animate while pending and retain explicit results
       assert.deepEqual(await motion(purpose), before, 'Terminal feedback must remain still');
     };
 
-    await cdp.send('Page.navigate', { url: server.resolvedUrls.local[0] });
+    await navigate();
     await until(`!!document.querySelector('[data-model-purpose="embedding"]')`, 'The real model overview did not render');
     assert.deepEqual(await evaluate('window.modelTestRequests'), [], 'Opening model settings must not run probes');
     await clickButton('Test Text embedding', true);
@@ -196,10 +171,5 @@ test('purpose connection tests animate while pending and retain explicit results
       { path: '/api/model-configuration/bindings/image-generation/test', method: 'POST', body: { revision: 3 } },
     ], 'Only the three explicit probe clicks may dispatch model requests');
     assert.deepEqual(errors, [], 'The real model settings page must not throw browser exceptions');
-  } finally {
-    if (cdp) { try { await cdp.send('Browser.close', {}, { timeoutMs: 2000 }); } catch {} cdp.close(); }
-    profile.removeAfter(chrome);
-    await server.close();
-    rmSync(fixture, { recursive: true, force: true });
-  }
+  });
 });
