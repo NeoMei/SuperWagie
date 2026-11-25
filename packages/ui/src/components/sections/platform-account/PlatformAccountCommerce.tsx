@@ -685,7 +685,7 @@ export const PlatformAccountCommerce: React.FC<{
         </div>
         <div className={checkoutOpen ? "grid min-w-0 items-start gap-4 @2xl/purchase:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]" : undefined}>
           <div className="@container/catalog min-w-0 space-y-4" data-purchase-catalog>
-            {(!checkoutOpen || !payment) && state.payments.mode === 'external' && channels.length > 0 && finance && state.payments.canPurchase && <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {(!checkoutOpen || !payment || !unresolvedPayment(payment)) && state.payments.mode === 'external' && channels.length > 0 && finance && state.payments.canPurchase && <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <span className={SETTINGS_HELPER_CLASS}>{t('platformAccount.paymentChannel')}</span>
               {paymentChoices}
             </div>}

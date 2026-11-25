@@ -746,6 +746,24 @@ test('a refresh recovers the confirmed offer closure when the failed read hid it
   expect(JSON.parse(paymentMutations()[1].body)).toMatchObject({ accountId: 'team-a', offerId: 'addon-a', provider: 'alipay' });
 });
 
+test('a completed external receipt leaves balance available for the next purchase', async () => {
+  const checkout = { id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', offer_name: 'Membership', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z' } as const;
+  commerce.checkouts = [checkout];
+  await render('overview');
+
+  commerce.checkouts = [{ ...checkout, payment_status: 'PAID', fulfillment_status: 'FULFILLED' }];
+  await act(async () => button('Refresh status').click());
+  expect(host?.querySelector('[data-purchase-checkout]')?.textContent).toContain('Your purchase is active');
+
+  await act(async () => button('Existing cash balances').click());
+  expect(host?.querySelector('[data-purchase-checkout]')?.textContent).toContain('Your purchase is active');
+  await act(async () => host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="Buy extra credits"]')?.click());
+  expect(paymentMutations()).toHaveLength(0);
+
+  await act(async () => button('Buy Buy extra credits for CNY 10.00').click());
+  expect(paymentMutations().map((item) => item.path)).toEqual(['/api/platform-account/commerce/purchases']);
+});
+
 test('browsing purchase categories leaves a pending wallet recharge alone', async () => {
   commerce.checkouts = [{ id: 'waiting-checkout', account_id: 'team-a', product_id: 'superwagie', provider: 'wechat', walletTopUp: true, offer_name: '', amount: '10000000', currency: 'CNY', payment_status: 'PENDING', fulfillment_status: 'NOT_STARTED', refund_status: '', expires_at: '2099-01-01T00:00:00Z', created_at: '2026-11-08T00:00:00Z' }];
   await render('overview');

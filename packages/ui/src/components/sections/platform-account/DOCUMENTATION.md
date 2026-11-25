@@ -156,7 +156,9 @@ Expired codes and earlier redirect-only checkouts can be replaced after confirme
 original purchase intent can be recovered. Switching methods follows the same
 rule, and a completed original payment is shown in place. The panel keeps
 polling while fulfillment is pending, hides the code after payment and retains
-the final result until the user selects an offer. Verified fulfillment
+the final result until the user selects an offer. After settlement, the catalog
+shows the payment methods for the next purchase alongside that receipt.
+Verified fulfillment
 refreshes membership and credits.
 An unconfirmed submission with no known checkout is retried
 only by explicit action with its original key. Closed attempts are in history.
