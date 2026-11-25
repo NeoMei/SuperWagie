@@ -204,7 +204,7 @@ const render = async (vscode = false, initialTab: 'billing' | 'profile' | 'usage
   await act(async () => root.render(<RuntimeAPIContext.Provider value={{ ...apis, runtime: { ...apis.runtime, isVSCode: vscode } }}><I18nProvider>{showFundingNotice ? <ManagedModelFundingNotice /> : <PlatformAccountPage />}</I18nProvider></RuntimeAPIContext.Provider>));
   if (!vscode && host.querySelector('[data-platform-account-tab]')) await tab(initialTab === 'usage' ? 'Consumption records' : initialTab === 'profile' ? 'Personal details' : 'Membership and usage');
 };
-afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; useProductWallet = false; renewalWrites.length = 0; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; usageStatus = 200; nativeReportRequests = 0; nativeScenario = false; legacyCoverageUnknown = false; nativeOverride = null; purchaseFailure = null; failCommerceAfterPurchase = false; if (commerce.offers?.[0]) delete commerce.offers[0].salesReadiness; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
+afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); profileFail = false; profile.displayName = 'Alice'; profile.avatarAvailable = false; profileWrites.length = 0; passwordWrites.length = 0; avatarWrites = 0; identityUser = null; failed = false; readCount = 0; logoutCount = 0; reconcileCount = 0; modelEnabled = false; modelRecoveryAvailable = false; mediaHistory = false; mediaHistoryRequests = 0; unboundTask = false; scopeRestart = false; taskState.calls[0].status = 'UNKNOWN'; signedIn.credits.available = '9007199254740993'; authSignedOut = false; registrationUnknown = true; registrationPasswordRequired = false; lostRegistrationResponse = false; registrationLimited = false; expiredAccount = false; lostLogoutResponse = false; financialAccess = false; commerce.payments.mode = 'external'; useProductWallet = false; renewalWrites.length = 0; lostRechargeResponse = false; passwordRequests = 0; passwordLoginFailed = false; rechargeRequests = 0; settlementRequests = 0; purchaseRequests = 0; registrationBodies.length = 0; rechargeKeys.length = 0; rechargeProducts.length = 0; nextAccountResponse = null; nextPasswordResponse = null; rechargeResponseGate = null; usageStatus = 200; nativeReportRequests = 0; nativeScenario = false; legacyCoverageUnknown = false; nativeOverride = null; purchaseFailure = null; failCommerceAfterPurchase = false; if (commerce.offers?.[0]) delete commerce.offers[0].salesReadiness; commerce.intents = []; commerce.orders = []; if (commerce.offers) commerce.offers = commerce.offers.filter((offer) => offer.id === 'addon-a'); if (commerce.wallets) commerce.wallets = commerce.wallets.filter((wallet) => wallet.productId); if (commerce.wallets?.[1]) commerce.wallets[1].amount = '0'; localStorage.clear(); useSessionUIStore.setState({ currentSessionId: null }); });
 afterAll(async () => { fetchFixture.mockRestore(); await browser.happyDOM.close(); for (const [name, descriptor] of savedGlobals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); } });
 
 const button = (text: string) => {
@@ -241,7 +241,7 @@ const submit = async (scope: ParentNode = host) => {
 };
 const chooseOffer = async (name = 'Buy extra credits') => {
   if (name === 'Buy extra credits') await act(async () => button('Buy extra credits').click());
-  const option = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((item) => item.getAttribute('aria-label') === name);
+  const option = [...host.querySelectorAll<HTMLButtonElement>('[data-platform-offer]')].find((item) => item.getAttribute('aria-label') === name);
   if (!option) throw new Error(`Missing offer option ${name}`);
   await act(async () => option.click());
 };
@@ -255,7 +255,7 @@ describe('PlatformAccountPage', () => {
     }));
     commerce.offers?.push({ id: 'new-monthly-plan', productId: 'superwagie', name: 'Standard', accountKind: 'both', kind: 'membership', period: 'month', price: '99000000', monthlyCredit: '4000000000', validityMonths: 1, rank: 1, sandbox: false });
     await render();
-    const offer = () => host.querySelector('[role="radio"][aria-label="Standard"]');
+    const offer = () => host.querySelector('[data-platform-offer][aria-label="Standard"]');
     expect(offer()).not.toBeNull();
     await act(async () => button('Close').click());
     expect(offer()).toBeNull();
@@ -485,7 +485,7 @@ describe('PlatformAccountPage', () => {
     const offer = commerce.offers?.[0]; if (!offer) throw new Error('Missing fixture offer');
     offer.salesReadiness = { ready: false, reason: 'credit_rates_unavailable' };
     await render(); await act(async () => button('Buy extra credits').click());
-    const option = host.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Buy extra credits"]');
+    const option = host.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="Buy extra credits"]');
     expect(option?.disabled).toBe(true); expect(host.textContent).toContain('complete its model credit rates');
     expect(host.textContent).toContain('9007199254');
     expect(purchaseRequests).toBe(0);
@@ -1104,19 +1104,24 @@ describe('PlatformAccountPage', () => {
     } finally { Object.assign(membership, original); }
   });
 
-  test('browses one buying task at a time with a named payer and no financial command', async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
+  test('shows the payer on the balance payment screen and waits for an explicit debit', async () => {
+    useI18nStore.getState().setLocale('en'); financialAccess = true; commerce.payments.mode = 'unconfigured';
+    if (commerce.wallets?.[1]) commerce.wallets[1].amount = '10000000';
+    await render();
     expect(host.querySelector('#unihub-recharge-amount')).toBeNull();
     expect(host.textContent).not.toContain('Confirm purchase');
     expect(host.textContent).not.toContain('Session expires');
     await chooseOffer();
-    expect(host.textContent).toContain('Team A');
-    expect(host.textContent).not.toContain('Confirm purchase');
+    const checkout = host.querySelector('[data-purchase-checkout]');
+    expect(checkout?.textContent).toContain('Team A');
+    expect(host.querySelector('[data-platform-offer][aria-current="true"]')).not.toBeNull();
+    expect(button('Buy Buy extra credits for CNY 10.00').disabled).toBe(false);
     expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
   });
 
   test('clears a selected offer when the authoritative payer changes', async () => {
-    useI18nStore.getState().setLocale('en'); financialAccess = true; await render();
+    useI18nStore.getState().setLocale('en'); financialAccess = true; commerce.payments.mode = 'unconfigured';
+    await render();
     await chooseOffer();
     expect(button('Buy Buy extra credits for CNY 10.00')).toBeDefined();
     try {
@@ -1126,7 +1131,8 @@ describe('PlatformAccountPage', () => {
       expect(host.textContent).not.toContain('Buy Buy extra credits for CNY 10.00');
       expect(host.querySelector('[aria-label="Billing account"]')?.textContent).toContain('Team B');
       await act(async () => button('Buy extra credits').click());
-      expect(host.querySelector('[role="radio"][aria-label="Buy extra credits"]')?.getAttribute('aria-checked')).toBe('false');
+      expect(host.querySelector('[data-platform-offer][aria-label="Buy extra credits"]')).not.toBeNull();
+      expect(host.querySelector('[data-purchase-checkout]')).toBeNull();
       expect(rechargeRequests).toBe(0); expect(purchaseRequests).toBe(0);
     } finally {
       signedIn.accountId = 'team-a'; commerce.accountId = 'team-a'; signedIn.accounts.pop();
@@ -1144,7 +1150,7 @@ describe('PlatformAccountPage', () => {
     await act(async () => resolveOld(Response.json(signedIn)));
     expect(host.textContent).not.toContain('Alice'); expect(host.textContent).not.toContain('9007199254');
   });
-  test('separates monthly and annual memberships from addons and clears hidden purchase selections', async () => {
+  test('compares monthly, annual and add-on products without starting a purchase', async () => {
     useI18nStore.getState().setLocale('en'); financialAccess = true;
     commerce.offers?.push(
       { id: 'monthly-plan', productId: 'superwagie', name: 'Monthly plan', accountKind: 'both', kind: 'membership', period: 'month', price: '19000000', monthlyCredit: '7000000', validityMonths: 0, rank: 1, sandbox: false },
@@ -1152,30 +1158,26 @@ describe('PlatformAccountPage', () => {
     );
     await render();
     await act(async () => button('Manage membership').click());
-    const membershipGroup = host.querySelector('[role="radiogroup"][aria-label="Subscribe"]');
+    const membershipGroup = host.querySelector('[role="group"][aria-label="Subscribe"]');
     expect(membershipGroup?.textContent).toContain('CNY 19.00 / month');
     expect(membershipGroup?.textContent).toContain('7 credits each month');
     expect(membershipGroup?.textContent).not.toContain('Buy extra credits');
-    expect(host.querySelector('[role="radiogroup"][aria-label="Buy extra credits"]')).toBeNull();
+    expect(host.querySelector('[role="group"][aria-label="Buy extra credits"]')).toBeNull();
     expect(host.textContent).toContain('issue credits monthly');
-    await chooseOffer('Monthly plan');
     await act(async () => button('Annual').click());
-    expect(host.querySelector('[role="radiogroup"][aria-label="Subscribe"]')?.textContent).toContain('CNY 190.00 / year, paid in full');
-    expect(host.querySelector('[role="radio"][aria-label="Monthly plan"]')).toBeNull();
+    expect(host.querySelector('[role="group"][aria-label="Subscribe"]')?.textContent).toContain('CNY 190.00 / year, paid in full');
+    expect(host.querySelector('[data-platform-offer][aria-label="Monthly plan"]')).toBeNull();
     expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Buy Monthly plan for CNY 19.00')).toBe(false);
-    await chooseOffer('Annual plan');
-    expect(button('Check upgrade price').disabled).toBe(false);
-    await chooseOffer();
-    expect(host.querySelector('[role="radio"][aria-label="Annual plan"]')).toBeNull();
-    expect(host.querySelector('[role="radio"][aria-label="Buy extra credits"]')?.getAttribute('aria-checked')).toBe('true');
-    expect(host.textContent).not.toContain('Buy Annual plan');
-    expect(button('Buy Buy extra credits for CNY 10.00')).toBeDefined();
+    await act(async () => button('Buy extra credits').click());
+    expect(host.querySelector('[data-platform-offer][aria-label="Annual plan"]')).toBeNull();
+    expect(host.querySelector('[data-platform-offer][aria-label="Buy extra credits"]')).not.toBeNull();
+    expect(host.querySelector('[data-purchase-checkout]')).toBeNull();
     expect(purchaseRequests).toBe(0); expect(rechargeRequests).toBe(0);
     await act(async () => { useI18nStore.getState().setLocale('zh-CN'); await import('@/lib/i18n/messages/zh-CN'); });
     expect(host.textContent).toContain('订阅会员'); expect(host.textContent).toContain('加量包');
     expect(host.textContent).not.toContain('人民币 19.00 元 / 月');
     expect(host.textContent).toContain('有效期 12 个月');
-    expect(host.querySelector('[role="radio"][aria-label="购买加量包"]')?.getAttribute('aria-checked')).toBe('true');
+    expect(host.querySelector('[data-platform-offer][aria-label="购买加量包"]')).not.toBeNull();
   });
 
   test('omits an unavailable annual period while keeping addons available', async () => {
@@ -1184,7 +1186,7 @@ describe('PlatformAccountPage', () => {
     expect([...host.querySelectorAll('button')].some((item) => item.textContent === 'Annual')).toBe(false);
     expect(host.textContent).toContain('No membership offers are published for this billing period.');
     await act(async () => button('Buy extra credits').click());
-    expect(host.querySelector('[role="radiogroup"][aria-label="Buy extra credits"]')?.textContent).toContain('Buy extra credits');
+    expect(host.querySelector('[role="group"][aria-label="Buy extra credits"]')?.textContent).toContain('Buy extra credits');
     expect(purchaseRequests).toBe(0);
   });
 
@@ -1195,11 +1197,10 @@ describe('PlatformAccountPage', () => {
     commerce.orders?.push({ id: 'order-a', productId: 'superwagie', offerName: 'Annual membership', amount: '100000000', paymentStatus: 'PAID', fulfillmentStatus: 'FULFILLED', refundStatus: '' });
     await render();
     await act(async () => button('Manage membership').click());
-    expect(host.querySelector('[role="radiogroup"][aria-label="Subscribe"]')?.textContent).toContain('CNY 100.00 / year, paid in full');
-    await chooseOffer('Annual membership');
-    expect(host.textContent).toContain('Billing period'); expect(host.textContent).toContain('Monthly credits');
+    expect(host.querySelector('[role="group"][aria-label="Subscribe"]')?.textContent).toContain('CNY 100.00 / year, paid in full');
+    expect(host.querySelector('[data-platform-offer][aria-label="Annual membership"]')?.textContent).toContain('20 credits each month');
     expect(host.textContent).not.toContain('0 months'); expect(host.textContent).not.toContain('Account balance');
-    expect(button('Check upgrade price').disabled).toBe(false);
+    expect(purchaseRequests).toBe(0);
     await tab('Orders');
     expect(host.textContent).toContain('Payment: Paid · Fulfillment: Fulfilled · Refund: None');
   });

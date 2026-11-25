@@ -22,7 +22,7 @@ The SuperWagie account page owns in-app registration and login, the user center 
 - Model availability and historical recovery availability are separate runtime checks. When dispatch is suspended but the journal can be read, the current session's authenticated task status still shows its fixed payer and model, pending and unknown calls, and terminal receipts. Reconciliation only queries receipts; it cannot submit another model request. An unbound current session shows no task section. Other failures remain visible.
 - Membership and add-on credits are separate from CNY model cash. One credit is one CREDIT (1,000,000 CREDIT/6 micro units). The overview omits reserved-point rows, batch-expiry disclosures and legacy CNY balance panels. The underlying holds and cash wallets remain separate accounting data for purchase eligibility. Original uncertain operations remain recoverable; hiding these panels never migrates or discards funds. Subscription purchases may use an existing authorized funding source server-side.
 - Membership balances and offer grants use credits with exact integer arithmetic and insignificant trailing zeros removed. The detailed usage ledger retains its original unit. The renderer never converts ledger quantities to JavaScript Number. Source cards distinguish explicitly attributed SuperWagie subscription/add-on points from other shared points, show their earliest positive-balance expiry, and exclude frozen, future and expired availability. An older server without batches retains the authoritative total with unavailable source detail. Reserved points remain separate in the contract. The expiry-first rule does not promise a new grant after an expired membership; remaining points retain their original expiry and require renewal for SuperWagie use.
-- Membership choices are grouped by monthly or annual billing, with an independently priced credit-addon list. Every option prominently shows its published price and credit amount before selection; annual pricing is the whole-year charge and still grants credits monthly. Addons show their own validity and never extend membership. Changing the membership period clears a hidden membership selection; it preserves a selected addon. No selector sends a financial request.
+- Membership choices are grouped by monthly or annual billing, with an independently priced credit-addon list. Every option prominently shows its published price and credit amount before selection; annual pricing is the whole-year charge and still grants credits monthly. Addons show their own validity and never extend membership. Changing the membership period clears an unsubmitted membership selection and its quote when the offer leaves the catalog. It preserves selected add-ons and submitted payments. No selector sends a financial request.
 - Cash balances and offer prices preserve CNY/6 precision. Recharge accepts positive whole cents. The chosen offer shows its exact price, product wallet and credit grant before purchase.
 - Wallet, catalog and order `null` values mean unavailable permission. They never render as zero balances or empty history. Ordinary members retain access to membership and credits while financial controls remain restricted.
 - Consumption records show the SuperWagie 30-day summary and the 365-day local daily-activity snapshot. The summary and activity reads are independent. The page sends no recent-call list or native LLMRouter request. Activity refresh preserves the same authorized owner's previous snapshot on transient failure, while permission, session and account invalidation clear its visible data. Runtime, actor and account remount keys reject stale responses.
@@ -135,32 +135,39 @@ row remains useful when another model fails or the next poll is interrupted.
 
 ## Direct checkout controls
 
-The membership/add-on confirmation includes an explicit payment method when
-merchant checkout is configured. Choosing a method before submitting a payment,
-changing tabs and opening the account page are read-only. The legacy cash option
-remains separate.
-Upgrade quotes bind their selected payment source and show the server's exact
-cent-rounded external charge before confirmation.
-Negotiated legacy upgrade quotes and their payment panels show the plan price,
-applied old-plan credit, and amount due. Payment starts the new term. The
-estimated-refund explanation belongs to the full-price upgrade flow.
+Membership and add-on cards show the price, grant, and billing period or pack
+validity. Browsing the catalog and choosing a method before checkout are read-only.
+Activating a regular external-payment offer creates one checkout and shows
+its payment panel alongside the catalog. Balance-funded purchases require an
+explicit debit action. Activating an upgrade offer fetches a quote for the
+selected payment source. Users see the exact charge and old-plan credit or
+estimated refund before accepting the quote.
 
-The checkout panel recovers server records after reopening. Waiting, unknown,
-paid-but-activating, completed and original-channel refund states stay distinct.
-The purchase confirmation stays in place when it changes to payment. It
-shows the offer, amount, method, QR and payment status together. Both providers
-supply merchant QR payloads, encoded locally by the panel. Expired codes and
-earlier redirect-only checkouts can be replaced after confirmed closure if the
+The checkout panel shows the offer, payer, amount, method, QR and payment
+status together. It restores unresolved checkout records after reopening.
+Waiting, unknown, paid-but-activating, completed and original-channel refund
+states stay distinct. Changing categories or billing periods keeps a submitted
+checkout open and preserves its original offer. Selecting a different eligible
+offer requests closure of an
+unpaid checkout and hides its QR. The replacement starts after confirmed
+closure. While closure is pending, the account keeps checking the original
+order. If payment has already arrived, the original result stays visible.
+Both providers supply merchant QR payloads, encoded locally by the panel.
+Expired codes and earlier redirect-only checkouts can be replaced after confirmed closure if the
 original purchase intent can be recovered. Switching methods follows the same
 rule, and a completed original payment is shown in place. The panel keeps
 polling while fulfillment is pending, hides the code after payment and retains
-the final result until the user returns to purchase. Verified fulfillment
+the final result until the user selects an offer. After settlement, the catalog
+shows the payment methods for the next purchase alongside that receipt.
+Verified fulfillment
 refreshes membership and credits.
 An unconfirmed submission with no known checkout is retried
 only by explicit action with its original key. Closed attempts are in history.
 A pending or reviewed refund blocks new purchases and hides refund submission;
 users can check a pending refund on the same checkout. Read failure preserves
-the last checkout state and surfaces a recovery action.
+the last checkout state and surfaces a recovery action. If the read after a
+confirmed offer closure fails, refreshing keeps the original checkout receipt
+even if the summary omits it. The replacement still requires a usable catalog.
 Verified fulfillment refreshes account benefits and never replays a model task.
 A `REJECTED` manual refund preserves the confirmed purchase status and shows
 that the request was declined without a refund. A paid, fulfilled purchase

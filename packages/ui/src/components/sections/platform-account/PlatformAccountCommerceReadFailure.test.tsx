@@ -61,11 +61,17 @@ const button = (text: string) => {
   if (!found) throw new Error(`Missing button ${text}`);
   return found;
 };
-const assertFailedRead = () => {
+const assertFailedRead = (hasCheckout = false) => {
   expect(host?.querySelector('[role="alert"]')?.textContent).toContain('Could not read wallets or orders. Refresh to check the authoritative status.');
-  expect(button('Subscribe').disabled).toBe(true);
-  expect(button('Buy extra credits').disabled).toBe(true);
-  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  if (hasCheckout) {
+    expect(host?.querySelector('[data-purchase-checkout]')).not.toBeNull();
+    expect(host?.querySelector('[data-purchase-catalog]')).not.toBeNull();
+    expect(host?.querySelectorAll('[data-platform-offer]:not(:disabled)')).toHaveLength(0);
+  } else {
+    expect(button('Subscribe').disabled).toBe(true);
+    expect(button('Buy extra credits').disabled).toBe(true);
+    expect(host?.querySelector('[data-platform-offer]')).toBeNull();
+  }
 };
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined; host?.remove(); host = undefined;
@@ -89,16 +95,14 @@ test('a funding target received during a failed commerce read stays closed after
   expect(button('Subscribe').disabled).toBe(false);
   expect(button('Buy extra credits').disabled).toBe(false);
   expect(button('Buy extra credits').getAttribute('aria-pressed')).toBe('false');
-  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  expect(host?.querySelector('[data-platform-offer]')).toBeNull();
   expect(mutations).toHaveLength(0);
 });
 
 test('a failed follow-up read after a channel switch disables purchase entries until an authoritative refresh', async () => {
   await render();
-  await act(async () => host?.querySelector<HTMLButtonElement>('[role="radio"][aria-label="SuperWagie Plus"]')?.click());
   await act(async () => button('Alipay').click());
-  const purchase = [...(host?.querySelectorAll('button') ?? [])].find((item) => item.textContent?.includes('Buy SuperWagie Plus'));
-  await act(async () => purchase?.click());
+  await act(async () => host?.querySelector<HTMLButtonElement>('[data-platform-offer][aria-label="SuperWagie Plus"]')?.click());
   expect(mutations.filter((item) => item.path.endsWith('/api/platform-account/commerce/checkouts'))).toHaveLength(1);
   commerce.intents[0].status = 'PENDING';
   commerce.intents[0].resourceId = 'waiting-checkout';
@@ -111,13 +115,12 @@ test('a failed follow-up read after a channel switch disables purchase entries u
   await act(async () => channelSwitch?.click());
   expect(mutations.filter((item) => item.path.endsWith('/checkouts/waiting-checkout/close'))).toHaveLength(1);
   expect(mutations.filter((item) => item.path.endsWith('/api/platform-account/commerce/checkouts'))).toHaveLength(2);
-  assertFailedRead();
+  assertFailedRead(true);
   failReadAfterMutation = null;
   await act(async () => button('Refresh wallets and orders').click());
   expect(host?.querySelector('[role="alert"]')).toBeNull();
-  expect(button('Subscribe').disabled).toBe(false);
-  expect(button('Buy extra credits').disabled).toBe(false);
-  expect(host?.querySelector('[role="radiogroup"]')).toBeNull();
+  expect(host?.querySelector('[data-purchase-checkout]')).not.toBeNull();
+  expect(host?.querySelector('[data-purchase-catalog]')).not.toBeNull();
 });
 
 test('a failed follow-up read after a refund disables purchase entries until an authoritative refresh', async () => {
@@ -127,11 +130,11 @@ test('a failed follow-up read after a refund disables purchase entries until an 
   failReadAfterMutation = 'refund';
   await act(async () => button('Confirm refund').click());
   expect(mutations.filter((item) => item.path.endsWith('/checkouts/waiting-checkout/refund'))).toHaveLength(1);
-  assertFailedRead();
+  assertFailedRead(true);
   failReadAfterMutation = null;
   await act(async () => button('Refresh wallets and orders').click());
   expect(host?.querySelector('[role="alert"]')).toBeNull();
-  expect(button('Subscribe').disabled).toBe(false);
-  expect(button('Buy extra credits').disabled).toBe(false);
+  expect(host?.querySelector('[data-purchase-checkout]')).not.toBeNull();
+  expect(host?.querySelector('[data-purchase-catalog]')).not.toBeNull();
   expect(mutations.filter((item) => item.path.endsWith('/checkouts/waiting-checkout/refund'))).toHaveLength(1);
 });
