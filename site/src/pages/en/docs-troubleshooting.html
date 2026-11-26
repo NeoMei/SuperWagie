@@ -14,15 +14,14 @@
   <li><strong>agent.list failed (403):</strong> update to 2.7.99. Version 2.7.82 fixed the desktop page being rejected by the newer engine's origin check.</li>
   <li><strong>session.prompt failed (503):</strong> requests wait for the engine during startup or restart. If the failure continues, check the log for its cause. A missing session returns 404 separately.</li>
   <li><strong>Old session not found:</strong> SuperWagie uses its private session database and does not import system OpenCode history. Start a new session in SuperWagie; the original database is retained.</li>
-  <li><strong>Key activated but configuration failed:</strong> after updating, choose Continue setup under API keys in the account panel. Setup reuses the existing key without another activation.</li>
 </ul>
 
 <h2>Model errors</h2>
 <p>Model messages follow the current interface language. Expand the response details for diagnostic information.</p>
 <ul>
   <li><strong>Auto reports an unavailable model:</strong> open Settings → Routing and select the fallback again from the available models. Version 2.7.82 added the unavailable-fallback check before sending; updating retains existing routing settings.</li>
-  <li><strong>Model not set up:</strong> use a bundled free model when no model is configured. To use another model, click your avatar to activate a SuperWagie Key, or add your own provider in Settings.</li>
-  <li><strong>Model connection failed:</strong> check the connection settings and key. If your SuperWagie Key is already activated, continue setup in the account panel.</li>
+  <li><strong>Model not set up:</strong> Use an available free model or add your own provider in Settings.</li>
+  <li><strong>Model connection failed:</strong> Check the endpoint, key, and model name in Settings, then run a connection test where available.</li>
   <li><strong>Free allowance used up:</strong> wait for the service to restore the allowance, or choose another configured model.</li>
   <li><strong>Too many requests:</strong> wait a little, then try again.</li>
   <li><strong>Timeouts:</strong> check the network or try another provider.</li>
