@@ -618,7 +618,7 @@ export const invalidateSettingsCache = (): void => {
   _serverKnownSettings = {};
 };
 
-export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean }): Promise<void> => {
+export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean; onApplied?: () => void }): Promise<void> => {
   const bootstrap = options?.bootstrap !== false;
   const adoptTheme = options?.adoptTheme ?? bootstrap;
   if (typeof window === 'undefined') {
@@ -698,6 +698,7 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
     }
 
     dispatchSettingsSynced(settings, bootstrap, adoptTheme);
+    options?.onApplied?.();
   };
 
   try {

@@ -11,6 +11,7 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 import { getDeviceInfo } from '@/lib/device';
 import { markAppBootReady } from './appBootReady';
 import { initializeSharedPreferences } from './initializeSharedPreferences';
+import { canSaveNativeMobileModelPreferences } from './initializeNativeMobileRuntime';
 import { installMobileWidgetSnapshotBridge } from './mobileWidgetSnapshot';
 import { I18nProvider } from '@/lib/i18n';
 import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoader';
@@ -27,6 +28,7 @@ export function renderMobileApp(apis: RuntimeAPIs) {
   preloadMarkdownRenderer();
   initializeSharedPreferences({
     logLabel: '[mobile-main]',
+    canSaveModelPrefs: isNativeShell ? canSaveNativeMobileModelPreferences : undefined,
     // Persisted typography/appearance is now applied — release the splash gate so the
     // first UI paint is already at its final sizes.
     onAppearanceSettled: markAppBootReady,

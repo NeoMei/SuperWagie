@@ -1,7 +1,8 @@
 import { expect, spyOn, test } from 'bun:test';
+import * as persistence from '@/lib/persistence';
 import { isRetiredPlatformProvider } from '@/lib/platformAccount';
-import { MOBILE_DISCONNECTED_RUNTIME_KEY, switchRuntimeEndpoint } from '@/lib/runtime-switch';
-import { initializeNativeMobileRuntime } from './initializeNativeMobileRuntime';
+import { getRuntimeApiBaseUrl, MOBILE_DISCONNECTED_RUNTIME_KEY, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { canSaveNativeMobileModelPreferences, initializeNativeMobileRuntime } from './initializeNativeMobileRuntime';
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -21,7 +22,19 @@ test('native model initialization waits for the connected server and discards a 
   };
   const firstRequest = deferred<Response>();
   const requestStarted = deferred<void>();
+  const firstSettings = deferred<void>();
+  const legacySettings = deferred<void>();
+  const legacySettingsStarted = deferred<void>();
   let holdStandalone = true;
+  const settings = spyOn(persistence, 'syncDesktopSettings').mockImplementation(async (options) => {
+    if (getRuntimeApiBaseUrl() === legacyHost) {
+      legacySettingsStarted.resolve();
+      await legacySettings.promise;
+    } else if (holdStandalone) {
+      await firstSettings.promise;
+    }
+    options?.onApplied?.();
+  });
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input);
     if (url.pathname === '/api/client-auth/url-token') return new Response(null, { status: 404 });
@@ -41,10 +54,18 @@ test('native model initialization waits for the connected server and discards a 
     const staleInitialization = initializeNativeMobileRuntime(initialize);
     await requestStarted.promise;
     expect(initialSelections).toEqual([]);
+    expect(canSaveNativeMobileModelPreferences()).toBe(false);
 
     switchRuntimeEndpoint({ apiBaseUrl: legacyHost, clientToken: 'device-fixture' });
-    await initializeNativeMobileRuntime(initialize);
+    const legacyInitialization = initializeNativeMobileRuntime(initialize);
+    await legacySettingsStarted.promise;
+    expect(canSaveNativeMobileModelPreferences()).toBe(false);
+    expect(initialSelections).toEqual([]);
+    legacySettings.resolve();
+    await legacyInitialization;
     expect(initialSelections).toEqual(['unihub']);
+    expect(canSaveNativeMobileModelPreferences()).toBe(true);
+    firstSettings.resolve();
     firstRequest.resolve(Response.json({ status: 'disabled' }));
     await staleInitialization;
     expect(initialSelections).toEqual(['unihub']);
@@ -52,10 +73,13 @@ test('native model initialization waits for the connected server and discards a 
 
     holdStandalone = false;
     switchRuntimeEndpoint({ apiBaseUrl: standaloneHost, clientToken: 'device-fixture' });
+    expect(canSaveNativeMobileModelPreferences()).toBe(false);
     await initializeNativeMobileRuntime(initialize);
     expect(initialSelections).toEqual(['unihub', 'custom']);
+    expect(canSaveNativeMobileModelPreferences()).toBe(true);
   } finally {
     switchRuntimeEndpoint({ apiBaseUrl: '', runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
     fetch.mockRestore();
+    settings.mockRestore();
   }
 });

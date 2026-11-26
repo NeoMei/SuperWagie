@@ -37,10 +37,11 @@ transports and isolated-space completeness checks remain unchanged.
 `MobileApplicationBoundary` starts hosted mobile after runtime authentication,
 the server’s standalone status and shared-settings bootstrap. Model preference
 writes start with the server's saved preferences. Capacitor uses its own connection
-flow. On each native instance connection, the authenticated platform-mode read
-precedes model initialization so saved selections from disabled services can be
-ignored. The read has a deadline for older servers. Its result and the ensuing
-bootstrap belong to the instance that started the read.
+flow. On each native instance connection, platform mode and shared settings
+load before model initialization. The startup deadline keeps the workspace
+available when a read is slow. Automatic preference writes start once the
+active instance's settings have applied. The state belongs to that instance
+through transport changes and is retired when switching to another instance.
 
 On a legacy platform-enabled server the hosted mobile workspace stays blocked
 and the hosted browser offers the selected-material reader at

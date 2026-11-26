@@ -9,18 +9,20 @@ type InitializeSharedPreferencesOptions = {
   logLabel: string;
   /** Runs once appearance init settles, whether it succeeded or failed. */
   onAppearanceSettled?: () => void;
+  canSaveModelPrefs?: () => boolean;
 };
 
 /** Boots local appearance and autosave; authenticated roots own workspace reads. */
 export const initializeSharedPreferences = ({
   logLabel,
   onAppearanceSettled,
+  canSaveModelPrefs,
 }: InitializeSharedPreferencesOptions): void => {
   initializeLocale();
 
   void initializeAppearancePreferences().then(() => {
     startAppearanceAutoSave();
-    startModelPrefsAutoSave();
+    startModelPrefsAutoSave(canSaveModelPrefs);
     startTypographyWatcher();
   }).catch((err) => {
     console.error(`${logLabel} appearance init failed:`, err);
