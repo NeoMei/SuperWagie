@@ -30,6 +30,7 @@ describe('managed-media synthesis broker', () => {
     await new Promise((resolve) => broker.listen(0, '127.0.0.1', resolve));
     cleanups.push(() => new Promise((resolve) => broker.close(resolve)));
     const environment = {
+      OPENCHAMBER_UNIHUB_MODE: 'on',
       OPENCHAMBER_DATA_DIR: dataDir,
       OPENCHAMBER_UNIHUB_PROXY_URL: `http://127.0.0.1:${broker.address().port}`,
       OPENCHAMBER_UNIHUB_PROXY_TOKEN: 'broker-capability-token',
@@ -56,7 +57,7 @@ describe('managed-media synthesis broker', () => {
     await fs.writeFile(path.join(dataDir, 'model-configuration.json'), JSON.stringify(state));
     await expect(synthesizeConfiguredSpeechFromDisk(
       { text: '朗读测试', sessionID: 'media_test_session' },
-      { environment: { OPENCHAMBER_DATA_DIR: dataDir } },
+      { environment: { OPENCHAMBER_UNIHUB_MODE: 'on', OPENCHAMBER_DATA_DIR: dataDir } },
     )).rejects.toMatchObject({ code: 'model_configuration_unavailable' });
   });
 });

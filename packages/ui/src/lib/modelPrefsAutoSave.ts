@@ -83,7 +83,7 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
   customProviderIcons: { ...prefs.customProviderIcons },
 });
 
-export const startModelPrefsAutoSave = () => {
+export const startModelPrefsAutoSave = (canSave: () => boolean = () => true) => {
   if (typeof window === 'undefined') {
     return () => {};
   }
@@ -138,7 +138,7 @@ export const startModelPrefsAutoSave = () => {
     }
     // updateDesktopSettings owns the shared debounce and lifecycle flush, so
     // the change is queued immediately and cannot be lost on a quick reload.
-    flush();
+    if (canSave()) flush();
   });
 
   return () => {

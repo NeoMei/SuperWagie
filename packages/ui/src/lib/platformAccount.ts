@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 
 const signedInSchema = z.object({
   status: z.literal('signed-in'),
@@ -18,6 +18,7 @@ const stateSchema = z.discriminatedUnion('status', [signedInSchema, z.object({ s
 export type PlatformAccountState = z.infer<typeof stateSchema>;
 const identitySessionSchema = z.discriminatedUnion('status', [
   signedInSchema.pick({ status: true, user: true, expiresAt: true }),
+  z.object({ status: z.literal('disabled') }),
   z.object({ status: z.enum(['unsupported', 'unconfigured', 'signed-out', 'expired']) }),
 ]);
 export type PlatformIdentitySession = z.infer<typeof identitySessionSchema>;
@@ -35,12 +36,12 @@ export type PlatformPasswordIssue = z.infer<typeof passwordIssueSchema>;
 export class PlatformAccountError extends Error {
   constructor(readonly code: string, readonly interactionKind?: string, readonly status = 400, readonly passwordIssues: PlatformPasswordIssue[] = [], readonly retryAfter?: number) { super(code); this.name = 'PlatformAccountError'; }
 }
-export const requestPlatformAccount = async <T>(path: string, schema: z.ZodType<T>, method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET', body?: string): Promise<T> => {
+export const requestPlatformAccount = async <T>(path: string, schema: z.ZodType<T>, method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET', body?: string, signal?: AbortSignal): Promise<T> => {
   const runtimeKey = getRuntimeKey();
   let response: Response;
   try {
     response = await runtimeFetch(path, {
-      method, credentials: 'include', headers: body ? { 'Content-Type': 'application/json' } : undefined, body,
+      method, credentials: 'include', headers: body ? { 'Content-Type': 'application/json' } : undefined, body, signal,
     });
   } catch {
     throw new PlatformAccountError('platform_unavailable');
@@ -58,7 +59,18 @@ export const requestPlatformAccount = async <T>(path: string, schema: z.ZodType<
   return parsed.data;
 };
 export const readPlatformAccount = () => requestPlatformAccount('/api/platform-account', stateSchema);
-export const readPlatformIdentitySession = () => requestPlatformAccount('/api/platform-account/session', identitySessionSchema);
+let standaloneRuntime: (() => boolean) | undefined;
+
+export const readPlatformIdentitySession = async (signal?: AbortSignal) => {
+  const isCurrent = captureRuntimeInstance();
+  const state = await requestPlatformAccount('/api/platform-account/session', identitySessionSchema, 'GET', undefined, signal);
+  if (isCurrent() && !signal?.aborted) standaloneRuntime = state.status === 'disabled' ? isCurrent : undefined;
+  return state;
+};
+
+export const isRetiredPlatformProvider = (id?: string | null): boolean =>
+  (id === 'unihub' || id === 'llmrouter' || id?.startsWith('superwagie-account-') === true)
+  && standaloneRuntime?.() === true;
 export const loginPlatformAccount = () => requestPlatformAccount('/api/platform-account/login', z.object({ authorizationUrl: z.string().url() }), 'POST');
 export const selectPlatformAccount = async (accountId: string) => {
   const runtimeKey = getRuntimeKey();

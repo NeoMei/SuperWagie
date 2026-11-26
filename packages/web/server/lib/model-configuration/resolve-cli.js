@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import { createModelConfigurationRuntime } from './runtime.js';
+import { isPlatformServiceEnabled } from '../platform-account/service-mode.js';
 import { createModelBootstrapStore } from './bootstrap-store.js';
 import { openCodeCredentialSource, projectCredentialEntries } from '../opencode/auth.js';
 import { generateConfiguredSpeech, isBailianSpeechBinding } from './speech.js';
@@ -39,6 +40,7 @@ export const resolveModelBindingFromDisk = (purpose, { dataDir, supportedProtoco
   const productManaged = environment.OPENCHAMBER_PRODUCT_MANAGED_MEDIA === '1';
   return createModelConfigurationRuntime({
     dataDir: directory, env: environment, readOpenCodeCredentials: privateCredentialReader(environment),
+    platformServicesEnabled: () => isPlatformServiceEnabled(environment),
     useProductManagedMedia: () => productManaged,
     readModelBootstrapCredential: (ref) => productManaged ? null : store.getSecret(ref),
   }).resolveBinding(purpose, { supportedProtocols });

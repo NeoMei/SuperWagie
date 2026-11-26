@@ -104,6 +104,32 @@ test('holds the application behind account sign-in', async () => {
   expect(host.querySelector('button[aria-label="Quit SuperWagie"]')).toBeNull();
 });
 
+test('opens the application for a runtime that explicitly disables platform login', async () => {
+  response = { status: 'disabled' };
+  await render();
+  expect(host.textContent).toContain('Application mounted');
+  expect(host.querySelector('form')).toBeNull();
+  expect(requests.map(({ path }) => new URL(path, 'http://localhost').pathname)).toEqual(['/api/platform-account/session']);
+});
+
+test('preserves a verified standalone workspace until the server reports a different access state', async () => {
+  response = { status: 'disabled' };
+  await render();
+  const workspace = host.querySelector('main');
+  expect(workspace).not.toBeNull();
+
+  readResponse = () => Promise.reject(new Error('offline'));
+  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  expect(host.querySelector('main')).toBe(workspace);
+  expect(host.querySelector('form')).toBeNull();
+
+  readResponse = null;
+  response = { status: 'signed-out' };
+  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  expect(host.querySelector('main')).toBeNull();
+  expect(host.textContent).toContain('Sign in to SuperWagie');
+});
+
 test('remembers the username after gate login and clears the password on sign-out', async () => {
   switchRuntimeEndpoint({ apiBaseUrl: 'http://gate-username.test', runtimeKey: 'test-gate-username' });
   await render();

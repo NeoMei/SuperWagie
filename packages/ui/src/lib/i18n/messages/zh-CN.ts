@@ -2192,6 +2192,7 @@ const baseDict = {
   'header.actions.terminalPanelWithShortcut': '终端面板（{shortcut}）',
   'chat.recap.aria': '会话回顾',
   'chat.recap.label': '回顾：',
+  'chat.sessionError.managedModelRetired': '此模型服务已停用。请选择其他模型继续。',
   'chat.sessionError.title': '内核停止了本次回复',
   'chat.sessionError.modelReplyTitle': '模型暂时无法回复',
   'chat.assistantError.modelNotConfigured': '当前模型尚未连接。请选择可用模型开始聊天，或前往设置中的模型配置完成连接。',

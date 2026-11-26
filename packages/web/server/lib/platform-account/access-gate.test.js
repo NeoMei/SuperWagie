@@ -72,6 +72,51 @@ describe('UniHub global access gate', () => {
     gate.dispose();
   });
 
+  it('accepts runtime credentials only on unpinned standalone instances', async () => {
+    const env = {};
+    let identity = null;
+    const gate = createPlatformAccessGate({ env, runtimeOnly: true, isStandaloneRequestHostAllowed: () => true, resolveIdentity: async () => identity, getAccountRuntime: () => null });
+    const api = request('GET', '/api/config/settings');
+    const upgrade = request('GET', '/api/terminal/ws');
+    let reachable = 0;
+    const denied = response();
+    await gate.middleware(api, denied, () => { reachable++; });
+    expect(denied.statusCode).toBe(401);
+    expect((await gate.authorizeUpgrade(upgrade)).status).toBe(401);
+
+    identity = { type: 'client', token: 'fixture' };
+    await gate.middleware(api, response(), () => { reachable++; });
+    expect(reachable).toBe(1);
+    expect(await gate.authorizeUpgrade(upgrade)).toBeNull();
+
+    env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID = 'private-owner';
+    const pinned = response();
+    await gate.middleware(api, pinned, () => { reachable++; });
+    expect(reachable).toBe(1);
+    expect(pinned.statusCode).toBe(503);
+    expect((await gate.authorizeUpgrade(upgrade)).status).toBe(503);
+    gate.dispose();
+  });
+
+  it('passes trusted packaged writes with an existing device credential', async () => {
+    const origin = 'openchamber-ui://app';
+    const identity = { type: 'client', token: 'device-fixture' };
+    const gate = createPlatformAccessGate({
+      env: {}, runtimeOnly: true, getAccountRuntime: () => null,
+      isStandaloneRequestHostAllowed: () => true,
+      isRequestOriginAllowed: (req) => req.headers.origin === origin,
+      resolveIdentity: async (req, res) => {
+        expect(res).toBeNull();
+        return req.headers.authorization === 'Bearer device-fixture' ? identity : null;
+      },
+    });
+    const api = { ...request('PUT', '/api/config/settings'), headers: { origin, authorization: 'Bearer device-fixture' } };
+    const res = response();
+    let reached = false;
+    await gate.middleware(api, res, () => { reached = true; });
+    expect(reached).toBe(true);
+  });
+
   it('keeps callback exceptions behind both exact routing and service authority', async () => {
     let permitted = false;
     const gate = createPlatformAccessGate({

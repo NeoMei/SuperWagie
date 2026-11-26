@@ -1404,6 +1404,7 @@ from its separate server and does not relay proof issued inside a space.
 - Project config: `<workingDirectory>/.opencode/opencode.json(c)` first, else `<workingDirectory>/opencode.json(c)`.
 - Custom config: `OPENCODE_CONFIG` env var path.
 - Origins (`../security/request-security.js`): CORS with credentials and socket upgrades trust the request's own host, `publicOrigin`, and the packaged clients (`openchamber-ui://app`, `capacitor://localhost`, `https://localhost`). Any other loopback port is trusted only on a development server (`OPENCHAMBER_ELECTRON_DEV=1` or `OPENCHAMBER_ALLOW_DEV_ORIGINS=1`, which the dev scripts set). Without a UI password a socket that names an `Origin` must still come from one of these (`isPasswordlessSocketOriginAllowed`): nothing else would stop a website open in the user's browser from reaching the terminal on the loopback port. Clients that send no `Origin` are not pages and pass.
+- Standalone hosts verify the HTTP authority before bootstrap and socket authorization. They accept loopback names, the receiving interface, the configured bind and LAN names, the active tunnel hostname, and the configured `publicOrigin`. A reverse proxy that preserves an external hostname uses that configured public origin.
 - Rate limit config: `OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS`, `OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS` env vars. Login and tunnel-connect limits key on `req.ip`. `server/index.js` sets `trust proxy` to loopback and private ranges, so `X-Forwarded-For` counts only when a proxy on this machine or a private network sent it; from anyone else it is ignored and cannot open a fresh bucket per attempt.
 
 ## Notes for contributors
@@ -1455,6 +1456,10 @@ under a running child.
   global `opencode.json` and below their project config.
 - `OPENCODE_CONFIG_CONTENT` is passed through untouched, so whatever the user
   put there still applies.
+- Standalone SuperWagie adds provider-use deny rules for the retired UniHub and
+  LLMRouter provider IDs and the generated account-key provider prefix in its
+  managed OpenCode child. The managed layer applies these rules without
+  modifying user provider files, credentials or session history.
 - `OPENCHAMBER_AGENT_TOOL_URL` and a fresh `OPENCHAMBER_AGENT_TOOL_TOKEN` are
   always in the child environment, including while every managed tool is off —
   a tool switched on later then reaches a process that can already call back.

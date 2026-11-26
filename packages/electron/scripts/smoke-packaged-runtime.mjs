@@ -77,6 +77,7 @@ try {
     XDG_CONFIG_HOME: path.join(home, '.config'), XDG_DATA_HOME: path.join(home, '.local/share'),
     XDG_STATE_HOME: path.join(home, '.local/state'), XDG_CACHE_HOME: path.join(home, '.cache'),
     OPENCHAMBER_DESKTOP_USER_DATA_DIR: path.join(root, 'electron'), OPENCHAMBER_RELAY_HOST: 'off' };
+  delete environment.OPENCHAMBER_UNIHUB_MODE;
   if (process.platform === 'darwin') { environment.SHELL = '/bin/zsh'; environment.ZDOTDIR = home; }
   checkpoint('packaged cold launch');
   appChild = spawn(executable, [`--remote-debugging-port=${debugPort}`, '--disable-features=MacAppCodeSignClone'], { cwd: project, env: environment, windowsHide: true, stdio: 'ignore' });
@@ -126,12 +127,23 @@ try {
     assert(result && Number.isInteger(result.status), 'Renderer API call failed');
     return new Response(result.status === 204 ? null : result.text, { status: result.status, headers: { 'Content-Type': 'application/json' } });
   };
-  checkpoint('existing account login');
-  assert.equal((await rendererFetch('/api/info')).status, 401, 'Signed-out business API must remain gated');
-  const login = await rendererFetch('/api/platform-account/password-login', { method: 'POST', body: JSON.stringify({ username: fixture.username, password: fixture.password }) });
-  assert.equal(login.status, 200); assert.equal((await login.json()).status, 'signed-in');
-  const selection = await rendererFetch('/api/platform-account/account', { method: 'PUT', body: JSON.stringify({ accountId: fixture.accountId }) });
-  assert.equal(selection.status, 200);
+  checkpoint('packaged identity mode');
+  const identity = await rendererFetch('/api/platform-account/session');
+  assert.equal(identity.status, 200);
+  const { status } = await identity.json();
+  receipt.platformIdentityMode = status;
+  if (status === 'disabled') {
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/info`, { headers: { Authorization: 'Bearer invalid-device-fixture' } })).status, 401);
+    assert.equal((await rendererFetch('/api/platform-account/commerce')).status, 410);
+    assert.deepEqual(fixture.counts(), { authorizations: 0, tokens: 0, authenticatedReads: 0, rejected: 0 });
+  } else {
+    assert.equal(status, 'signed-out');
+    assert.equal((await rendererFetch('/api/info')).status, 401);
+    const login = await rendererFetch('/api/platform-account/password-login', { method: 'POST', body: JSON.stringify({ username: fixture.username, password: fixture.password }) });
+    assert.equal(login.status, 200); assert.equal((await login.json()).status, 'signed-in');
+    const selection = await rendererFetch('/api/platform-account/account', { method: 'PUT', body: JSON.stringify({ accountId: fixture.accountId }) });
+    assert.equal(selection.status, 200);
+  }
   await cdp.send('Page.reload', {}, { timeoutMs: 10_000 });
   receipt.authenticatedAppMounted = await until(() => evaluateValue(cdp, `Boolean([...(document.querySelector('#root')?.children??[])].some(element=>Object.keys(element).some(key=>key.startsWith('__reactFiber')))&&document.body?.innerText.length>10&&!document.getElementById('initial-loading')&&!document.querySelector('#platform-account-gate-title')&&!document.querySelector('input[type="password"]'))`));
   const sdk = OpenCode.make({ baseUrl: 'http://packaged-runtime.invalid', fetch: async (input, init) => {
@@ -182,6 +194,10 @@ try {
         defaultConsoleCodePage: Number(codePage), defaultPipelineUnicode: output.includes('pipeline-default=犇马✓'),
         explicitUtf8Console: true, unicodeOutput: true };
     } finally { await sdk.shell.remove({ id: created.data.id, location: { directory: project } }); }
+  }
+  if (receipt.platformIdentityMode === 'disabled') {
+    receipt.platformFixtureCalls = fixture.counts();
+    assert.deepEqual(receipt.platformFixtureCalls, { authorizations: 0, tokens: 0, authenticatedReads: 0, rejected: 0 });
   }
   checkpoint('native quit');
   assert.equal(rendererFailure, false, 'Packaged renderer raised an exception or root error boundary');

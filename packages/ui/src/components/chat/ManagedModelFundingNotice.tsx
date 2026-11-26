@@ -1,4 +1,5 @@
 import React from 'react';
+import { usePlatformServices } from '@/components/auth/platformServicesContext';
 import { Button } from '@/components/ui/button';
 import { DialogTrigger } from '@/components/ui/dialog';
 import { PlatformAccountDialog } from '@/components/sections/platform-account/PlatformAccountDialog';
@@ -8,6 +9,10 @@ import { useI18n } from '@/lib/i18n';
 export const ManagedModelFundingNotice = ({ membershipExpired = false }: { membershipExpired?: boolean }) => {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
+  const platformServicesEnabled = usePlatformServices();
+  if (!platformServicesEnabled) {
+    return <p role="status" className="typography-meta text-foreground">{t('chat.sessionError.managedModelRetired')}</p>;
+  }
   return (
     <PlatformAccountDialog open={open} onOpenChange={setOpen}>
       <div role="status" className="mt-2 rounded-lg bg-[var(--status-warning-background)] px-3 py-2">

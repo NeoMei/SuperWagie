@@ -36,6 +36,7 @@ export type SettingsSearchResult = SettingsSearchItem & {
 interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
+  platformServicesEnabled?: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
   isMac: boolean;
   // Windows desktop shell — for controls that only render on win32.
@@ -49,7 +50,7 @@ export const shortcutSearchItemId = (actionId: string): string => `shortcuts.act
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: 'models.overview', page: 'models', titleKey: 'modelConfiguration.tab.overview', keywords: ['model status', 'connection test', 'health', '模型总览', '配置状态', '故障'] },
-  { id: 'models.quick-setup', page: 'models', titleKey: 'modelConfiguration.quickSetup.open', descriptionKey: 'modelConfiguration.quickSetup.description', keywords: ['llmrouter', 'quick setup', 'unihub', 'models', '快速设置', '模型发现'], isAvailable: (ctx) => !ctx.isVSCode },
+  { id: 'models.quick-setup', page: 'models', titleKey: 'modelConfiguration.quickSetup.open', descriptionKey: 'modelConfiguration.quickSetup.description', keywords: ['quick setup', 'models', '快速设置', '模型发现'], isAvailable: (ctx) => !ctx.isVSCode && ctx.platformServicesEnabled === true },
   ...Object.entries(MODEL_PURPOSE_LABELS).map(([purpose, titleKey]): SettingsSearchItem => ({
     id: `models.${purpose}`,
     page: 'models',
@@ -1502,7 +1503,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'voice.speech-recognition',
     page: 'voice',
     titleKey: 'settings.voice.page.section.speechRecognition',
-    keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'llmrouter', 'asr', 'qwen3-asr-flash', 'microphone'],
+    keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'asr', 'qwen3-asr-flash', 'microphone'],
   },
   {
     id: 'tunnel.provider',

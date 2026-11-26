@@ -8,6 +8,7 @@ import type { Part } from '@/lib/opencode/model';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { I18nProvider } from '@/lib/i18n';
+import { PlatformServicesContext } from '@/components/auth/platformServicesContext';
 import { SyncProvider } from '@/sync/sync-context';
 import type { ChatMessageEntry, TurnGroupingContext } from '../lib/turns/types';
 import { projectTurnActivity } from '../lib/turns/projectTurnActivity';
@@ -43,17 +44,19 @@ const context: TurnGroupingContext = {
   turnId: 'turn', isFirstAssistantInTurn: true, isLastAssistantInTurn: true,
   isLatestTurn: true, isWorking: false, hasTools: false, hasReasoning: false,
 };
-const renderAnswer = (parts: Part[], turnContext = context, showReasoningTraces = true, error?: { message?: string; responseBody?: string }) => renderToStaticMarkup(
+const renderAnswer = (parts: Part[], turnContext = context, showReasoningTraces = true, error?: { message?: string; responseBody?: string; platformServices?: boolean }) => renderToStaticMarkup(
   <RuntimeAPIContext.Provider value={runtimeApis}>
     <SyncProvider sdk={sdk} directory="">
       <I18nProvider>
-        <MessageBody
-          messageId="answer" parts={parts} isUser={false} isMessageCompleted messageFinish="stop"
-          isMobile={false} copiedCode={null} onCopyCode={() => {}} expandedTools={new Set()}
-          onToggleTool={() => {}} onShowPopup={() => {}} streamPhase="completed" allowAnimation={false}
-          hasTextContent showReasoningTraces={showReasoningTraces} turnGroupingContext={turnContext}
-          errorMessage={error?.message} errorResponseBody={error?.responseBody}
-        />
+        <PlatformServicesContext.Provider value={error?.platformServices ?? false}>
+          <MessageBody
+            messageId="answer" parts={parts} isUser={false} isMessageCompleted messageFinish="stop"
+            isMobile={false} copiedCode={null} onCopyCode={() => {}} expandedTools={new Set()}
+            onToggleTool={() => {}} onShowPopup={() => {}} streamPhase="completed" allowAnimation={false}
+            hasTextContent showReasoningTraces={showReasoningTraces} turnGroupingContext={turnContext}
+            errorMessage={error?.message} errorResponseBody={error?.responseBody}
+          />
+        </PlatformServicesContext.Provider>
       </I18nProvider>
     </SyncProvider>
   </RuntimeAPIContext.Provider>,
@@ -99,16 +102,22 @@ describe('managed gateway size refusal', () => {
   }
 
   test('shows credit purchase guidance for a native credit funding refusal', () => {
-    const html = renderAnswer([], context, true, { responseBody: '{"error":{"code":"platform_model_credits_required"}}' });
+    const html = renderAnswer([], context, true, { responseBody: '{"error":{"code":"platform_model_credits_required"}}', platformServices: true });
     expect(html).toContain('Get credits');
     expect(html).toContain('There are not enough credits');
     expect(html).not.toContain('Top up model balance');
   });
 
   test('keeps the funding action for the confirmed funding refusal', () => {
-    const html = renderAnswer([], context, true, { responseBody: '{"error":{"code":"platform_model_funding_required"}}' });
+    const html = renderAnswer([], context, true, { responseBody: '{"error":{"code":"platform_model_funding_required"}}', platformServices: true });
     expect(html).toContain('Get credits');
     expect(html).not.toContain('The model gateway rejected this request during its body read or size check');
+  });
+
+  test('standalone chat offers another model when a historical turn requires platform funds', () => {
+    const html = renderAnswer([], context, true, { responseBody: '{"error":{"code":"platform_model_funding_required"}}' });
+    expect(html).toContain('Select another model to continue.');
+    expect(html).not.toContain('Get credits');
   });
 });
 

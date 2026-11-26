@@ -6,6 +6,24 @@ const createRuntime = () => createRequestSecurityRuntime({
 });
 
 describe('request security runtime', () => {
+  test('standalone host authority comes from local or configured endpoints', async () => {
+    const runtime = createRequestSecurityRuntime({
+      readSettingsFromDiskMigrated: async () => ({ publicOrigin: 'https://workspace.example.test' }),
+    });
+    const allowed = (host, localAddress = '127.0.0.1') => runtime.isStandaloneRequestHostAllowed({
+      headers: { host, origin: `http://${host}`, 'x-forwarded-host': 'workspace.example.test' },
+      socket: { localAddress },
+    }, { bindHost: 'device.lan', lanUrl: 'http://paired.lan:4120', tunnelHost: 'tunnel.example.test' });
+
+    for (const host of ['localhost:4120', '[::1]:4120', 'device.lan:4120', 'paired.lan:4120', 'workspace.example.test', 'tunnel.example.test']) {
+      expect(await allowed(host)).toBe(true);
+    }
+    expect(await allowed('192.168.1.50:4120', '::ffff:192.168.1.50')).toBe(true);
+    expect(await allowed('unrecognized.example.test:4120')).toBe(false);
+    expect(await allowed('workspace.example.test.invalid')).toBe(false);
+    expect(await allowed('workspace.example.test/invalid')).toBe(false);
+  });
+
   test('allows packaged client origins for remote client transports', async () => {
     const runtime = createRuntime();
 

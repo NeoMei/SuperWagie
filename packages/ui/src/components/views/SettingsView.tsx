@@ -1,3 +1,4 @@
+import { usePlatformServices } from '@/components/auth/platformServicesContext';
 import React from 'react';
 import { cn } from '@/lib/utils';
 import {
@@ -345,17 +346,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const trackers = useTrackerDescriptors();
   const sourceControlProviders = useSourceControlProviders();
+  const platformServicesEnabled = usePlatformServices();
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
-      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux },
+      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux, platformServicesEnabled },
       visiblePageSlugs,
       t,
       getPageTitle,
       trackers,
       sourceControlProviders,
     });
-  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, sourceControlProviders, t, trackers, visiblePageSlugs]);
+  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, platformServicesEnabled, runtimeCtx, settingsSearchQuery, sourceControlProviders, t, trackers, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
     if (result.id.startsWith('agents.')) {

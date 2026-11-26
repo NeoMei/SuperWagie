@@ -20,7 +20,7 @@ Once on, you get a play button on messages to hear them read aloud.
 
 ## Dictating messages (speech-to-text)
 
-Continuous dictation and short voice input use LLMRouter ASR qwen3-asr-flash through your SuperWagie account key. The server buffers audio and sends WAV segments to https://llmrouter.quukk.com/v1/audio/transcriptions. No model download, API key, or custom Whisper server is needed. The composer inserts the transcript when you stop recording. In enterprise mode this remote transcription is refused.
+For dictation and short voice input, set up a compatible transcription connection in Model configuration. The composer inserts the transcript when you stop recording. Enterprise mode restricts remote transcription.
 
 API keys you enter for read-aloud services are kept by the OpenChamber server, not in your browser. Type a key and press Enter to save it; the field then shows that a key is saved, and the cross removes it.
 

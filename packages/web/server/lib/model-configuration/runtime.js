@@ -114,13 +114,25 @@ const resolved = (state, purpose) => {
 };
 const isLoopback = (baseUrl) => ['localhost', '127.0.0.1', '[::1]'].includes(new URL(baseUrl).hostname.toLowerCase());
 const credentialFingerprint = (source, apiKey) => createHash('sha256').update(JSON.stringify({ source, apiKey })).digest('hex');
+const isPlatformProvider = (id) => id === 'unihub' || id === 'llmrouter' || id.startsWith('superwagie-account-');
+const isPlatformConnection = ({ providerId, protocol, baseUrl, credentialSource }) =>
+  isPlatformProvider(providerId)
+  || protocol === 'managed-media'
+  || credentialSource?.type === 'model-bootstrap'
+  || (credentialSource?.type === 'opencode' && isPlatformProvider(credentialSource.providerId))
+  || ['unihub.quukk.com', 'llmrouter.quukk.com'].includes(new URL(baseUrl).hostname.replace(/\.$/, ''));
+
 
 /** Server-only state. Each operation reads fresh state; callers must not cache resolved keys. */
-export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fetchImpl = fetch, prepareBindingChange, readOpenCodeCredentials, readOpenCodeProviderMetadata, readModelBootstrapCredential, deleteModelBootstrapCredential, useProductManagedMedia = () => false, isProductMediaOperationConfigured = () => false, env = process.env } = {}) => {
+export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fetchImpl = fetch, prepareBindingChange, readOpenCodeCredentials, readOpenCodeProviderMetadata, readModelBootstrapCredential, deleteModelBootstrapCredential, platformServicesEnabled = () => true, useProductManagedMedia = () => false, isProductMediaOperationConfigured = () => false, env = process.env } = {}) => {
   if (!dataDir) throw new Error('Model configuration needs a data directory');
   const filePath = path.join(dataDir, 'model-configuration.json');
   let mutationQueue = Promise.resolve();
   const enterpriseMode = () => isEnterpriseMode(enterpriseOptions);
+  const connectionAvailable = (connection) => platformServicesEnabled() || !isPlatformConnection(connection);
+  const requireConnectionAvailable = (connection) => {
+    if (!connectionAvailable(connection)) fail('model_configuration_managed_unavailable', 409);
+  };
   const guardEntry = () => { if (enterpriseMode()) fail('enterprise_mode', 403); };
   const guardEgress = (binding) => { if (enterpriseMode() && !isLoopback(binding.baseUrl)) fail('enterprise_mode', 403); };
   const legacyProductOcr = (binding, connection) => useProductManagedMedia() && binding.purpose === 'ocr'
@@ -150,6 +162,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     const value = resolved(state, purpose);
     if (!value) return null;
     const connection = state.connections.find((entry) => entry.id === value.connectionId);
+    if (!connectionAvailable(connection)) return null;
     if (!connection.credentialSource) return value;
     const snapshot = await readCredentials();
     try { return { ...value, apiKey: await referenceKey(connection, snapshot) }; }
@@ -169,7 +182,10 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     assertIntegrity(parsed.data);
     return parsed.data;
   };
-  const publicState = async (state) => {
+  const publicState = async (storedState) => {
+    const activeConnections = storedState.connections.filter(connectionAvailable);
+    const activeIds = new Set(activeConnections.map(({ id }) => id));
+    const state = { ...storedState, connections: activeConnections, bindings: storedState.bindings.filter(({ connectionId }) => activeIds.has(connectionId)) };
     const snapshot = await readCredentials();
     const bootstrapKeys = new Map();
     for (const connection of state.connections) {
@@ -211,8 +227,8 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     });
     return {
       version: state.version, revision: state.revision, enterpriseMode: enterpriseMode(), purposes: MODEL_PURPOSES,
-      presets: MODEL_PRESETS, connections,
-      credentialSources: { status: snapshot.status, sources: snapshot.sources }, bindings,
+      presets: MODEL_PRESETS.filter(connectionAvailable), connections,
+      credentialSources: { status: snapshot.status, sources: snapshot.sources.filter(({ providerId }) => platformServicesEnabled() || !isPlatformProvider(providerId)) }, bindings,
     };
   };
   const writeState = async (state, expectedBootstrapCredential, assertCurrent) => {
@@ -300,6 +316,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
   const saveConnection = async (input) => {
     guardEntry();
     const { revision, connection } = parseInput(connectionMutationSchema, input);
+    requireConnectionAvailable(connection);
     return mutate(revision, async (state) => {
       guardEntry();
       const id = connection.id ?? randomUUID();
@@ -311,6 +328,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       const nextConnection = credentialSource
         ? { ...connection, id, credentialSource }
         : { ...connection, id, apiKey: connection.apiKey ?? previous?.apiKey };
+      requireConnectionAvailable(nextConnection);
       if (credentialSource) await referenceKey(nextConnection, await readCredentials());
       const next = structuredClone(state);
       next.connections = [...next.connections.filter((entry) => entry.id !== id), nextConnection];
@@ -404,6 +422,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
       if (binding) {
         const connection = state.connections.find((entry) => entry.id === binding.connectionId);
         if (!connection) return fail('model_configuration_connection_missing', 404);
+        requireConnectionAvailable(connection);
         checkPreset({ ...binding, purpose }, connection);
       }
       const next = { ...state, bindings: state.bindings.filter((entry) => entry.purpose !== purpose) };
@@ -452,10 +471,11 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     const binding = state.bindings.find((entry) => entry.purpose === purpose);
     if (!binding) return null;
     if (MODEL_PURPOSES.find((entry) => entry.id === purpose).status !== 'available') return fail('model_configuration_not_connected', 501);
+    const connection = state.connections.find((entry) => entry.id === binding.connectionId);
+    if (!connectionAvailable(connection)) return null;
     const preset = findPreset(binding.presetId);
     const selected = resolved(state, purpose);
     guardEgress(selected);
-    const connection = state.connections.find((entry) => entry.id === binding.connectionId);
     if (legacyProductOcr(binding, connection)) return fail('model_configuration_managed_unavailable', 409);
     if (managedMediaPurpose(binding, connection)) {
       if (enterpriseMode()) return fail('enterprise_mode', 403);
@@ -514,6 +534,7 @@ export const createModelConfigurationRuntime = ({ dataDir, enterpriseOptions, fe
     if (!connection) return fail('model_configuration_connection_missing', 404);
     if (expectedBootstrapCredential && JSON.stringify(connection) !== JSON.stringify(parseInput(storedConnectionSchema, expectedBootstrapCredential.connection))) return fail('model_configuration_account_key_conflict', 409);
     if (MODEL_PURPOSES.find((entry) => entry.id === purpose).status !== 'available') return fail('model_configuration_not_connected', 501);
+    requireConnectionAvailable(connection);
     const candidate = { ...model, purpose, connectionId: id };
     checkPreset(candidate, connection);
     const preset = findPreset(candidate.presetId);

@@ -2235,6 +2235,7 @@ const baseDict = {
   'header.actions.terminalPanelWithShortcut': 'Terminal panel ({shortcut})',
   'chat.recap.aria': 'Session recap',
   'chat.recap.label': 'Recap:',
+  'chat.sessionError.managedModelRetired': 'This model service is unavailable. Select another model to continue.',
   'chat.sessionError.title': 'Engine stopped this reply',
   'chat.sessionError.modelReplyTitle': 'The model could not reply',
   'chat.assistantError.modelNotConfigured': 'This model is not connected yet. Choose an available model to chat, or finish connecting it in Settings → Model configuration.',

@@ -1,4 +1,30 @@
 import { sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
+import { isLoopbackBindHost } from './bind-host.js';
+
+/** @param {string | undefined} authority */
+const authorityHostname = (authority) => {
+  if (!authority || /[\s/\\@?#]/.test(authority)) return null;
+  try {
+    return new URL(`http://${authority}`).hostname;
+  } catch {
+    return null;
+  }
+};
+
+const socketHostname = (address) => {
+  if (!address) return null;
+  const normalized = address.replace(/^::ffff:(?=\d+\.)/, '');
+  return authorityHostname(normalized.includes(':') ? `[${normalized}]` : normalized);
+};
+
+const configuredHostname = (origin) => {
+  if (!origin) return null;
+  try {
+    return new URL(origin).hostname;
+  } catch {
+    return null;
+  }
+};
 
 /** Remove OpenChamber client credentials before an authenticated request crosses an upstream boundary. */
 export const stripClientCredentialQuery = (searchParams) => {
@@ -100,6 +126,21 @@ export const createRequestSecurityRuntime = (deps) => {
       }
     }
     return null;
+  };
+
+  const isStandaloneRequestHostAllowed = async (req, { bindHost, lanUrl, tunnelHost }) => {
+    const host = authorityHostname(req.headers.host);
+    if (!host) return false;
+    // Trust the bound interface and operator settings. Browser-supplied proxy
+    // headers and an Origin agreeing with Host carry no host authority.
+    if (isLoopbackBindHost(host) || host === socketHostname(req.socket?.localAddress)
+      || host === authorityHostname(bindHost) || host === configuredHostname(lanUrl) || host === tunnelHost) return true;
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      return host === configuredHostname(settings?.publicOrigin);
+    } catch {
+      return false;
+    }
   };
 
   const rejectWebSocketUpgrade = (socket, statusCode, reason) => {
@@ -211,6 +252,7 @@ export const createRequestSecurityRuntime = (deps) => {
 
   return {
     getUiSessionTokenFromRequest,
+    isStandaloneRequestHostAllowed,
     rejectWebSocketUpgrade,
     isRequestOriginAllowed,
   };

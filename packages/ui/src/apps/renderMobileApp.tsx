@@ -11,11 +11,11 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 import { getDeviceInfo } from '@/lib/device';
 import { markAppBootReady } from './appBootReady';
 import { initializeSharedPreferences } from './initializeSharedPreferences';
+import { canSaveNativeMobileModelPreferences } from './initializeNativeMobileRuntime';
 import { installMobileWidgetSnapshotBridge } from './mobileWidgetSnapshot';
-import { I18nProvider, initializeLocale } from '@/lib/i18n';
+import { I18nProvider } from '@/lib/i18n';
 import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoader';
 import { MobileApplicationBoundary } from './MobileApplicationBoundary';
-import { mobileOfficialMode } from './mobileOfficialRoute';
 import { MobileBusinessApplication } from './MobileBusinessApplication';
 import { isCapacitorApp } from '@/lib/platform';
 
@@ -25,18 +25,10 @@ export function renderMobileApp(apis: RuntimeAPIs) {
   // a wide native device (iPad landscape) would fall out of the mobile branch.
   window.__OPENCHAMBER_SURFACE__ = 'mobile';
   const isNativeShell = isCapacitorApp();
-  // The selected-material reader mounts no workspace, model, widget or diff bootstrap.
-  if (!isNativeShell && mobileOfficialMode(window.location.search)) {
-    initializeLocale(); getDeviceInfo(); markAppBootReady();
-    const element = document.getElementById('root');
-    if (!element) throw new Error('Root element not found');
-    createRoot(element).render(<StrictMode><I18nProvider><MobileApplicationBoundary native={false} search={window.location.search} /></I18nProvider></StrictMode>);
-    return;
-  }
-
   preloadMarkdownRenderer();
   initializeSharedPreferences({
     logLabel: '[mobile-main]',
+    canSaveModelPrefs: isNativeShell ? canSaveNativeMobileModelPreferences : undefined,
     // Persisted typography/appearance is now applied — release the splash gate so the
     // first UI paint is already at its final sizes.
     onAppearanceSettled: markAppBootReady,

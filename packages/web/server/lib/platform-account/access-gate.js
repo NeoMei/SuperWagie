@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hasPlatformOwnerPolicy } from './service-mode.js';
 import { isMobileOfficialAuthRequest } from '../guests/mobile-official-auth.js';
 
 const API_PREFIX = '/api';
@@ -53,7 +54,7 @@ const isGrantOnlyRequest = (req) => {
 };
 
 const statusFor = (error) => {
-  if (error?.code === 'platform_instance_owner_forbidden') return 403;
+  if (['platform_instance_owner_forbidden', 'platform_origin_forbidden', 'platform_host_forbidden'].includes(error?.code)) return 403;
   if (error?.code === 'platform_runtime_auth_required' || error?.code === 'platform_session_expired') return 401;
   if (error?.code === 'platform_session_changed') return 409;
   if (error?.code === 'platform_runtime_unsupported') return 409;
@@ -68,11 +69,14 @@ const codeFor = (error) => {
 };
 
 /**
- * Enforces the UniHub user boundary after transport authentication and before
- * every API route. The identity resolver is deliberately injected so this
- * module never owns cookies, bearer tokens or account-session storage.
+ * Enforces standalone runtime or managed account authorization before API
+ * routes. The injected resolver owns cookies, bearer tokens and session storage.
  */
-export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false, env = process.env }) => {
+export const createPlatformAccessGate = ({
+  resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false,
+  isRequestOriginAllowed = () => false, isStandaloneRequestHostAllowed = () => false,
+  runtimeOnly = false, env = process.env,
+}) => {
   if (!requiredCallback.safeParse(resolveIdentity).success || !requiredCallback.safeParse(getAccountRuntime).success) {
     throw new TypeError('platform access gate requires identity and account runtime resolvers');
   }
@@ -98,7 +102,28 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
   };
 
   const authorize = async (req, res, { allowUrlToken = false } = {}) => {
-    const identity = await resolveIdentity(req, res, { allowUrlToken });
+    const standalone = runtimeOnly && !hasPlatformOwnerPolicy(env);
+    const reading = ['GET', 'HEAD'].includes(methodOf(req));
+    if (standalone) {
+      const origin = req.headers?.origin;
+      const fetchSite = req.headers?.['sec-fetch-site'];
+      const untrustedOrigin = origin !== undefined && !await isRequestOriginAllowed(req);
+      const untrustedOriginlessWrite = !reading && origin === undefined && fetchSite !== undefined && fetchSite !== 'same-origin';
+      if (untrustedOrigin || untrustedOriginlessWrite) {
+        const error = new Error('request origin is not trusted');
+        error.code = 'platform_origin_forbidden';
+        throw error;
+      }
+    }
+    // The passwordless resolver can issue a cookie when given a response.
+    // A write must arrive with a credential that already grants access.
+    const identity = await resolveIdentity(req, standalone && !reading ? null : res, { allowUrlToken });
+    if (standalone) {
+      if (identity) return { identity, actor: null, ownerPolicy: null };
+      const error = new Error('runtime authentication required');
+      error.code = 'platform_runtime_auth_required';
+      throw error;
+    }
     const runtime = getAccountRuntime();
     if (!runtime || !requiredCallback.safeParse(runtime.actor).success) {
       const error = new Error('platform account runtime unavailable');
@@ -115,6 +140,13 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
     }
     const ownerPolicy = requireInstanceOwner(runtime, identity, actor);
     return { identity, actor, ownerPolicy };
+  };
+
+  const requireStandaloneRequestHost = async (req) => {
+    if (await isStandaloneRequestHostAllowed(req)) return;
+    const error = new Error('request host is not trusted');
+    error.code = 'platform_host_forbidden';
+    throw error;
   };
 
   // Existing streams must stop after logout, expiry or configuration removal.
@@ -153,36 +185,41 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
     // Express routes are case insensitive by default. Match the entire API
     // namespace under the same rule so /API cannot skip the user boundary.
     const apiPath = path.toLowerCase();
-    if ((apiPath !== API_PREFIX && !apiPath.startsWith(`${API_PREFIX}/`)) || isBootstrapRequest(req) || isGrantOnlyRequest(req)) return next();
     try {
+      if (runtimeOnly) await requireStandaloneRequestHost(req);
+      if ((apiPath !== API_PREFIX && !apiPath.startsWith(`${API_PREFIX}/`)) || isBootstrapRequest(req) || isGrantOnlyRequest(req)) return next();
       if (methodOf(req) === 'POST' && ['/api/openchamber/agent-tool', '/api/openchamber/limit-failover', '/api/openchamber/limit-failover/settle', '/api/notifications/emit', '/api/git/repository-credential'].includes(path) && await authorizeServiceRequest(req)) return next();
       const authorization = await authorize(req, res, { allowUrlToken: true });
       // Readable media and EventSource requests use the existing scoped URL
       // tokens. The injected resolver checks their original path/method scope.
-      track(authorization, res);
+      if (authorization.actor) track(authorization, res);
       return next();
     } catch (error) {
       return res.status(statusFor(error)).json({ error: codeFor(error), code: codeFor(error) });
     }
   };
 
+  const upgradeRejectionMessage = runtimeOnly ? 'Runtime authentication required' : 'UniHub account login required';
+
   const authorizeUpgrade = async (req, { allowUrlToken = true } = {}) => {
     try {
+      if (runtimeOnly) await requireStandaloneRequestHost(req);
       await authorize(req, null, { allowUrlToken });
       return null;
     } catch (error) {
-      return { status: statusFor(error), code: codeFor(error), message: 'UniHub account login required' };
+      return { status: statusFor(error), code: codeFor(error), message: upgradeRejectionMessage };
     }
   };
 
   const guardUpgrade = async (req, socket, reject, onAuthorized) => {
     try {
+      if (runtimeOnly) await requireStandaloneRequestHost(req);
       const authorization = await authorize(req, null, { allowUrlToken: true });
       onAuthorized?.(authorization);
-      track(authorization, socket);
+      if (authorization.actor) track(authorization, socket);
       return true;
     } catch (error) {
-      reject(socket, statusFor(error), 'UniHub account login required');
+      reject(socket, statusFor(error), upgradeRejectionMessage);
       return false;
     }
   };

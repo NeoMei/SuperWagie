@@ -3,12 +3,18 @@
 ## Ownership
 
 `SessionAuthGate` establishes access to the selected runtime. `PlatformAccountGate`
-then establishes the UniHub product user before the application mounts. Backend
+then reads the server’s platform mode and verifies the product user when required. Backend
 authorization owns access enforcement independently of these React gates.
 
 ## Invariants
 
-- Managed web, Electron main and Electron Mini Chat defer workspace bootstrap
+- An authenticated runtime that explicitly reports `disabled` mounts the
+  workspace through the usual bootstrap without a product login. Platform
+  account, billing and model setup controls stay hidden. A transient identity
+  read failure keeps the active standalone workspace available. An unsupported,
+  broken or unreachable service response cannot select standalone mode.
+
+- With legacy platform services enabled, managed web, Electron main and Electron Mini Chat defer workspace bootstrap
   until UniHub reports a signed-in identity. The identity check reads no wallets,
   subscriptions or model credits.
 - Pending, failed, unconfigured, unsupported and signed-out identity states
@@ -69,7 +75,11 @@ authorization owns access enforcement independently of these React gates.
 - Workspace settings, persisted directory validation and home-directory reads
   run after identity authentication. The runtime gate can retain its existing
   bootstrap behavior for callers that do not defer it.
-- VS Code, the complete hosted-mobile application and Capacitor show the explicit unsupported identity state and do not mount their business application. The separately approved hosted selected-material reader has its own isolated pilot account gate, documented in `apps/DOCUMENTATION.md`. Its root retains `SessionAuthGate` for existing runtime access and never invokes normal platform account login or runtime bootstrap. The unsupported hosted root exposes only a link to that reader; Capacitor gets no exception.
+- VS Code uses its extension runtime. Capacitor uses its instance-connect
+  flow. Hosted mobile keeps its runtime session gate and mounts the full app
+  when the server reports standalone mode. Legacy platform-enabled hosted
+  mobile keeps its separate selected-material pilot, documented in
+  `apps/DOCUMENTATION.md`.
 
 ## Decisions
 
