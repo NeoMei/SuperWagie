@@ -205,7 +205,8 @@ test('user center opens outside Settings, navigation stays read-only and explici
         {settingsOpen ? <div data-fixture-settings-window style={{ height: '90vh' }}><SettingsView isWindowed forceMobile={false} /></div> : null}
         {scenario && !walletScenario && !managedScenario ? <div hidden data-fixture-mounted-model-settings><ModelConfigurationPage /></div> : null}</>;
     }
-    createRoot(document.getElementById('root')).render(<RuntimeAPIContext.Provider value={createWebAPIs()}><I18nProvider><EntryPoints /></I18nProvider></RuntimeAPIContext.Provider>);
+    const { PlatformServicesContext } = await import('@/components/auth/platformServicesContext');
+    createRoot(document.getElementById('root')).render(<RuntimeAPIContext.Provider value={createWebAPIs()}><I18nProvider><PlatformServicesContext.Provider value={true}><EntryPoints /></PlatformServicesContext.Provider></I18nProvider></RuntimeAPIContext.Provider>);
   `);
   await run(async ({ cdp, errors: browserErrors, evaluate, navigate }) => {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });

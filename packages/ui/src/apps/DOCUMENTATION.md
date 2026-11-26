@@ -36,7 +36,12 @@ transports and isolated-space completeness checks remain unchanged.
 
 `MobileApplicationBoundary` starts hosted mobile after the runtime session
 gate and the server’s standalone status. Capacitor uses its own connection
-flow. On a legacy platform-enabled server the mobile workspace stays blocked
+flow. On each native instance connection, the authenticated platform-mode read
+precedes model initialization so saved selections from disabled services can be
+ignored. The read has a deadline for older servers. Its result and the ensuing
+bootstrap belong to the instance that started the read.
+
+On a legacy platform-enabled server the hosted mobile workspace stays blocked
 and the hosted browser offers the selected-material reader at
 `?view=official`. The reader does not mount the workspace or OpenCode sync.
 

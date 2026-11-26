@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it } from 'vitest';
 
 import { createModelConfigurationRuntime } from './runtime.js';
 import { resolveSpeechBinding, configuredDefaultVoice, requestConfiguredSpeech } from '../../builtin-skills/supervideo-engine/src/providers/model-configuration.mjs';
@@ -16,8 +16,9 @@ import { synthesize } from '../../builtin-skills/supervideo-engine/src/providers
 const directories = [];
 const hasAudioTools = ['ffmpeg', 'ffprobe'].every((command) => spawnSync(command, ['-version'], { stdio: 'ignore' }).status === 0);
 const previous = { ...process.env };
+beforeEach(() => { process.env.OPENCHAMBER_UNIHUB_MODE = 'on'; });
 afterEach(async () => {
-  for (const key of ['OPENCHAMBER_DATA_DIR', 'SUPERWAGIE_MODEL_RESOLVER', 'SUPERWAGIE_MODEL_NODE', 'OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN', 'OPENCHAMBER_PRODUCT_MANAGED_MEDIA']) {
+  for (const key of ['OPENCHAMBER_UNIHUB_MODE', 'OPENCHAMBER_DATA_DIR', 'SUPERWAGIE_MODEL_RESOLVER', 'SUPERWAGIE_MODEL_NODE', 'OPENCHAMBER_UNIHUB_PROXY_URL', 'OPENCHAMBER_UNIHUB_PROXY_TOKEN', 'OPENCHAMBER_PRODUCT_MANAGED_MEDIA']) {
     if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
   }
   await Promise.all(directories.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));

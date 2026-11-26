@@ -1119,7 +1119,7 @@ describe('UniHub model transport', () => {
     ]}));
     const resolver=fileURLToPath(new URL('../model-configuration/resolve-cli.js',import.meta.url));
     const skillDir=fileURLToPath(new URL('../../builtin-skills/skills/ai-image-to-ppt/scripts/',import.meta.url));
-    const childEnv={...process.env,...f.runtime().createChildEnv(),OPENCHAMBER_DATA_DIR:f.dir,SUPERWAGIE_MODEL_RESOLVER:resolver,SUPERWAGIE_MODEL_NODE:process.execPath};
+    const childEnv={...process.env,...f.runtime().createChildEnv(),OPENCHAMBER_UNIHUB_MODE:'on',OPENCHAMBER_DATA_DIR:f.dir,SUPERWAGIE_MODEL_RESOLVER:resolver,SUPERWAGIE_MODEL_NODE:process.execPath};
     const image = await runProcess('python3',['-c',"import sys; sys.path.insert(0,sys.argv[1]); from provider_credentials import generate_managed_image; generate_managed_image('slide','qwen-image-2.0')",skillDir],{env:childEnv,timeoutMs:30000});
     expect(image.code).not.toBe(0);
     expect(image.stderr).toContain('temporarily unavailable');

@@ -108,16 +108,17 @@ describe('i18n dictionaries', () => {
     }
   });
 
-  test('LLMRouter ASR voice copy is present and translated in both locales', () => {
+  test('voice setup explains transcription configuration in both locales', () => {
     const keys = [
       'settings.voice.page.tooltip.sttLocal',
       'settings.voice.page.tooltip.sttServer',
       'modelConfiguration.note.buffered-dictation',
     ] as const;
     for (const key of keys) {
-      expect(enDict[key]).toContain('LLMRouter ASR');
-      expect(zhCnDict[key]).toContain('LLMRouter ASR');
-      expect(zhCnDict[key]).not.toBe(enDict[key]);
+      expect(enDict[key]).toContain('transcription');
+      expect(zhCnDict[key]).toContain('转写');
+      expect(/llmrouter|unihub/i.test(enDict[key])).toBe(false);
+      expect(/llmrouter|unihub/i.test(zhCnDict[key])).toBe(false);
     }
   });
 

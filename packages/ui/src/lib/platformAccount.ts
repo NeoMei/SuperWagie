@@ -36,12 +36,12 @@ export type PlatformPasswordIssue = z.infer<typeof passwordIssueSchema>;
 export class PlatformAccountError extends Error {
   constructor(readonly code: string, readonly interactionKind?: string, readonly status = 400, readonly passwordIssues: PlatformPasswordIssue[] = [], readonly retryAfter?: number) { super(code); this.name = 'PlatformAccountError'; }
 }
-export const requestPlatformAccount = async <T>(path: string, schema: z.ZodType<T>, method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET', body?: string): Promise<T> => {
+export const requestPlatformAccount = async <T>(path: string, schema: z.ZodType<T>, method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET', body?: string, signal?: AbortSignal): Promise<T> => {
   const runtimeKey = getRuntimeKey();
   let response: Response;
   try {
     response = await runtimeFetch(path, {
-      method, credentials: 'include', headers: body ? { 'Content-Type': 'application/json' } : undefined, body,
+      method, credentials: 'include', headers: body ? { 'Content-Type': 'application/json' } : undefined, body, signal,
     });
   } catch {
     throw new PlatformAccountError('platform_unavailable');
@@ -61,10 +61,10 @@ export const requestPlatformAccount = async <T>(path: string, schema: z.ZodType<
 export const readPlatformAccount = () => requestPlatformAccount('/api/platform-account', stateSchema);
 let standaloneRuntime: (() => boolean) | undefined;
 
-export const readPlatformIdentitySession = async () => {
+export const readPlatformIdentitySession = async (signal?: AbortSignal) => {
   const isCurrent = captureRuntimeInstance();
-  const state = await requestPlatformAccount('/api/platform-account/session', identitySessionSchema);
-  if (isCurrent()) standaloneRuntime = state.status === 'disabled' ? isCurrent : undefined;
+  const state = await requestPlatformAccount('/api/platform-account/session', identitySessionSchema, 'GET', undefined, signal);
+  if (isCurrent() && !signal?.aborted) standaloneRuntime = state.status === 'disabled' ? isCurrent : undefined;
   return state;
 };
 

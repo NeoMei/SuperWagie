@@ -76,6 +76,7 @@ import { MobileWorkspaceDrawer } from './MobileWorkspaceDrawer';
 import { shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
+import { initializeNativeMobileRuntime } from './initializeNativeMobileRuntime';
 import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
@@ -848,12 +849,15 @@ function MobileAppContent({ apis }: MobileAppProps) {
     // runtime-endpoint-changed subscription (which re-bootstraps the app), so we
     // only refresh in place when the transport is 'unchanged'.
     const refreshInPlace = () => {
-      void initializeApp();
+      void initializeNativeMobileRuntime(() => {
+        const initialization = initializeApp();
+        if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
+        if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
+        return initialization;
+      }, () => nativeResumeValidationSeqRef.current === validationSeq);
       void refreshSourceControlProviders(apis.sourceControl);
       void refreshSourceControlAuth(apis.sourceControl, { force: true });
       void refreshTrackers(apis.trackers);
-      if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
-      if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
     };
     const disconnect = (reason: string) => {
       logMobileConnectEvent('resume:disconnect', { reason });
@@ -1147,13 +1151,13 @@ function MobileAppContent({ apis }: MobileAppProps) {
   }, [setIsMobile]);
 
   React.useEffect(() => {
-    // Never bootstrap without a runtime endpoint on native: with apiBaseUrl ''
-    // the resolver falls back to the webview's own origin, where Capacitor's
-    // static server answers every request with index.html — the bootstrap
-    // "succeeds" against a fake backend and flips isConnected back on, leaving
-    // the user in an empty shell after a disconnect.
-    if (isNativeMobileApp && !getRuntimeApiBaseUrl()) return;
-    void initializeApp();
+    if (!isNativeMobileApp) {
+      void initializeApp();
+      return;
+    }
+    let active = true;
+    void initializeNativeMobileRuntime(initializeApp, () => active);
+    return () => { active = false; };
   }, [connectionEpoch, initializeApp, isNativeMobileApp]);
 
   React.useEffect(() => {

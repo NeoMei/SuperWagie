@@ -34,7 +34,7 @@ const fixture = async (bailian = false) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'minimax-tts-consumer-'));
   cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
   const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
-  const environment = { OPENCHAMBER_DATA_DIR: dataDir, OPENCHAMBER_LLMROUTER_API_URL: baseUrl };
+  const environment = { OPENCHAMBER_UNIHUB_MODE: 'on', OPENCHAMBER_DATA_DIR: dataDir, OPENCHAMBER_LLMROUTER_API_URL: baseUrl };
   const secretStore = createModelBootstrapStore({ dataDir });
   const secret = bailian ? await secretStore.putSecret('private-native-speech-key') : null;
   const runtime = createModelConfigurationRuntime({ dataDir, env: environment, readModelBootstrapCredential: secretStore.getSecret });
