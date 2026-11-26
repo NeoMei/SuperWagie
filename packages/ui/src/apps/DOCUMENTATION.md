@@ -34,8 +34,9 @@ transports and isolated-space completeness checks remain unchanged.
 
 ### Dedicated hosted reader
 
-`MobileApplicationBoundary` starts hosted mobile after the runtime session
-gate and the server’s standalone status. Capacitor uses its own connection
+`MobileApplicationBoundary` starts hosted mobile after runtime authentication,
+the server’s standalone status and shared-settings bootstrap. Model preference
+writes start with the server's saved preferences. Capacitor uses its own connection
 flow. On each native instance connection, the authenticated platform-mode read
 precedes model initialization so saved selections from disabled services can be
 ignored. The read has a deadline for older servers. Its result and the ensuing

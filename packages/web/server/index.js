@@ -2564,6 +2564,11 @@ async function main(options = {}) {
   const platformAccessGate = createPlatformAccessGate({
     runtimeOnly: !platformServicesEnabled,
     isRequestOriginAllowed,
+    isStandaloneRequestHostAllowed: (req) => requestSecurityRuntime.isStandaloneRequestHostAllowed(req, {
+      bindHost: effectiveBindHost,
+      lanUrl: advertisedLanUrl,
+      tunnelHost: tunnelAuthController.getActiveTunnelHost(),
+    }),
     getAccountRuntime: () => platformAccountRuntime,
     resolveIdentity: mobileOfficialAccess?.resolveIdentity ?? ((req, res, options) => uiAuthController.resolvePlatformAccessContext(req, res, options)),
     authorizeServiceRequest: (req) => req.path === '/api/git/repository-credential'

@@ -18,7 +18,9 @@ This module owns UniHub browser and JSON login, registration, the global user ga
   indicates local journal availability, not permission to read a task or its
   generated artifacts; the model routes enforce identity and payer checks.
 - In standalone mode the access gate uses validated runtime identity for API
-  requests and WebSocket upgrades. Business writes require a credential already
+  requests and WebSocket upgrades. The server verifies the request host against
+  its local or configured hostnames before bootstrap and credential issuance.
+  Business writes require a credential already
   present on the request, including in passwordless mode. Named browser origins
   must pass the runtime origin check. Originless browser writes with Fetch
   Metadata must be same-origin. An instance with either platform owner setting

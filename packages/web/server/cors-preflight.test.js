@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import request from 'supertest';
 import { expect, it } from 'vitest';
 
 it.each(['on', 'off'])('permits packaged preflight and protects runtime writes with platform mode %s', async (platformMode) => {
@@ -88,6 +89,11 @@ it.each(['on', 'off'])('permits packaged preflight and protects runtime writes w
     if (platformMode === 'off') {
       const origin = new URL(url).origin;
       const settings = new URL('/api/config/settings', origin);
+      for (const route of ['/auth/session', '/api/platform-account/session']) {
+        const wrongHost = await request(origin).get(route).set('Host', 'unconfigured.example.test').expect(403);
+        expect(wrongHost.headers['set-cookie']).toBeUndefined();
+        expect(wrongHost.body.error).toBe('platform_host_forbidden');
+      }
       const write = (headers = {}) => fetch(settings, {
         method: 'PUT', headers: { 'Content-Type': 'application/json', ...headers }, body: '{}',
       });

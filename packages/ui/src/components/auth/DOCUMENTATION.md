@@ -10,7 +10,8 @@ authorization owns access enforcement independently of these React gates.
 
 - An authenticated runtime that explicitly reports `disabled` mounts the
   workspace through the usual bootstrap without a product login. Platform
-  account, billing and model setup controls stay hidden. An unsupported,
+  account, billing and model setup controls stay hidden. A transient identity
+  read failure keeps the active standalone workspace available. An unsupported,
   broken or unreachable service response cannot select standalone mode.
 
 - With legacy platform services enabled, managed web, Electron main and Electron Mini Chat defer workspace bootstrap

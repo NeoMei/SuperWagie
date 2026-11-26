@@ -16,7 +16,7 @@ export const MobileApplicationBoundary: React.FC<React.PropsWithChildren<{ nativ
     : <PlatformAccountGate unsupported unsupportedActions={<Button variant="outline" asChild className="mt-5"><a href="?view=official">{t('mobile.official.readOnly')}</a></Button>} />;
   return (
     <SessionAuthGate deferRuntimeBootstrap>
-      <PlatformAccountGate legacyView={legacyView}>{children}</PlatformAccountGate>
+      <PlatformAccountGate bootstrapRuntime legacyView={legacyView}>{children}</PlatformAccountGate>
     </SessionAuthGate>
   );
 };

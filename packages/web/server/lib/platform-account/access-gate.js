@@ -54,7 +54,7 @@ const isGrantOnlyRequest = (req) => {
 };
 
 const statusFor = (error) => {
-  if (error?.code === 'platform_instance_owner_forbidden' || error?.code === 'platform_origin_forbidden') return 403;
+  if (['platform_instance_owner_forbidden', 'platform_origin_forbidden', 'platform_host_forbidden'].includes(error?.code)) return 403;
   if (error?.code === 'platform_runtime_auth_required' || error?.code === 'platform_session_expired') return 401;
   if (error?.code === 'platform_session_changed') return 409;
   if (error?.code === 'platform_runtime_unsupported') return 409;
@@ -72,7 +72,11 @@ const codeFor = (error) => {
  * Enforces standalone runtime or managed account authorization before API
  * routes. The injected resolver owns cookies, bearer tokens and session storage.
  */
-export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false, isRequestOriginAllowed = () => false, runtimeOnly = false, env = process.env }) => {
+export const createPlatformAccessGate = ({
+  resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false,
+  isRequestOriginAllowed = () => false, isStandaloneRequestHostAllowed = () => false,
+  runtimeOnly = false, env = process.env,
+}) => {
   if (!requiredCallback.safeParse(resolveIdentity).success || !requiredCallback.safeParse(getAccountRuntime).success) {
     throw new TypeError('platform access gate requires identity and account runtime resolvers');
   }
@@ -138,6 +142,13 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
     return { identity, actor, ownerPolicy };
   };
 
+  const requireStandaloneRequestHost = async (req) => {
+    if (await isStandaloneRequestHostAllowed(req)) return;
+    const error = new Error('request host is not trusted');
+    error.code = 'platform_host_forbidden';
+    throw error;
+  };
+
   // Existing streams must stop after logout, expiry or configuration removal.
   // A single process timer checks only live connections; no UniHub network IO.
   const live = new Set();
@@ -174,8 +185,9 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
     // Express routes are case insensitive by default. Match the entire API
     // namespace under the same rule so /API cannot skip the user boundary.
     const apiPath = path.toLowerCase();
-    if ((apiPath !== API_PREFIX && !apiPath.startsWith(`${API_PREFIX}/`)) || isBootstrapRequest(req) || isGrantOnlyRequest(req)) return next();
     try {
+      if (runtimeOnly) await requireStandaloneRequestHost(req);
+      if ((apiPath !== API_PREFIX && !apiPath.startsWith(`${API_PREFIX}/`)) || isBootstrapRequest(req) || isGrantOnlyRequest(req)) return next();
       if (methodOf(req) === 'POST' && ['/api/openchamber/agent-tool', '/api/openchamber/limit-failover', '/api/openchamber/limit-failover/settle', '/api/notifications/emit', '/api/git/repository-credential'].includes(path) && await authorizeServiceRequest(req)) return next();
       const authorization = await authorize(req, res, { allowUrlToken: true });
       // Readable media and EventSource requests use the existing scoped URL
@@ -191,6 +203,7 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
 
   const authorizeUpgrade = async (req, { allowUrlToken = true } = {}) => {
     try {
+      if (runtimeOnly) await requireStandaloneRequestHost(req);
       await authorize(req, null, { allowUrlToken });
       return null;
     } catch (error) {
@@ -200,6 +213,7 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
 
   const guardUpgrade = async (req, socket, reject, onAuthorized) => {
     try {
+      if (runtimeOnly) await requireStandaloneRequestHost(req);
       const authorization = await authorize(req, null, { allowUrlToken: true });
       onAuthorized?.(authorization);
       if (authorization.actor) track(authorization, socket);

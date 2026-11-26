@@ -75,7 +75,7 @@ describe('UniHub global access gate', () => {
   it('accepts runtime credentials only on unpinned standalone instances', async () => {
     const env = {};
     let identity = null;
-    const gate = createPlatformAccessGate({ env, runtimeOnly: true, resolveIdentity: async () => identity, getAccountRuntime: () => null });
+    const gate = createPlatformAccessGate({ env, runtimeOnly: true, isStandaloneRequestHostAllowed: () => true, resolveIdentity: async () => identity, getAccountRuntime: () => null });
     const api = request('GET', '/api/config/settings');
     const upgrade = request('GET', '/api/terminal/ws');
     let reachable = 0;
@@ -103,6 +103,7 @@ describe('UniHub global access gate', () => {
     const identity = { type: 'client', token: 'device-fixture' };
     const gate = createPlatformAccessGate({
       env: {}, runtimeOnly: true, getAccountRuntime: () => null,
+      isStandaloneRequestHostAllowed: () => true,
       isRequestOriginAllowed: (req) => req.headers.origin === origin,
       resolveIdentity: async (req, res) => {
         expect(res).toBeNull();

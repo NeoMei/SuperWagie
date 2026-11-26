@@ -18,6 +18,7 @@ test('actual mobile entry exposes only the authenticated selected-material root 
   useI18nStore.getState().setLocale('en');
   const requests: string[] = [];
   let platformStatus = 'signed-out';
+  const settingsReads: Array<(response: Response) => void> = [];
   const pending: Array<{ projectId: string; finish: (response: Response) => void }> = [];
   const session = { status: 'signed-in', user: { id: 'owner', name: 'Owner', email: 'owner@example.test' },
     expiresAt: '2099-01-01T00:00:00.000Z', accounts: [{ id: 'personal', name: 'Personal' }], accountId: 'personal' };
@@ -27,6 +28,8 @@ test('actual mobile entry exposes only the authenticated selected-material root 
     if (target.pathname === '/auth/session') return Response.json({ authenticated: true });
     if (target.pathname === '/auth/passkeys/status') return Response.json({ enabled: false, registered: false });
     if (target.pathname === '/api/platform-account/session') return Response.json({ status: platformStatus });
+    if (target.pathname === '/api/config/settings') return new Promise<Response>((finish) => settingsReads.push(finish));
+    if (target.pathname === '/api/fs/home') return Response.json({ home: '/fixture' });
     if (target.pathname === '/api/mobile-official/auth/session') return Response.json(session);
     if (target.pathname === '/api/mobile-official/auth/logout') return Response.json({ status: 'signed-out' });
     if (target.pathname === '/api/mobile-official/reader/projects') return Response.json({ projects: [{ id: 'a', name: 'Project A' }, { id: 'b', name: 'Project B' }] });
@@ -64,6 +67,9 @@ test('actual mobile entry exposes only the authenticated selected-material root 
     expect(requests.every((target) => target.startsWith('/auth/') || target === '/api/platform-account/session' || target.startsWith('/api/mobile-official'))).toBe(true);
     platformStatus = 'disabled';
     await act(async () => { window.dispatchEvent(new Event('focus')); }); await flush();
+    expect(settingsReads).toHaveLength(1);
+    expect(fullApplicationMounts).toBe(0);
+    await act(async () => settingsReads[0](Response.json({ favoriteModels: [{ providerID: 'custom', modelID: 'fixture' }] }))); await flush();
     expect(container.textContent).toContain('Full mobile business app');
     const beforeNative = requests.length;
     await act(async () => render('?view=official', true)); await flush();

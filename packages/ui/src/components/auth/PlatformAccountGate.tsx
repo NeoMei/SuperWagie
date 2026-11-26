@@ -106,7 +106,10 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
         // Without an identity answer there is no state to show, and the gate
         // hides the sign-in form when the state is unknown. Keep it open so a
         // user can still sign in while the service or network recovers.
-        setState(recoverableSession ? { status: expiredSession ? 'expired' : 'signed-out' } : platformUnreachable ? { status: 'signed-out' } : null);
+        const failedState: PlatformIdentitySession | null = recoverableSession
+          ? { status: expiredSession ? 'expired' : 'signed-out' }
+          : platformUnreachable ? { status: 'signed-out' } : null;
+        setState((current) => platformUnreachable && current?.status === 'disabled' ? current : failedState);
         setError(platformAccountErrorKey(cause instanceof PlatformAccountError ? cause : null, 'platformAccount.failed'));
       }
     } finally {
