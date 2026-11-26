@@ -23,6 +23,29 @@ const bind = async (runtime, state, changes = {}, purpose = 'embedding') => runt
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
 
 describe('model configuration persistence and boundaries', () => {
+  it('hides saved retired connections and resolves ordinary bindings in standalone mode', async () => {
+    let platformEnabled = true;
+    const { dataDir, runtime } = await fixture({ platformServicesEnabled: () => platformEnabled });
+    const retired = await connect(runtime, { providerId: 'llmrouter', baseUrl: 'https://llmrouter.quukk.com/v1' });
+    const firstBinding = await bind(runtime, retired, {}, 'tts');
+    const saved = await runtime.saveConnection({ revision: firstBinding.revision, connection: connectionInput() });
+    const ordinary = saved.connections.find(({ providerId }) => providerId === 'openai');
+    await bind(runtime, saved, { connectionId: ordinary.id });
+    const file = path.join(dataDir, 'model-configuration.json');
+    const previous = await fs.readFile(file, 'utf8');
+
+    platformEnabled = false;
+    const active = await runtime.getPublicConfiguration();
+    expect(active.connections).toEqual([ordinary]);
+    expect(active.bindings.map(({ purpose }) => purpose)).toEqual(['embedding']);
+    expect(active.presets.some(({ providerId }) => ['llmrouter', 'unihub'].includes(providerId))).toBe(false);
+    expect(await runtime.resolveBinding('tts')).toBeNull();
+    expect(await runtime.resolveBinding('embedding')).toMatchObject({ connectionId: ordinary.id, apiKey: 'fixture-private-key' });
+    await expect(runtime.saveConnection({ revision: active.revision, connection: connectionInput({ baseUrl: 'https://llmrouter.quukk.com/v1' }) }))
+      .rejects.toMatchObject({ code: 'model_configuration_managed_unavailable' });
+    expect(await fs.readFile(file, 'utf8')).toBe(previous);
+  });
+
   it('routes certified saved account voice bindings through product media without reading the legacy secret', async () => {
     const baseUrl = 'https://inference.example.test/v1';
     let secretReads = 0;

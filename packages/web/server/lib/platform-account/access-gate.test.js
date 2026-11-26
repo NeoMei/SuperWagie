@@ -72,6 +72,32 @@ describe('UniHub global access gate', () => {
     gate.dispose();
   });
 
+  it('accepts runtime credentials only on unpinned standalone instances', async () => {
+    const env = {};
+    let identity = null;
+    const gate = createPlatformAccessGate({ env, runtimeOnly: true, resolveIdentity: async () => identity, getAccountRuntime: () => null });
+    const api = request('GET', '/api/config/settings');
+    const upgrade = request('GET', '/api/terminal/ws');
+    let reachable = 0;
+    const denied = response();
+    await gate.middleware(api, denied, () => { reachable++; });
+    expect(denied.statusCode).toBe(401);
+    expect((await gate.authorizeUpgrade(upgrade)).status).toBe(401);
+
+    identity = { type: 'client', token: 'fixture' };
+    await gate.middleware(api, response(), () => { reachable++; });
+    expect(reachable).toBe(1);
+    expect(await gate.authorizeUpgrade(upgrade)).toBeNull();
+
+    env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID = 'private-owner';
+    const pinned = response();
+    await gate.middleware(api, pinned, () => { reachable++; });
+    expect(reachable).toBe(1);
+    expect(pinned.statusCode).toBe(503);
+    expect((await gate.authorizeUpgrade(upgrade)).status).toBe(503);
+    gate.dispose();
+  });
+
   it('keeps callback exceptions behind both exact routing and service authority', async () => {
     let permitted = false;
     const gate = createPlatformAccessGate({

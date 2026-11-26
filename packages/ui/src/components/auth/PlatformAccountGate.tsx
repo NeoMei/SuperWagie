@@ -1,4 +1,5 @@
 import React from 'react';
+import { PlatformServicesContext } from './platformServicesContext';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { SuperWagieWordmark } from '@/components/ui/SuperWagieWordmark';
@@ -67,10 +68,10 @@ const AuthenticatedRuntimeBootstrap: React.FC<React.PropsWithChildren<{ bootstra
     })().catch(() => undefined).finally(settle);
     return () => { cancelled = true; clearTimeout(timeout); };
   }, [bootstrap, onBootstrap]);
-  return ready ? <>{children}</> : <div className="flex h-full items-center justify-center bg-background text-muted-foreground" role="status">{t('platformAccount.loading')}</div>;
+  return ready ? <>{children}</> : <div className="flex h-full items-center justify-center bg-background text-muted-foreground" role="status">{t('common.loading')}</div>;
 };
 
-export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRuntime?: boolean; unsupported?: boolean; unsupportedActions?: React.ReactNode }>> = ({ children, bootstrapRuntime = false, unsupported = false, unsupportedActions }) => {
+export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRuntime?: boolean; unsupported?: boolean; unsupportedActions?: React.ReactNode; legacyView?: React.ReactNode }>> = ({ children, bootstrapRuntime = false, unsupported = false, unsupportedActions, legacyView }) => {
   const { t } = useI18n();
   const [state, setState] = React.useState<PlatformIdentitySession | null>(unsupported ? { status: 'unsupported' } : null);
   const [error, setError] = React.useState<I18nKey | null>(null);
@@ -167,6 +168,11 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
 
   React.useEffect(() => { document.getElementById('initial-loading')?.remove(); }, []);
 
+  if (state === null && error === null) {
+    return <div className="flex h-full items-center justify-center bg-background text-muted-foreground" role="status">{t('common.loading')}</div>;
+  }
+  if (legacyView !== undefined && state && state.status !== 'disabled') return <>{legacyView}</>;
+
   const quit = getDesktopQuitAction();
   const quitButton = quit && <Button
     type="button"
@@ -182,7 +188,7 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
   if (preserveWorkspaceDuringReauth) {
     return (
       <div className="relative h-full min-h-0">
-        {children}
+        <PlatformServicesContext.Provider value>{children}</PlatformServicesContext.Provider>
         <div className="oc-glass-backdrop fixed inset-0 z-[200] flex flex-col items-center overflow-y-auto bg-black/25 px-6 py-10 backdrop-blur-sm dark:bg-black/40" role="dialog" aria-modal="true" aria-labelledby="platform-account-expired-title">
           {quitButton}
           <div className="oc-glass-popover oc-glass-floating my-auto flex w-full max-w-md shrink-0 flex-col items-center rounded-xl p-6 text-center">
@@ -195,9 +201,12 @@ export const PlatformAccountGate: React.FC<React.PropsWithChildren<{ bootstrapRu
     );
   }
 
-  if (!unsupported && state?.status === 'signed-in') return bootstrapRuntime
-    ? <AuthenticatedRuntimeBootstrap bootstrap={!hasBootstrapped.current} onBootstrap={markBootstrapped}>{children}</AuthenticatedRuntimeBootstrap>
-    : <>{children}</>;
+  if (!unsupported && (state?.status === 'disabled' || state?.status === 'signed-in')) {
+    const workspace = <PlatformServicesContext.Provider value={state.status === 'signed-in'}>{children}</PlatformServicesContext.Provider>;
+    return bootstrapRuntime
+      ? <AuthenticatedRuntimeBootstrap bootstrap={!hasBootstrapped.current} onBootstrap={markBootstrapped}>{workspace}</AuthenticatedRuntimeBootstrap>
+      : workspace;
+  }
 
   const titleId = 'platform-account-gate-title';
   const unavailable = state?.status === 'unconfigured' || state?.status === 'unsupported';

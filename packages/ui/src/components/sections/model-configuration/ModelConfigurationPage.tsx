@@ -1,3 +1,4 @@
+import { usePlatformServices } from '@/components/auth/platformServicesContext';
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
@@ -334,6 +335,7 @@ const PurposeEditor: React.FC<{
 export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClient }> = ({ client = modelConfigurationClient }) => {
   const { t } = useI18n();
   const tab = useModelConfigurationTabStore((state) => state.tab);
+  const platformServicesEnabled = usePlatformServices();
   const quickSetupRequested = useModelConfigurationTabStore((state) => state.quickSetupRequested);
   const refreshVersion = useModelConfigurationTabStore((state) => state.refreshVersion);
   const purposeId = useModelConfigurationTabStore((state) => state.purpose);
@@ -373,8 +375,8 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
   React.useEffect(() => {
     if (!quickSetupRequested) return;
     useModelConfigurationTabStore.getState().clearQuickSetupRequest();
-    if (!isVSCode) setQuickSetupOpen(true);
-  }, [isVSCode, quickSetupRequested]);
+    if (platformServicesEnabled && !isVSCode) setQuickSetupOpen(true);
+  }, [isVSCode, platformServicesEnabled, quickSetupRequested]);
   React.useEffect(() => { if (tab === 'purposes') setHasOpenedPurpose(true); }, [tab]);
   React.useEffect(() => {
     if (tab !== 'overview' || loadState === 'loading') return;
@@ -520,7 +522,7 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
   ];
 
   return <>
-  <SettingsPageLayout title={t('modelConfiguration.title')} titleAccessory={<SettingsInfoHint>{t('modelConfiguration.description')}</SettingsInfoHint>} showSaveStatus headerEnd={<div className="flex flex-wrap gap-2">{configuration ? <Button variant="outline" size="sm" disabled={pending || isVSCode} data-settings-item="models.quick-setup" onClick={() => setQuickSetupOpen(true)}>{t('modelConfiguration.quickSetup.open')}</Button> : null}{configuration ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void load()}>{t('modelConfiguration.refresh')}</Button> : null}</div>}>
+  <SettingsPageLayout title={t('modelConfiguration.title')} titleAccessory={<SettingsInfoHint>{t('modelConfiguration.description')}</SettingsInfoHint>} showSaveStatus headerEnd={<div className="flex flex-wrap gap-2">{configuration && platformServicesEnabled && !isVSCode ? <Button variant="outline" size="sm" disabled={pending} data-settings-item="models.quick-setup" onClick={() => setQuickSetupOpen(true)}>{t('modelConfiguration.quickSetup.open')}</Button> : null}{configuration ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void load()}>{t('modelConfiguration.refresh')}</Button> : null}</div>}>
     <div className="mb-3">
       <SortableTabsStrip items={tabs} activeId={tab} onSelect={(id) => {
         if (id === 'overview' || id === 'purposes' || id === 'connections' || id === 'coverage') setTab(id);
@@ -585,6 +587,6 @@ export const ModelConfigurationPage: React.FC<{ client?: ModelConfigurationClien
       </SettingsFieldRow>)}
     </SettingsSection> : null}
   </SettingsPageLayout>
-  {configuration ? <ModelQuickSetupWizard open={quickSetupOpen} configuration={configuration} onClose={() => setQuickSetupOpen(false)} onApplied={(next) => { setConfiguration(next); setTestFeedback(null); setOverviewError(null); }} onRolledBack={() => { setQuickSetupOpen(false); void load(); }} /> : null}
+  {configuration && platformServicesEnabled ? <ModelQuickSetupWizard open={quickSetupOpen} configuration={configuration} onClose={() => setQuickSetupOpen(false)} onApplied={(next) => { setConfiguration(next); setTestFeedback(null); setOverviewError(null); }} onRolledBack={() => { setQuickSetupOpen(false); void load(); }} /> : null}
   </>;
 };

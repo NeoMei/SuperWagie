@@ -136,6 +136,7 @@ export async function startPlatformAccountFixture() {
     origin, username, password, accountId: account.id, alternateAccountId: alternateAccount.id,
     otherUsername, otherPassword, otherAccountId: otherAccount.id,
     env: {
+      OPENCHAMBER_UNIHUB_MODE: 'on',
       OPENCHAMBER_UNIHUB_ISSUER: origin, OPENCHAMBER_UNIHUB_API_URL: origin,
       OPENCHAMBER_UNIHUB_HEADLESS_CLIENT_ID: clientId, OPENCHAMBER_UNIHUB_HEADLESS_REDIRECT_URI: redirectUri,
       OPENCHAMBER_UNIHUB_CONSOLE_URL: `${origin}/console`, OPENCHAMBER_UNIHUB_GATEWAY_URL: `${origin}/platform/v1`,

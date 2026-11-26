@@ -33,6 +33,7 @@ const STORAGE_KEY = 'config-store';
 type TestAgent = { name: string; mode?: string; hidden?: boolean; model?: { providerID?: string; modelID?: string }; variant?: string; options?: { hidden?: boolean } };
 
 let storage = new Map<string, string>();
+let platformStatus: 'disabled' | 'unconfigured' = 'unconfigured';
 let liveProviderId = 'live';
 let liveProviderIdsByDirectory = new Map<string, string>();
 let liveProviderVariants: string[] | undefined;
@@ -230,9 +231,7 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => new Response(JSON.stringify({}), {
-    headers: { 'Content-Type': 'application/json' },
-  })),
+  runtimeFetch: mock(async (route: string) => Response.json(route === '/api/platform-account/session' ? { status: platformStatus } : {})),
 }));
 
 mock.module('@/lib/persistence', () => ({
@@ -3691,6 +3690,31 @@ describe('ttsChunkedMode default', () => {
   test('defaults to disabled until the user enables it', () => {
     expect(useConfigStore.getState().ttsChunkedMode).toBe(false);
   });
+});
+
+test('standalone mode skips retired project and account-model defaults while retaining other defaults', async () => {
+  const { readPlatformIdentitySession } = await import('@/lib/platformAccount');
+  const previousState = useConfigStore.getState();
+  const retired = 'superwagie-account-fixture/chat';
+  const ordinary = 'custom/approved';
+  try {
+    platformStatus = 'disabled';
+    await readPlatformIdentitySession();
+    useConfigStore.setState({ settingsDefaultModel: ordinary, settingsDefaultsLoaded: true });
+    useConfigStore.getState().applyDefaultModelAgentSelection({ projectDefaultModel: retired });
+    expect(useConfigStore.getState().currentProviderId).toBe('custom');
+    expect(useConfigStore.getState().currentModelId).toBe('approved');
+    expect(useConfigStore.getState().settingsDefaultModel).toBe(ordinary);
+
+    platformStatus = 'unconfigured';
+    await readPlatformIdentitySession();
+    useConfigStore.getState().applyDefaultModelAgentSelection({ projectDefaultModel: retired });
+    expect(useConfigStore.getState().currentProviderId).toBe('superwagie-account-fixture');
+  } finally {
+    platformStatus = 'unconfigured';
+    await readPlatformIdentitySession();
+    useConfigStore.setState(previousState);
+  }
 });
 
 describe('stale Auto selection', () => {

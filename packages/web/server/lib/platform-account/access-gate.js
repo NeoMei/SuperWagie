@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hasPlatformOwnerPolicy } from './service-mode.js';
 import { isMobileOfficialAuthRequest } from '../guests/mobile-official-auth.js';
 
 const API_PREFIX = '/api';
@@ -72,7 +73,7 @@ const codeFor = (error) => {
  * every API route. The identity resolver is deliberately injected so this
  * module never owns cookies, bearer tokens or account-session storage.
  */
-export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false, env = process.env }) => {
+export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false, runtimeOnly = false, env = process.env }) => {
   if (!requiredCallback.safeParse(resolveIdentity).success || !requiredCallback.safeParse(getAccountRuntime).success) {
     throw new TypeError('platform access gate requires identity and account runtime resolvers');
   }
@@ -99,6 +100,12 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
 
   const authorize = async (req, res, { allowUrlToken = false } = {}) => {
     const identity = await resolveIdentity(req, res, { allowUrlToken });
+    if (runtimeOnly && !hasPlatformOwnerPolicy(env)) {
+      if (identity) return { identity, actor: null, ownerPolicy: null };
+      const error = new Error('runtime authentication required');
+      error.code = 'platform_runtime_auth_required';
+      throw error;
+    }
     const runtime = getAccountRuntime();
     if (!runtime || !requiredCallback.safeParse(runtime.actor).success) {
       const error = new Error('platform account runtime unavailable');
@@ -159,19 +166,21 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
       const authorization = await authorize(req, res, { allowUrlToken: true });
       // Readable media and EventSource requests use the existing scoped URL
       // tokens. The injected resolver checks their original path/method scope.
-      track(authorization, res);
+      if (authorization.actor) track(authorization, res);
       return next();
     } catch (error) {
       return res.status(statusFor(error)).json({ error: codeFor(error), code: codeFor(error) });
     }
   };
 
+  const upgradeRejectionMessage = runtimeOnly ? 'Runtime authentication required' : 'UniHub account login required';
+
   const authorizeUpgrade = async (req, { allowUrlToken = true } = {}) => {
     try {
       await authorize(req, null, { allowUrlToken });
       return null;
     } catch (error) {
-      return { status: statusFor(error), code: codeFor(error), message: 'UniHub account login required' };
+      return { status: statusFor(error), code: codeFor(error), message: upgradeRejectionMessage };
     }
   };
 
@@ -179,10 +188,10 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
     try {
       const authorization = await authorize(req, null, { allowUrlToken: true });
       onAuthorized?.(authorization);
-      track(authorization, socket);
+      if (authorization.actor) track(authorization, socket);
       return true;
     } catch (error) {
-      reject(socket, statusFor(error), 'UniHub account login required');
+      reject(socket, statusFor(error), upgradeRejectionMessage);
       return false;
     }
   };

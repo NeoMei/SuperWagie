@@ -27,7 +27,7 @@ it('permits packaged knowledge idempotency preflight and retains origin and acco
       SHELL: '/usr/bin/false', OPENCHAMBER_DATA_DIR: data,
       XDG_CONFIG_HOME: path.join(root, 'config'), XDG_DATA_HOME: data,
       XDG_CACHE_HOME: path.join(root, 'cache'), OPENCODE_SKIP_START: 'true',
-      OPENCHAMBER_RELAY_HOST: 'off', OPENCHAMBER_UNIHUB_API_URL: 'http://127.0.0.1:9',
+      OPENCHAMBER_RELAY_HOST: 'off', OPENCHAMBER_UNIHUB_MODE: 'on', OPENCHAMBER_UNIHUB_API_URL: 'http://127.0.0.1:9',
       OPENCHAMBER_UNIHUB_ISSUER: 'http://127.0.0.1:9',
       OPENCHAMBER_UNIHUB_GATEWAY_URL: 'http://127.0.0.1:9/platform/v1',
     },

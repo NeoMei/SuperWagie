@@ -4,7 +4,7 @@ Sidebar code is organized by the business object it owns. Shared contracts are
 kept at this root in `types.ts` and `utils.tsx`.
 
 - `shell/` owns sidebar chrome, navigation, search, confirmations, and switcher effects.
-- `shell/SidebarFooter` owns the shared footer actions and the leading avatar button. The avatar opens the user center in its own dialog; Settings, Usage, Shortcuts and About remain separate buttons. It reads the current platform identity for its display state, while account data, authentication and profile writes remain owned by `platform-account`. Closing the dialog refreshes the displayed profile and avatar.
+- `shell/SidebarFooter` owns the shared footer actions and the leading avatar button. On platform-enabled instances the avatar opens the user center in its own dialog; Settings, Usage, Shortcuts and About remain separate buttons. It reads the current platform identity for its display state, while account data, authentication and profile writes remain owned by `platform-account`. Closing the dialog refreshes the displayed profile and avatar.
 - `list/` owns global-first session collection, directory bootstrap demand,
   layout-owned synchronization, authoritative cleanup, and nearby-session prefetch.
 - `projects/` owns project zones, grouping, ordering, scroller behavior, project

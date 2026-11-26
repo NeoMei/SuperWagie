@@ -49,6 +49,7 @@ import { registerTtsRoutes } from './lib/tts/routes.js';
 import { createPlatformAccountRuntime } from './lib/platform-account/runtime.js';
 import { createProductModelProxyClient } from './lib/platform-account/product-model-proxy.js';
 import { createPlatformAccessGate } from './lib/platform-account/access-gate.js';
+import { hasPlatformOwnerPolicy, isPlatformServiceEnabled } from './lib/platform-account/service-mode.js';
 import { registerPlatformAccountRoutes } from './lib/platform-account/routes.js';
 import { createPlatformCommerceRuntime } from './lib/platform-account/commerce.js';
 import { registerPlatformCommerceRoutes } from './lib/platform-account/commerce-routes.js';
@@ -1497,6 +1498,7 @@ const messageSearchRuntime = createMessageSearchRuntime({
 const modelBootstrapStore = createModelBootstrapStore({ dataDir: OPENCHAMBER_DATA_DIR });
 let modelBootstrapRuntime = null;
 const modelConfigurationRuntime = createModelConfigurationRuntime({
+  platformServicesEnabled: isPlatformServiceEnabled,
   dataDir: OPENCHAMBER_DATA_DIR,
   readOpenCodeCredentials,
   useProductManagedMedia: () => Boolean(productModelProxy),
@@ -1995,6 +1997,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   onManagedOpenCodeMessage: (message, child) => platformModelRuntime?.handleManagedOpenCodeMessage?.(message, child),
   getManagedOpenCodeEnv: async ({ port, hostname }) => ({
     ...(managedConfigRuntime ? await managedConfigRuntime.buildManagedChildEnv() : {}),
+    OPENCHAMBER_UNIHUB_MODE: isPlatformServiceEnabled() ? 'on' : 'off',
     ...modelConfigurationChildEnvironment({ serverDirectory: __dirname, dataDir: OPENCHAMBER_DATA_DIR, openCodePort: port, openCodeHostname: hostname }),
     ...await excalidrawChildEnvironment({ serverDirectory: __dirname, resourcesPath: process.resourcesPath }),
   }),
@@ -2540,33 +2543,35 @@ async function main(options = {}) {
     authorizeRequest: (req) => agentToolRuntime.authorizeRequest(req),
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
   });
+  const platformServicesEnabled = isPlatformServiceEnabled();
   const productModelOrigin = options.productModelProxyOrigin ?? process.env.OPENCHAMBER_UNIHUB_PRODUCT_MODEL_PROXY_URL;
-  productModelProxy = productModelOrigin && !isExternalOpenCode && !ENV_SKIP_OPENCODE_START
+  productModelProxy = platformServicesEnabled && productModelOrigin && !isExternalOpenCode && !ENV_SKIP_OPENCODE_START
     ? createProductModelProxyClient(productModelOrigin)
     : undefined;
-  platformAccountRuntime = createPlatformAccountRuntime({
+  platformAccountRuntime = platformServicesEnabled ? createPlatformAccountRuntime({
     dataDir: OPENCHAMBER_DATA_DIR,
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     isModelAvailable: () => platformModelRuntime?.enabled() === true,
     isModelHistoryAvailable: () => platformModelRuntime?.historyAvailable?.() === true,
     productModelProxy, productWalletReady: () => Boolean(productModelProxy) && platformModelRuntime?.enabled() === true,
-  });
-  const mobileOfficialAccess = createMobileOfficialAccess({
+  }) : null;
+  const mobileOfficialAccess = platformServicesEnabled ? createMobileOfficialAccess({
     getAccountRuntime: () => platformAccountRuntime,
     resolveFullIdentity: (req, res, options) => uiAuthController?.resolvePlatformAccessContext?.(req, res, options) ?? null,
     captureTransport: (req) => captureMobileOfficialTransport(req, { tunnelAuthController, getUiAuthController: () => uiAuthController }),
     isRequestOriginAllowed,
-  });
+  }) : null;
   const platformAccessGate = createPlatformAccessGate({
+    runtimeOnly: !platformServicesEnabled,
     getAccountRuntime: () => platformAccountRuntime,
-    resolveIdentity: mobileOfficialAccess.resolveIdentity,
+    resolveIdentity: mobileOfficialAccess?.resolveIdentity ?? ((req, res, options) => uiAuthController.resolvePlatformAccessContext(req, res, options)),
     authorizeServiceRequest: (req) => req.path === '/api/git/repository-credential'
       ? featureRoutesRuntime.authorizeRepositoryCredentialRequest(req)
       : agentToolRuntime.authorizeRequest(req),
   });
-  platformCommerceRuntime = createPlatformCommerceRuntime({ accountRuntime: platformAccountRuntime, dataDir: OPENCHAMBER_DATA_DIR });
-  platformProfileRuntime = createPlatformProfileRuntime(platformAccountRuntime);
-  platformModelRuntime = await createProductPlatformModelRuntime({
+  platformCommerceRuntime = platformServicesEnabled ? createPlatformCommerceRuntime({ accountRuntime: platformAccountRuntime, dataDir: OPENCHAMBER_DATA_DIR }) : null;
+  platformProfileRuntime = platformServicesEnabled ? createPlatformProfileRuntime(platformAccountRuntime) : null;
+  platformModelRuntime = platformServicesEnabled ? await createProductPlatformModelRuntime({
     dataDir: OPENCHAMBER_DATA_DIR,
     instanceDir,
     getAccountRuntime: () => platformAccountRuntime,
@@ -2575,8 +2580,8 @@ async function main(options = {}) {
     readExecution: (sessionID) => readPlatformExecution(openCodeSessionClient(), sessionID),
     isManaged: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     trustedBoundary: true,
-  });
-  modelBootstrapRuntime = createModelBootstrapRuntime({
+  }) : null;
+  modelBootstrapRuntime = platformServicesEnabled ? createModelBootstrapRuntime({
     dataDir: OPENCHAMBER_DATA_DIR,
     store: modelBootstrapStore,
     modelRuntime: modelConfigurationRuntime,
@@ -2602,8 +2607,9 @@ async function main(options = {}) {
         writeSettings: (changes, beforeWrite) => persistSettings(changes, { beforeWrite }),
       })
       : undefined,
-  });
+  }) : null;
   managedConfigRuntime = createManagedConfigRuntime({
+    disablePlatformProviders: !platformServicesEnabled,
     fsPromises,
     path,
     instanceDir,
@@ -3027,43 +3033,56 @@ async function main(options = {}) {
   });
   uiAuthController = bootstrapResult.uiAuthController;
 
-  registerPlatformAccountRoutes(app, {
-    runtime: platformAccountRuntime,
-    onSessionRead: async (identity) => {
-      if (!productModelProxy) await modelBootstrapRuntime.accountKey.read({ identity, owner: identity, accountId: platformAccountRuntime.actor(identity).billingAccountId });
-      const state = knowledgeLibraryRuntime.status();
-      if (state.backend.state === 'running' && [state.error, state.backend.error].includes('account_key_consumer_owner_unavailable')) await knowledgeLibraryRuntime.start();
-      await conversationMemoryRuntime.start().catch(() => {
-        console.warn('[ConversationMemory] Runtime state is unavailable');
-      });
-    },
-    isRequestOriginAllowed,
-    resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
-  });
-  registerPlatformProfileRoutes(app, {
-    runtime: platformProfileRuntime,
-    isRequestOriginAllowed,
-    resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
-  });
-  registerPlatformCommerceRoutes(app, {
-    runtime: platformCommerceRuntime,
-    isRequestOriginAllowed,
-    resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
-  });
-  registerPlatformModelRoutes(app, {
-    runtime: platformModelRuntime,
-    productCreditsEnabled: (identity) => platformAccountRuntime.usesProductCreditWallet(identity),
-    isRequestOriginAllowed,
-    resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
-    waitForOpenCodeRequest: createOpenCodeRequestReadiness({
-      readyGraceMs: OPEN_CODE_READY_GRACE_MS,
-      getRuntime: () => ({ openCodePort, openCodeNotReadySince, isOpenCodeReady, isRestartingOpenCode }),
-    }),
-    readSession: (sessionID) => openCodeSessionClient().session.get({ sessionID }),
-  });
+  if (platformServicesEnabled) {
+    registerPlatformAccountRoutes(app, {
+      runtime: platformAccountRuntime,
+      onSessionRead: async (identity) => {
+        if (!productModelProxy) await modelBootstrapRuntime.accountKey.read({ identity, owner: identity, accountId: platformAccountRuntime.actor(identity).billingAccountId });
+        const state = knowledgeLibraryRuntime.status();
+        if (state.backend.state === 'running' && [state.error, state.backend.error].includes('account_key_consumer_owner_unavailable')) await knowledgeLibraryRuntime.start();
+        await conversationMemoryRuntime.start().catch(() => {
+          console.warn('[ConversationMemory] Runtime state is unavailable');
+        });
+      },
+      isRequestOriginAllowed,
+      resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
+    });
+    registerPlatformProfileRoutes(app, {
+      runtime: platformProfileRuntime,
+      isRequestOriginAllowed,
+      resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
+    });
+    registerPlatformCommerceRoutes(app, {
+      runtime: platformCommerceRuntime,
+      isRequestOriginAllowed,
+      resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
+    });
+    registerPlatformModelRoutes(app, {
+      runtime: platformModelRuntime,
+      productCreditsEnabled: (identity) => platformAccountRuntime.usesProductCreditWallet(identity),
+      isRequestOriginAllowed,
+      resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
+      waitForOpenCodeRequest: createOpenCodeRequestReadiness({
+        readyGraceMs: OPEN_CODE_READY_GRACE_MS,
+        getRuntime: () => ({ openCodePort, openCodeNotReadySince, isOpenCodeReady, isRestartingOpenCode }),
+      }),
+      readSession: (sessionID) => openCodeSessionClient().session.get({ sessionID }),
+    });
+  } else {
+    app.get('/api/platform-account/session', async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      if (!await uiAuthController.resolvePlatformAuthContext(req, res)) {
+        return res.status(401).json({ error: 'platform_runtime_auth_required' });
+      }
+      return res.json({ status: hasPlatformOwnerPolicy() ? 'unconfigured' : 'disabled' });
+    });
+    app.use(['/api/platform-account', '/api/platform-model', '/api/mobile-official'], (_req, res) => {
+      res.status(410).json({ error: 'platform_service_disabled' });
+    });
+  }
   const knowledgeWork = createManagedWorkAdmission({
     dataDir: OPENCHAMBER_DATA_DIR,
-    enabled: () => process.env.OPENCHAMBER_KNOWLEDGE_WORK_PREPARE === 'true',
+    enabled: () => platformServicesEnabled && process.env.OPENCHAMBER_KNOWLEDGE_WORK_PREPARE === 'true',
     authorizeOwner: (principal) => Boolean(process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER && process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID
       && principal.issuer === process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_ISSUER
       && principal.userId === process.env.OPENCHAMBER_UNIHUB_INSTANCE_OWNER_USER_ID),
@@ -3090,7 +3109,7 @@ async function main(options = {}) {
   knowledgeLibraryRuntime.configureManaged(knowledgeWork, knowledgeContext);
   app.use(createManagedKnowledgeMiddleware({
     productOcrEnabled,
-    enabled: () => process.env.OPENCHAMBER_KNOWLEDGE_WORK_PREPARE === 'true',
+    enabled: () => platformServicesEnabled && process.env.OPENCHAMBER_KNOWLEDGE_WORK_PREPARE === 'true',
     resolveModelBinding: (purpose) => modelConfigurationRuntime.resolveBinding(purpose),
     resolveIdentity: (req, res) => uiAuthController.resolvePlatformAuthContext(req, res),
     isRequestOriginAllowed,
@@ -3104,14 +3123,14 @@ async function main(options = {}) {
   // An archived chat of a deleted space is read and deleted, never run or changed.
   app.use(spaceArchive.guard);
   app.use((req, res, next) => (spacesHost ? spacesHost.middleware(req, res, next) : next()));
-  mobileOfficialAccess.register(app);
-  const nativeOfficialSelections = registerMobileOfficialRoutes(app, {
+  mobileOfficialAccess?.register(app);
+  const nativeOfficialSelections = mobileOfficialAccess ? registerMobileOfficialRoutes(app, {
     dataDir: OPENCHAMBER_DATA_DIR,
     getAccountRuntime: () => platformAccountRuntime,
     resolveIdentity: (req, res) => req.method ? mobileOfficialAccess.resolveIdentity(req, res, { allowUrlToken: false }) : uiAuthController.resolvePlatformAuthContext(req, res),
     readSettings: readSettingsFromDiskMigrated,
     readSession: (sessionID, directory) => openCodeSessionClient(directory).session.get({ sessionID }),
-  });
+  }) : null;
   // First of all upgrade handlers: a socket addressed to a space by its directory carries a path
   // a host handler would take too, and the space's handler marks it as the space's before they run.
   server.prependListener('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });

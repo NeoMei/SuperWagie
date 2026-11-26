@@ -1,10 +1,10 @@
 # Platform account
 
-Managed SuperWagie uses the published UniHub model catalog when no local model
-override is present. The gateway is `https://llmrouter.quukk.com/platform/v1`.
-Set `OPENCHAMBER_UNIHUB_DISABLED=1` or `OPENCHAMBER_UNIHUB_MODE=off` to disable
-the managed provider; these switches take precedence over explicit gateway and
-model overrides. Local OpenCode/BYOK providers remain independent.
+SuperWagie runs independently by default. It does not start platform login,
+commerce, account-key setup or the managed model gateway. The runtime-authenticated
+identity endpoint reports `disabled`, and retired account, model and reader routes
+return HTTP 410. `OPENCHAMBER_UNIHUB_MODE=on` enables the legacy integration for
+an explicitly configured instance. `OPENCHAMBER_UNIHUB_DISABLED=1` takes precedence.
 
 ## Ownership
 
@@ -17,8 +17,12 @@ This module owns UniHub browser and JSON login, registration, the global user ga
   authenticated owner to read and reconcile an existing task. This flag
   indicates local journal availability, not permission to read a task or its
   generated artifacts; the model routes enforce identity and payer checks.
-- The managed server installs `access-gate.js` before bootstrap route registration. Every `/api/*` business request and every host WebSocket upgrade must carry a validated UniHub actor. Identity, runtime pairing, discovery and health metadata remain exact bootstrap exceptions; the GET-only preview, guest-file and guest OAuth callback paths carry their own capability and are validated by their owning routes. Missing configuration, external OpenCode, expired sessions and unsupported runtimes fail closed.
-- `GET /api/platform-account/session` returns only the verified identity status, public user and expiry. Password login returns this same contract. Financial projection has a separate request, so unavailable balances cannot prevent a valid user from entering the app. The renderer defers workspace bootstrap and app mounting until this identity check succeeds.
+- In standalone mode the access gate uses validated runtime identity for API
+  requests and WebSocket upgrades. An instance with either platform owner setting
+  present still requires owner verification and stays locked when the platform is
+  unavailable. Auth and origin checks for the runtime retain their existing rules.
+- With the platform enabled, the managed server installs `access-gate.js` before bootstrap route registration. Every `/api/*` business request and every host WebSocket upgrade must carry a validated UniHub actor. Identity, runtime pairing, discovery and health metadata remain exact bootstrap exceptions; the GET-only preview, guest-file and guest OAuth callback paths carry their own capability and are validated by their owning routes. Missing configuration, external OpenCode, expired sessions and unsupported runtimes fail closed.
+- `GET /api/platform-account/session` returns only the verified identity status, public user and expiry. Password login returns this same contract. Financial projection has a separate request, so unavailable balances cannot prevent a valid user from entering the app. The renderer defers workspace bootstrap and app mounting until identity is verified or the server authoritatively reports standalone mode.
 - Personal identity reads and profile operations remain valid across billing-account selection. Commerce captures still reject a billing-account change. An authoritative upstream authentication failure revokes the exact captured local session; a late response cannot revoke a newer login in the same runtime namespace.
 - Self-service routes capture the current identity session before network IO and reject replacement or expiry before accepting the result. Profile reads and display-name writes expose the fixed provider username, display name, email, avatar availability and version. Only the display name is writable through the profile endpoint; email and login username remain read-only.
 - Profile and avatar GET/HEAD reads accept a missing Origin only when Fetch Metadata explicitly reports `Sec-Fetch-Site: same-origin`. Explicit origins still require the configured origin check, including packaged desktop origins. Writes always require that check. Runtime authentication and the platform access gate remain mandatory, and reads accept no URL-token identity.

@@ -40,7 +40,7 @@ prefetchOpenCodeCompatibility();
 // themes may briefly see default appearance on cold start; accepted trade-off
 // for faster time-to-first-paint.
 // Only local appearance preferences load here. Workspace settings and directory
-// probes wait for both runtime access and the UniHub user session.
+// probes wait for runtime access and the server’s platform mode.
 void initializeAppearancePreferences().then(() => {
   // Start watchers regardless of whether secondary settings succeed.
   startAppearanceAutoSave();

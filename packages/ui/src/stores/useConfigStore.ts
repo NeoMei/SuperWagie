@@ -1,3 +1,4 @@
+import { isRetiredPlatformProvider } from '@/lib/platformAccount';
 import { create } from "zustand";
 import { listModelVariantIds, modelVariantNames } from "@/lib/modelVariants";
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
@@ -299,7 +300,7 @@ const resolveProviderModelSelection = ({
     const currentModel = currentProviderId && currentModelId ? findProviderModel(providers, currentProviderId, currentModelId) : undefined;
     const preserveAutomatic = currentModel && (isFreeOpenCodeModel(currentModel)
         || lastPicked !== null && lastPicked.providerId === currentProviderId && lastPicked.modelId === currentModelId);
-    if (currentProviderId && currentModelId && (preserveManual || preserveAutomatic)) {
+    if (currentProviderId && currentModelId && !isRetiredPlatformProvider(currentProviderId) && (preserveManual || preserveAutomatic)) {
         return {
             providerId: currentProviderId,
             modelId: currentModelId,
@@ -309,7 +310,7 @@ const resolveProviderModelSelection = ({
 
     if (settingsDefaultModel) {
         const parsed = parseModelString(settingsDefaultModel);
-        if (parsed && !isStaleAutoSelection(parsed.providerId, parsed.modelId)) {
+        if (parsed && !isRetiredPlatformProvider(parsed.providerId) && !isStaleAutoSelection(parsed.providerId, parsed.modelId)) {
             return {
                 providerId: parsed.providerId,
                 modelId: parsed.modelId,
@@ -349,7 +350,7 @@ const resolveLastSelectedModel = (
     const parsed = lastSelectedModel ? parseModelString(lastSelectedModel) : null;
     if (!parsed) return null;
     if (isModelHidden(hiddenModels, parsed.providerId, parsed.modelId)) return null;
-    if (isStaleAutoSelection(parsed.providerId, parsed.modelId)) return null;
+    if (isRetiredPlatformProvider(parsed.providerId) || isStaleAutoSelection(parsed.providerId, parsed.modelId)) return null;
     return parsed;
 };
 
@@ -456,16 +457,17 @@ const resolveDefaultAgentModelSelection = ({
     let modelId: string | undefined;
     let variant: string | undefined;
 
-    const effectiveDefaultModel = projectDefaultModel || settingsDefaultModel;
+    const eligibleProjectModel = isRetiredPlatformProvider(parseModelString(projectDefaultModel ?? '')?.providerId) ? undefined : projectDefaultModel;
+    const effectiveDefaultModel = eligibleProjectModel || settingsDefaultModel;
 
     if (effectiveDefaultModel) {
         const parsed = parseModelString(effectiveDefaultModel);
-        if (parsed && !isStaleAutoSelection(parsed.providerId, parsed.modelId)) {
+        if (parsed && !isRetiredPlatformProvider(parsed.providerId) && !isStaleAutoSelection(parsed.providerId, parsed.modelId)) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
             // A project default carries its own variant; the settings variant
             // belongs to the settings model and must not leak onto it.
-            const configuredVariant = projectDefaultModel ? projectDefaultVariant : settingsDefaultVariant;
+            const configuredVariant = eligibleProjectModel ? projectDefaultVariant : settingsDefaultVariant;
             variant = hasProviderModel(providers, providerId, modelId)
                 ? resolveVariant(providerId, modelId, configuredVariant)
                 : configuredVariant;
@@ -478,7 +480,8 @@ const resolveDefaultAgentModelSelection = ({
 
     if (!providerId
         && resolvedAgent?.model?.providerID
-        && resolvedAgent.model?.id) {
+        && resolvedAgent.model?.id
+        && !isRetiredPlatformProvider(resolvedAgent.model.providerID)) {
         providerId = resolvedAgent.model.providerID;
         modelId = resolvedAgent.model.id;
         variant = hasProviderModel(providers, providerId, modelId)
@@ -489,7 +492,7 @@ const resolveDefaultAgentModelSelection = ({
     // OpenCode's global default model — used when neither our settings nor the agent pin a model.
     if (!providerId && opencodeDefaultModel) {
         const parsed = parseModelSelection(opencodeDefaultModel);
-        if (parsed) {
+        if (parsed && !isRetiredPlatformProvider(parsed.providerID)) {
             providerId = parsed.providerID;
             modelId = parsed.modelID;
             variant = hasProviderModel(providers, providerId, modelId)
@@ -969,9 +972,10 @@ const getProjectDefaultsForConfigDirectory = (directory: string | null | undefin
         && toDirectoryKey(configDirectory) === useConfigStore.getState().activeDirectoryKey) return {};
     const projectDirectory = resolveProjectDirectory(configDirectory);
     const project = useProjectsStore.getState().projects.find((entry) => normalizeConfigPath(entry.path) === projectDirectory);
+    const defaultModel = normalizeOptionalString(project?.defaultModel);
     return {
         projectDefaultAgent: normalizeOptionalString(project?.defaultAgent),
-        projectDefaultModel: normalizeOptionalString(project?.defaultModel),
+        projectDefaultModel: isRetiredPlatformProvider(parseModelString(defaultModel ?? '')?.providerId) ? undefined : defaultModel,
         projectDefaultVariant: normalizeOptionalString(project?.defaultVariant),
     };
 };
@@ -1165,7 +1169,7 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
             || (isActive && (state.providersLoaded || state.providers.length > 0));
         const agentsLive = snapshot.agentsLoaded === true || snapshot.agents.length > 0
             || (isActive && (state.agentsLoaded || state.agents.length > 0));
-        const providers = !providersLive && cached.providers?.length ? cached.providers : null;
+        const providers = !providersLive && cached.providers?.length ? cached.providers.filter(({ id }) => !isRetiredPlatformProvider(id)) : null;
         const agents = !agentsLive && cached.agents?.length ? cached.agents : null;
         if (!providers && !agents) return state;
         if (providers) _providersShownFromCache.set(loadKey, countCatalogModels(providers));
@@ -1264,8 +1268,8 @@ type SelectedAgentModel = { agentName: string; model: NonNullable<Agent['model']
 const resolveSelectedAgentModel = (agents: Agent[], agentName: string | undefined, previous?: SelectedAgentModel): SelectedAgentModel | undefined => {
     if (!agentName) return undefined;
     const agent = agents.find((entry) => entry.name === agentName);
-    if (!agent) return previous?.agentName === agentName ? previous : undefined;
-    if (!agent.model) return undefined;
+    if (!agent) return previous?.agentName === agentName && !isRetiredPlatformProvider(previous.model.providerID) ? previous : undefined;
+    if (!agent.model || isRetiredPlatformProvider(agent.model.providerID)) return undefined;
     return { agentName, model: { providerID: agent.model.providerID, id: agent.model.id, variant: agent.model.variant } };
 };
 
@@ -1491,7 +1495,8 @@ const resolveSelectionWithManualGuard = ({
 }) => {
     const manualAgentName = currentAgentName;
     const manualModelValid = !!currentProviderId
-        && !!currentModelId;
+        && !!currentModelId
+        && !isRetiredPlatformProvider(currentProviderId);
     const preserveAgent = selectionSource === "manual" || agentSelectionSource === "manual";
     // Picking an unpinned agent does not turn an automatic model into a user
     // choice. Only its explicit pin or a manual model choice protects the pair.
@@ -2341,7 +2346,7 @@ export const useConfigStore = create<ConfigStore>()(
                             // model, is not offerable — v2 replaced the `connected` list
                             // with these two facts.
                             const processedProviders: ProviderWithModelList[] = providers
-                                .filter((provider) => provider.activation !== "disabled" && modelsByProvider.has(provider.id))
+                                .filter((provider) => provider.activation !== "disabled" && modelsByProvider.has(provider.id) && !isRetiredPlatformProvider(provider.id))
                                 .map((provider) => ({
                                     ...provider,
                                     models: modelsByProvider.get(provider.id) ?? [],
@@ -3535,7 +3540,7 @@ export const useConfigStore = create<ConfigStore>()(
                         const pendingModel = currentSessionId
                             ? useSelectionStore.getState().getSessionModelPick(currentSessionId)
                             : null;
-                        if (pendingModel) {
+                        if (pendingModel && !isRetiredPlatformProvider(pendingModel.providerId)) {
                             applyResolvedModelSelection(
                                 pendingModel.providerId,
                                 pendingModel.modelId,
@@ -3551,7 +3556,7 @@ export const useConfigStore = create<ConfigStore>()(
                         // (issue #2404).
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
-                            if (existingAgentModel) {
+                            if (existingAgentModel && !isRetiredPlatformProvider(existingAgentModel.providerId)) {
                                 applyResolvedModelSelection(
                                     existingAgentModel.providerId,
                                     existingAgentModel.modelId,

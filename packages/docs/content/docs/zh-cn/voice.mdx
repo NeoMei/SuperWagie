@@ -20,7 +20,7 @@ description: 对 OpenChamber 说话，并听它朗读回复。
 
 ## 口述消息（语音转文本）
 
-连续口述和短语音输入都通过你的 SuperWagie 账户密钥使用 LLMRouter ASR qwen3-asr-flash。服务器会缓冲音频，并把 WAV 片段发送到 https://llmrouter.quukk.com/v1/audio/transcriptions。无需下载模型、填写 API 密钥，也无需自建 Whisper 服务器。停止录音后，输入框会插入转写文本。在企业模式下，这项远程转写会被拒绝。
+要使用连续听写和短语音输入，请在模型配置中设置兼容的语音转写连接。停止录音后，输入框会插入转写文本。企业模式限制远程语音转写。
 
 你为朗读服务输入的 API 密钥由 OpenChamber 服务器保存，而不是保存在浏览器中。输入密钥后按 Enter 即可保存；之后输入框会显示已保存密钥，点击 × 可将其删除。
 

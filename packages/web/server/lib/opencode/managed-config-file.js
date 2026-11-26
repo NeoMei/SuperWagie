@@ -20,6 +20,10 @@ export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
  */
 const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser', '-opencode.tool.image-generate', '-opencode.provider.claude-agent'];
 
+const retiredProviderPolicies = ['unihub', 'llmrouter', 'superwagie-account-*'].map((resource) => ({
+  action: 'provider.use', resource, effect: 'deny',
+}));
+
 /**
  * The managed OpenCode config layer.
  *
@@ -64,6 +68,7 @@ export const createManagedConfigRuntime = ({
   agentToolRuntime = null,
   limitFailoverRuntime = null,
   platformModelRuntime = null,
+  disablePlatformProviders = false,
   readSettings,
   isAgentMemoryAvailable,
   isWorkflowAvailable = () => false,
@@ -89,6 +94,7 @@ export const createManagedConfigRuntime = ({
     const config = { plugins: [...DISABLED_BUILTIN_PLUGINS, ...directories] };
     if (Object.keys(providers).length) config.providers = providers;
     if (permissions.length > 0) config.permissions = permissions;
+    if (disablePlatformProviders) config.policies = retiredProviderPolicies;
     const text = `${JSON.stringify(config, null, 2)}\n`;
     // Temp + rename: OpenCode reacts to the write immediately, and a partial
     // read would make it drop every managed plugin until the next change.
@@ -161,6 +167,14 @@ export const createManagedConfigRuntime = ({
       const config = JSON.parse(content);
       if (config.providers?.unihub || config.provider?.unihub) throw new Error('The unihub provider identifier is reserved for managed platform sessions');
       config.providers = { ...config.providers, ...platformModelRuntime.providerConfig() };
+      content = JSON.stringify(config);
+    }
+    if (disablePlatformProviders) {
+      const config = JSON.parse(content);
+      if (config.policies !== undefined && !Array.isArray(config.policies)) {
+        throw new Error('OPENCODE_CONFIG_CONTENT policies must be an array');
+      }
+      config.policies = [...(config.policies ?? []), ...retiredProviderPolicies];
       content = JSON.stringify(config);
     }
     if (enabled.permissions.length > 0) content = appendManagedPermissions(content, enabled.permissions);

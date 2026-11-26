@@ -10,9 +10,13 @@ import { mobileOfficialMode, mobileOfficialProject } from './mobileOfficialRoute
 /** The read-only root has an isolated account namespace and no full mobile application. */
 export const MobileApplicationBoundary: React.FC<React.PropsWithChildren<{ native: boolean; search: string }>> = ({ native, search, children }) => {
   const { t } = useI18n();
-  if (!native && mobileOfficialMode(search)) {
-    return <SessionAuthGate deferRuntimeBootstrap><MobileOfficialEntry requestedProject={mobileOfficialProject(search)} /></SessionAuthGate>;
-  }
-  const app = <PlatformAccountGate unsupported unsupportedActions={!native ? <Button variant="outline" asChild className="mt-5"><a href="?view=official">{t('mobile.official.readOnly')}</a></Button> : null}>{children}</PlatformAccountGate>;
-  return native ? app : <SessionAuthGate deferRuntimeBootstrap>{app}</SessionAuthGate>;
+  if (native) return <>{children}</>;
+  const legacyView = mobileOfficialMode(search)
+    ? <MobileOfficialEntry requestedProject={mobileOfficialProject(search)} />
+    : <PlatformAccountGate unsupported unsupportedActions={<Button variant="outline" asChild className="mt-5"><a href="?view=official">{t('mobile.official.readOnly')}</a></Button>} />;
+  return (
+    <SessionAuthGate deferRuntimeBootstrap>
+      <PlatformAccountGate legacyView={legacyView}>{children}</PlatformAccountGate>
+    </SessionAuthGate>
+  );
 };

@@ -806,7 +806,9 @@ Packaged Desktop builds include the official OpenCode CLI release pinned by `ope
 checks a macOS app bundle or Windows executable with fresh private app data,
 Electron profile and home directories. It seeds synthetic history using that
 package's CLI, cold-starts the application, checks its mounted packaged renderer,
-then uses a localhost account fixture through the existing password-login flow.
+then checks the installed version's identity mode. In standalone mode it checks
+that runtime authentication still protects the backend and confirms zero requests
+to a localhost account fixture. Earlier packages exercise the fixture login.
 Runtime credentials remain in the renderer while the official SDK's requests
 read the engine version and seeded history through the authenticated backend.
 Windows also runs a multiline PowerShell command and checks its exact UTF-8

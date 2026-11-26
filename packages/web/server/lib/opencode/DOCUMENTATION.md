@@ -1455,6 +1455,10 @@ under a running child.
   global `opencode.json` and below their project config.
 - `OPENCODE_CONFIG_CONTENT` is passed through untouched, so whatever the user
   put there still applies.
+- Standalone SuperWagie adds provider-use deny rules for the retired UniHub and
+  LLMRouter provider IDs and the generated account-key provider prefix in its
+  managed OpenCode child. The managed layer applies these rules without
+  modifying user provider files, credentials or session history.
 - `OPENCHAMBER_AGENT_TOOL_URL` and a fresh `OPENCHAMBER_AGENT_TOOL_TOKEN` are
   always in the child environment, including while every managed tool is off —
   a tool switched on later then reaches a process that can already call back.

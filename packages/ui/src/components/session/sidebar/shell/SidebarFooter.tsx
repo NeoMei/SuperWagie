@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { DialogTrigger } from '@/components/ui/dialog';
+import { usePlatformServices } from '@/components/auth/platformServicesContext';
 import { PlatformAccountDialog } from '@/components/sections/platform-account/PlatformAccountDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
@@ -131,6 +132,7 @@ export function SidebarFooter({
   showUpdateButton = true,
 }: Props): React.ReactNode {
   const { t } = useI18n();
+  const platformServicesEnabled = usePlatformServices();
   const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
   // On a remote host the button updates this app, not the server it shows.
   const isDesktopRemote = useDesktopRemoteHostActive();
@@ -160,7 +162,7 @@ export function SidebarFooter({
     <div className="flex shrink-0 items-center justify-start gap-1 px-2.5 py-2">
       {showRuntimeButtons ? (
         <>
-          <UserCenterButton />
+          {platformServicesEnabled ? <UserCenterButton /> : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="sm" onClick={onOpenSettings} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.settings')}>

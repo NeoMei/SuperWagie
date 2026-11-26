@@ -34,12 +34,11 @@ transports and isolated-space completeness checks remain unchanged.
 
 ### Dedicated hosted reader
 
-`MobileApplicationBoundary` keeps the complete mobile business application behind
-its existing unsupported gate. Hosted browsers get an explicit link to
-`?view=official`; Capacitor gets no exception. This mode mounts the existing
-runtime `SessionAuthGate` followed by `MobileOfficialEntry`, with local i18n only.
-It starts no shared-preference/model autosave, widget bridge, diff worker,
-OpenCode sync, full project/session loader or model bootstrap.
+`MobileApplicationBoundary` starts hosted mobile after the runtime session
+gate and the server’s standalone status. Capacitor uses its own connection
+flow. On a legacy platform-enabled server the mobile workspace stays blocked
+and the hosted browser offers the selected-material reader at
+`?view=official`. The reader does not mount the workspace or OpenCode sync.
 
 The dedicated root uses `/api/mobile-official/auth/*`, an isolated product-login
 namespace. It shows only verified account memberships and the projects that own

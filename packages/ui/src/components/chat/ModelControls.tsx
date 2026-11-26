@@ -1,3 +1,4 @@
+import { isRetiredPlatformProvider } from '@/lib/platformAccount';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import React from 'react';
 import { useChatColumnActions } from './chatColumnSession';
@@ -810,6 +811,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const tryApplyModelSelection = React.useCallback(
         (providerId: string, modelId: string, agentName?: string): ModelApplyResult => {
+            if (isRetiredPlatformProvider(providerId)) return 'model-missing';
             if (selection) {
                 if (controlledSessionId) {
                     saveSessionModelSelection(controlledSessionId, providerId, modelId);
@@ -1221,7 +1223,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 }
             }
 
-            if (savedSessionModel && !isStaleAutoSelection(savedSessionModel.providerId, savedSessionModel.modelId)) {
+            if (savedSessionModel && !isRetiredPlatformProvider(savedSessionModel.providerId) && !isStaleAutoSelection(savedSessionModel.providerId, savedSessionModel.modelId)) {
                 const result = tryApplyModelSelection(savedSessionModel.providerId, savedSessionModel.modelId, savedAgentName ?? undefined);
                 if (result === 'applied') {
                     if (savedAgentName && currentAgentName !== savedAgentName) {

@@ -104,6 +104,14 @@ test('holds the application behind account sign-in', async () => {
   expect(host.querySelector('button[aria-label="Quit SuperWagie"]')).toBeNull();
 });
 
+test('opens the application for a runtime that explicitly disables platform login', async () => {
+  response = { status: 'disabled' };
+  await render();
+  expect(host.textContent).toContain('Application mounted');
+  expect(host.querySelector('form')).toBeNull();
+  expect(requests.map(({ path }) => new URL(path, 'http://localhost').pathname)).toEqual(['/api/platform-account/session']);
+});
+
 test('remembers the username after gate login and clears the password on sign-out', async () => {
   switchRuntimeEndpoint({ apiBaseUrl: 'http://gate-username.test', runtimeKey: 'test-gate-username' });
   await render();
