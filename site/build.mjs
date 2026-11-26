@@ -540,11 +540,8 @@ ${footerHtml(lang)}
 </body>
 </html>`;
 
-  if (slug === 'release-notes') {
-    assertSuperWagieReleaseCopy(html, `${lang}/release-notes/index.html`);
-  }
-  if (slug === '' || slug === 'download') {
-    assertSuperWagieReleaseCopy(body.split('</section>', 1)[0], `${lang}/${file}.html`);
+  if (slug === '' || slug === 'download' || slug === 'release-notes') {
+    assertSuperWagieReleaseCopy(html, `${lang}/${file}.html`);
   }
 
   const out = path.join(DIST, hrefFor(lang, slug).replace(/^\//, ''), 'index.html');
