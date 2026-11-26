@@ -18,9 +18,12 @@ This module owns UniHub browser and JSON login, registration, the global user ga
   indicates local journal availability, not permission to read a task or its
   generated artifacts; the model routes enforce identity and payer checks.
 - In standalone mode the access gate uses validated runtime identity for API
-  requests and WebSocket upgrades. An instance with either platform owner setting
+  requests and WebSocket upgrades. Business writes require a credential already
+  present on the request, including in passwordless mode. Named browser origins
+  must pass the runtime origin check. Originless browser writes with Fetch
+  Metadata must be same-origin. An instance with either platform owner setting
   present still requires owner verification and stays locked when the platform is
-  unavailable. Auth and origin checks for the runtime retain their existing rules.
+  unavailable.
 - With the platform enabled, the managed server installs `access-gate.js` before bootstrap route registration. Every `/api/*` business request and every host WebSocket upgrade must carry a validated UniHub actor. Identity, runtime pairing, discovery and health metadata remain exact bootstrap exceptions; the GET-only preview, guest-file and guest OAuth callback paths carry their own capability and are validated by their owning routes. Missing configuration, external OpenCode, expired sessions and unsupported runtimes fail closed.
 - `GET /api/platform-account/session` returns only the verified identity status, public user and expiry. Password login returns this same contract. Financial projection has a separate request, so unavailable balances cannot prevent a valid user from entering the app. The renderer defers workspace bootstrap and app mounting until identity is verified or the server authoritatively reports standalone mode.
 - Personal identity reads and profile operations remain valid across billing-account selection. Commerce captures still reject a billing-account change. An authoritative upstream authentication failure revokes the exact captured local session; a late response cannot revoke a newer login in the same runtime namespace.

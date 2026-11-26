@@ -2563,6 +2563,7 @@ async function main(options = {}) {
   }) : null;
   const platformAccessGate = createPlatformAccessGate({
     runtimeOnly: !platformServicesEnabled,
+    isRequestOriginAllowed,
     getAccountRuntime: () => platformAccountRuntime,
     resolveIdentity: mobileOfficialAccess?.resolveIdentity ?? ((req, res, options) => uiAuthController.resolvePlatformAccessContext(req, res, options)),
     authorizeServiceRequest: (req) => req.path === '/api/git/repository-credential'

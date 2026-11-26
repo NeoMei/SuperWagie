@@ -54,7 +54,7 @@ const isGrantOnlyRequest = (req) => {
 };
 
 const statusFor = (error) => {
-  if (error?.code === 'platform_instance_owner_forbidden') return 403;
+  if (error?.code === 'platform_instance_owner_forbidden' || error?.code === 'platform_origin_forbidden') return 403;
   if (error?.code === 'platform_runtime_auth_required' || error?.code === 'platform_session_expired') return 401;
   if (error?.code === 'platform_session_changed') return 409;
   if (error?.code === 'platform_runtime_unsupported') return 409;
@@ -69,11 +69,10 @@ const codeFor = (error) => {
 };
 
 /**
- * Enforces the UniHub user boundary after transport authentication and before
- * every API route. The identity resolver is deliberately injected so this
- * module never owns cookies, bearer tokens or account-session storage.
+ * Enforces standalone runtime or managed account authorization before API
+ * routes. The injected resolver owns cookies, bearer tokens and session storage.
  */
-export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false, runtimeOnly = false, env = process.env }) => {
+export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, authorizeServiceRequest = () => false, isRequestOriginAllowed = () => false, runtimeOnly = false, env = process.env }) => {
   if (!requiredCallback.safeParse(resolveIdentity).success || !requiredCallback.safeParse(getAccountRuntime).success) {
     throw new TypeError('platform access gate requires identity and account runtime resolvers');
   }
@@ -99,8 +98,23 @@ export const createPlatformAccessGate = ({ resolveIdentity, getAccountRuntime, a
   };
 
   const authorize = async (req, res, { allowUrlToken = false } = {}) => {
-    const identity = await resolveIdentity(req, res, { allowUrlToken });
-    if (runtimeOnly && !hasPlatformOwnerPolicy(env)) {
+    const standalone = runtimeOnly && !hasPlatformOwnerPolicy(env);
+    const reading = ['GET', 'HEAD'].includes(methodOf(req));
+    if (standalone) {
+      const origin = req.headers?.origin;
+      const fetchSite = req.headers?.['sec-fetch-site'];
+      const untrustedOrigin = origin !== undefined && !await isRequestOriginAllowed(req);
+      const untrustedOriginlessWrite = !reading && origin === undefined && fetchSite !== undefined && fetchSite !== 'same-origin';
+      if (untrustedOrigin || untrustedOriginlessWrite) {
+        const error = new Error('request origin is not trusted');
+        error.code = 'platform_origin_forbidden';
+        throw error;
+      }
+    }
+    // The passwordless resolver can issue a cookie when given a response.
+    // A write must arrive with a credential that already grants access.
+    const identity = await resolveIdentity(req, standalone && !reading ? null : res, { allowUrlToken });
+    if (standalone) {
       if (identity) return { identity, actor: null, ownerPolicy: null };
       const error = new Error('runtime authentication required');
       error.code = 'platform_runtime_auth_required';

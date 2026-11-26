@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 
-it('permits packaged knowledge idempotency preflight and retains origin and account gates', async () => {
+it.each(['on', 'off'])('permits packaged preflight and protects runtime writes with platform mode %s', async (platformMode) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-cors-preflight-'));
   const data = path.join(root, 'data');
   for (const name of ['projects', 'themes', 'speech-models']) {
@@ -27,7 +27,7 @@ it('permits packaged knowledge idempotency preflight and retains origin and acco
       SHELL: '/usr/bin/false', OPENCHAMBER_DATA_DIR: data,
       XDG_CONFIG_HOME: path.join(root, 'config'), XDG_DATA_HOME: data,
       XDG_CACHE_HOME: path.join(root, 'cache'), OPENCODE_SKIP_START: 'true',
-      OPENCHAMBER_RELAY_HOST: 'off', OPENCHAMBER_UNIHUB_MODE: 'on', OPENCHAMBER_UNIHUB_API_URL: 'http://127.0.0.1:9',
+      OPENCHAMBER_RELAY_HOST: 'off', OPENCHAMBER_UNIHUB_MODE: platformMode, OPENCHAMBER_UNIHUB_API_URL: 'http://127.0.0.1:9',
       OPENCHAMBER_UNIHUB_ISSUER: 'http://127.0.0.1:9',
       OPENCHAMBER_UNIHUB_GATEWAY_URL: 'http://127.0.0.1:9/platform/v1',
     },
@@ -85,6 +85,27 @@ it('permits packaged knowledge idempotency preflight and retains origin and acco
       body: '{}',
     });
     expect([401, 403, 409]).toContain(unauthenticated.status);
+    if (platformMode === 'off') {
+      const origin = new URL(url).origin;
+      const settings = new URL('/api/config/settings', origin);
+      const write = (headers = {}) => fetch(settings, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', ...headers }, body: '{}',
+      });
+      const anonymous = await write({ Origin: origin });
+      expect(anonymous.status).toBe(401);
+      expect(anonymous.headers.get('set-cookie')).toBeNull();
+
+      const bootstrap = await fetch(new URL('/api/platform-account/session', origin));
+      expect(await bootstrap.json()).toEqual({ status: 'disabled' });
+      const cookie = bootstrap.headers.getSetCookie().find((value) => value.startsWith('oc_platform_runtime_'))?.split(';')[0];
+      expect(cookie).toBeDefined();
+      for (const headers of [{ Origin: 'null' }, { Origin: 'https://untrusted.invalid' }, { 'Sec-Fetch-Site': 'same-site' }]) {
+        const forbidden = await write({ Cookie: cookie, ...headers });
+        expect(forbidden.status).toBe(403);
+        expect((await forbidden.json()).error).toBe('platform_origin_forbidden');
+      }
+      expect((await write({ Cookie: cookie, Origin: origin })).status).toBe(200);
+    }
   } finally {
     if (child.exitCode === null) {
       const exited = new Promise((resolve) => child.once('exit', resolve));

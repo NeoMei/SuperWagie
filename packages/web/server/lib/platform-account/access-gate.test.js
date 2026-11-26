@@ -98,6 +98,24 @@ describe('UniHub global access gate', () => {
     gate.dispose();
   });
 
+  it('passes trusted packaged writes with an existing device credential', async () => {
+    const origin = 'openchamber-ui://app';
+    const identity = { type: 'client', token: 'device-fixture' };
+    const gate = createPlatformAccessGate({
+      env: {}, runtimeOnly: true, getAccountRuntime: () => null,
+      isRequestOriginAllowed: (req) => req.headers.origin === origin,
+      resolveIdentity: async (req, res) => {
+        expect(res).toBeNull();
+        return req.headers.authorization === 'Bearer device-fixture' ? identity : null;
+      },
+    });
+    const api = { ...request('PUT', '/api/config/settings'), headers: { origin, authorization: 'Bearer device-fixture' } };
+    const res = response();
+    let reached = false;
+    await gate.middleware(api, res, () => { reached = true; });
+    expect(reached).toBe(true);
+  });
+
   it('keeps callback exceptions behind both exact routing and service authority', async () => {
     let permitted = false;
     const gate = createPlatformAccessGate({
