@@ -114,7 +114,12 @@ export async function planReviewReply(root: string, plan: PlanBundle, revision: 
   let view: string;
   if (chatInteractionEnabled(process.env) && publishedReviewModelPath) {
     const review = await readTaskJson(root, publishedReviewModelPath) as ReviewModel;
-    const remote = await loadRemoteStyleAssets(builtInStyleAssetsRoot());
+    let remote: RemoteStyleAssets;
+    try {
+      remote = await loadRemoteStyleAssets(builtInStyleAssetsRoot());
+    } catch {
+      remote = {};
+    }
     view = chatPlanReview(review, styleSelection(plan.styles), remote, absolutePath ? markdownFileLink('详细回看与 HTML 选款', absolutePath) : undefined);
   } else view = renderPlanReview(plan, absolutePath);
   return { kind: 'decision', id: decisionId, stage: 'plan-review', view, details: planDetails(plan, revision, absolutePath ? path : undefined, publishedReviewModelPath) };
