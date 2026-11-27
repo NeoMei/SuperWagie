@@ -1,24 +1,288 @@
 {
   "component": "SuperPPT",
-  "version": "0.3.6",
+  "version": "0.3.8",
   "repository": "https://github.com/NeoMei/SuperPPT",
-  "tag": "v0.3.6",
-  "commit": "91b75cf6514207d3ae3d18d8211b75bd8182dff0",
-  "archiveSha256": "b891cff28077a40f63431675fa476bea46b5301061e14c9bc90158b69902021f",
-  "archiveUrl": "https://codeload.github.com/NeoMei/SuperPPT/tar.gz/refs/tags/v0.3.6",
+  "tag": "v0.3.8",
+  "commit": "41592a54f9715df3ea47dc7a603c84679ea534df",
+  "archiveSha256": "a95abc495f54eed76141d9c378ccdd53eb78e1484ee7332543461b4d50df68c9",
+  "archiveUrl": "https://codeload.github.com/NeoMei/SuperPPT/tar.gz/refs/tags/v0.3.8",
   "adaptations": [
     "src/project/markdown-link.ts and its two call sites preserve URL-encoded local Markdown links.",
     "tests/markdown-link.test.ts uses the upstream node:test runner; fast-planning selector assertion expects a file URL.",
     "Machine-specific RELEASE-INSTALL.json is omitted.",
     "Managed launchers invoke the captured server executable without system Node/npm. Compiled offline boundary is explicit in instructions.",
-    "Plan-review now emits an openui-lang image-choice block so chat style images can be clicked to reply with the selected style; SKILL.md, src/workflow/planning.ts and tests/plan-review.test.ts carry the adaptation."
+    "Plan review uses managed chat reply blocks when launchers declare SUPERPPT_CHAT_INTERACTIONS=1. Other hosts retain HTML and ordinary text. src/planning/chat-review.ts and its tests bind comments and exact style variants to the current decision."
   ],
   "files": [
     {
       "path": ".codex-plugin/plugin.json",
-      "shippedSha256": "288af07bb15a462b63110e680f25eb1d010280bf146d1b13b87ec1628eedf240",
+      "shippedSha256": "cbcbda68408a01f0d60e327e474e5682dbb9f6a349f93b633fc6348c51364ad6",
       "sourcePath": ".codex-plugin/plugin.json",
-      "upstreamSha256": "288af07bb15a462b63110e680f25eb1d010280bf146d1b13b87ec1628eedf240"
+      "upstreamSha256": "cbcbda68408a01f0d60e327e474e5682dbb9f6a349f93b633fc6348c51364ad6"
+    },
+    {
+      "path": "docs/design/visual-presets/aurora-gradient.visual-style.md",
+      "shippedSha256": "97c0221888d80f9030c68d6646f4e229ed9ab84a321c47d78479f6904fe1a3a0",
+      "sourcePath": "docs/design/visual-presets/aurora-gradient.visual-style.md",
+      "upstreamSha256": "97c0221888d80f9030c68d6646f4e229ed9ab84a321c47d78479f6904fe1a3a0"
+    },
+    {
+      "path": "docs/design/visual-presets/bento-grid.visual-style.md",
+      "shippedSha256": "44ea01cb4b4d700b1cee4fbba9c2de5120f7999ccd2fc13f1078acbb43584310",
+      "sourcePath": "docs/design/visual-presets/bento-grid.visual-style.md",
+      "upstreamSha256": "44ea01cb4b4d700b1cee4fbba9c2de5120f7999ccd2fc13f1078acbb43584310"
+    },
+    {
+      "path": "docs/design/visual-presets/bold-editorial.visual-style.md",
+      "shippedSha256": "19c85d4531eeb7e14cad86d6621c16574ed4d2ecf078da9b91f0bd5502541d7f",
+      "sourcePath": "docs/design/visual-presets/bold-editorial.visual-style.md",
+      "upstreamSha256": "19c85d4531eeb7e14cad86d6621c16574ed4d2ecf078da9b91f0bd5502541d7f"
+    },
+    {
+      "path": "docs/design/visual-presets/dark-neon.visual-style.md",
+      "shippedSha256": "dc3f379c80f52602ce15497d72174b341cf0ee295fb8f251a67585a950e3071c",
+      "sourcePath": "docs/design/visual-presets/dark-neon.visual-style.md",
+      "upstreamSha256": "dc3f379c80f52602ce15497d72174b341cf0ee295fb8f251a67585a950e3071c"
+    },
+    {
+      "path": "docs/design/visual-presets/data-storytelling.visual-style.md",
+      "shippedSha256": "6144e26c8143f981070864376cea4ad7f134a46fdf9b4affa1dc017d9a8cdd4a",
+      "sourcePath": "docs/design/visual-presets/data-storytelling.visual-style.md",
+      "upstreamSha256": "6144e26c8143f981070864376cea4ad7f134a46fdf9b4affa1dc017d9a8cdd4a"
+    },
+    {
+      "path": "docs/design/visual-presets/glassmorphism.visual-style.md",
+      "shippedSha256": "29033abc353f26334826d8bb896a18c07533c03e79afb11dba03b94671e73710",
+      "sourcePath": "docs/design/visual-presets/glassmorphism.visual-style.md",
+      "upstreamSha256": "29033abc353f26334826d8bb896a18c07533c03e79afb11dba03b94671e73710"
+    },
+    {
+      "path": "docs/design/visual-presets/minimal-whitespace.visual-style.md",
+      "shippedSha256": "37ef04797bb8d923a738f56c49c2d72bbc9c51d8ddb9e3ce1dd5b03d758157e8",
+      "sourcePath": "docs/design/visual-presets/minimal-whitespace.visual-style.md",
+      "upstreamSha256": "37ef04797bb8d923a738f56c49c2d72bbc9c51d8ddb9e3ce1dd5b03d758157e8"
+    },
+    {
+      "path": "docs/design/visual-presets/modular-cards.visual-style.md",
+      "shippedSha256": "caeb5ebd81052d52c0aafe1eb0ec08c9455fff3b965354097df1435178395822",
+      "sourcePath": "docs/design/visual-presets/modular-cards.visual-style.md",
+      "upstreamSha256": "caeb5ebd81052d52c0aafe1eb0ec08c9455fff3b965354097df1435178395822"
+    },
+    {
+      "path": "docs/design/visual-presets/neumorphism.visual-style.md",
+      "shippedSha256": "76f4f4028713f62c356666c3a556d249648ff4df5c61631d852430e1e10196bb",
+      "sourcePath": "docs/design/visual-presets/neumorphism.visual-style.md",
+      "upstreamSha256": "76f4f4028713f62c356666c3a556d249648ff4df5c61631d852430e1e10196bb"
+    },
+    {
+      "path": "docs/design/visual-presets/README.md",
+      "shippedSha256": "59631df72b5fa95814481255123972e77c38f9c503a5271e553a7648ec660833",
+      "sourcePath": "docs/design/visual-presets/README.md",
+      "upstreamSha256": "59631df72b5fa95814481255123972e77c38f9c503a5271e553a7648ec660833"
+    },
+    {
+      "path": "docs/macOS交接与接力开发指南.md",
+      "shippedSha256": "1e2724779f4c7107a6ab2a9494f16a35c05f821a7ae6c68ae15afd4d25f6e9ef",
+      "sourcePath": "docs/macOS交接与接力开发指南.md",
+      "upstreamSha256": "1e2724779f4c7107a6ab2a9494f16a35c05f821a7ae6c68ae15afd4d25f6e9ef"
+    },
+    {
+      "path": "docs/releases/v0.2.0.md",
+      "shippedSha256": "4f37a6b924e4a03c457e1027613686be984a4d00368f2b709e723a022b22cca1",
+      "sourcePath": "docs/releases/v0.2.0.md",
+      "upstreamSha256": "4f37a6b924e4a03c457e1027613686be984a4d00368f2b709e723a022b22cca1"
+    },
+    {
+      "path": "docs/releases/v0.3.0.md",
+      "shippedSha256": "5f97b49cad1ed17e14ada9b6a294d251b75f7919b36a4964d4b3b2754adc25fa",
+      "sourcePath": "docs/releases/v0.3.0.md",
+      "upstreamSha256": "5f97b49cad1ed17e14ada9b6a294d251b75f7919b36a4964d4b3b2754adc25fa"
+    },
+    {
+      "path": "docs/releases/v0.3.1.md",
+      "shippedSha256": "2dbf4e90bf67506f7bbe383912c27393d5e3fbf5c34546d083e6546cb183644c",
+      "sourcePath": "docs/releases/v0.3.1.md",
+      "upstreamSha256": "2dbf4e90bf67506f7bbe383912c27393d5e3fbf5c34546d083e6546cb183644c"
+    },
+    {
+      "path": "docs/releases/v0.3.2.md",
+      "shippedSha256": "e6bf72784b5223a114ea4171edb222427f1fcbfd674a62f64541c4da1ba19110",
+      "sourcePath": "docs/releases/v0.3.2.md",
+      "upstreamSha256": "e6bf72784b5223a114ea4171edb222427f1fcbfd674a62f64541c4da1ba19110"
+    },
+    {
+      "path": "docs/releases/v0.3.3.md",
+      "shippedSha256": "62330b6703669814a21d07e86ec809c11683cec0a267d31948a5e0ae5f3d4157",
+      "sourcePath": "docs/releases/v0.3.3.md",
+      "upstreamSha256": "62330b6703669814a21d07e86ec809c11683cec0a267d31948a5e0ae5f3d4157"
+    },
+    {
+      "path": "docs/releases/v0.3.4.md",
+      "shippedSha256": "107d4cf5af5bf2710f5d7d6d7cdac107f0845c92c01fd1fedf9215c6fc23c2ab",
+      "sourcePath": "docs/releases/v0.3.4.md",
+      "upstreamSha256": "107d4cf5af5bf2710f5d7d6d7cdac107f0845c92c01fd1fedf9215c6fc23c2ab"
+    },
+    {
+      "path": "docs/releases/v0.3.5.md",
+      "shippedSha256": "7020eb85e7ba9caad2339fc6cf7d6a5554881864dc8779ae366c87d102ab4977",
+      "sourcePath": "docs/releases/v0.3.5.md",
+      "upstreamSha256": "7020eb85e7ba9caad2339fc6cf7d6a5554881864dc8779ae366c87d102ab4977"
+    },
+    {
+      "path": "docs/releases/v0.3.6.md",
+      "shippedSha256": "b49e5453577e7f4926fc41ec583e316734ca1524638bf8e5293eb8a1fce79b85",
+      "sourcePath": "docs/releases/v0.3.6.md",
+      "upstreamSha256": "b49e5453577e7f4926fc41ec583e316734ca1524638bf8e5293eb8a1fce79b85"
+    },
+    {
+      "path": "docs/releases/v0.3.7.md",
+      "shippedSha256": "774fd7ae50a1f5618f2abea0adad41c0465a950a1fd3900ef30f9992c3d4fed1",
+      "sourcePath": "docs/releases/v0.3.7.md",
+      "upstreamSha256": "774fd7ae50a1f5618f2abea0adad41c0465a950a1fd3900ef30f9992c3d4fed1"
+    },
+    {
+      "path": "docs/releases/v0.3.8.md",
+      "shippedSha256": "ffb50cad6f77514f2cebfccb88d233a9c99e302eb3e6f51174f4f7d72c4b7f58",
+      "sourcePath": "docs/releases/v0.3.8.md",
+      "upstreamSha256": "ffb50cad6f77514f2cebfccb88d233a9c99e302eb3e6f51174f4f7d72c4b7f58"
+    },
+    {
+      "path": "docs/specs/business-style-layout.md",
+      "shippedSha256": "0958a095880134bc9eb143abff647ada3dc7ee6511c8e018d5a4fa38bf84a989",
+      "sourcePath": "docs/specs/business-style-layout.md",
+      "upstreamSha256": "0958a095880134bc9eb143abff647ada3dc7ee6511c8e018d5a4fa38bf84a989"
+    },
+    {
+      "path": "docs/specs/decisions.md",
+      "shippedSha256": "aa5137c2511db00ec93340c50965a0b092b18ce069046d95aaec5b2df17c0fec",
+      "sourcePath": "docs/specs/decisions.md",
+      "upstreamSha256": "aa5137c2511db00ec93340c50965a0b092b18ce069046d95aaec5b2df17c0fec"
+    },
+    {
+      "path": "docs/specs/README.md",
+      "shippedSha256": "423bf2f83904d14a6af2f466ef2ca1264c5ed50d5f54a853cb623b44e21d3d98",
+      "sourcePath": "docs/specs/README.md",
+      "upstreamSha256": "423bf2f83904d14a6af2f466ef2ca1264c5ed50d5f54a853cb623b44e21d3d98"
+    },
+    {
+      "path": "docs/specs/style-art-directions.md",
+      "shippedSha256": "05b6b49e375a92589d73ee39dacb2ae244d7966da45bb369b9c5744f9ac09657",
+      "sourcePath": "docs/specs/style-art-directions.md",
+      "upstreamSha256": "05b6b49e375a92589d73ee39dacb2ae244d7966da45bb369b9c5744f9ac09657"
+    },
+    {
+      "path": "docs/specs/style-showcase-copy.md",
+      "shippedSha256": "d05860cf9caca0aa042dff8db7a0b57c0579a994ee966d8dcd081a1c8ff03b08",
+      "sourcePath": "docs/specs/style-showcase-copy.md",
+      "upstreamSha256": "d05860cf9caca0aa042dff8db7a0b57c0579a994ee966d8dcd081a1c8ff03b08"
+    },
+    {
+      "path": "docs/specs/visual-design-and-selection.md",
+      "shippedSha256": "425dcefc34691773edcadff2645dc7aa1433f275ec13255c94e2a73a058582f9",
+      "sourcePath": "docs/specs/visual-design-and-selection.md",
+      "upstreamSha256": "425dcefc34691773edcadff2645dc7aa1433f275ec13255c94e2a73a058582f9"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-26-superppt-v1.md",
+      "shippedSha256": "0f0a5c3f26ab8bcb7225826bc10930163163347336d6927bb16e0a9265d329f1",
+      "sourcePath": "docs/superpowers/plans/2026-08-26-superppt-v1.md",
+      "upstreamSha256": "0f0a5c3f26ab8bcb7225826bc10930163163347336d6927bb16e0a9265d329f1"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-28-superppt-ai-image-delegation.md",
+      "shippedSha256": "32783dda3e1ece902a4790cfe5cc7eeb2a93db2ec8dc71c11376f5758e5bafdb",
+      "sourcePath": "docs/superpowers/plans/2026-08-28-superppt-ai-image-delegation.md",
+      "upstreamSha256": "32783dda3e1ece902a4790cfe5cc7eeb2a93db2ec8dc71c11376f5758e5bafdb"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-30-ai-image-to-ppt-capability-manifest.md",
+      "shippedSha256": "2e36291e93560b9b6961380d6208d3fa1578e8b15ff676ace084284611b4967f",
+      "sourcePath": "docs/superpowers/plans/2026-08-30-ai-image-to-ppt-capability-manifest.md",
+      "upstreamSha256": "2e36291e93560b9b6961380d6208d3fa1578e8b15ff676ace084284611b4967f"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-30-local-full-deck-editing.md",
+      "shippedSha256": "f944fb3b12270e71edb5efe53b481375f075dfa567a04e4cdb0eb6c8a4589c13",
+      "sourcePath": "docs/superpowers/plans/2026-08-30-local-full-deck-editing.md",
+      "upstreamSha256": "f944fb3b12270e71edb5efe53b481375f075dfa567a04e4cdb0eb6c8a4589c13"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-30-portable-pptx-review.md",
+      "shippedSha256": "0cdc8537cf60d504a7b5969f825b27837c3823b242519d6d1768d2eadb5a8195",
+      "sourcePath": "docs/superpowers/plans/2026-08-30-portable-pptx-review.md",
+      "upstreamSha256": "0cdc8537cf60d504a7b5969f825b27837c3823b242519d6d1768d2eadb5a8195"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-09-05-superppt-fast-workflow.md",
+      "shippedSha256": "8d108e444f14970595753ecc4ba88afc392d436ebf41359aa60d1cd830c2ce2d",
+      "sourcePath": "docs/superpowers/plans/2026-09-05-superppt-fast-workflow.md",
+      "upstreamSha256": "8d108e444f14970595753ecc4ba88afc392d436ebf41359aa60d1cd830c2ce2d"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-09-07-ten-styles-selection.md",
+      "shippedSha256": "a2362f753c87664cea3b4ab771893c7aad3498974b4f6526cb9e59434d85c32c",
+      "sourcePath": "docs/superpowers/plans/2026-09-07-ten-styles-selection.md",
+      "upstreamSha256": "a2362f753c87664cea3b4ab771893c7aad3498974b4f6526cb9e59434d85c32c"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-09-08-superppt-guided-plan-review.md",
+      "shippedSha256": "6fcc436db33fed893adea88e6be3b880d4450f1fcb7c0377705799d587c0f240",
+      "sourcePath": "docs/superpowers/plans/2026-09-08-superppt-guided-plan-review.md",
+      "upstreamSha256": "6fcc436db33fed893adea88e6be3b880d4450f1fcb7c0377705799d587c0f240"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-09-26-latest-stable-dependencies.md",
+      "shippedSha256": "83020e32c65ec4cd58af47a679de5e1274a591e34ebbf815982879286cbc8784",
+      "sourcePath": "docs/superpowers/plans/2026-09-26-latest-stable-dependencies.md",
+      "upstreamSha256": "83020e32c65ec4cd58af47a679de5e1274a591e34ebbf815982879286cbc8784"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-26-superppt-design.md",
+      "shippedSha256": "d0ca7a95038de67126c05556d086e5224e61d32ef50505f475b2e16f7edb152d",
+      "sourcePath": "docs/superpowers/specs/2026-08-26-superppt-design.md",
+      "upstreamSha256": "d0ca7a95038de67126c05556d086e5224e61d32ef50505f475b2e16f7edb152d"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-28-superppt-ai-image-to-ppt-delegation-design.md",
+      "shippedSha256": "97c7b0224c0a28c800a303572ca4b7c972a16992da6431e7c8655e3bcef707c4",
+      "sourcePath": "docs/superpowers/specs/2026-08-28-superppt-ai-image-to-ppt-delegation-design.md",
+      "upstreamSha256": "97c7b0224c0a28c800a303572ca4b7c972a16992da6431e7c8655e3bcef707c4"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-05-superppt-fast-workflow-design.md",
+      "shippedSha256": "122f42c926953d6761c785b61e880b8976fb715d004e77f61f96b8436952b1b5",
+      "sourcePath": "docs/superpowers/specs/2026-09-05-superppt-fast-workflow-design.md",
+      "upstreamSha256": "122f42c926953d6761c785b61e880b8976fb715d004e77f61f96b8436952b1b5"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-08-superppt-guided-plan-review-design.md",
+      "shippedSha256": "6a4b450ee65de9f20f7cb4d6b2704da62159ebc45a044ba224ad07500f2dffef",
+      "sourcePath": "docs/superpowers/specs/2026-09-08-superppt-guided-plan-review-design.md",
+      "upstreamSha256": "6a4b450ee65de9f20f7cb4d6b2704da62159ebc45a044ba224ad07500f2dffef"
+    },
+    {
+      "path": "docs/verification/2026-09-05-fast-workflow.md",
+      "shippedSha256": "43c8acc88b7c118a54620c01659c2c256ea64cbde3def5b3fc2c71fbaa0e8b51",
+      "sourcePath": "docs/verification/2026-09-05-fast-workflow.md",
+      "upstreamSha256": "43c8acc88b7c118a54620c01659c2c256ea64cbde3def5b3fc2c71fbaa0e8b51"
+    },
+    {
+      "path": "docs/verification/2026-09-06-v0.2.0.md",
+      "shippedSha256": "cbbd1147b01134ced356935407b2ce3f8a3ac1e1ac5a481006ccabeec89adc75",
+      "sourcePath": "docs/verification/2026-09-06-v0.2.0.md",
+      "upstreamSha256": "cbbd1147b01134ced356935407b2ce3f8a3ac1e1ac5a481006ccabeec89adc75"
+    },
+    {
+      "path": "docs/verification/2026-09-27-style-variants.md",
+      "shippedSha256": "8845af8557d2f9b29f79a5c5be69ba63ea2865b9b489663dcccfd02e45b150f9",
+      "sourcePath": "docs/verification/2026-09-27-style-variants.md",
+      "upstreamSha256": "8845af8557d2f9b29f79a5c5be69ba63ea2865b9b489663dcccfd02e45b150f9"
+    },
+    {
+      "path": "docs/Windows交接与验证指南.md",
+      "shippedSha256": "83b9a16cf9f7288048186c760b2a5a47bb45bca9af7532ccd1f177f108f0af1c",
+      "sourcePath": "docs/Windows交接与验证指南.md",
+      "upstreamSha256": "83b9a16cf9f7288048186c760b2a5a47bb45bca9af7532ccd1f177f108f0af1c"
     },
     {
       "path": "LICENSE",
@@ -27,28 +291,23 @@
       "upstreamSha256": "f14e7132353f15002e025f465911c53c708c7cd188405431304fa2e25eabe33d"
     },
     {
-      "path": "README.md",
-      "shippedSha256": "073deee35cfdb52922a5ac9b0b0a544ee3431fb5e753502650362091588eab75",
-      "sourcePath": "README.md",
-      "upstreamSha256": "073deee35cfdb52922a5ac9b0b0a544ee3431fb5e753502650362091588eab75"
-    },
-    {
-      "path": "SECURITY.md",
-      "shippedSha256": "f532cf8ed9e3b0bd27fe65b1a22b3426ef272c22e16996444ce7b5c3988c81c9",
-      "sourcePath": "SECURITY.md",
-      "upstreamSha256": "f532cf8ed9e3b0bd27fe65b1a22b3426ef272c22e16996444ce7b5c3988c81c9"
-    },
-    {
       "path": "package-lock.json",
-      "shippedSha256": "62c05e3758e22c928f9bae1a42505d604f42af6b4d5e8cb80a65e8bff6127c1d",
+      "shippedSha256": "bfd320442399548d13b438cf4401b40188dfffb323de068f983e445ad923f817",
       "sourcePath": "package-lock.json",
-      "upstreamSha256": "62c05e3758e22c928f9bae1a42505d604f42af6b4d5e8cb80a65e8bff6127c1d"
+      "upstreamSha256": "bfd320442399548d13b438cf4401b40188dfffb323de068f983e445ad923f817"
     },
     {
       "path": "package.json",
-      "shippedSha256": "6c1b0863c591dfb1ddd67de74b50150784032d73a49a0281698df3fc3e94633d",
+      "shippedSha256": "9fbe08c591156c43465b8d814bf6948c5c309e019c06c4d93f707c4002a9a8aa",
       "sourcePath": "package.json",
-      "upstreamSha256": "6c1b0863c591dfb1ddd67de74b50150784032d73a49a0281698df3fc3e94633d"
+      "upstreamSha256": "ad6ec6c9b70ee87daca67727ba15217453d82cf7e900c9bf6dc553f43abaaba9",
+      "origin": "SuperWagie retains official documentation in the vendored package"
+    },
+    {
+      "path": "README.md",
+      "shippedSha256": "68ac0e50a8423225cd13fa00ad311e6867c949dcba928cafdc51d8a8aa4b85de",
+      "sourcePath": "README.md",
+      "upstreamSha256": "68ac0e50a8423225cd13fa00ad311e6867c949dcba928cafdc51d8a8aa4b85de"
     },
     {
       "path": "references/dependencies.json",
@@ -58,9 +317,9 @@
     },
     {
       "path": "scripts/audit-dependencies.mjs",
-      "shippedSha256": "7c127af75d1829317e0f66f8e4f5dd54beda4b73c51624b1fe5189e3b959de43",
+      "shippedSha256": "5c14d1f10ec8a6cfe822b430b7c596dde18e312ffd0618296d9fa0390df7a6ec",
       "sourcePath": "scripts/audit-dependencies.mjs",
-      "upstreamSha256": "7c127af75d1829317e0f66f8e4f5dd54beda4b73c51624b1fe5189e3b959de43"
+      "upstreamSha256": "5c14d1f10ec8a6cfe822b430b7c596dde18e312ffd0618296d9fa0390df7a6ec"
     },
     {
       "path": "scripts/build-style-catalog.mjs",
@@ -111,22 +370,16 @@
       "upstreamSha256": "0a81be93e2286e87011e4d7b949dc9c03323039596110140c8fcff35813e9a2f"
     },
     {
-      "path": "skills/superppt/SKILL.md",
-      "shippedSha256": "0aaee38036580c7f8fc34696c0dda762de20a31a6d8f429ce149efa6514fd71d",
-      "sourcePath": "skills/superppt/SKILL.md",
-      "upstreamSha256": "04709c1432e0f6f7c991cc7b8972277f848ba84ffd0034300f585ac7b3b1d1af"
+      "path": "SECURITY.md",
+      "shippedSha256": "f532cf8ed9e3b0bd27fe65b1a22b3426ef272c22e16996444ce7b5c3988c81c9",
+      "sourcePath": "SECURITY.md",
+      "upstreamSha256": "f532cf8ed9e3b0bd27fe65b1a22b3426ef272c22e16996444ce7b5c3988c81c9"
     },
     {
       "path": "skills/superppt/agents/openai.yaml",
       "shippedSha256": "35a4e40eebefcf3d08a39c3ac7568c8bba850f02edf10e406599d37633b24e7c",
       "sourcePath": "skills/superppt/agents/openai.yaml",
       "upstreamSha256": "35a4e40eebefcf3d08a39c3ac7568c8bba850f02edf10e406599d37633b24e7c"
-    },
-    {
-      "path": "skills/superppt/assets/styles/README.md",
-      "shippedSha256": "316eebd13ed06b1e5e59d5d1b7293f8fca10ab18079cad70b2765ffecbe923ad",
-      "sourcePath": "skills/superppt/assets/styles/README.md",
-      "upstreamSha256": "316eebd13ed06b1e5e59d5d1b7293f8fca10ab18079cad70b2765ffecbe923ad"
     },
     {
       "path": "skills/superppt/assets/styles/catalog.json",
@@ -141,70 +394,58 @@
       "upstreamSha256": "2bec775c5d4af72ff0b5e63e25adedb6819f9b325b0ab8f8b8ba479e2de41c32"
     },
     {
+      "path": "skills/superppt/assets/styles/README.md",
+      "shippedSha256": "316eebd13ed06b1e5e59d5d1b7293f8fca10ab18079cad70b2765ffecbe923ad",
+      "sourcePath": "skills/superppt/assets/styles/README.md",
+      "upstreamSha256": "316eebd13ed06b1e5e59d5d1b7293f8fca10ab18079cad70b2765ffecbe923ad"
+    },
+    {
       "path": "skills/superppt/assets/styles/remote-assets.json",
       "shippedSha256": "63ba7d93542245873d1673538d8bec937dc847ada33f7a9b8c865d7f1d145d60",
       "sourcePath": "skills/superppt/assets/styles/remote-assets.json",
       "upstreamSha256": "63ba7d93542245873d1673538d8bec937dc847ada33f7a9b8c865d7f1d145d60"
     },
     {
-      "path": "skills/superppt/references/\u4f9d\u8d56\u8bf4\u660e.md",
-      "shippedSha256": "313a5647f172d73bb363da01761caa1c859b21d53dad3e571db707b916d56f50",
-      "sourcePath": "skills/superppt/references/\u4f9d\u8d56\u8bf4\u660e.md",
-      "upstreamSha256": "5786fac7b5a3ece292894d227120d94b6176a07275bab51deb2cef37d9568bfd"
+      "path": "skills/superppt/references/依赖说明.md",
+      "shippedSha256": "f73d07d34f62e0e20893131d687b04ca379c906be5f747ac6b35c772b4997918",
+      "sourcePath": "skills/superppt/references/依赖说明.md",
+      "upstreamSha256": "a69de6c73a7e9a9448b15724f3361a12ead92aa55ccc6f3679b2ee494eb5ab77"
     },
     {
-      "path": "skills/superppt/references/\u4fee\u6539\u8def\u7531.md",
+      "path": "skills/superppt/references/修改路由.md",
       "shippedSha256": "e5c817e7b30ca73ef938ff9e1406b574a894b85af1c7058aef1dc7a57e6651e5",
-      "sourcePath": "skills/superppt/references/\u4fee\u6539\u8def\u7531.md",
+      "sourcePath": "skills/superppt/references/修改路由.md",
       "upstreamSha256": "e5c817e7b30ca73ef938ff9e1406b574a894b85af1c7058aef1dc7a57e6651e5"
     },
     {
-      "path": "skills/superppt/references/\u5de5\u4f5c\u533a\u5951\u7ea6.md",
+      "path": "skills/superppt/references/工作区契约.md",
       "shippedSha256": "e41d2d416be5df1ca628ea9d6b315645009f3ecc661d58c2729a8cb56e3afe11",
-      "sourcePath": "skills/superppt/references/\u5de5\u4f5c\u533a\u5951\u7ea6.md",
+      "sourcePath": "skills/superppt/references/工作区契约.md",
       "upstreamSha256": "e41d2d416be5df1ca628ea9d6b315645009f3ecc661d58c2729a8cb56e3afe11"
     },
     {
-      "path": "skills/superppt/references/\u95e8\u7981\u6e05\u5355.md",
+      "path": "skills/superppt/references/门禁清单.md",
       "shippedSha256": "23247157295cc0a790a068965e85c1cb31ae6e226ba5242071ff33711a95da1d",
-      "sourcePath": "skills/superppt/references/\u95e8\u7981\u6e05\u5355.md",
+      "sourcePath": "skills/superppt/references/门禁清单.md",
       "upstreamSha256": "23247157295cc0a790a068965e85c1cb31ae6e226ba5242071ff33711a95da1d"
     },
     {
-      "path": "skills/superppt/references/\u9636\u6bb5\u5951\u7ea6.json",
+      "path": "skills/superppt/references/阶段契约.json",
       "shippedSha256": "0eadf18265ae84b2da334c80b053dc640b0c989d1cac2ab7a2fbe4c4830707ad",
-      "sourcePath": "skills/superppt/references/\u9636\u6bb5\u5951\u7ea6.json",
+      "sourcePath": "skills/superppt/references/阶段契约.json",
       "upstreamSha256": "0eadf18265ae84b2da334c80b053dc640b0c989d1cac2ab7a2fbe4c4830707ad"
+    },
+    {
+      "path": "skills/superppt/SKILL.md",
+      "shippedSha256": "ed3d8fe9226d0a7a158b4feaf4bc345c3fddb2a1846b9f0d1317555d0b6f129a",
+      "sourcePath": "skills/superppt/SKILL.md",
+      "upstreamSha256": "2502daefa0f5dddd8441f5bac6f63093137e4e052e68d31a71a192c1ac296c8e"
     },
     {
       "path": "src/cli.ts",
       "shippedSha256": "7af63f98b3018a7c41e4a93a13cc2a5dd026d58c9a6b6ddd2f0572ff3db8eec4",
       "sourcePath": "src/cli.ts",
       "upstreamSha256": "7af63f98b3018a7c41e4a93a13cc2a5dd026d58c9a6b6ddd2f0572ff3db8eec4"
-    },
-    {
-      "path": "src/deck/editable-slide.ts",
-      "shippedSha256": "52baa114a2f66534e05ee39b222b646f95835f7cfc84fc7f520cd72e9e61bb1e",
-      "sourcePath": "src/deck/editable-slide.ts",
-      "upstreamSha256": "52baa114a2f66534e05ee39b222b646f95835f7cfc84fc7f520cd72e9e61bb1e"
-    },
-    {
-      "path": "src/deck/geometry.ts",
-      "shippedSha256": "6e4faf94822a493bdd58edcb9c3adeb6cae3d9cc8b1ba85c2c06b681cbc9dc59",
-      "sourcePath": "src/deck/geometry.ts",
-      "upstreamSha256": "6e4faf94822a493bdd58edcb9c3adeb6cae3d9cc8b1ba85c2c06b681cbc9dc59"
-    },
-    {
-      "path": "src/deck/pptx.ts",
-      "shippedSha256": "6de3a5186a8f3bd96895f0a1f1a86adbcfab0675b72a6891f69594ba6d4d1bb7",
-      "sourcePath": "src/deck/pptx.ts",
-      "upstreamSha256": "6de3a5186a8f3bd96895f0a1f1a86adbcfab0675b72a6891f69594ba6d4d1bb7"
-    },
-    {
-      "path": "src/deck/presentation-service.ts",
-      "shippedSha256": "0d24d5e3d5d926503fd0f4e6b78581b05252dabe746ef7219dd99c4d82e987e2",
-      "sourcePath": "src/deck/presentation-service.ts",
-      "upstreamSha256": "0d24d5e3d5d926503fd0f4e6b78581b05252dabe746ef7219dd99c4d82e987e2"
     },
     {
       "path": "src/deck-revisions/archive.ts",
@@ -267,6 +508,30 @@
       "upstreamSha256": "a920d15b1725871134865ffc343c8046607611a5872f132d73087c2516aa8835"
     },
     {
+      "path": "src/deck/editable-slide.ts",
+      "shippedSha256": "52baa114a2f66534e05ee39b222b646f95835f7cfc84fc7f520cd72e9e61bb1e",
+      "sourcePath": "src/deck/editable-slide.ts",
+      "upstreamSha256": "52baa114a2f66534e05ee39b222b646f95835f7cfc84fc7f520cd72e9e61bb1e"
+    },
+    {
+      "path": "src/deck/geometry.ts",
+      "shippedSha256": "6e4faf94822a493bdd58edcb9c3adeb6cae3d9cc8b1ba85c2c06b681cbc9dc59",
+      "sourcePath": "src/deck/geometry.ts",
+      "upstreamSha256": "6e4faf94822a493bdd58edcb9c3adeb6cae3d9cc8b1ba85c2c06b681cbc9dc59"
+    },
+    {
+      "path": "src/deck/pptx.ts",
+      "shippedSha256": "6de3a5186a8f3bd96895f0a1f1a86adbcfab0675b72a6891f69594ba6d4d1bb7",
+      "sourcePath": "src/deck/pptx.ts",
+      "upstreamSha256": "6de3a5186a8f3bd96895f0a1f1a86adbcfab0675b72a6891f69594ba6d4d1bb7"
+    },
+    {
+      "path": "src/deck/presentation-service.ts",
+      "shippedSha256": "0d24d5e3d5d926503fd0f4e6b78581b05252dabe746ef7219dd99c4d82e987e2",
+      "sourcePath": "src/deck/presentation-service.ts",
+      "upstreamSha256": "0d24d5e3d5d926503fd0f4e6b78581b05252dabe746ef7219dd99c4d82e987e2"
+    },
+    {
       "path": "src/dependencies/task-dependencies.ts",
       "shippedSha256": "a30d181f505c51f0bd2d097c176c420b67e2aea7a7a10bf420dddf1e10adc13d",
       "sourcePath": "src/dependencies/task-dependencies.ts",
@@ -310,9 +575,15 @@
     },
     {
       "path": "src/generation/task-batch.ts",
-      "shippedSha256": "7b0b0b77e3f45307ccecea22268f757ae9710847ff6f6b5687ce36143adba5c8",
+      "shippedSha256": "5248bc2b8e4d9477f8c46561534cc6a287b5fb04893cec02e125844f16241d49",
       "sourcePath": "src/generation/task-batch.ts",
-      "upstreamSha256": "7b0b0b77e3f45307ccecea22268f757ae9710847ff6f6b5687ce36143adba5c8"
+      "upstreamSha256": "5248bc2b8e4d9477f8c46561534cc6a287b5fb04893cec02e125844f16241d49"
+    },
+    {
+      "path": "src/planning/chat-review.ts",
+      "shippedSha256": "4515fc0a333dbc0c4f9bedf263ff2b1c2658a41616cf61b63967e69e7490767f",
+      "sourcePath": "src/planning/chat-review.ts",
+      "origin": "SuperWagie plan-review adaptation"
     },
     {
       "path": "src/planning/context.ts",
@@ -322,9 +593,9 @@
     },
     {
       "path": "src/planning/review-model.ts",
-      "shippedSha256": "65d7afd4cfcc4277cd864a8f53a904df4c14a769edd0d178a1a247e58e3c622f",
+      "shippedSha256": "7379ee31a7028f3e8f0bdbf7682dade9c40b567924cb5d55cba9a07522714ec9",
       "sourcePath": "src/planning/review-model.ts",
-      "upstreamSha256": "65d7afd4cfcc4277cd864a8f53a904df4c14a769edd0d178a1a247e58e3c622f"
+      "upstreamSha256": "7379ee31a7028f3e8f0bdbf7682dade9c40b567924cb5d55cba9a07522714ec9"
     },
     {
       "path": "src/planning/review-view.ts",
@@ -353,7 +624,8 @@
     {
       "path": "src/project/markdown-link.ts",
       "shippedSha256": "84bf9a28ca25346d5ded2014b6b8f29c80ed5c2b4b2dad81e37f5254c1ef25e2",
-      "origin": "SuperWagie adaptation"
+      "sourcePath": "src/project/markdown-link.ts",
+      "origin": "SuperWagie plan-review adaptation"
     },
     {
       "path": "src/project/paths.ts",
@@ -405,9 +677,9 @@
     },
     {
       "path": "src/styles/selection-view.ts",
-      "shippedSha256": "22ca78cded7d84ac4ea7075da0c67d31ddd4bbb071d1f24b7454136dd35b48da",
+      "shippedSha256": "a41c32f47ff3b0cc99dfd981fd85d2ac1b836df07d240b8e7806f04e1fcc3bd7",
       "sourcePath": "src/styles/selection-view.ts",
-      "upstreamSha256": "22ca78cded7d84ac4ea7075da0c67d31ddd4bbb071d1f24b7454136dd35b48da"
+      "upstreamSha256": "a41c32f47ff3b0cc99dfd981fd85d2ac1b836df07d240b8e7806f04e1fcc3bd7"
     },
     {
       "path": "src/styles/selection.ts",
@@ -417,9 +689,9 @@
     },
     {
       "path": "src/workflow/continue.ts",
-      "shippedSha256": "f991076e97c2436b2425d0a9a2ed3810b5fa7c359a4cc8531f9c224f225484c3",
+      "shippedSha256": "f26aa153a66bd3f27bddf802a4900f7d6d6778c10633861ef1ce650f09053b5b",
       "sourcePath": "src/workflow/continue.ts",
-      "upstreamSha256": "f991076e97c2436b2425d0a9a2ed3810b5fa7c359a4cc8531f9c224f225484c3"
+      "upstreamSha256": "f26aa153a66bd3f27bddf802a4900f7d6d6778c10633861ef1ce650f09053b5b"
     },
     {
       "path": "src/workflow/contracts.ts",
@@ -435,15 +707,27 @@
     },
     {
       "path": "src/workflow/planning.ts",
-      "shippedSha256": "0ab3c6a314d9b947e0f404b06791c77827a6902b2127d30e2642ae77adc6071d",
+      "shippedSha256": "2b3e4d85e5d00dee9f7ba3a8d4948ce0fe2fc2b7f1fef8ce0c0a172cfa2d6ec6",
       "sourcePath": "src/workflow/planning.ts",
-      "upstreamSha256": "9996f6b9145fc2fa3209349afaebb68f11172e688436f725e78e3dab0174b5b6"
+      "upstreamSha256": "63ab76a742fdffc45970f3f3d5c00135664cc1e717b640baf12531c51d19c477"
     },
     {
       "path": "src/workflow/reuse.ts",
       "shippedSha256": "7327079a942212430fb91b925e901122e07a3861d08e1a4beb5bb6468e8380a9",
       "sourcePath": "src/workflow/reuse.ts",
       "upstreamSha256": "7327079a942212430fb91b925e901122e07a3861d08e1a4beb5bb6468e8380a9"
+    },
+    {
+      "path": "superwagie-cli.ps1",
+      "shippedSha256": "5993b5d5ece9a24df21601e62e760507a033b799b8b8bd0593057536643f8363",
+      "sourcePath": "superwagie-cli.ps1",
+      "origin": "SuperWagie managed executable launcher"
+    },
+    {
+      "path": "superwagie-cli.sh",
+      "shippedSha256": "de8862fd46f8fc6603a2bd45c4092dba1628d0fdc5055fd50ff910955bd86a2c",
+      "sourcePath": "superwagie-cli.sh",
+      "origin": "SuperWagie managed executable launcher"
     },
     {
       "path": "tests/archive-limits.test.ts",
@@ -453,9 +737,9 @@
     },
     {
       "path": "tests/audit-dependencies.test.ts",
-      "shippedSha256": "cab8b15af913c8b9e0c860ee4652f8f20c442d9579233b76a0ec45aeec78d68f",
+      "shippedSha256": "4575aa92fff6bb6c26f11c996513f1f1089b41f330e0fb5f3835ee7929d324b4",
       "sourcePath": "tests/audit-dependencies.test.ts",
-      "upstreamSha256": "cab8b15af913c8b9e0c860ee4652f8f20c442d9579233b76a0ec45aeec78d68f"
+      "upstreamSha256": "4575aa92fff6bb6c26f11c996513f1f1089b41f330e0fb5f3835ee7929d324b4"
     },
     {
       "path": "tests/batch-progress.test.ts",
@@ -468,6 +752,18 @@
       "shippedSha256": "c47f3114cb3752a79840b8cca2a480af3aa259856f2dc182b0679e4f17b2fab6",
       "sourcePath": "tests/business-style-source.test.ts",
       "upstreamSha256": "c47f3114cb3752a79840b8cca2a480af3aa259856f2dc182b0679e4f17b2fab6"
+    },
+    {
+      "path": "tests/chat-plan-review-assets.test.ts",
+      "shippedSha256": "6cfd4fb63561ebb0aae8f4438f778762a22c26acc1b200f5a5da0af0ad29c3cd",
+      "sourcePath": "tests/chat-plan-review-assets.test.ts",
+      "origin": "SuperWagie plan-review adaptation"
+    },
+    {
+      "path": "tests/chat-plan-review.test.ts",
+      "shippedSha256": "07e8649d3b37045d62d87cda4048f291ad8c341e05acdcb146b71a751520cf2a",
+      "sourcePath": "tests/chat-plan-review.test.ts",
+      "origin": "SuperWagie plan-review adaptation"
     },
     {
       "path": "tests/fast-cli.test.ts",
@@ -621,9 +917,9 @@
     },
     {
       "path": "tests/image-intent.test.ts",
-      "shippedSha256": "ec9f44c6f7a30962e846bae7d4feb9871ab3b48bf45e244609b4dc721daa7b7e",
+      "shippedSha256": "24f1a98be1b15e2b592a372e2768339dd1ace53b7f405b8ce172cf714ebcbf40",
       "sourcePath": "tests/image-intent.test.ts",
-      "upstreamSha256": "ec9f44c6f7a30962e846bae7d4feb9871ab3b48bf45e244609b4dc721daa7b7e"
+      "upstreamSha256": "24f1a98be1b15e2b592a372e2768339dd1ace53b7f405b8ce172cf714ebcbf40"
     },
     {
       "path": "tests/intake.test.ts",
@@ -634,13 +930,14 @@
     {
       "path": "tests/markdown-link.test.ts",
       "shippedSha256": "8483445a19f3a876549b5a82a5c5d7fc1634ba599b535ad8c9dc0a5f4044cdf5",
-      "origin": "SuperWagie adaptation"
+      "sourcePath": "tests/markdown-link.test.ts",
+      "origin": "SuperWagie plan-review adaptation"
     },
     {
       "path": "tests/plan-review.test.ts",
-      "shippedSha256": "bcf2a4b0b37ad7d25da78dcbb6cd2d492d3a4d6eb435e64a1636e763c08bc26f",
+      "shippedSha256": "4a2faff9232fa07bce8cfcd25bbd7488b0f054d7654252c29ccb11c0da7c5172",
       "sourcePath": "tests/plan-review.test.ts",
-      "upstreamSha256": "db28f756a93f936e34a1896c7f29cc0379eae1028a9d53f74d50479a095d49b8"
+      "upstreamSha256": "fb22a21ae049e07b0a4e4d73174868436f32c90f84edb64da4d67a0a20eab69b"
     },
     {
       "path": "tests/planning-context.test.ts",
@@ -743,16 +1040,6 @@
       "shippedSha256": "de600ad9c1e4af095b4521139c60a4d701c3c3c20ff1e2a8bf1704a074c20f42",
       "sourcePath": "tsconfig.json",
       "upstreamSha256": "de600ad9c1e4af095b4521139c60a4d701c3c3c20ff1e2a8bf1704a074c20f42"
-    },
-    {
-      "path": "superwagie-cli.sh",
-      "shippedSha256": "ee5f8b827c52e26c793a4fc4a7562fd1a7190d5f91f649e65b4423c19bbdd4d5",
-      "origin": "SuperWagie managed executable launcher"
-    },
-    {
-      "path": "superwagie-cli.ps1",
-      "shippedSha256": "3dec81b1f495e3f85e33f4f2206f468b6296cc305c7c5a8a4772cff2962ff34b",
-      "origin": "SuperWagie managed executable launcher"
     }
   ]
 }

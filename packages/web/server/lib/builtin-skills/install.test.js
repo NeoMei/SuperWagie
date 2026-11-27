@@ -252,14 +252,22 @@ describe('installBuiltinSkills', () => {
     fs.writeFileSync(credential, customized);
     fs.copyFileSync(path.join(fixtures, 'vision_check_gemini.previous.py'), vision);
     const previousVision = fs.readFileSync(vision);
-    const before = spawnSync('python3', [vision, '--help'], { encoding: 'utf8' });
+    const pythonModules = path.join(root, 'python-test-modules');
+    // This ownership case checks --help only. Supply the optional image imports
+    // locally so it does not depend on the host's Pillow installation.
+    fs.mkdirSync(path.join(pythonModules, 'PIL'), { recursive: true });
+    fs.writeFileSync(path.join(pythonModules, 'PIL', '__init__.py'), 'class UnidentifiedImageError(Exception):\n    pass\nclass Image:\n    class DecompressionBombWarning(Warning):\n        pass\n    class DecompressionBombError(Exception):\n        pass\nImage.Image = Image\n');
+    const help = () => spawnSync('python3', [vision, '--help'], {
+      encoding: 'utf8', env: { ...process.env, PYTHONPATH: pythonModules, PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1' },
+    });
+    const before = help();
     expect(before.status, before.stderr).toBe(0);
 
     await run();
 
     expect(fs.readFileSync(credential, 'utf8')).toBe(customized);
     expect(fs.readFileSync(vision)).toEqual(previousVision);
-    const after = spawnSync('python3', [vision, '--help'], { encoding: 'utf8' });
+    const after = help();
     expect(after.status, after.stderr).toBe(0);
   });
 
