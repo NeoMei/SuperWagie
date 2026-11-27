@@ -84,15 +84,10 @@ export function chatStyleVariants(model: ReviewModel, selection: StyleSelection,
   const optionsText = style.groups.flatMap(group => group.variants.map(variant => `${variant.styleId}/${variant.level}/${variant.paletteId}`)).join('；');
   const content = [
     `已选择${style.name}。确认某个档位与配色组合即授权 1 次样页生图。`,
+    '选择后展示该组合的完整提示词、参考图用途和输出位置，再按本次授权生成样页。',
     `缺图时使用文字回复精确元组：${optionsText}。`,
     block([
-      'root = Stack([prompts, variants])',
-      ...style.groups.flatMap(group => group.variants).map((variant, index) => {
-        const key = `${variant.styleId}/${variant.level}/${variant.paletteId}`;
-        const text = `样页内容 prompt（${key}）\n\n${model.variants[key]!.prompt}\n\n${model.variants[key]!.catalogReference ? '参考图用途：画风参考图仅用于视觉风格，保持材质、平面或立体表现、光影、配色比例与字体质感。\n\n' : ''}输出位置：generation；预算：1 次生图调用。`;
-        return `prompt_${index} = Details(${quoted(`${variant.level} 档 · ${variant.paletteName} · 核对完整提示词`)}, [Text(${quoted(text)})])`;
-      }),
-      `prompts = Stack([${style.groups.flatMap(group => group.variants).map((_, index) => `prompt_${index}`).join(', ')}])`,
+      'root = Stack([variants])',
       'variants = ImageChoice("确认风格组合", [',
       options.join(',\n'),
       `], ${quoted('点击组合即确认风格并授权 1 次样页生图')})`,

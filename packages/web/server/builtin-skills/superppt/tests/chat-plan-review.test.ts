@@ -14,7 +14,10 @@ test('chat interactions require the launcher declaration', () => {
   assert.equal(chatInteractionEnabled({ SUPERPPT_CHAT_INTERACTIONS: '1' }), true);
   execFileSync('sh', ['-n', 'superwagie-cli.sh']);
   assert.match(execFileSync('cat', ['superwagie-cli.sh'], { encoding: 'utf8' }), /SUPERPPT_CHAT_INTERACTIONS=1/);
-  assert.match(execFileSync('cat', ['superwagie-cli.ps1'], { encoding: 'utf8' }), /SUPERPPT_CHAT_INTERACTIONS.*1/);
+  const powershell = execFileSync('cat', ['superwagie-cli.ps1'], { encoding: 'utf8' });
+  assert.match(powershell, /SUPERPPT_CHAT_INTERACTIONS.*1/);
+  assert.match(powershell, /\$previousChatInteractions = \$env:SUPERPPT_CHAT_INTERACTIONS/);
+  assert.match(powershell, /finally \{[^\n]*\$env:ELECTRON_RUN_AS_NODE = \$previousMode; \$env:SUPERPPT_CHAT_INTERACTIONS = \$previousChatInteractions \}/);
 });
 
 test('chat review separates content feedback from the first style choice', async () => {
@@ -51,7 +54,7 @@ test('a complete style selection carries the exact variant and one-call authoriz
   assert.match(view, /授权新增生图调用：1 次/);
   assert.match(view, /revision-current/);
   assert.match(view, /decision-current/);
-  assert.match(view, /样页内容 prompt/);
+  assert.match(view, /完整提示词、参考图用途/);
   assert.match(view, /缺少精确预览/);
   assert.doesNotMatch(view, /ImageChoice\("选择风格"/);
   assert.throws(() => chatStyleVariants(model, selection, 'missing', {}), /Unknown style/);
@@ -132,19 +135,16 @@ test('every style answer contains an unambiguous ID and missing-image text lists
   assert.match(variants, /glass\/3\/warm/);
 });
 
-test('a variant discloses its exact outgoing prompt and reference purpose before the answer', async () => {
+test('variant choices retain the selected prompt in the review model without expanding every candidate', async () => {
   const plan = await fixturePlan();
   const remote = JSON.parse(execFileSync('cat', ['skills/superppt/assets/styles/remote-assets.json'], { encoding: 'utf8' })).assets;
   const reference = remote['previews/glass-2-cool.jpg'];
   const model = buildReviewModel(plan, 'revision-current', 'decision-current', { 'glass/2/cool': reference });
   const view = chatStyleVariants(model, styleSelection(plan.styles), 'glass', {});
-  const promptBlock = view.slice(view.indexOf('prompt_3 = Details'), view.indexOf('prompt_4 = Details'));
-  const promptText = promptBlock.slice(promptBlock.indexOf('[Text(') + 6, promptBlock.lastIndexOf('})])'));
-  const disclosed = JSON.parse(promptText.slice(0, promptText.lastIndexOf('"') + 1));
-  assert.ok(disclosed.startsWith(`样页内容 prompt（glass/2/cool）\n\n${model.variants['glass/2/cool']!.prompt}\n\n`));
-  assert.ok(disclosed.endsWith('输出位置：generation；预算：1 次生图调用。'));
-  assert.match(view, /画风参考图仅用于视觉风格/);
-  assert.match(view, /样页内容 prompt/);
-  assert.match(view, /generation/);
-  assert.ok(view.indexOf('prompt_3 = Details') < view.indexOf('授权新增生图调用：1 次。'));
+  assert.match(view, /glass\/2\/cool/);
+  assert.match(view, /选择后展示该组合的完整提示词、参考图用途和输出位置/);
+  assert.match(view, /授权新增生图调用：1 次/);
+  assert.doesNotMatch(view, /样页内容 prompt|prompt_\d+ = Details|画风参考图仅用于视觉风格/);
+  assert.equal(view.includes(model.variants['glass/2/cool']!.prompt), false);
+  assert.equal(model.variants['glass/2/cool']!.catalogReference, reference);
 });
