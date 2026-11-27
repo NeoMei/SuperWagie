@@ -34,6 +34,24 @@ test('chat review separates content feedback from the first style choice', async
   assert.doesNotMatch(view, /data-review-note/);
 });
 
+test('chat review includes planning context, references and generation boundaries', async () => {
+  const plan = await fixturePlan();
+  plan.context = {
+    schemaVersion: 1,
+    narrativeSummary: '根据既有材料形成试点方案',
+    answers: [{ key: 'goal', value: '批准小规模试点', kind: 'preference' }],
+    assumptions: ['汇报控制在十分钟内'],
+  };
+  plan.references = [{ path: 'references/accepted-style.png', sha256: 'a'.repeat(64), role: 'art-direction' }];
+  const model = buildReviewModel(plan, 'revision-current', 'decision-current');
+  const view = chatPlanReview(model, styleSelection(plan.styles), {});
+  assert.match(view, /批准小规模试点/);
+  assert.match(view, /汇报控制在十分钟内/);
+  assert.match(view, /references\/accepted-style\.png/);
+  assert.match(view, /输出位置：generation/);
+  assert.match(view, /预算：1 次生图调用/);
+});
+
 test('a slide comment reply preserves its number and current decision identity', async () => {
   const plan = await fixturePlan();
   const model = buildReviewModel(plan, 'revision-current', 'decision-current');
@@ -64,6 +82,7 @@ test('portable skill keeps HTML and text while the managed runtime declares chat
   const source = execFileSync('cat', [join('skills/superppt/SKILL.md')], { encoding: 'utf8' });
   assert.match(source, /SUPERPPT_CHAT_INTERACTIONS/);
   assert.match(source, /details.chatInteractions/);
+  assert.match(source, /A variant answer[\s\S]*chatStyleVariants[\s\S]*disclosure[\s\S]*select-style-and-generate-sample/);
   assert.match(source, /open.*HTML|HTML/);
 });
 
@@ -147,4 +166,18 @@ test('variant choices retain the selected prompt in the review model without exp
   assert.doesNotMatch(view, /样页内容 prompt|prompt_\d+ = Details|画风参考图仅用于视觉风格/);
   assert.equal(view.includes(model.variants['glass/2/cool']!.prompt), false);
   assert.equal(model.variants['glass/2/cool']!.catalogReference, reference);
+});
+
+test('the selected variant disclosure carries its exact outgoing prompt before generation', async () => {
+  const plan = await fixturePlan();
+  const remote = JSON.parse(execFileSync('cat', ['skills/superppt/assets/styles/remote-assets.json'], { encoding: 'utf8' })).assets;
+  const reference = remote['previews/glass-2-cool.jpg'];
+  const model = buildReviewModel(plan, 'revision-current', 'decision-current', { 'glass/2/cool': reference });
+  const disclosure = chatStyleVariants(model, styleSelection(plan.styles), 'glass', {}, 'glass/2/cool');
+  assert.match(disclosure, /方案版本：revision-current/);
+  assert.match(disclosure, /决定编号：decision-current/);
+  assert.ok(disclosure.includes(`样页内容 prompt（glass/2/cool）\n\n${model.variants['glass/2/cool']!.prompt}`));
+  assert.match(disclosure, /画风参考图仅用于视觉风格/);
+  assert.match(disclosure, /输出位置：generation；预算：1 次生图调用/);
+  assert.doesNotMatch(disclosure, /glass\/1\/cool/);
 });

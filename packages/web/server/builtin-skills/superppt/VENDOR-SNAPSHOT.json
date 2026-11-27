@@ -437,7 +437,7 @@
     },
     {
       "path": "skills/superppt/SKILL.md",
-      "shippedSha256": "c7ce34cae691b95d8bda8f88778f3d488a57bc92ae3800c0efa7530967c6e1df",
+      "shippedSha256": "ed3d8fe9226d0a7a158b4feaf4bc345c3fddb2a1846b9f0d1317555d0b6f129a",
       "sourcePath": "skills/superppt/SKILL.md",
       "upstreamSha256": "2502daefa0f5dddd8441f5bac6f63093137e4e052e68d31a71a192c1ac296c8e"
     },
@@ -581,7 +581,7 @@
     },
     {
       "path": "src/planning/chat-review.ts",
-      "shippedSha256": "f4a5469421d6bf2307a106289c5b34f08576ea9fafb52ced4102b4e2c0949bd7",
+      "shippedSha256": "4515fc0a333dbc0c4f9bedf263ff2b1c2658a41616cf61b63967e69e7490767f",
       "sourcePath": "src/planning/chat-review.ts",
       "origin": "SuperWagie plan-review adaptation"
     },
@@ -761,7 +761,7 @@
     },
     {
       "path": "tests/chat-plan-review.test.ts",
-      "shippedSha256": "80c4dc916c481d47b17b7ede8178c6039b24b39b1c9ce3b965d3f05dbab127d6",
+      "shippedSha256": "07e8649d3b37045d62d87cda4048f291ad8c341e05acdcb146b71a751520cf2a",
       "sourcePath": "tests/chat-plan-review.test.ts",
       "origin": "SuperWagie plan-review adaptation"
     },
