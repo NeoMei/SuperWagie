@@ -30,12 +30,24 @@ export function chatPlanReview(model: ReviewModel, selection: StyleSelection, re
     options.join(',\n'),
     `], ${quoted('点击图片选择风格；下一步选择档位和配色')})`,
   ]);
+  const answers = model.answers.length
+    ? model.answers.map(answer => `${answer.key}（${answer.kind}）：${answer.value}`).join('\n') : '无额外回答';
+  const assumptions = model.assumptions.length ? model.assumptions.join('\n') : '无额外假设';
+  const references = model.references.length
+    ? model.references.map(reference => `${reference.path}（${reference.role}）`).join('\n') : '无额外参考文件';
+  const planningContext = [
+    `事实与偏好\n${answers}`,
+    `可见假设\n${assumptions}`,
+    `参考文件\n${references}`,
+    `输出位置：${model.output}；预算：${model.callBudget} 次生图调用。`,
+  ].join('\n\n');
   return [
     `${model.narrativeSummary}\n\n需要修改内容，或先选择风格。缺图时回复卡片所附的风格 ID。`,
     htmlLink ?? '',
     block([
-      'root = Stack([identity, review])',
+      'root = Stack([identity, context, review])',
       `identity = KeyValue([{label: "方案版本", value: ${quoted(model.revision)}}, {label: "决定编号", value: ${quoted(model.decisionId)}}])`,
+      `context = Details("查看规划上下文与生成边界", [Text(${quoted(planningContext)})])`,
       `review = Details("查看完整内容方案", [Text(${quoted(model.slides.map(slide => `### ${slide.number}. ${slide.title}\n${slide.coreMessage}\n\n完整文字\n${slide.requiredText.join('\n\n')}\n\n内容关系\n${slide.relationships.join('；')}\n\n来源\n${slide.sourceRefs.join('；')}`).join('\n\n'))})])`,
     ]),
     overall,
@@ -71,9 +83,24 @@ export function chatSlideComment(model: ReviewModel, pageNumber: number | number
   ].join('\n\n');
 }
 
-export function chatStyleVariants(model: ReviewModel, selection: StyleSelection, styleId: string, remote: RemoteStyleAssets): string {
+export function chatStyleVariants(model: ReviewModel, selection: StyleSelection, styleId: string, remote: RemoteStyleAssets, selectedKey?: string): string {
   const style = selection.styles.find(item => item.id === styleId);
   if (!style) throw new Error('Unknown style');
+  if (selectedKey !== undefined) {
+    const available = style.groups.some(group => group.variants.some(variant =>
+      `${variant.styleId}/${variant.level}/${variant.paletteId}` === selectedKey));
+    const variant = Object.hasOwn(model.variants, selectedKey) ? model.variants[selectedKey] : undefined;
+    if (!available || !variant) throw new Error('Unknown variant');
+    const referencePurpose = variant.catalogReference || model.references.some(reference => reference.role === 'art-direction')
+      ? '参考图用途：画风参考图仅用于视觉风格，保持材质、平面或立体表现、光影、配色比例与字体质感。'
+      : '参考图用途：无额外参考图。';
+    return [
+      reviewReply(model, selectedKey, []),
+      `样页内容 prompt（${selectedKey}）\n\n${variant.prompt}`,
+      referencePurpose,
+      `输出位置：${model.output}；预算：${model.callBudget} 次生图调用。`,
+    ].join('\n\n');
+  }
   const options = style.groups.flatMap(group => group.variants.map(variant => {
     const key = `${variant.styleId}/${variant.level}/${variant.paletteId}`;
     const answer = reviewReply(model, key, []);

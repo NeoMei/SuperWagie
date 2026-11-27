@@ -37,9 +37,12 @@ current review model, `details.selection`, selected style ID and the local
 remote-assets index. A submitted comment already includes the current revision
 and decision identity; validate them and call `revise-plan` with the complete
 comment. A variant answer includes the current identity, exact variant and
-one-call authorization. Validate them and call `select-style-and-generate-sample`
-with `callBudget: 1`. "内容无须修改" advances to style choice without revising
-the plan. Text replies remain available when an image is unavailable.
+one-call authorization. Validate them, call `chatStyleVariants` with the exact
+selected variant key and display its full prompt, reference purpose, output and
+budget disclosure. Then call `select-style-and-generate-sample` with
+`callBudget: 1` in the same response without another confirmation. "内容无须修改"
+advances to style choice without revising the plan. Text replies remain available
+when an image is unavailable.
 
 When the capability is absent, use the HTML and ordinary text flow below. Do
 not infer chat support from the host's name or emit reply blocks in that mode.
