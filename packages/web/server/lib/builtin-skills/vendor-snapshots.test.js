@@ -8,7 +8,7 @@ const payload = fileURLToPath(new URL('../../builtin-skills/', import.meta.url))
 const json = async (file) => JSON.parse(await readFile(file, 'utf8'));
 const snapshots = [
   ['skills/obsidian-excalidraw', '2.0.0', '8d6663e9405ae289a1d26aeccf1b95dcbaa68029', 230],
-  ['superppt', '0.3.6', '91b75cf6514207d3ae3d18d8211b75bd8182dff0'],
+  ['superppt', '0.3.8', '41592a54f9715df3ea47dc7a603c84679ea534df'],
   ['skills/superweb', '1.2.0', '0edbf5787c518abcfd199254182be7a5661bb1b9'],
   ['skills/WPSComposer', '0.10.0', '8e6ddbc0943aa04d4292fe26ce9d5deba5ea3046'],
   ['skills/superwriter', '0.2.9', 'f279b87fe1f826e50cda140707f821f5a8da0f8f'],
