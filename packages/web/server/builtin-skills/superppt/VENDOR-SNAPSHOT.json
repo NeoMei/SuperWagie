@@ -707,7 +707,7 @@
     },
     {
       "path": "src/workflow/planning.ts",
-      "shippedSha256": "fd1c8d17f5ada0a861273406ca360b98142bba1c34db7f237fcf6b77c79c765e",
+      "shippedSha256": "2b3e4d85e5d00dee9f7ba3a8d4948ce0fe2fc2b7f1fef8ce0c0a172cfa2d6ec6",
       "sourcePath": "src/workflow/planning.ts",
       "upstreamSha256": "63ab76a742fdffc45970f3f3d5c00135664cc1e717b640baf12531c51d19c477"
     },
@@ -752,6 +752,12 @@
       "shippedSha256": "c47f3114cb3752a79840b8cca2a480af3aa259856f2dc182b0679e4f17b2fab6",
       "sourcePath": "tests/business-style-source.test.ts",
       "upstreamSha256": "c47f3114cb3752a79840b8cca2a480af3aa259856f2dc182b0679e4f17b2fab6"
+    },
+    {
+      "path": "tests/chat-plan-review-assets.test.ts",
+      "shippedSha256": "6cfd4fb63561ebb0aae8f4438f778762a22c26acc1b200f5a5da0af0ad29c3cd",
+      "sourcePath": "tests/chat-plan-review-assets.test.ts",
+      "origin": "SuperWagie plan-review adaptation"
     },
     {
       "path": "tests/chat-plan-review.test.ts",
