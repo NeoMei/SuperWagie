@@ -581,7 +581,7 @@
     },
     {
       "path": "src/planning/chat-review.ts",
-      "shippedSha256": "28c921ae64f377b9e2d1a38ca1a92b49663414abc7a44b27c252a5d377a12456",
+      "shippedSha256": "f4a5469421d6bf2307a106289c5b34f08576ea9fafb52ced4102b4e2c0949bd7",
       "sourcePath": "src/planning/chat-review.ts",
       "origin": "SuperWagie plan-review adaptation"
     },
@@ -719,7 +719,7 @@
     },
     {
       "path": "superwagie-cli.ps1",
-      "shippedSha256": "4ba67cca733f9e6db316eabba7f45cfcc160e004bb0c8e33b2c96d402d4279fd",
+      "shippedSha256": "5993b5d5ece9a24df21601e62e760507a033b799b8b8bd0593057536643f8363",
       "sourcePath": "superwagie-cli.ps1",
       "origin": "SuperWagie managed executable launcher"
     },
@@ -761,7 +761,7 @@
     },
     {
       "path": "tests/chat-plan-review.test.ts",
-      "shippedSha256": "66a82a0794c204efcbb80e0dea644080f06da69e5bdf8443de07664046df7f97",
+      "shippedSha256": "80c4dc916c481d47b17b7ede8178c6039b24b39b1c9ce3b965d3f05dbab127d6",
       "sourcePath": "tests/chat-plan-review.test.ts",
       "origin": "SuperWagie plan-review adaptation"
     },
