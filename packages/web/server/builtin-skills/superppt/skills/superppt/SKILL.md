@@ -27,6 +27,29 @@ offline. New image analysis and live conversion are unavailable until dedicated
 configured-model adapters exist. Stop at that boundary when a task needs new
 analysis; do not claim that installing the dependency completes live conversion.
 
+The managed launchers declare `SUPERPPT_CHAT_INTERACTIONS=1`. When a plan-review
+has `details.chatInteractions: true`, copy each returned `openui-lang` block
+unchanged into the assistant reply. Keep the sections in separate replies as the
+user answers them. A `review-slide:N` answer calls `chatSlideComment` from
+`src/planning/chat-review.js` with the current review model and page number,
+then displays its block. A style choice calls `chatStyleVariants` with the
+current review model, `details.selection`, selected style ID and the local
+remote-assets index. A submitted comment already includes the current revision
+and decision identity; validate them and call `revise-plan` with the complete
+comment. A variant answer includes the current identity, exact variant and
+one-call authorization. Validate them, call `chatStyleVariants` with the exact
+selected variant key and display its full prompt, reference purpose, output and
+budget disclosure. Then call `select-style-and-generate-sample` with
+`callBudget: 1` in the same response without another confirmation. "内容无须修改"
+advances to style choice without revising the plan. Text replies remain available
+when an image is unavailable.
+
+When the capability is absent, use the HTML and ordinary text flow below. Do
+not infer chat support from the host's name or emit reply blocks in that mode.
+On ordinary agents, select a style with a normal text reply, then its tier and
+palette from `details.selection`. Show the selected prompt snapshot, references,
+output and budget before invoking the current decide.
+
 ## 操作节奏
 
 在新建任务前先判断用户是否已提供具体 PPT 主题、正文、资料或明确指定的文件。只有“做一个 PPT / 使用 SuperPPT”等泛化请求、空白输入或没有指明内容时，先用一句话引导用户提供主题、粘贴内容或指定资料；等待用户回复。此时不要假设存在需求.md 或其他文件，不搜索、扫描或读取工作区，不检查依赖或联网版本，不创建任务目录、源文件或执行 start，也不发起生成。用户提供明确主题即可进入规划；完整资料无需额外问卷。用户明确要求恢复或修改既有任务时，按其指定的任务继续，不受新任务输入引导阻断。
@@ -46,20 +69,20 @@ analysis; do not claim that installing the dependency completes live conversion.
 
 规划时一次写完整 Brief、Outline、逐页 SlideSpec 和可用真实风格候选。
 默认读取 `assets/styles/catalog.json` 并原样写入当前目录的全部 11 种内置风格（商务风格、立体、玻璃、水墨、经典手绘、教材图解、创意拼贴、电影科技、奢华摄影、建筑蓝图、叙事幻想），不由 Agent 缩成推荐短名单；用户明确要求的自定义 `plan.styles` 是权威输入，不用内置目录静默覆盖。当前目录每种风格均提供 1／2／3 档和偏冷／基准中线／偏暖，共 99 个组合、99 张精确预览和 11 张代表图；具体可用项以 `catalog.json` 为准。商务正文强调文字层级、留白和小型语义图标，仅有输入数据时才使用图表或 KPI，不编造数字，正文不用流光；模板不带内部 SuperPPT 广告样例文案。
-新发布 plan-review 的 view 可能包含一个 openui-lang 图片选款块：Agent 原样展示该块，聊天里就会出现一轮风格代表图，用户点一张图即回传“选择<风格名>”。这个块只完成第一轮风格单选，档位与配色仍按文本元组或 HTML 第二轮确认；点击只回传选择，不写决定、不创建作业、不消耗预算、不授权生图。图片来自图床 HTTPS 地址，加载失败时组合仍可选择。新发布 plan-review 的 details.selectionPath 指向任务内 HTML；历史任务没有已发布选择页时会省略该字段并使用纯对话与原生图片回退。HTML 第一轮完整展示全部风格图，进入某个风格后，第二轮一次展示它的档位与配色组合。HTML 从图床加载公开风格图片，不调用 CLI 或生成服务；点击只形成可复制的自然语言回复。HTML 不可用时，先按 details.planPath、可用时的 details.reviewModelPath，以及 details.samplePromptsPath 展示与页面相同的整体方案、完整逐页内容、当前上下文、确切已选 prompt、参考图用途、输出位置和 1 次调用预算；历史任务没有 reviewModelPath 时直接从 planPath、samplePromptsPath 和当前 details 恢复这些内容，不要求不存在的文件。再读取 details.previewBase 下的 remote-assets.json，以 showcase.path 或 previews[].path 查 assets[逻辑路径].url，作为原生内联图片地址，索引无此条目时才使用 details.previewBase 加相对路径读取自定义本地图片。按同一顺序展示图片和文本元组。图床加载失败时明确说明网络图片不可用，组合仍可选择。没有精确预览时明确说明缺图并仍允许选择，不生成或冒充预览。这仍是同一次 plan-review，不增加逐步确认关卡。不要声称远程或移动端已经验收。
+新发布 plan-review 的 details.selectionPath 指向任务内 HTML；历史任务没有已发布选择页时会省略该字段并使用纯对话与原生图片回退。HTML 第一轮完整展示全部风格图，进入某个风格后，第二轮一次展示它的档位与配色组合。HTML 从图床加载公开风格图片，不调用 CLI 或生成服务；点击只形成可复制的自然语言回复。HTML 不可用时，先按 details.planPath、可用时的 details.reviewModelPath，以及 details.samplePromptsPath 展示与页面相同的整体方案、完整逐页内容、当前上下文、确切已选 prompt、参考图用途、输出位置和 1 次调用预算；历史任务没有 reviewModelPath 时直接从 planPath、samplePromptsPath 和当前 details 恢复这些内容，不要求不存在的文件。再读取 details.previewBase 下的 remote-assets.json，以 showcase.path 或 previews[].path 查 assets[逻辑路径].url，作为原生内联图片地址，索引无此条目时才使用 details.previewBase 加相对路径读取自定义本地图片。按同一顺序展示图片和文本元组。图床加载失败时明确说明网络图片不可用，组合仍可选择。没有精确预览时明确说明缺图并仍允许选择，不生成或冒充预览。这仍是同一次 plan-review，不增加逐步确认关卡。不要声称远程或移动端已经验收。
 保留源内容结构、来源覆盖和精确 requiredText（包含独立标题及全部可见文字，不删减、不限制行数）。relationships 只描述内容含义与关系；实际背景、承载图形和构图由生图模型根据内容决定。
 
 规划 work 的 request.planningContextPath 保存当前有效问答。开始或恢复规划时先读源材料、该上下文和 previous（若存在），不要重复询问已保存的事实或偏好。每次收到用户回答，立即校验并原子写回 planningContextPath；用户一次回答多个事项时全部吸收，再判断下一个缺口。answers 的 kind 只用 fact 或 preference，key 不重复；assumptions 单独保存，不能混成已确认事实。
 
 完整材料且目标明确时直接出完整方案，不发起无关问卷。只有缺失信息会显著改变叙事、内容取舍、页数或交付范围时才追问；一次只问当前影响最高的一个问题，不能把受众与目标合并成一个标为“关键一点”的问题或其他单项。只有主题时，先单独询问受众，给 2–3 个选项，将推荐项放在前面并说明理由；下一轮仅在目标仍未知时再问目标。缺少事实来源时也只问该项事实，不夹带偏好题。低影响且可逆的偏好采用合理默认值，并在方案中公开列为假设。缺少必须准确的数字、结论或承诺时必须追问，不能编造；“你决定”只授权采用推荐偏好，不授权补造事实。不强制比较多套方案；只有存在两种以上实质不同的叙事方向时才给两三个组织方案。未获授权时不重构、删减或改写用户已批准的结构和完整文案。
 
-只使用 PlanBundleSchema 已定义的字段。汇报时长等额外约束写入 brief.constraints 和 planning context，不发明 Brief.duration 等字段。不分别确认大纲、逐页说明和风格。用户选择风格、档位或配色只形成选择，不授权生图；必须先披露确切样页 prompt、参考图用途、输出位置和新增 1 次调用预算，再接收明确的生成授权。
+只使用 PlanBundleSchema 已定义的字段。汇报时长等额外约束写入 brief.constraints 和 planning context，不发明 Brief.duration 等字段。不分别确认大纲、逐页说明和风格。用户选择并确认风格、档位与配色即授权 1 次样页生图；在同一 plan-review 内披露确切样页 prompt、参考图用途、输出位置和 1 次调用预算后直接提交生成，不另行发起生图授权询问。
 
 ## 生图与检查
 
-在 plan-review 展示完整方案、选中组合的样页内容 prompt、参考图用途、1 次调用预算和输出位置；选择页仅加载公开参考图，不发送生图请求，用户把文本元组交给 Agent 后，仍由现有决定动作确认选款并授权样页。内容 prompt 从 details.samplePromptsPath 按 styleId/level/paletteId 取出，不把所有组合的长 prompt 展开到对话。
-接收带版本的页面或对话回复时，逐项核对回复自带的方案版本和决定编号与当前 details.contentRevision、当前 decision.id 相同；不匹配就展示当前方案并要求重新确认，禁止把旧回复静默改写成新 decisionId。当前回复已经包含确切三元组和“授权新增生图调用：1 次”，且完整 prompt、参考图用途和 generation 输出位置此前均已披露时，这份回复本身就是明确授权，核对通过后直接用同一个 decisionId 和 callBudget:1 提交，不重复索要确认。纯对话里没有写出 UUID 的“确认”，只有在紧接当前方案、确切已选组合／prompt、用途、输出和预算 1 的明确生成询问时，才承接当前已披露的 decision.id 提交；上下文不明确时重新展示当前方案。例如页面回复为“方案版本：<当前 UUID>；决定编号：<当前 UUID>；选择玻璃，3 档，偏冷（glass/3/cool）；授权新增生图调用：1 次”。
-在 sample-review 展示实际样页、整套 prompt、参考图用途、整套页数、复用页数、新生成页数与新增调用预算、输出位置；确认即授权整套。按 details.callBudget 披露和提交新增预算，不把整套页数当调用数。
+在 plan-review 展示完整方案、选中组合的样页内容 prompt、参考图用途、1 次调用预算和输出位置；选择页仅加载公开参考图，不发送生图请求，用户把文本元组交给 Agent 后由现有决定动作直接提交样页生成，不再索要授权。内容 prompt 从 details.samplePromptsPath 按 styleId/level/paletteId 取出，不把所有组合的长 prompt 展开到对话。
+接收带版本的页面或对话回复时，逐项核对回复自带的方案版本和决定编号与当前 details.contentRevision、当前 decision.id 相同；不匹配就展示当前方案并要求重新确认，禁止把旧回复静默改写成新 decisionId。当前回复已经包含确切三元组，且完整 prompt、参考图用途和 generation 输出位置已在同一 plan-review 披露时，这份回复即生成授权，核对通过后直接用同一个 decisionId 和 callBudget:1 提交，不重复索要确认。纯对话里没有写出 UUID 的“确认”，只有在紧接当前方案、确切已选组合／prompt、用途、输出和预算 1 的明确生成询问时，才承接当前已披露的 decision.id 提交；上下文不明确时重新展示当前方案。例如页面回复为“方案版本：<当前 UUID>；决定编号：<当前 UUID>；选择玻璃，3 档，偏冷（glass/3/cool）”。
+在 sample-review 展示实际样页、整套 prompt、参考图用途、整套页数、复用页数、新生成页数与新增调用预算、输出位置；确认样页即授权整套并直接提交 approve-sample-and-generate-deck，不再另设授权轮。按 details.callBudget 披露和提交新增预算，不把整套页数当调用数。
 用户确认无须修改的样页直接进入正式 PPT 的原对应页，不重画、不换图；只生成未缓存页。三页正常路径共调用三次：样页一次，剩余两页两次。内容、风格、档位、配色或用途改变时重新规划，按新批次缓存状态执行；用户要求重画某页时走 regenerate-page。未通过内容检查的样页不能替用户批准。
 两处同时披露 details.submissionNote 与参考图用途说明 details.referenceDirection（如有）；实际出站文本以 review model 和 beginRequest 返回值为准。用途取已有 brief 的 purpose、audience，不新增分析或确认步骤。
 
@@ -67,10 +90,12 @@ analysis; do not claim that installing the dependency completes live conversion.
 按 [批次工作说明](references/依赖说明.md#批次执行) 执行：串行、成功页复用、每次请求前累计预算、正常路径只回传一个聚合结果。
 使用 job.styleLock.recipe 中锁定的 id、level、paletteId、promptTemplate、逐页确切 prompt 和批准样页；样页到整套沿用同一快照，不重新挑配色或重写档位。只替换每页内容关系与完整文案，不再叠加前中后景、微装饰或预设构图，不追加依赖默认风格。宿主原图 raw 与严格 16:9 master 都保留。
 实际提交宿主或 API 时，先调用 prepareGenerationReferences 校验并准备图片；样页使用已披露的精确子风格图，整套使用批准样页，保持同一批次内的参考图不变。原样发送 beginRequest 返回的完整 prompt：它在原内容后附加真实用途和参考图用途说明，让模型自行决定适当表达。该说明不是画面文案；不改内容规划、正文、风格、档位或配色，不增加预筛查或模型调用，也不承诺通过安全过滤。拒绝仍按既有失败流程处理。
-将准备好的图片真实传入宿主参考图参数；豆包 API 使用 gen_slide.py 的重复 --reference-image 参数。不可只在 prompt 中写路径或 URL。先按依赖 capabilities.json 检查候选支持性，不支持参考图的候选标记 unavailable 后沿既定路由继续；没有能保留参考图的通道则停止。成功结果 referencesUsed 必须记录实际已传图片的 SHA-256，不能只凭作业计划填入。
+将准备好的图片真实传入宿主参考图参数。API 候选先查已安装依赖的 capabilities.json 中的 referenceImages.apiProviders，支持时用 gen_slide.py 的重复 --reference-image 参数逐张传入。API 模型和请求参数由该依赖管理，宿主工具采用其当前声明的参数。不支持参考图的候选标记 unavailable 后沿既定路由继续；没有能保留参考图的通道则停止。成功结果 referencesUsed 必须记录实际已传图片的 SHA-256。
+若依赖的 requestCheck.apiProviders 声明当前候选支持请求预检，先按[依赖说明](references/依赖说明.md#批次执行)用完整参数执行本地预检，返回 ready 后再调用 beginRequest 登记预算。
 原图不能直接当成可编辑 PPTX。两个依赖保持独立，不复制其实现。
+逐页验图优先使用宿主当前可调用的视觉能力，采用其最新稳定识图模型；需要独立自检时使用 ai-image-to-ppt 的 vision_check_gemini.py。OCR 与场景分析模型读取 image-to-editable-pptx 的当前 Skill 和配置，不在 SuperPPT 中另设旧模型名。
 
-样页生成后先执行 review-images，实际检查样页；通过后才进入 sample-review，失败时进入 quality-review 并由用户提出修订，不自行重画或追加生图调用。review-images 时实际查看全部图片，逐项核对文字、标点、重复／遗漏、标题与正文对应关系、风格、层级与禁用内容。对照每页 coreMessage 和 relationships 检查文字与图形：完整文字须清晰、易读、不被挤压遮挡；所选风格与内容需要创意图形时，图形应主动、有意义地表达文意和真实关系，不能只是装饰或背景。以图文整体是否一眼可懂判断，适度控制图形尺寸，不因图形有表现力或不符合固定面积比例单独判失败；托底仅在改善阅读时采用。需要创意图形的页面只使用装饰、图形语义或关系失真、或文字被边缘化时将 hierarchyClear 设为 false，并在 notes 记录实际观察。豆包 API 使用依赖声明的 Pro 默认模型；不可在 Pro 不可用时私自降到 Lite。API success 仅代表图片文件有效，不能视为文字 QA 通过。若需修改已批准的 prompt，应在原有方案／样页边界展示修订，不在降级适配器里静默压缩。精简设计指令时完整保留 requiredText 与内容关系，优先清晰文字与充分阅读空间，不把长说明挤在大型插图下方。
+样页生成后先执行 review-images，实际检查样页；通过后才进入 sample-review，失败时进入 quality-review 并由用户提出修订，不自行重画或追加生图调用。review-images 时实际查看全部图片，逐项核对文字、标点、重复／遗漏、标题与正文对应关系、风格、层级与禁用内容。对照每页 coreMessage 和 relationships 检查文字与图形：完整文字须清晰、易读、不被挤压遮挡；所选风格与内容需要创意图形时，图形应主动、有意义地表达文意和真实关系，不能只是装饰或背景。以图文整体是否一眼可懂判断，适度控制图形尺寸，不因图形有表现力或不符合固定面积比例单独判失败；托底仅在改善阅读时采用。需要创意图形的页面只使用装饰、图形语义或关系失真、或文字被边缘化时将 hierarchyClear 设为 false，并在 notes 记录实际观察。各 API 使用依赖声明的默认模型或用户明确指定的覆盖值。模型不可用时按依赖的路由规则处理。API success 仅代表图片文件有效，不能视为文字 QA 通过。若需修改已批准的 prompt，应在原有方案／样页边界展示修订，不在降级适配器里静默压缩。精简设计指令时完整保留 requiredText 与内容关系，优先清晰文字与充分阅读空间，不把长说明挤在大型插图下方。
 检查通过后 CLI 自动组装整套 PPTX。最后展示一个完整 PPTX 链接以及“修改某页 / 返回修改内容或风格 / 确认交付”。
 
 ## 改稿与完成

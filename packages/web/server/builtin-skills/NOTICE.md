@@ -22,12 +22,17 @@ presentation flows work without a separate installer.
 
 ## Snapshot provenance
 
-SuperPPT v0.3.6, SuperWeb v1.2.0 and WPSComposer v0.10.0 are pinned to
+SuperPPT v0.3.8, SuperWeb v1.2.0 and WPSComposer v0.10.0 are pinned to
 the official release commits recorded in each `VENDOR-SNAPSHOT.json`. These
 receipts list the upstream and shipped SHA-256 for every owned file and name
 each SuperWagie adaptation. They contain no local installation paths.
 
 SuperPPT retains encoded local Markdown links. SuperWeb launches Chrome with
+SuperPPT's managed launchers declare the shared chat reply-block capability.
+Its plan review then carries overall, selected-slide and exact style-variant
+answers through the current decision identity. Other agents retain HTML and
+ordinary text replies.
+SuperWeb launches Chrome with
 `--disable-features=MacAppCodeSignClone`. WPSComposer includes its upstream
 macOS add-in resources inside the skill and resolves them in that installed
 layout. Its 3 pinned Office templates come from the official `wpsjs@2.2.3`
