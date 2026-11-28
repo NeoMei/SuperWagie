@@ -245,7 +245,7 @@ describe('generateSmallModelText', () => {
     configureOpenCodeRuntimeProviders({
       buildOpenCodeUrl: (requestPath) => `${baseUrl}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`,
       getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
-      getDefaultDirectory: () => '/last/project',
+      getDefaultDirectory: async () => '/last/project',
     });
 
     await generateSmallModelText({ prompt: 'hi' });

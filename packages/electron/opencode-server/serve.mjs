@@ -29,6 +29,8 @@ const main = async () => {
   if (!/--tls[-_]cipher[-_]list/.test([...process.execArgv, process.env.NODE_OPTIONS ?? ''].join(' '))) {
     tls.connect = openCodeTlsConnect(tls.connect);
   }
+  const { fixWindowsFolderWatches } = await import('./windows-folder-watch.mjs');
+  fixWindowsFolderWatches();
   const { configureAssets } = await import('./assets.mjs');
   configureAssets(new URL('./assets/', import.meta.url));
   const { run } = await import('./server.mjs');

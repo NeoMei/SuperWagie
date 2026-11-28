@@ -1,3 +1,7 @@
+import { z } from 'zod';
+
+const storedDirectoryPath = z.string().trim();
+
 export const createSettingsNormalizationRuntime = (dependencies) => {
   const {
     os,
@@ -5,6 +9,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     processLike,
     realpathSync,
     readdirSync,
+    canonicalPaths,
     tunnelBootstrapTtlDefaultMs,
     tunnelBootstrapTtlMinMs,
     tunnelBootstrapTtlMaxMs,
@@ -103,10 +108,11 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
   // (missing, no permission) is kept exactly as stored: recovering its case
   // could land on a different, existing sibling such as /volume/Foo for a
   // missing /volume/foo.
-  const safeRealpathSync = (value, listings) => {
+  const canonicalPathOf = (value, listings) => {
     if (typeof value !== 'string' || !value) {
       return value;
     }
+    if (canonicalPaths) return canonicalPaths.of(value);
     if (!realpathSync) {
       return canonicalizePathCase(value, listings);
     }
@@ -117,6 +123,28 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       return value;
     }
     return canonicalizePathCase(resolved, listings);
+  };
+
+  const uppercaseDriveLetter = (value) => value.replace(/^([a-z]):/, (_, letter) => letter.toUpperCase() + ':');
+
+  const refreshCanonicalPaths = (...documents) => {
+    if (!canonicalPaths) return;
+    const paths = documents.flatMap((settings) => {
+      if (!settings) return [];
+      const pinned = Array.isArray(settings.pinnedDirectories) ? settings.pinnedDirectories : [];
+      const fields = [];
+      for (const value of [settings.lastDirectory, settings.homeDirectory, ...pinned]) {
+        const directory = storedDirectoryPath.safeParse(value).data;
+        if (directory) fields.push(uppercaseDriveLetter(normalizeDirectoryPath(directory)));
+      }
+      const projects = Array.isArray(settings.projects) ? settings.projects : [];
+      for (const entry of projects) {
+        const directory = storedDirectoryPath.safeParse(entry?.path).data;
+        if (directory) fields.push(path.resolve(normalizeDirectoryPath(directory)));
+      }
+      return fields;
+    });
+    return canonicalPaths.refresh(paths);
   };
 
   const normalizePathForPersistence = (value, options = {}) => {
@@ -138,14 +166,11 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     // case across all path representations on Windows. NTFS is case-insensitive
     // but case-preserving, so a path like "c:\\Users\\..." and "C:\\Users\\..."
     // would be stored differently in settings.json across sessions.
-    const uppercaseDriveLetter = (p) =>
-      p.replace(/^([a-z]):/, (_, letter) => letter.toUpperCase() + ':');
-
     const isWindows = processLike.platform === 'win32';
     const caseNormalized = isWindows ? uppercaseDriveLetter(trimmed) : trimmed;
-    const resolved = options.resolveRealpath === false ? caseNormalized : safeRealpathSync(caseNormalized);
+    const resolved = options.resolveRealpath === false ? caseNormalized : canonicalPathOf(caseNormalized);
 
-    // Re-normalize after realpath — safeRealpathSync may return a
+    // Re-normalize after realpath — canonicalPathOf may return a
     // lowercase drive letter on some Windows environments.
     const finalResolved = isWindows && typeof resolved === 'string'
       ? uppercaseDriveLetter(resolved)
@@ -214,7 +239,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const candidate = entry;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-      const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath)), listings) : '';
+      const resolvedPath = rawPath ? canonicalPathOf(path.resolve(normalizeDirectoryPath(rawPath)), listings) : '';
       const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
       const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
@@ -526,6 +551,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     normalizeDirectoryPath,
     normalizePathForPersistence,
     normalizeSettingsPaths,
+    refreshCanonicalPaths,
     normalizeTunnelBootstrapTtlMs,
     normalizeTunnelSessionTtlMs,
     normalizeManagedRemoteTunnelHostname,

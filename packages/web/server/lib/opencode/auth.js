@@ -85,7 +85,7 @@ export const openCodeCredentialSource = ({
     listEnvironmentKeys: async () => {
       const environment = getLaunchEnvironment();
       if (!environment) return {};
-      const { data } = await client(getDefaultDirectory()).integration.list();
+      const { data } = await client(await getDefaultDirectory()).integration.list();
       return projectEnvironmentKeys(data, environment);
     },
   };

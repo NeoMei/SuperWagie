@@ -207,23 +207,28 @@ export const fetchOpenCodeSkillsFromApi = async (
 // `settings.json` holds instance facts and legacy keys, `preferences.json`
 // holds the profile keys with their `updatedAt` stamps. Reads return the
 // merged view; writes split a merged document back into the two files.
-//
-// A settings.json parse failure (corrupt or non-object file) is still coerced
-// to `{}`, which lets the next write replace it; tracked in the settings-scopes
-// plan. preferences.json already fails closed below.
-const readSettingsJsonFromDisk = (): Record<string, unknown> => {
+let lastInstanceText: string | undefined;
+
+const readInstanceSettings = (restoreMissing = false): Record<string, unknown> => {
+  let text: string;
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_SHARED_SETTINGS_PATH, 'utf8');
-    // SAFETY: JSON.parse returns untyped data; the check below keeps only a plain object.
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      // SAFETY: a non-array object parsed from JSON is a string-keyed dictionary.
-      return parsed as Record<string, unknown>;
-    }
-    return {};
-  } catch {
-    return {};
+    text = fs.readFileSync(OPENCHAMBER_SHARED_SETTINGS_PATH, 'utf8');
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw new Error('Cannot read settings.json');
+    if (lastInstanceText === undefined) return {};
+    if (!restoreMissing) throw new Error('settings.json is missing');
+    text = lastInstanceText;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('Invalid JSON in settings.json');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('settings.json must contain an object');
+  lastInstanceText = text;
+  // SAFETY: a non-array object parsed from JSON is a string-keyed dictionary.
+  return parsed as Record<string, unknown>;
 };
 
 type PreferencesReadResult =
@@ -265,12 +270,15 @@ const readPreferencesFromDisk = (): PreferencesReadResult => {
 // Atomic write: tmp file + rename, so readers never see a partial JSON. Throws
 // on failure (after removing the tmp file) so a failed save is reported, not
 // mistaken for success.
-const writeJsonAtomic = async (filePath: string, text: string): Promise<void> => {
+const writeJsonAtomic = async (filePath: string, text: string, expectedText: string | undefined): Promise<void> => {
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await fs.promises.writeFile(tmp, text, 'utf8');
+    readInstanceSettings(true);
+    if (lastInstanceText !== expectedText) throw new Error('settings.json changed during save');
     await fs.promises.rename(tmp, filePath);
+    if (filePath === OPENCHAMBER_SHARED_SETTINGS_PATH) lastInstanceText = text;
   } catch (error) {
     await fs.promises.rm(tmp, { force: true }).catch(() => {});
     throw error;
@@ -296,10 +304,19 @@ const writeJsonAtomicSync = (filePath: string, text: string): void => {
 // Merged view of both files. A missing preferences.json is seeded once from the
 // profile keys settings.json still carries; every write keeps a copy of the
 // profile's base values in settings.json, so an older build can still read it.
-const readSharedSettingsFromDisk = (): Record<string, unknown> => {
-  const settings = readSettingsJsonFromDisk();
+const readSharedSettingsFromDisk = (forWrite: boolean, hasMirror: boolean) => {
+  let settings: Record<string, unknown>;
+  let stale = false;
+  try {
+    settings = readInstanceSettings(forWrite);
+  } catch (error) {
+    if (forWrite || (lastInstanceText === undefined && !hasMirror)) throw error;
+    // The remembered bytes passed the object check when read or committed.
+    settings = lastInstanceText === undefined ? {} : JSON.parse(lastInstanceText);
+    stale = true;
+  }
   let preferences = readPreferencesFromDisk();
-  if (preferences.status === 'missing') {
+  if (preferences.status === 'missing' && !stale) {
     const seeded = seedPreferencesFrom(stripDerived(settings), Date.now());
     try {
       writeJsonAtomicSync(OPENCHAMBER_PREFERENCES_PATH, serializePreferencesDocument(seeded));
@@ -309,9 +326,9 @@ const readSharedSettingsFromDisk = (): Record<string, unknown> => {
     preferences = { status: 'ok', fields: seeded };
   }
   if (preferences.status !== 'ok') {
-    return settings;
+    return { settings, stale };
   }
-  return { ...settings, ...flattenPreferences(preferences.fields, VSCODE_SETTINGS_SURFACE) };
+  return { settings: { ...settings, ...flattenPreferences(preferences.fields, VSCODE_SETTINGS_SURFACE) }, stale };
 };
 
 // Write a complete merged document: profile keys go to preferences.json (keeping
@@ -321,15 +338,16 @@ const writeSharedSettingsToDisk = async (
   document: Record<string, unknown>,
   changedKeys: Iterable<string> | null = null,
 ): Promise<void> => {
+  const expectedText = lastInstanceText;
   const preferences = readPreferencesFromDisk();
   if (preferencesUnavailable) {
     console.warn('[OpenChamber] preferences.json is unreadable; profile settings were not saved.');
     // settings.json keeps whatever legacy profile copy it already holds.
-    const onDisk = readSettingsJsonFromDisk();
+    const onDisk = readInstanceSettings(true);
     await writeJsonAtomic(OPENCHAMBER_SHARED_SETTINGS_PATH, JSON.stringify({
       ...instancePartOf(document),
       ...profilePartOf(onDisk),
-    }, null, 2));
+    }, null, 2), expectedText);
     return;
   }
   const previousFields = preferences.status === 'ok' ? preferences.fields : {};
@@ -339,9 +357,9 @@ const writeSharedSettingsToDisk = async (
     surface: VSCODE_SETTINGS_SURFACE,
     changedKeys,
   });
-  await writeJsonAtomic(OPENCHAMBER_PREFERENCES_PATH, serializePreferencesDocument(nextFields));
+  await writeJsonAtomic(OPENCHAMBER_PREFERENCES_PATH, serializePreferencesDocument(nextFields), expectedText);
   // The legacy copy of the profile's base values rides along for older builds.
-  await writeJsonAtomic(OPENCHAMBER_SHARED_SETTINGS_PATH, JSON.stringify(legacySettingsDocumentOf(document, nextFields), null, 2));
+  await writeJsonAtomic(OPENCHAMBER_SHARED_SETTINGS_PATH, JSON.stringify(legacySettingsDocumentOf(document, nextFields), null, 2), expectedText);
 };
 
 // Fields derived from runtime context — never persisted, always recomputed.
@@ -364,13 +382,14 @@ let eagerMigrationAttempted = false;
 // On first read per process, if globalState has keys that are missing on
 // disk, copy them to disk so other clients see them immediately — without
 // waiting for the user to save again.
-const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => {
+const readPersistedSettings = (ctx?: BridgeContext, forWrite = false): Record<string, unknown> => {
   const fromGlobalState = stripDerived(
     ctx?.context?.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {},
   );
-  const fromDisk = stripDerived(readSharedSettingsFromDisk());
+  const { settings, stale } = readSharedSettingsFromDisk(forWrite, Object.keys(fromGlobalState).length > 0);
+  const fromDisk = stripDerived(settings);
 
-  if (!eagerMigrationAttempted) {
+  if (!eagerMigrationAttempted && !forWrite && !stale) {
     eagerMigrationAttempted = true;
     const missingFromDisk: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(fromGlobalState)) {
@@ -389,12 +408,8 @@ const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => 
   return { ...fromGlobalState, ...fromDisk };
 };
 
-// Everything the webview may see: the persisted document minus the keys the
-// registry marks `secret` (a UI password, tunnel tokens), which are write-only.
-export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
-  const persisted = withoutSecretSettings(readPersistedSettings(ctx));
-  const persistedOpencodeBinary =
-    typeof persisted.opencodeBinary === 'string' ? String(persisted.opencodeBinary).trim() : '';
+const webviewFields = ({ opencodeBinary }: { opencodeBinary?: unknown }) => {
+  const persistedOpencodeBinary = typeof opencodeBinary === 'string' ? opencodeBinary.trim() : '';
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
   const themeVariant =
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light ||
@@ -403,15 +418,19 @@ export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
       : 'dark';
 
   return {
-    ...persisted,
     themeVariant,
     lastDirectory: workspaceFolder,
     opencodeBinary: persistedOpencodeBinary || undefined,
   };
 };
 
+export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
+  const visible = withoutSecretSettings(readPersistedSettings(ctx));
+  return { ...visible, ...webviewFields(visible) };
+};
+
 export const persistSettings = async (changes: Record<string, unknown>, ctx?: BridgeContext): Promise<Record<string, unknown>> => {
-  const current = readSettings(ctx);
+  const persistedCurrent = readPersistedSettings(ctx, true);
   // Only keys the settings registry knows as stored shared fields reach disk.
   const restChanges = filterPersistableSettingsChanges(stripDerived({ ...(changes || {}) }));
 
@@ -461,7 +480,6 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
   }
 
   // Persistable state = current persisted (no derived fields) + sanitized changes.
-  const persistedCurrent = readPersistedSettings(ctx);
   const persistable: Record<string, unknown> = { ...persistedCurrent, ...restChanges };
   for (const key of keysToClear) {
     delete persistable[key];
@@ -471,16 +489,9 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
   // so the webview reports the save as failed. Also mirror into globalState so
   // older builds can still read recent values if a user downgrades the extension.
   await writeSharedSettingsToDisk(persistable, [...Object.keys(restChanges), ...keysToClear]);
+  eagerMigrationAttempted = true;
   await ctx?.context?.globalState.update(SETTINGS_KEY, persistable);
 
-  // Return the same shape as readSettings (derived fields re-applied, secrets withheld).
-  return {
-    ...withoutSecretSettings(persistable),
-    themeVariant: current.themeVariant,
-    lastDirectory: current.lastDirectory,
-    opencodeBinary:
-      typeof persistable.opencodeBinary === 'string' && persistable.opencodeBinary.length > 0
-        ? persistable.opencodeBinary
-        : undefined,
-  };
+  const visible = withoutSecretSettings(persistable);
+  return { ...visible, ...webviewFields(visible) };
 };

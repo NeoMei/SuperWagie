@@ -2094,6 +2094,10 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
+      await mkdir(path.join(directory, 'directory-reachability'));
+      for (const name of ['index.js', 'probe-process.js']) {
+        await copyFile(new URL('../directory-reachability/' + name, import.meta.url), path.join(directory, 'directory-reachability', name));
+      }
       await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
       await copyFile(new URL('./byte-range.js', import.meta.url), path.join(directory, 'fs/byte-range.js'));
       await copyFile(new URL('./xlsx-copy.js', import.meta.url), path.join(directory, 'fs/xlsx-copy.js'));
@@ -2208,6 +2212,7 @@ describe('fs stat directory error handling', () => {
       os: { homedir: () => '/home/user' },
       path: path.posix,
       fsPromises: { realpath: async (targetPath) => targetPath, stat, readdir: vi.fn(async () => []) },
+      isDirectoryOffline: async (directory) => directory === '/offline',
       spawn: vi.fn(),
       crypto: { randomUUID: () => 'job-0' },
       normalizeDirectoryPath: (p) => p,
@@ -2219,13 +2224,15 @@ describe('fs stat directory error handling', () => {
     const handler = getRoute('POST', '/api/fs/directory-stats');
 
     const response = createMockResponse();
-    await handler({ body: { paths: ['/repo', '/gone', '/file'] } }, response);
+    await handler({ body: { paths: ['/repo', '/offline', '/gone', '/file'] } }, response);
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ results: [
       { path: '/repo', isDirectory: true },
+      { path: '/offline', isDirectory: false, reason: 'unknown' },
       { path: '/gone', isDirectory: false, reason: 'not-found' },
       { path: '/file', isDirectory: false, reason: 'not-directory' },
     ] });
+    expect(stat).not.toHaveBeenCalledWith('/offline');
 
     const invalid = createMockResponse();
     await handler({ body: { paths: [] } }, invalid);

@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { createCanonicalPaths } from './canonical-paths.js';
 import { describe, expect, it } from 'vitest';
 
 import { createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
@@ -24,6 +26,38 @@ const createTestRuntime = (overrides = {}) => {
 };
 
 describe('settings normalization runtime - symlink resolution', () => {
+  it('normalizes saved Windows folders without synchronously touching a drive on each settings read', async () => {
+    const active = 'C:\\work';
+    const offline = 'Z:\\project';
+    const corrected = 'C:\\Work';
+    let online = false;
+    const reads = [];
+    const canonicalPaths = createCanonicalPaths({
+      path: path.win32, platform: 'win32',
+      checkDirectory: async (directory) => directory === offline && !online ? 'unreachable' : 'available',
+      realpath: async (directory) => { reads.push(directory); return directory; },
+      readdir: async (root) => root === 'C:\\' ? ['Work'] : ['Project'],
+    });
+    let syncReads = 0;
+    const syncRead = () => { syncReads++; throw new Error('synchronous disk access'); };
+    const runtime = createTestRuntime({
+      path: path.win32, processLike: { platform: 'win32' }, canonicalPaths,
+      realpathSync: syncRead, readdirSync: syncRead,
+    });
+    const saved = { projects: [{ id: 'nas', path: offline }], lastDirectory: active, pinnedDirectories: [offline] };
+    await runtime.refreshCanonicalPaths(saved);
+    for (let i = 0; i < 3; i++) {
+      expect(runtime.normalizeSettingsPaths(saved).settings).toMatchObject({
+        lastDirectory: corrected, projects: saved.projects, pinnedDirectories: [offline],
+      });
+    }
+    expect(reads).toEqual([active]);
+    online = true;
+    await runtime.refreshCanonicalPaths(saved);
+    expect(runtime.sanitizeProjects(saved.projects)[0].path).toBe('Z:\\Project');
+    expect(syncReads).toBe(0);
+  });
+
   describe('normalizePathForPersistence', () => {
     it('resolves symlinks via realpathSync', () => {
       const runtime = createTestRuntime({

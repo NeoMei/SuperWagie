@@ -1,3 +1,4 @@
+import { isWindowsDirectoryOffline, readProjectPath } from '../directory-reachability/index.js';
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import {
   buildPreferencesFields,
@@ -83,6 +84,9 @@ const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   'accountSwitchProviders',
 ]);
 
+// A reader can still serve the last accepted document when a migration cannot publish.
+class SettingsSnapshotError extends Error {}
+
 export const createSettingsRuntime = (deps) => {
   const {
     fsPromises,
@@ -93,6 +97,8 @@ export const createSettingsRuntime = (deps) => {
     sanitizeSettingsUpdate,
     mergePersistedSettings,
     normalizeSettingsPaths,
+    refreshCanonicalPaths,
+    isDirectoryOffline = isWindowsDirectoryOffline,
     normalizeStringArray,
     formatSettingsResponse,
     resolveDirectoryCandidate,
@@ -125,7 +131,7 @@ export const createSettingsRuntime = (deps) => {
   // event loop, so hitting it 3+ times/second from fs/list, path, etc.
   // turns into perceptible UI jank for ~10-15 seconds after launch.
   // Cache the outcome for this process lifetime.
-  let orphanRecoveryDone = false;
+  let orphanRecovery = 'pending';
 
   const PROJECTS_ROOT_DIR = path.join(path.dirname(SETTINGS_FILE_PATH), 'projects');
   const PROJECT_ICONS_DIR = path.join(path.dirname(SETTINGS_FILE_PATH), 'project-icons');
@@ -404,10 +410,11 @@ export const createSettingsRuntime = (deps) => {
       nextProjects.push({ ...project, id: nextId });
     }
 
-    if (!orphanRecoveryDone) {
-      orphanRecoveryDone = true; // set before await to close races under concurrent settings reads
+    if (orphanRecovery !== 'done') {
+      const wasOffline = orphanRecovery === 'offline';
+      orphanRecovery = 'done'; // Claim the one-shot scan before concurrent reads can start it.
       try {
-        await recoverOrphanProjectFiles(nextProjects);
+        await recoverOrphanProjectFiles(nextProjects, wasOffline);
       } catch (error) {
         console.warn('[projects] Orphan recovery failed, continuing startup:', error);
       }
@@ -435,7 +442,15 @@ export const createSettingsRuntime = (deps) => {
   // For each canonical project whose current config is empty (lost during the
   // earlier id churn), try to find a single orphan whose setup-worktree command
   // patterns uniquely match the project's basename and merge it in.
-  const recoverOrphanProjectFiles = async (canonicalProjects) => {
+  const recoverOrphanProjectFiles = async (canonicalProjects, wasOffline) => {
+    const deferIfOffline = async () => {
+      const offline = await Promise.all(canonicalProjects.map((project) => isDirectoryOffline(project.path)));
+      if (!offline.some(Boolean)) return false;
+      orphanRecovery = 'offline';
+      return true;
+    };
+    if (wasOffline && await deferIfOffline()) return;
+
     let entries;
     try {
       entries = await fsPromises.readdir(PROJECTS_ROOT_DIR, { withFileTypes: true });
@@ -521,6 +536,7 @@ export const createSettingsRuntime = (deps) => {
       return haystacks.includes(name);
     };
 
+    if (!wasOffline && await deferIfOffline()) return;
     const matches = new Map();
     for (const orphan of orphans) {
       const matchedProjects = [];
@@ -570,20 +586,36 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  // Keep immutable bytes so callers can freely edit their returned document.
+  let lastInstanceText = null;
   const readInstanceSettingsFromDisk = async () => {
+    const previous = lastInstanceText;
+    let text;
     try {
-      const raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        return parsed;
-      }
-      return {};
+      text = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return {};
-      }
-      console.warn('Failed to read settings file:', error);
-      return {};
+      if (error?.code !== 'ENOENT') throw new SettingsSnapshotError('Cannot read settings.json');
+      text = null;
+    }
+    // A read held across another read or commit must not roll back its snapshot.
+    if (previous !== lastInstanceText) return readInstanceSettingsFromDisk();
+    if (text === null) return { text, settings: JSON.parse(lastInstanceText ?? '{}') };
+    let settings;
+    try {
+      settings = JSON.parse(text);
+    } catch {
+      throw new SettingsSnapshotError('Invalid JSON in settings.json');
+    }
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      throw new SettingsSnapshotError('settings.json must contain an object');
+    }
+    lastInstanceText = text;
+    return { text, settings };
+  };
+
+  const checkInstanceText = async (expected) => {
+    if ((await readInstanceSettingsFromDisk()).text !== expected) {
+      throw new SettingsSnapshotError('settings.json changed during save');
     }
   };
 
@@ -628,49 +660,40 @@ export const createSettingsRuntime = (deps) => {
   // seed preferences.json. settings.json keeps a copy of the profile's base
   // values on every write too, so an older build (which reads only that file)
   // still finds everything where it used to be.
-  const readSettingsFromDisk = async ({ surface = null, seedPreferences = true } = {}) => {
-    const instance = await readInstanceSettingsFromDisk();
-    const preferences = await readPreferenceFields();
-    if (preferences.status === 'failed') {
-      preferencesUnavailable = true;
-      return instance;
+  const readMergedSettings = async ({ surface = null, seedPreferences = true, forWrite = false } = {}) => {
+    let instance;
+    let stale;
+    try {
+      instance = await readInstanceSettingsFromDisk();
+      stale = instance.text === null && lastInstanceText !== null;
+    } catch (error) {
+      if (forWrite || lastInstanceText === null) throw error;
+      instance = { text: lastInstanceText, settings: JSON.parse(lastInstanceText) };
+      stale = true;
     }
-    preferencesUnavailable = false;
-    if (preferences.status === 'missing') {
-      if (!seedPreferences) return instance;
-      const seeded = seedPreferencesFrom(instance, Date.now());
+    const preferences = await readPreferenceFields();
+    preferencesUnavailable = preferences.status === 'failed';
+    let settings = instance.settings;
+    if (preferences.status === 'ok') {
+      settings = { ...settings, ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) };
+    } else if (preferences.status === 'missing' && seedPreferences && !stale) {
+      const seeded = seedPreferencesFrom(settings, Date.now());
       try {
-        await writePreferencesToDisk(seeded);
+        await writePreferencesToDisk(seeded, () => checkInstanceText(instance.text));
       } catch (error) {
         console.warn('Failed to seed preferences file:', error);
       }
-      return instance;
     }
-    return { ...instance, ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) };
+    return { settings, stale, text: instance.text };
   };
 
-  // Strict variant for callers that REGENERATE persisted identity when a key is
-  // absent (relay signing/encryption keys). The lenient reader above maps every
-  // failure — corrupt JSON, EACCES, transient I/O — to `{}`, which such callers
-  // cannot distinguish from "first run": they would mint a NEW identity, orphan
-  // every paired device and push binding, and overwrite the settings file with
-  // the empty spread. Here only a genuinely missing file means "no settings";
-  // any other failure (including a non-object payload) throws.
+  const readSettingsFromDisk = async (options) => (await readMergedSettings(options)).settings;
+
+  // Relay identities can be minted only after a successful read or on first use.
   const readSettingsFromDiskStrict = async () => {
-    let raw;
-    try {
-      raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
-    } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return {};
-      }
-      throw error;
-    }
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Settings file is malformed (non-object payload)');
-    }
-    return parsed;
+    const { settings, text } = await readInstanceSettingsFromDisk();
+    if (text === null && lastInstanceText !== null) throw new Error('settings.json is missing');
+    return settings;
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -743,6 +766,7 @@ export const createSettingsRuntime = (deps) => {
       await fsPromises.writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
       await replaceFile(tmp, filePath, beforeWrite);
+      if (filePath === SETTINGS_FILE_PATH) lastInstanceText = text;
       if (process.platform !== 'win32') await fsPromises.chmod(filePath, 0o600);
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
@@ -756,17 +780,22 @@ export const createSettingsRuntime = (deps) => {
    * when their value changed), everything else to settings.json. While
    * preferences.json is unreadable its part is skipped rather than replaced.
    */
-  const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null, beforeWrite } = {}) => {
+  const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null, beforeWrite, expectedText } = {}) => {
+    const instance = await readInstanceSettingsFromDisk();
+    if (expectedText !== undefined && instance.text !== expectedText) throw new SettingsSnapshotError('settings.json changed before save');
+    const guard = async () => {
+      await checkInstanceText(instance.text);
+      await beforeWrite?.();
+    };
     const current = preferencesUnavailable ? { status: 'failed' } : await readPreferenceFields();
     if (current.status === 'failed') {
       // The profile part is not saved; settings.json keeps whatever legacy
       // profile copy it already holds rather than losing it too.
       preferencesUnavailable = true;
-      const onDisk = await readInstanceSettingsFromDisk();
       await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify({
         ...instancePartOf(settings),
-        ...profilePartOf(onDisk),
-      }, null, 2), beforeWrite);
+        ...profilePartOf(instance.settings),
+      }, null, 2), guard);
       return;
     }
     const previousFields = current.status === 'ok' ? current.fields : {};
@@ -779,10 +808,10 @@ export const createSettingsRuntime = (deps) => {
       // Preferences are authoritative for guarded model selections. Commit
       // them only while the expected owner and selection still match, then
       // update the compatibility copy without rechecking the old selection.
-      await writePreferencesToDisk(nextFields, beforeWrite);
-      await writeJsonFileAtomic(SETTINGS_FILE_PATH, legacy);
+      await writePreferencesToDisk(nextFields, guard);
+      await writeJsonFileAtomic(SETTINGS_FILE_PATH, legacy, () => checkInstanceText(instance.text));
     } else {
-      await writeJsonFileAtomic(SETTINGS_FILE_PATH, legacy);
+      await writeJsonFileAtomic(SETTINGS_FILE_PATH, legacy, guard);
       await writePreferencesToDisk(nextFields);
     }
   };
@@ -798,7 +827,7 @@ export const createSettingsRuntime = (deps) => {
         return null;
       }
       try {
-        const stats = await fsPromises.stat(project.path);
+        const stats = await readProjectPath(project.path, () => fsPromises.stat(project.path), isDirectoryOffline);
         if (!stats.isDirectory()) {
           console.warn(`[validateProjectEntries] Dropping project — path is not a directory: ${project.path}`);
           return null;
@@ -839,6 +868,7 @@ export const createSettingsRuntime = (deps) => {
     const settings = current && typeof current === 'object' ? current : {};
     const now = Date.now();
 
+    await refreshCanonicalPaths?.(settings);
     const sanitizedProjects = sanitizeProjects(settings.projects) || [];
     let nextProjects = sanitizedProjects;
     let nextActiveProjectId =
@@ -852,8 +882,10 @@ export const createSettingsRuntime = (deps) => {
 
       if (candidate) {
         try {
-          const stats = await fsPromises.stat(candidate);
-          if (stats.isDirectory() && !(await isChatDirectory(candidate))) {
+          const projectFolder = await readProjectPath(candidate, async () => (
+            (await fsPromises.stat(candidate)).isDirectory() && !await isChatDirectory(candidate)
+          ), isDirectoryOffline);
+          if (projectFolder) {
             const id = createProjectIdFromPath(candidate);
             nextProjects = [
               {
@@ -1114,7 +1146,8 @@ export const createSettingsRuntime = (deps) => {
       hasCleanedOrphanedTempFiles = true;
       await cleanupOrphanedSettingsTempFiles(path.dirname(SETTINGS_FILE_PATH));
     }
-    const current = await readSettingsFromDisk();
+    const { settings: current, stale, text } = await readMergedSettings();
+    if (stale) return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : current;
     const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
     const migration2 = await migrateSettingsFromLegacyThemePreferences(migration1.settings);
     const migration3 = await migrateSettingsFromLegacyCollapsedProjects(migration2.settings);
@@ -1125,7 +1158,12 @@ export const createSettingsRuntime = (deps) => {
     const migration8 = migrateSettingsRemoveApprovedDirectories(migration7.settings);
     const migration9 = migrateSettingsScheduleToolFromControl(migration8.settings);
     if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed || migration9.changed) {
-      await writeSettingsToDisk(migration9.settings);
+      try {
+        await writeSettingsToDisk(migration9.settings, { expectedText: text });
+      } catch (error) {
+        if (!(error instanceof SettingsSnapshotError)) throw error;
+        return readSettingsFromDisk({ surface, seedPreferences: false });
+      }
     }
     // Migrations run on the base view; a surface asks for its own resolution
     // of the per-surface keys on top of the migrated files.
@@ -1138,7 +1176,8 @@ export const createSettingsRuntime = (deps) => {
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
       console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
-      const current = await readSettingsFromDisk({ surface, seedPreferences: !beforeWrite });
+      const { settings: current, text } = await readMergedSettings({ surface, seedPreferences: !beforeWrite, forWrite: true });
+      await refreshCanonicalPaths?.(current, changes);
       const sanitized = sanitizeSettingsUpdate(changes);
       // Managed storage ownership is a server fact, never a client setting.
       // Only the knowledge provisioner may establish it; public writes cannot
@@ -1220,7 +1259,7 @@ export const createSettingsRuntime = (deps) => {
       }
 
       const changedKeys = Object.keys(sanitized);
-      await writeSettingsToDisk(next, { surface, changedKeys, beforeWrite });
+      await writeSettingsToDisk(next, { surface, changedKeys, beforeWrite, expectedText: text });
       // OpenChamber's own OpenCode plugins live in a config file OpenCode
       // watches, so flipping one of these switches takes effect in the running
       // process instead of waiting for a restart.

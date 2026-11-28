@@ -49,14 +49,23 @@ describe('createDirectoryQueryCanonicalizer', () => {
 
     const first = canonicalize('/session?directory=/link/project');
     const second = canonicalize('/session?directory=/link/project');
-    await Promise.resolve();
-
-    expect(calls).toBe(1);
+    await expect.poll(() => calls).toBe(1);
     release();
     await expect(Promise.all([first, second])).resolves.toEqual([
       '/session?directory=%2Freal%2Fproject',
       '/session?directory=%2Freal%2Fproject',
     ]);
+  });
+
+  it('preserves the directory query without resolving an offline share', async () => {
+    let reads = 0;
+    const canonicalize = createDirectoryQueryCanonicalizer({
+      realpath: async () => { reads += 1; return '/wrong'; },
+      isDirectoryOffline: async () => true,
+    });
+    const request = '/session?directory=Z%3A%5Cproject';
+    expect(await canonicalize(request)).toBe(request);
+    expect(reads).toBe(0);
   });
 
   it('falls back to the original URL when realpath fails', async () => {
