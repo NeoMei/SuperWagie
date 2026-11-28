@@ -447,9 +447,8 @@ describe('scheduled task items', () => {
     expect(results).toEqual([]);
     expect(openCode.state.sent).toEqual([]);
     await expect(runtime.enqueue(SESSION, DIRECTORY, scheduled())).rejects.toMatchObject({ status: 409 });
-    await settle(130);
+    await vi.waitFor(() => expect(results).toEqual(['sent']));
     expect(checks).toBe(2);
-    expect(results).toEqual(['sent']);
     expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['follow up']);
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
@@ -857,12 +856,11 @@ describe('message queue runtime', () => {
 
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1));
     expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first']);
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0));
     expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first', 'second']);
     runtime.stop();
   });
