@@ -1,3 +1,5 @@
+import { useI18nStore } from '@/lib/i18n/store';
+import { appToolDisplayName } from '@/lib/toolHelpers';
 import type { PermissionRequest } from '@/types/permission';
 
 type PermissionToastOptions = {
@@ -31,6 +33,7 @@ export const showPermissionNeededToast = ({
 
   pendingIds.add(key);
   const description = permission.message?.trim()
+    || appToolDisplayName(permission.action, (key) => useI18nStore.getState().dictionary[key])
     || permission.action.trim()
     || 'Agent needs your approval';
   show('Permission needed', {

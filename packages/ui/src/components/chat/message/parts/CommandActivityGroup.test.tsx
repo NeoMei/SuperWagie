@@ -5,7 +5,8 @@ import { pathToFileURL } from 'node:url';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
-import type { ToolPart as ToolPartData } from '@/lib/opencode/model';
+import { requestReasoningReveal } from '../../search/reasoningReveal';
+import type { ReasoningPart, ToolPart as ToolPartData } from '@/lib/opencode/model';
 import { SyncProvider } from '@/sync/sync-context';
 import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { getChatQuoteSourceMessageId } from '@/lib/chatQuoteAnchor';
@@ -47,7 +48,7 @@ const command = (id: string, status: 'running' | 'completed' | 'error', output =
 
 const withCommands = async (run: (harness: {
     container: HTMLElement;
-    render: (parts: ToolPartData[], externalExpanded?: boolean) => Promise<void>;
+    render: (parts: (ToolPartData | ReasoningPart)[], externalExpanded?: boolean) => Promise<void>;
     click: (id: string) => Promise<void>;
     header: (id: string) => HTMLElement;
 }) => Promise<void>, autoExpand = true) => {
@@ -62,7 +63,7 @@ const withCommands = async (run: (harness: {
         localStorage: happyWindow.localStorage, customElements: happyWindow.customElements,
         Node: happyWindow.Node, Text: happyWindow.Text, NodeList: happyWindow.NodeList,
         Element: happyWindow.Element, HTMLElement: happyWindow.HTMLElement, SVGElement: happyWindow.SVGElement,
-        CustomEvent: happyWindow.CustomEvent,
+        CustomEvent: happyWindow.CustomEvent, CSS: happyWindow.CSS,
         requestAnimationFrame: happyWindow.requestAnimationFrame.bind(happyWindow),
         cancelAnimationFrame: happyWindow.cancelAnimationFrame.bind(happyWindow),
         getComputedStyle: happyWindow.getComputedStyle.bind(happyWindow),
@@ -90,7 +91,7 @@ const withCommands = async (run: (harness: {
     useUIStore.setState({ expandReasoningWhileStreaming: autoExpand });
     useDirectoryStore.setState({ currentDirectory: '/synthetic/command-group' });
     useGuestsStore.setState({ status: 'ready', guests: [], runtimeKey: 'test' });
-    const Rows = ({ parts, externalExpanded }: { parts: ToolPartData[]; externalExpanded: boolean }) => {
+    const Rows = ({ parts, externalExpanded }: { parts: (ToolPartData | ReasoningPart)[]; externalExpanded: boolean }) => {
         const [expanded, setExpanded] = React.useState(externalExpanded);
         const [handledExternal, setHandledExternal] = React.useState(externalExpanded);
         if (externalExpanded !== handledExternal) {
@@ -155,6 +156,26 @@ test('consecutive commands share one header and capped scroller while retaining 
         await click('one');
         expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('first result');
         expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('second result');
+    });
+});
+
+test('mixed activity uses one header and reveals file links and lookup rows in their source order', async () => {
+    await withCommands(async ({ render, click, header, container }) => {
+        const lookup = (id: string, tool: string, input: ToolPartData['state']['input']): ToolPartData => ({
+            ...command(id, 'completed'), messageID: 'source-' + id, tool,
+            state: { status: 'completed', input, output: 'lookup result', metadata: {}, time: { start: 1, end: 2 } },
+        });
+        await render([lookup('a', 'read', { filePath: '/synthetic/command-group/example.ts' }),
+            lookup('b', 'websearch', { query: 'documentation' }), command('c', 'completed')]);
+        expect(header('a').textContent).toBe('Ran 1 command · 1 read · 1 web lookup');
+        expect(header('a').title).toBe(header('a').textContent ?? '');
+        expect(header('a').getAttribute('aria-expanded')).toBe('false');
+        await click('a');
+        const details = container.querySelector('[data-command-scroll]');
+        expect(details?.textContent).toContain('example.ts');
+        expect(details?.textContent).toContain('echo c');
+        expect(Array.from(details?.querySelectorAll('[data-chat-source-message-id]') ?? [],
+            (row) => row.getAttribute('data-chat-source-message-id'))).toEqual(['source-a', 'source-b', 'msg_command']);
     });
 });
 
@@ -227,7 +248,7 @@ test('reader choices and the header survive a singleton growing into a group', a
         await click('one');
         await render([command('one', 'completed', 'first'), command('two', 'error', 'before failure')]);
         expect(header('one').getAttribute('aria-expanded')).toBe('true');
-        expect(header('one').textContent).not.toContain('Failed');
+        expect(header('one').textContent).toContain('Failed');
         expect(header('one').textContent).not.toContain('permission denied');
         expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('before failure');
         expect(container.querySelector('[data-command-scroll]')?.textContent).toContain('permission denied');
@@ -266,6 +287,7 @@ test('failed singleton output stays behind the fold and external reopen can be r
     await withCommands(async ({ container, render, click, header }) => {
         await render([command('failure', 'error', 'partial stdout')]);
         expect(header('failure').getAttribute('aria-expanded')).toBe('false');
+        expect(header('failure').textContent).toContain('Failed');
         expect(header('failure').textContent).not.toContain('permission denied');
         expect(header('failure').textContent).not.toContain('partial stdout');
         await render([command('failure', 'error', 'partial stdout')], true);
@@ -278,4 +300,27 @@ test('failed singleton output stays behind the fold and external reopen can be r
         await render([command('failure', 'error', 'partial stdout')], true);
         expect(header('failure').getAttribute('aria-expanded')).toBe('true');
     });
+});
+
+test('a search for a continuation thought opens its group and source block on each visit', async () => {
+    const thought: ReasoningPart = {
+        type: 'reasoning', id: 'thought', messageID: 'later', sessionID: 'ses_command',
+        time: { start: 1, end: 2 }, text: 'Checked the references.',
+    };
+    try {
+        await withCommands(async ({ render, container, click, header }) => {
+            await render([command('first', 'completed'), thought]);
+            for (let visit = 0; visit < 2; visit++) {
+                expect(header('first').getAttribute('aria-expanded')).toBe('false');
+                await act(async () => requestReasoningReveal('later'));
+                expect(header('first').getAttribute('aria-expanded')).toBe('true');
+                const source = container.querySelector<HTMLElement>('[data-reasoning-message-id="later"]');
+                expect(source?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
+                expect(source && getChatQuoteSourceMessageId(source)).toBe('later');
+                await click('first');
+            }
+        });
+    } finally {
+        requestReasoningReveal(null);
+    }
 });

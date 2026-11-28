@@ -63,6 +63,8 @@ describe('local diagnostic runtime', () => {
       recordSessionError({ sessionId: 'ses_privateR', directory: '/private/path-R', name: 'provider.auth', message: 'Bearer secret-456' });
 
       const output = await buildDiagnosticLog();
+      expect(output.startsWith('SuperWagie diagnostic timeline\n')).toBe(true);
+      expect(output).toContain('\nSuperWagie: ');
       expect(output).toContain('OpenCode: 2.0.31, binary source=path, wrapper=bun-shebang');
       expect(output).toContain('Last OpenCode start error: binary not found');
       expect(output).toContain('Current health: HTTP 200, OpenCode running=false, ready=false');
@@ -87,6 +89,8 @@ describe('local diagnostic runtime', () => {
         return Response.json({ openCodeRunning: true, isOpenCodeReady: true });
       };
       const switched = await buildDiagnosticLog();
+      expect(switched.startsWith('SuperWagie diagnostic timeline\n')).toBe(true);
+      expect(switched).toContain('\nSuperWagie: ');
       expect(switched).toContain('Export interrupted: the active runtime changed while it was collected');
       expect(switched).not.toContain('Current health');
     } finally {

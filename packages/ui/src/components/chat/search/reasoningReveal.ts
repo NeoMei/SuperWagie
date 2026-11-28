@@ -29,9 +29,9 @@ const subscribe = (listener: () => void) => {
     };
 };
 
-/** A number that changes each time this message's reasoning is asked to open; 0 when it is not. */
-export const useReasoningReveal = (messageId: string): number => React.useSyncExternalStore(
+/** The latest reveal serial for a matching source message, or zero when another source is targeted. */
+export const useReasoningReveal = (matchesSource: (messageId: string) => boolean): number => React.useSyncExternalStore(
     subscribe,
-    () => (target?.messageId === messageId ? target.serial : 0),
+    () => (target && matchesSource(target.messageId) ? target.serial : 0),
     () => 0,
 );

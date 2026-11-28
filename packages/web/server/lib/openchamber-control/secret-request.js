@@ -48,7 +48,7 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     const runs = createSecretRuns({ waits, hasUnreadChat, leases, run: runCommand, savedStore, projectForDirectory, resolveSessionDirectory });
     const assertEnabled = async () => {
         if (!await isEnabled()) {
-            throw new OpenChamberControlError('The secret tool is turned off in OpenChamber settings', 403);
+            throw new OpenChamberControlError('The secret tool is turned off in SuperWagie settings', 403);
         }
     };
     const run = async (input, options = {}) => {

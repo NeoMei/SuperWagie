@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import type { I18nKey } from '@/lib/i18n';
 import type { ToolInput } from '@/lib/opencode/model';
 import { workflowRunSchema, workflowRunStateSchema } from '@/lib/workflows/model';
 
@@ -27,6 +28,27 @@ export type OpenChamberEnvelope = {
   data: unknown;
   errorMessage: string | undefined;
 };
+
+// Old transcripts store these service errors as English text.
+const serviceErrors = new Map<string, I18nKey>([
+  ['The secret tool is turned off in SuperWagie settings', 'chat.toolPart.appError.secretsDisabled'],
+  ['The notify tool is turned off in SuperWagie settings', 'chat.toolPart.appError.notificationsDisabled'],
+  ['Agent memory is switched off in SuperWagie settings', 'chat.toolPart.appError.memoryDisabled'],
+  ['SuperWagie action was cancelled', 'chat.toolPart.appError.cancelled'],
+  ['Failed to execute SuperWagie action', 'chat.toolPart.appError.failed'],
+  ["Leads need the managed OpenCode runtime and the SuperWagie control tool", 'chat.toolPart.appError.managedControl'],
+  ["SuperWagie could not read which browser answers agent actions, so the action was not run. Try again.", 'chat.toolPart.appError.browserSettings'],
+  ["SuperWagie could not read the extension catalog, so the action was not run. Try again.", 'chat.toolPart.appError.extensionCatalog'],
+  ["No SuperWagie client connected here can control a page. Reading and interacting with a page works when SuperWagie runs as its desktop application; a web browser tab can display a page but cannot be driven. Nothing was changed. Mention this to the user only if it affects what they asked for.", 'chat.toolPart.appError.desktopBrowser'],
+]);
+
+export function appToolErrorText(message: string, t: (key: I18nKey) => string): string {
+  if (message.startsWith("This worktree's branch `") && message.endsWith('Nothing was named yet.')) {
+    return message.replace('` is a placeholder OpenChamber generated, and it is not pushed.', '` is a placeholder SuperWagie generated, and it is not pushed.');
+  }
+  const key = serviceErrors.get(message.replaceAll('OpenChamber', 'SuperWagie'));
+  return key ? t(key) : message;
+}
 
 const jsonText = z.string().transform((text, context) => {
   try {

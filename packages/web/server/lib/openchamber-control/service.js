@@ -265,11 +265,11 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const wait = (duration, signal) => {
     if (!signal) return sleep(duration);
-    if (signal.aborted) return Promise.reject(new OpenChamberControlError('OpenChamber action was cancelled', 499));
+    if (signal.aborted) return Promise.reject(new OpenChamberControlError('SuperWagie action was cancelled', 499));
     return new Promise((resolve, reject) => {
       const onAbort = () => {
         signal.removeEventListener('abort', onAbort);
-        reject(new OpenChamberControlError('OpenChamber action was cancelled', 499));
+        reject(new OpenChamberControlError('SuperWagie action was cancelled', 499));
       };
       signal.addEventListener('abort', onAbort, { once: true });
       sleep(duration).then(() => {
@@ -545,7 +545,7 @@ export const createOpenChamberControlService = (dependencies) => {
     const deadline = now() + timeoutMs;
     let observedActivity = false;
     while (true) {
-      if (signal?.aborted) throw new OpenChamberControlError('OpenChamber action was cancelled', 499);
+      if (signal?.aborted) throw new OpenChamberControlError('SuperWagie action was cancelled', 499);
       const status = await sessionStatus(client, sessionID);
       if (status.type === 'busy') {
         observedActivity = true;
@@ -1153,7 +1153,7 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       throw new OpenChamberControlError(`Unsupported SuperWagie action: ${action || 'missing'}`, 400);
     } catch (error) {
-      throw asControlError(error, `Failed to execute ${action || 'OpenChamber action'}`);
+      throw asControlError(error, `Failed to execute ${action || 'SuperWagie action'}`);
     }
   };
 

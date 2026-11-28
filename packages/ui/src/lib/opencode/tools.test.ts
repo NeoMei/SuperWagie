@@ -269,7 +269,9 @@ describe("execute call details", () => {
   })
 
   test("reads the script off the input", () => {
-    expect(executeScript({ code: "return 1" })).toBe("return 1")
+    const source = "  // note\n\n  return 1\n"
+    expect(executeScript({ code: source })).toBe(source)
+    expect(executeScript({ code: "  \n" })).toBe(undefined)
     expect(executeScript({})).toBe(undefined)
   })
 })

@@ -264,9 +264,7 @@ const OPENCODE_NAMESPACE_STATUS = new Map(Object.entries<I18nKey>({
     artifact_delete: 'chat.agentStatus.opencode.artifacts',
 }));
 
-const asWords = (name: string): string => name.replace(/[_-]+/g, ' ').trim();
-
-const usingTool = (name: string): AgentStatus => ({ key: 'chat.agentStatus.usingTool', name: asWords(name) });
+const usingTool = (name: string): AgentStatus => ({ key: 'chat.agentStatus.usingTool', name });
 
 const getToolStatus = (toolName: string, count = 1): AgentStatus => {
     const bucket = TOOL_BUCKETS.get(toolName);

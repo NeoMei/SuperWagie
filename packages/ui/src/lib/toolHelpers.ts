@@ -1,4 +1,5 @@
 import { APP_NAME } from '@/lib/branding';
+import type { I18nKey } from '@/lib/i18n';
 import { normalizeToolName } from '@/lib/opencode/tools';
 import {
   isEditTool,
@@ -283,6 +284,30 @@ function formatUnknownToolDisplayName(toolName: string): string {
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^./, (char) => char.toUpperCase());
+}
+
+const appToolLabels = new Map<string, I18nKey>([
+  ['secret', 'chat.toolPart.appTool.secrets'],
+  ['schedule', 'chat.toolPart.appTool.schedule'],
+  ['web', 'chat.toolPart.appTool.browser'],
+  ['memory', 'chat.toolPart.appTool.memory'],
+  ['knowledge', 'chat.toolPart.appTool.knowledge'],
+  ['library', 'chat.toolPart.appTool.library'],
+  ['notify', 'chat.toolPart.appTool.notifications'],
+  ['render', 'chat.toolPart.appTool.page'],
+  ['image', 'chat.toolPart.appTool.image'],
+  ['usage', 'chat.toolPart.appTool.usage'],
+  ['workflow', 'chat.toolPart.appTool.workflow'],
+  ['workflow_answer', 'chat.toolPart.appTool.workflowAnswer'],
+]);
+
+/** Localize first-party wire names when displaying direct or Code Mode calls. */
+export function appToolDisplayName(toolName: string, t: (key: I18nKey) => string, includeMethod = false): string | undefined {
+  const name = toolName.trim().toLowerCase().replace(/:\d+$/, '');
+  const match = /(?:^|\.)openchamber(?:[._-]([a-z0-9_-]+))?(?:\.(.+))?$/.exec(name);
+  if (!match) return undefined;
+  const label = t(appToolLabels.get(match[1]) ?? 'chat.toolPart.appTool.general');
+  return includeMethod && match[2] ? `${label} · ${match[2]}` : label;
 }
 
 export function getToolMetadata(toolName: string): ToolMetadata {

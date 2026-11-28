@@ -15,46 +15,47 @@ const message = (id: string, parts: Part[]): ChatMessageEntry => ({
 });
 
 describe('getActivityGroups', () => {
-    test('groups only consecutive commands across source messages', () => {
-        const first = message('first', [tool('s1')]);
-        const next = message('next', [tool('s2'), reasoning('r1'), reasoning('r2'), tool('s3'), tool('s4')]);
+    test('attaches leading thoughts to the next phase and subsequent thoughts to the open phase, across source messages', () => {
+        const first = message('first', [reasoning('r1'), tool('read', 'read')]);
+        const next = message('next', [reasoning('r2'), tool('s1'), reasoning('r3'), tool('s2')]);
         const groups = getActivityGroups([first, next]);
-        expect([...groups.keys()]).toEqual(['s1', 's2', 's3', 's4']);
-        expect(groups.get('s1')).toBe(groups.get('s2'));
-        const group = groups.get('s1');
-        expect(group?.kind).toBe('command');
-        expect(group?.members.map((member) => member.message.info.id)).toEqual(['first', 'next']);
-        expect(group?.members[0]?.message).toBe(first);
-        expect(group?.members[0]?.part).toBe(first.parts[0]);
-        expect(groups.get('s1')?.id).toBe('s1');
+        const exploration = groups.get('r1');
+        expect(exploration?.members.map(({ part }) => part.id)).toEqual(['r1', 'read', 'r2']);
+        expect(exploration?.members[0]?.message).toBe(first);
+        expect(exploration?.members[2]?.message).toBe(next);
+        expect(groups.get('s1')?.members.map(({ part }) => part.id)).toEqual(['s1', 'r3', 's2']);
     });
 
-    test('interleaved thinking and shell calls remain separate singletons', () => {
-        const groups = getActivityGroups([message('m', [reasoning('r1'), tool('s1'), reasoning('r2'), tool('s2')])]);
-        expect(groups.size).toBe(0);
+    test('absorbs five lookups before an edit, keeps six independent, and waits for a live trailing run to settle', () => {
+        const lookups = Array.from({ length: 6 }, (_, i) => tool('read' + i, 'read'));
+        const first = tool('first', 'edit');
+        const last = tool('last', 'edit');
+        const plan = (parts: Part[], live = false) => getActivityGroups([message('m', parts)], 'group', live);
+        expect(plan([first, ...lookups.slice(0, 5), last]).get('first')?.members).toHaveLength(7);
+        expect(plan([first, ...lookups, last]).get('read0')?.members).toHaveLength(6);
+        expect(plan([first], true).get('first')?.phase).toBe('edit');
+        expect(plan([first]).size).toBe(0);
+        expect(plan([first, ...lookups.slice(0, 2)], true).get('read0')?.phase).toBe('explore');
+        expect(plan([first, ...lookups.slice(0, 2)]).get('read0')?.phase).toBe('edit');
     });
 
-    test('text including a growing empty placeholder, other tools and questions end a run', () => {
-        for (const separator of [text('text'), text('empty', ''), tool('read', 'read'), tool('question', 'question')]) {
-            expect(getActivityGroups([message('m', [reasoning('r1'), separator, reasoning('r2')])]).size).toBe(0);
-            expect(getActivityGroups([message('m', [tool('s1'), separator, tool('s2')])]).size).toBe(0);
+    test('text, growing placeholders, interactive tools, failures and background commands end a phase', () => {
+        const failed = tool('failed', 'websearch');
+        failed.state = { status: 'error', input: {}, error: 'Request failed', time: { start: 1, end: 2 } };
+        const background = tool('background');
+        background.state = { status: 'completed', input: {}, metadata: { status: 'running', shellID: 'sh_1' }, output: '', time: { start: 1, end: 2 } };
+        for (const separator of [text('answer'), text('empty', ''), tool('q', 'question'), tool('agent', 'subagent'), tool('request', 'openchamber_secret'), failed, background]) {
+            expect(getActivityGroups([message('m', [tool('a'), separator, tool('b')])]).size).toBe(0);
         }
     });
 
-    test('reasoning remains a command separator even when a caller hides traces', () => {
-        const groups = getActivityGroups([message('m', [tool('s1'), reasoning('hidden'), tool('s2'), tool('s3')])]);
-        expect(groups.has('s1')).toBe(false);
-        expect(groups.get('s2')?.members.map((member) => member.part.id)).toEqual(['s2', 's3']);
-    });
-
-    test('plain reasoning keeps individual parts while still separating command groups', () => {
+    test('keeps plain reasoning in place and removes hidden reasoning before choosing an anchor', () => {
         const messages = [message('m', [tool('s1'), reasoning('r1'), reasoning('r2'), tool('s2'), tool('s3')])];
-        const groups = getActivityGroups(messages);
-        expect(groups.has('r1')).toBe(false);
-        expect(groups.has('r2')).toBe(false);
-        expect(groups.has('s1')).toBe(false);
-        expect(groups.get('s2')?.members.map((member) => member.part.id)).toEqual(['s2', 's3']);
-        expect(getActivityGroups(messages)).toBe(groups);
+        const plain = getActivityGroups(messages, 'plain');
+        expect([...plain.keys()]).toEqual(['s2', 's3']);
+        expect(getActivityGroups(messages, 'plain')).toBe(plain);
+        expect([...getActivityGroups(messages, 'hidden').keys()]).toEqual(['s1', 's2', 's3']);
+        expect([...getActivityGroups(messages).keys()]).toEqual(['s1', 'r1', 'r2', 's2', 's3']);
     });
 
     test('adjacent reasoning keeps upstream part and message boundaries', () => {

@@ -1012,7 +1012,7 @@ describe('managed agent tool runtime', () => {
   it('forwards cancellation to the shared control service', async () => {
     const executeAction = vi.fn(async (_action, _input, _directory, options) => {
       await new Promise((resolve, reject) => {
-        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('OpenChamber action was cancelled'), { statusCode: 499 })), { once: true });
+        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('SuperWagie action was cancelled'), { statusCode: 499 })), { once: true });
       });
     });
     const { runtime } = await createRuntime({ executeAction });
@@ -1024,7 +1024,7 @@ describe('managed agent tool runtime', () => {
     await expect(pending).resolves.toEqual(expect.objectContaining({
       ok: false,
       action: 'projects.list',
-      error: { message: 'OpenChamber action was cancelled', kind: 'runtime' },
+      error: { message: 'SuperWagie action was cancelled', kind: 'runtime' },
     }));
     expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, undefined, { signal: controller.signal });
   });
@@ -1034,7 +1034,7 @@ describe('managed agent tool runtime', () => {
     // ends the action itself when the event stream reports the cancel.
     const executeAction = vi.fn(async (_action, _input, _directory, options) => {
       await new Promise((resolve, reject) => {
-        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('OpenChamber action was cancelled'), { statusCode: 499 })), { once: true });
+        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('SuperWagie action was cancelled'), { statusCode: 499 })), { once: true });
       });
     });
     const { runtime } = await createRuntime({ executeAction });
@@ -1058,7 +1058,7 @@ describe('managed agent tool runtime', () => {
 
     expect(runtime.abortSession('ses_cancel')).toBe(1);
     const response = await pending;
-    expect(response.body).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ message: 'OpenChamber action was cancelled' }) }));
+    expect(response.body).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ message: 'SuperWagie action was cancelled' }) }));
 
     // The other session's action is untouched until it is told otherwise.
     expect(runtime.abortSession('ses_other')).toBe(1);

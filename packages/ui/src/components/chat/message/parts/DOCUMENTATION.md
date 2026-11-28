@@ -4,6 +4,8 @@ This folder contains renderers for chat message parts (text, tools, reasoning, p
 
 Use this doc when changing message parts, tool disclosures, or timeline rendering.
 
+First-party tool names are localized at render time for row titles, phase summaries and nested call labels. The details list names each recorded call. A script that mentions the upstream name is available under Original script. Known service error messages also resolve at render time for old transcripts. Saved tool IDs, action routing, source code, and recorded output keep their original values.
+
 ## UI program page capability boundary
 
 - `ShownPage` selects `UiPageFrame` for a recorded `ui` program and keeps the existing sandboxed HTML frame for an HTML page. Native UI programs use the app-owned block catalog; extension component contracts are not enabled by this renderer.
@@ -62,7 +64,7 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
   - If a tool should switch between static vs expandable, change it here.
 
 - `ReasoningPart.tsx`
-  - Thinking disclosure UI (`ReasoningTimelineBlock`) follows upstream per-part and per-message boundaries, streaming throttle, search identity and expansion preference. Command groups reuse its disclosure and bounded scroll behavior without merging thinking.
+  - Thinking disclosure UI (`ReasoningTimelineBlock`) follows upstream per-part and per-message boundaries, streaming throttle, search identity and expansion preference. Activity phases reuse its bounded scroll area. A thought inside a phase retains its own disclosure, source message and search target.
 
 - `AssistantTextPart.tsx` and `message/MessageBody.tsx`
   - Text follows upstream block commits while streaming. `MessageSliceContext` selects the visible range of a completed long message without changing the underlying record.
@@ -76,8 +78,8 @@ Use this doc when changing message parts, tool disclosures, or timeline renderin
   - `lib/turns/liveActivity.ts` owns final-answer boundaries; `timelineRows.ts` owns stable list-row projection.
 
 - `CommandActivityGroup.tsx` and `CommandExecution.tsx`
-  - Consecutive shell calls share one fixed header and one bounded scrolling body. Each call keeps its original input, stdout, error, attachments, copy, and stop control inside that body.
-  - The group opens while any member is active, closes when all members settle, and preserves reader choices as further calls append. Its folded header retains the completed-call count and latest completed action, including while another member runs. Arguments and output stay in the body; the existing shimmer belongs to the active title.
+  - A phase shares one header and one bounded scrolling body. A mixed header counts tool calls by action, excluding reasoning. Edits count operations even when several touch the same file. The accessible label and tooltip keep the full summary on narrow screens. Reads keep their file links, edits and other tools use their existing detail rows, and each shell retains its input, output, attachments, copy and stop controls. Failed calls draw separately with a visible failure status.
+  - The streaming expansion preference controls whether an active group opens. Auto-open groups close when all members settle. A manual choice persists as calls append. Its folded header retains the completed-call count and latest completed action, including while another member runs. Arguments and output stay in the body; the existing shimmer belongs to the active title.
   - `ToolPart` retains authoritative foreground/background lifecycle, cancellation, and content completion. Member controllers remain mounted while folded; output polling and content mounting stop with group expansion.
 
 - `ShownToolCard.tsx`
@@ -376,14 +378,13 @@ follow the pre-migration worker. The payload and its byte estimate change from
 HTML to tokens so React can own the code body; streaming-only prefixes stay in
 the bounded recent results.
 
-### Consecutive commands
+### Activity phases
 
-`lib/turns/activityGroups.ts` groups only adjacent shell calls before message
-slicing and Activity trimming. Thinking, text including empty placeholders,
-other tools, notices and shown interactions end a command run. Thinking retains
-upstream part/message boundaries in both folded and plain presentations.
+`lib/turns/activityGroups.ts` groups tool calls before message slicing and
+Activity trimming. See [Chat turns and Activity](../../lib/turns/DOCUMENTATION.md)
+for the phase boundaries and reasoning modes.
 
-The first command owns the stable disclosure identity. Source message/part IDs,
+The first member owns the stable disclosure identity. Source message/part IDs,
 input, output, errors and native stop authority remain on each member. The
 24-part row budget and seven-row Activity preview count a command group once.
 A continuation-only command message maps to its owner's row while retaining its
@@ -597,7 +598,7 @@ the same owner.
 - The result of a session the agent dispatched with `returnResult` arrives as a `synthetic` message with `source: "openchamber-session"` (`@/lib/opencode/dispatched-session`, delivered by the server's `lib/dispatch-results`). It is a background report like a subagent run (`isBackgroundReportEntry`): it opens a turn, so the woken agent's reply renders below it, and a fork after an answer cuts before it. `TimelineNotice` renders it as one collapsed row, `Session finished: <title>` (failed / stopped variants carry the status icon), that opens to the answer as Markdown with an `Open session` action going through `openSessionLink`.
 - A session notice is a labelled message OpenCode, a plugin or OpenChamber puts into a session: a `synthetic` message with a `description`, or the `system` message OpenCode writes when the session's instructions change. `@/lib/opencode/session-notices` decides which ones the timeline shows (plugin notices, a restart, a `!command` that could not start, a move to another folder), and its header lists every kind, shown and hidden, with the reason; change that list there when a kind turns out to be noise. The rest about the session's instructions (skills, MCP servers, instruction files, "Loaded AGENTS.md") stays hidden as noise. The live `session.instructions.updated` event gets the `instructionSources` metadata OpenCode stores, so a live move reads like one loaded from history. A shown notice draws through `SessionNoticeBlock` as one folded row with an info icon (a `!command` that could not start takes the error icon) that opens to the text the model received. `attachSyntheticContext` places it: a notice that lands while a step runs becomes a row of that step, the final step included after it answers (the notice came before the step's `time.completed`) and also when a prompt was queued behind the running step; one that lands before the run's first step joins that step, and until the step exists turn projection keeps it in the prompt's turn (`TurnRecord.waitingNotices`, drawn by `TurnItem`), so it shows even when the run fails or is stopped before its first token and the turn stays the live tail. The row is a tool part only OpenChamber makes (`SESSION_NOTICE_TOOL`) that records whether it sits before or after the step's own parts, so Activity counts and trims it with the step's other rows and `MessageBody` draws it as a notice; `streamingTailEntry` puts these rows back before or after the step's live parts, and a turn whose only row is a notice gets no Activity fold (`hasLiveActivity`). A notice after an answer stays its own entry between turns; when a step follows, the last such notice opens that step's turn, as a hidden one did before, and a notice the answer took moves out of it to open that turn.
 - Reasoning streaming presentation derives from the live stream phase (`streaming`/`cooldown`), never from missing persisted timing: a cached part without `time.end` is not live, and a part whose `time.end` is set never streams (issue #2020).
-- Reasoning uses the upstream bounded Markdown disclosure in its original part position. The existing streaming-expansion preference controls whether it opens while thinking; completion folds it without deleting the part. Its header does not mirror live reasoning or shell output. Actual text increments use the existing throttle; an empty settled part takes no space. Search can open a reasoning block.
+- Visible reasoning uses its source Markdown disclosure, inside its activity phase when grouped. Standalone thoughts retain their original rows. The plain-text preference keeps thoughts inline. The existing streaming-expansion preference controls whether it opens while thinking; completion folds it without deleting the part. Its header does not mirror live reasoning or shell output. Actual text increments use the existing throttle; an empty settled part takes no space. Search can open a reasoning block.
 - Text that draws nothing takes no space (#5215). `lib/invisibleText.ts` supplies the shared test for whitespace and Unicode default-ignorable characters. Part renderers and turn projection use it for whole parts. `MarkdownArrivalBlock` omits an invisible-only streaming block before creating its wrapper; `remarkVisibleBlocks` in `streamdownPlugins.ts` filters top-level source ranges after disclosure reconstruction, including static rendering which bypasses that wrapper. Its source view omits the leading BOM as the parser does, so node offsets still identify the intended text. Both checks use the complete source block, so code fences and joiners inside visible text remain intact. The shared predicate avoids divergent definitions of empty text; CSS `:empty` cannot detect zero-width characters.
 - Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): the block-level reveal (`lib/streamTextCommit.ts`) holds a still-growing part's unfinished block, and the reply takes new text at most every 400 ms, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).
 ### Shared runtime behavior

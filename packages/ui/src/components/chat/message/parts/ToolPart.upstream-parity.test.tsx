@@ -130,6 +130,31 @@ for (const tool of ['openchamber_image']) test(`an unsupported ${tool} card reta
   }, true);
 });
 
+test('history shows a localized secret tool label and preserves recorded output', async () => {
+  await withPart(part('functions.openchamber_secret:2', {
+    status: 'completed',
+    input: { action: 'secret.forget', parameters: {} },
+    output: 'Original recorded output',
+    metadata: {},
+    time: { start: 1, end: 2 },
+  }), true, (container) => {
+    expect(container.textContent).toMatch(/密钥|Secrets/);
+    expect(/openchamber/i.test(container.textContent ?? '')).toBe(false);
+    expect(container.textContent).toContain('Original recorded output');
+  });
+});
+
+test('a saved first-party failure shows the current service message', async () => {
+  const error = 'The secret tool is turned off in OpenChamber settings';
+  const output = JSON.stringify({ schemaVersion: 1, action: 'secret.request', ok: false, error: { message: error } });
+  await withPart(part('openchamber_secret', {
+    status: 'completed', input: { action: 'secret.request' }, output, metadata: {}, time: { start: 1, end: 2 },
+  }), true, (container) => {
+    expect(container.textContent).toMatch(/关闭密钥工具|turned off in SuperWagie settings/);
+    expect(/openchamber/i.test(container.textContent ?? '')).toBe(false);
+  });
+});
+
 test('a waiting secret request renders a private input card in the transcript', async () => {
   await withPart(part('openchamber_secret', {
     status: 'running',

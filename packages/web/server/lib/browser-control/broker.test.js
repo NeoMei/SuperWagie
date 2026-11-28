@@ -58,7 +58,8 @@ describe('browser control broker', () => {
       // The agent reads this, not the user: it must state the limitation and
       // where the capability exists, without issuing an instruction the agent
       // cannot carry out.
-      expect(error.message).toContain('desktop application');
+      expect(error.message).toContain('No SuperWagie client connected here can control a page');
+      expect(error.message).toContain('SuperWagie runs as its desktop application');
       expect(error.message).toContain('Nothing was changed');
       expect(error.message).not.toContain('Ask the user to open');
     }
@@ -67,8 +68,9 @@ describe('browser control broker', () => {
   test('surfaces a client-reported failure with its message', async () => {
     const { broker, emitted } = createBroker();
     const inflight = broker.request('browser.click', { selector: '#missing' });
-    broker.resolve(emitted[0].requestId, { ok: false, error: 'No element matches #missing' });
-    await expect(inflight).rejects.toThrow('No element matches #missing');
+    const message = 'No element matches [title="OpenChamber"]';
+    broker.resolve(emitted[0].requestId, { ok: false, error: message });
+    await expect(inflight).rejects.toMatchObject({ message });
   });
 
   test('times out when the client accepted the request and never answered', async () => {

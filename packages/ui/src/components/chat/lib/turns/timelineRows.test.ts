@@ -77,6 +77,19 @@ describe('buildTimelineRows', () => {
         expect(rows[1]?.kind === 'turn-message' && rows[1].messageAliases).toEqual(['continuation']);
     });
 
+    test('locates a grouped thought at its actual row while retaining its source answer row', () => {
+        const thought: Part = { type: 'reasoning', id: 'thought', messageID: 'answer', sessionID: 'session', text: 'Checked it', time: { start: 1, end: 2 } };
+        const entry = turnEntry([
+            assistant('work', [readPart], 'tool-calls'),
+            assistant('answer', [thought, textPart('final', 'Done')], 'stop'),
+        ]);
+        const rows = buildTimelineRows([entry], summary, []);
+        expect(rows.map((row) => row.key)).toEqual(['turn:user', 'step:work', 'step:answer']);
+        expect(rows[1]?.kind === 'turn-message' && rows[1].reasoningSources).toEqual(['answer']);
+        const plain = buildTimelineRows([entry], { ...summary, collapsibleThinkingBlocks: false }, rows);
+        expect(plain[1]?.kind === 'turn-message' && plain[1].reasoningSources).toBeUndefined();
+    });
+
     test('keeps a continuation message that also owns an error or the final footer', () => {
         const shell = (id: string): ToolPart => ({ ...readPart, id, callID: id, tool: 'shell' });
         const failed = assistant('failed', [shell('second')], 'tool-calls');
@@ -109,7 +122,7 @@ describe('buildTimelineRows', () => {
     });
 
     test('cuts a step that ran dozens of calls into rows of parts, while it still runs', () => {
-        const calls: Part[] = Array.from({ length: 30 }, (_, index) => ({ ...readPart, id: `read-${index}`, callID: `read-${index}` }));
+        const calls: Part[] = Array.from({ length: 30 }, (_, index) => ({ ...readPart, tool: 'question', id: `read-${index}`, callID: `read-${index}` }));
         const rows = buildTimelineRows([turnEntry([assistant('step', calls)])], summary, []);
         expect(rows.map((row) => row.key)).toEqual(['turn:user', 'step:step', 'step:step:read-24:0']);
         expect(rows[1]?.kind === 'turn-message' && rows[1].slice).toEqual({ to: { partId: 'read-24', offset: 0 }, index: 0, count: 2 });

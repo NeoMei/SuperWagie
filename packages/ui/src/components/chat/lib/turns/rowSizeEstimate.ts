@@ -4,7 +4,7 @@ import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
 import { getShownPages, type ShownPart } from './liveActivity';
 import type { TimelineRow } from './timelineRows';
 import type { ChatMessageEntry } from './types';
-import { getActivityGroups, isActivityGroupContinuation } from './activityGroups';
+import { getActivityGroups, isActivityGroupContinuation, type ActivityGroups } from './activityGroups';
 
 /**
  * The height a transcript row will have before it is measured, from what it
@@ -101,8 +101,7 @@ const sliceText = (part: Part & { type: 'text' }, row: Extract<TimelineRow, { ki
 };
 
 // The parts one row of a message draws, in the order `messageCuts` cuts them.
-const rowParts = (message: ChatMessageEntry, row: Extract<TimelineRow, { kind: 'turn-message' }>, metrics: RowSizeMetrics): Part[] => {
-    const groups = getActivityGroups(row.entry.turn.assistantMessages);
+const rowParts = (message: ChatMessageEntry, row: Extract<TimelineRow, { kind: 'turn-message' }>, metrics: RowSizeMetrics, groups: ActivityGroups): Part[] => {
     const parts = filterVisibleParts(message.parts, { includeReasoning: metrics.showReasoningTraces }).filter((part) => !isEmptyTextPart(part) && !isActivityGroupContinuation(part, groups));
     const start = row.slice?.from ? parts.findIndex((part) => part.id === row.slice?.from?.partId) : 0;
     const endCut = row.slice?.to;
@@ -135,7 +134,8 @@ const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetric
     const message = row.entry.turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
     if (!message) return undefined;
     const hoisted = hoistedPages(row);
-    const parts = rowParts(message, row, metrics);
+    const groups = getActivityGroups(row.entry.turn.assistantMessages, row.reasoningMode, row.liveActivity);
+    const parts = rowParts(message, row, metrics, groups);
     // The final answer draws the hoisted pages right above its first text,
     // in the row where that text starts.
     const firstText = row.final ? parts.find((part) => part.type === 'text') : undefined;
@@ -145,7 +145,9 @@ const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetric
     let height = answerStartsHere ? hoistedHeight(hoisted, metrics, row.keepText) : 0;
     let hasText = false;
     for (const part of parts) {
-        if (part.type === 'text') {
+        if (groups.has(part.id)) {
+            height += metrics.lineHeight;
+        } else if (part.type === 'text') {
             if (hoisted.some((page) => page.id === part.id)) continue;
             hasText = true;
             height += markdownHeight(sliceText(part, row), metrics.columnWidth);

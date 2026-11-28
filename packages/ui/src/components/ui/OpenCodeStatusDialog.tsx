@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from '@/components/ui';
 import { useUIStore } from '@/stores/useUIStore';
+import { APP_NAME_EN } from '@/lib/branding';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -36,7 +37,7 @@ export const OpenCodeStatusDialog: React.FC = () => {
     const url = URL.createObjectURL(new Blob([openCodeStatusText], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = `openchamber-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
+    link.download = `${APP_NAME_EN.toLowerCase()}-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
     document.body.appendChild(link);
     link.click();
     link.remove();
