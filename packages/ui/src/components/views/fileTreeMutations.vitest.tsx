@@ -1,6 +1,46 @@
 import React, { act } from 'react';
-import { expect, test } from 'bun:test';
+import { Worker as NodeWorker } from 'node:worker_threads';
+import { afterAll, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
+
+const workers = new Set<NodeWorker>();
+const workerEntry = import.meta.resolve('@pierre/diffs/worker/worker.js');
+// Vitest has no browser Worker. Run Pierre's exported module in a Node
+// thread so the real initialization and highlighting requests get replies.
+const workerBootstrap = new URL(`data:text/javascript,${encodeURIComponent(`
+  import { parentPort } from 'node:worker_threads';
+  globalThis.self = globalThis;
+  globalThis.addEventListener = (type, listener) => {
+    if (type === 'message') parentPort.on('message', (data) => listener({ data }));
+  };
+  globalThis.postMessage = (data, transfer) => parentPort.postMessage(data, transfer);
+  await import(${JSON.stringify(workerEntry)});
+`)}`);
+
+class PierreTestWorker extends EventTarget {
+  private readonly worker = new NodeWorker(workerBootstrap);
+
+  constructor() {
+    super();
+    workers.add(this.worker);
+    this.worker.on('message', (data) => this.dispatchEvent(new MessageEvent('message', { data })));
+    this.worker.on('error', (error) => this.dispatchEvent(Object.assign(new Event('error'), { error, message: error.message })));
+    this.worker.once('exit', () => workers.delete(this.worker));
+  }
+
+  postMessage(...args: Parameters<NodeWorker['postMessage']>) {
+    this.worker.postMessage(...args);
+  }
+
+  terminate() {
+    void this.worker.terminate();
+  }
+}
+
+afterAll(async () => {
+  // The diff provider keeps its pool between mounts.
+  await Promise.all([...workers].map((worker) => worker.terminate()));
+});
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -45,7 +85,7 @@ async function setup(surface: 'sidebar' | 'view' = 'sidebar') {
     Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
     PointerEvent: dom.PointerEvent, MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
     IntersectionObserver: dom.IntersectionObserver,
-    Worker: class extends EventTarget { postMessage() {} terminate() {} },
+    Worker: PierreTestWorker,
     WebSocket: class extends dom.EventTarget {
       static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
       readyState = 0; send() {} close() { this.readyState = 3; }
