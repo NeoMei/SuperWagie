@@ -13,12 +13,14 @@ const createRuntime = async ({
   onLastDirectoryChanged = undefined,
   onKnowledgeLibraryEnabledChanged = undefined,
   chatRoots = undefined,
+  isDirectoryOffline,
   fs = fsPromises,
 } = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
     fsPromises: fs,
+    isDirectoryOffline,
     path,
     crypto,
     SETTINGS_FILE_PATH: settingsFilePath,
@@ -52,6 +54,148 @@ const createRuntime = async ({
 };
 
 describe('settings runtime', () => {
+  it('keeps the active project on an offline drive and removes a deleted neighbor on save', async () => {
+    const offline = 'Z:\\offline-project';
+    const { runtime, tempRoot, cleanup } = await createRuntime({ isDirectoryOffline: async (directory) => directory === offline });
+    const project = (directory) => ({ id: createProjectIdFromPath(directory), path: directory });
+    const offlineProject = project(offline);
+    try {
+      await runtime.persistSettings({
+        projects: [offlineProject, project(tempRoot), project(path.join(tempRoot, 'deleted'))],
+        activeProjectId: offlineProject.id,
+      });
+      expect(await runtime.readSettingsFromDiskMigrated()).toMatchObject({
+        projects: [offlineProject, project(tempRoot)], activeProjectId: offlineProject.id,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps projects visible during a read lock and resumes saves from the recovered file', async () => {
+    let locked = false;
+    const fs = { ...fsPromises, readFile: (file, ...args) => {
+      if (locked && path.basename(file) === 'settings.json') {
+        throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      }
+      return fsPromises.readFile(file, ...args);
+    } };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      fs, mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+    });
+    const project = { id: createProjectIdFromPath(tempRoot), path: tempRoot };
+    const saved = { projects: [project], activeProjectId: project.id, fontSize: 110, customInstanceKey: 1 };
+    const preferences = path.join(tempRoot, 'preferences.json');
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify(saved));
+      await runtime.persistSettings({ fontSize: 130 }, { surface: 'mobile' });
+      const before = await fsPromises.readFile(settingsFilePath, 'utf8');
+      const profileBefore = await fsPromises.readFile(preferences, 'utf8');
+      locked = true;
+      const cached = await runtime.readSettingsFromDiskMigrated({ surface: 'mobile' });
+      expect(cached).toMatchObject({ ...saved, fontSize: 130 });
+      cached.projects.length = 0;
+      expect((await runtime.readSettingsFromDisk()).projects).toEqual([project]);
+      await expect(runtime.persistSettings({ fontSize: 140 }, { beforeWrite: () => {} })).rejects.toThrow();
+      await expect(runtime.writeSettingsToDisk({})).rejects.toThrow();
+      await expect(runtime.readSettingsFromDiskStrict()).rejects.toThrow();
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe(before);
+      expect(await fsPromises.readFile(preferences, 'utf8')).toBe(profileBefore);
+      locked = false;
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...JSON.parse(before), customInstanceKey: 2 }));
+      await runtime.persistSettings({ desktopKeepAwakeEnabled: true });
+      expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toMatchObject({
+        projects: [project], activeProjectId: project.id, customInstanceKey: 2, desktopKeepAwakeEnabled: true,
+      });
+    } finally { await cleanup(); }
+  });
+
+  it.each([false, true])('refuses a save when settings.json locks during staging, guarded=%s', async (guarded) => {
+    let arm = false;
+    let locked = false;
+    const fs = {
+      ...fsPromises,
+      writeFile: async (file, ...args) => {
+        await fsPromises.writeFile(file, ...args);
+        if (arm) locked = true;
+      },
+      readFile: (file, ...args) => {
+        if (locked && path.basename(file) === 'settings.json') throw Object.assign(new Error('locked'), { code: 'EACCES' });
+        return fsPromises.readFile(file, ...args);
+      },
+    };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fs });
+    const profile = path.join(tempRoot, 'preferences.json');
+    try {
+      await runtime.persistSettings({ fontSize: 110 });
+      const before = await Promise.all([settingsFilePath, profile].map((file) => fsPromises.readFile(file, 'utf8')));
+      arm = true;
+      await expect(runtime.persistSettings({ fontSize: 130 }, guarded ? { beforeWrite: () => {} } : {})).rejects.toThrow();
+      expect(await Promise.all([settingsFilePath, profile].map((file) => fsPromises.readFile(file, 'utf8')))).toEqual(before);
+      expect((await fsPromises.readdir(tempRoot)).sort()).toEqual(['preferences.json', 'settings.json']);
+    } finally { await cleanup(); }
+  });
+
+  it('keeps the committed project list when an earlier disk read finishes late', async () => {
+    let hold = false;
+    const started = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const fs = { ...fsPromises, readFile: async (file, ...args) => {
+      const text = await fsPromises.readFile(file, ...args);
+      if (hold && path.basename(file) === 'settings.json') {
+        hold = false;
+        started.resolve();
+        await release.promise;
+      }
+      return text;
+    } };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fs });
+    try {
+      await fsPromises.writeFile(settingsFilePath, '{"projects":[]}');
+      await runtime.readSettingsFromDisk();
+      hold = true;
+      const pending = runtime.readSettingsFromDisk();
+      await started.promise;
+      const projects = [{ id: createProjectIdFromPath(tempRoot), path: tempRoot }];
+      await runtime.persistSettings({ projects });
+      release.resolve();
+      expect((await pending).projects).toEqual(projects);
+      await fsPromises.writeFile(settingsFilePath, '{');
+      expect((await runtime.readSettingsFromDiskMigrated()).projects).toEqual(projects);
+    } finally { release.resolve(); await cleanup(); }
+  });
+
+  it('restores a missing known file on explicit save and accepts an intentionally empty document', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+    });
+    try {
+      await runtime.persistSettings({ customInstanceKey: 'keep' });
+      await fsPromises.unlink(settingsFilePath);
+      expect(await runtime.readSettingsFromDiskMigrated()).toMatchObject({ customInstanceKey: 'keep' });
+      await expect(fsPromises.stat(settingsFilePath)).rejects.toMatchObject({ code: 'ENOENT' });
+      await runtime.persistSettings({ desktopKeepAwakeEnabled: true });
+      expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toMatchObject({
+        customInstanceKey: 'keep', desktopKeepAwakeEnabled: true,
+      });
+      await fsPromises.writeFile(settingsFilePath, '{}');
+      expect(await runtime.readSettingsFromDisk()).toEqual({});
+    } finally { await cleanup(); }
+  });
+
+  it.each(['{', 'null', '[]'])('refuses a malformed first read (%s) before any migration or seed', async (raw) => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, raw);
+      await expect(runtime.readSettingsFromDiskMigrated()).rejects.toThrow();
+      await expect(runtime.persistSettings({ desktopKeepAwakeEnabled: true })).rejects.toThrow();
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe(raw);
+      expect(await fsPromises.readdir(tempRoot)).toEqual(['settings.json']);
+      await fsPromises.writeFile(settingsFilePath, '{}');
+      expect(await runtime.readSettingsFromDisk()).toEqual({});
+    } finally { await cleanup(); }
+  });
+
   it('rechecks guarded ownership at the authoritative preferences commit before writing the legacy copy', async () => {
     let cancel = false;
     let armed = false;

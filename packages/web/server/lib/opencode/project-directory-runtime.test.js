@@ -55,6 +55,20 @@ describe('project directory runtime', () => {
       expect(statCalls).toBe(1);
     });
 
+    it('reports an offline drive before stat or realpath and accepts the remounted folder', async () => {
+      let offline = true;
+      let stats = 0;
+      const runtime = createTestRuntime({
+        isDirectoryOffline: async () => offline,
+        fsPromises: { stat: async () => { stats++; return { isDirectory: () => true }; }, realpath: async (p) => p },
+      });
+      expect(await runtime.validateDirectoryPath('/share/project')).toMatchObject({ ok: false, error: expect.stringContaining('offline') });
+      expect(stats).toBe(0);
+      offline = false;
+      expect(await runtime.validateDirectoryPath('/share/project')).toMatchObject({ ok: true, directory: '/share/project' });
+      expect(stats).toBe(1);
+    });
+
     it('returns error when candidate is empty', async () => {
       const runtime = createTestRuntime();
       const result = await runtime.validateDirectoryPath('');

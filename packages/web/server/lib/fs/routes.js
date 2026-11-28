@@ -1,3 +1,4 @@
+import { readProjectPath } from '../directory-reachability/index.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
@@ -630,6 +631,7 @@ export const registerFsRoutes = (app, dependencies) => {
     openchamberUserConfigRoot,
     managedChatsRoot,
     cloneRepository,
+    isDirectoryOffline,
     environmentRuntime = null,
   } = dependencies;
   // Chat worktrees may live outside every project workspace; both managed
@@ -1045,9 +1047,9 @@ export const registerFsRoutes = (app, dependencies) => {
 
     try {
       // Directory discovery uses the same path policy as /api/fs/list, including
-      // paths outside the current workspace. stat follows symlinks without readdir.
+      // paths outside the current workspace. The final stat follows symlinks.
       const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
-      const stats = await fsPromises.stat(resolvedPath);
+      const stats = await readProjectPath(resolvedPath, () => fsPromises.stat(resolvedPath), isDirectoryOffline);
       if (!stats.isDirectory()) {
         return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
       }
@@ -1154,7 +1156,7 @@ export const registerFsRoutes = (app, dependencies) => {
     const results = await Promise.all(directoryPaths.map(async (directoryPath) => {
       try {
         const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
-        const stats = await fsPromises.stat(resolvedPath);
+        const stats = await readProjectPath(resolvedPath, () => fsPromises.stat(resolvedPath), isDirectoryOffline);
         if (!stats.isDirectory()) {
           return { path: directoryPath, isDirectory: false, reason: 'not-directory' };
         }

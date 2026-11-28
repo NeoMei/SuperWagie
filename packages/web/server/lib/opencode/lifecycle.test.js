@@ -467,15 +467,13 @@ describe('OpenCode lifecycle', () => {
         ENV_SKIP_OPENCODE_START: true,
       },
       reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
-      getWarmupDirectories: vi.fn(async () => [lastUsed, otherProject]),
+      getWarmupDirectories: vi.fn(async () => [Buffer.from(lastUsed), new URL('file:///'), lastUsed, otherProject]),
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const warmups = fetchMock.mock.calls
-      .filter(([url]) => String(url).endsWith('/api/location'))
-      .map(([url, init]) => [String(url), init.headers['x-opencode-directory']]);
+    const warmupCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/location'));
+    await expect.poll(() => warmupCalls().length).toBe(1);
+    const warmups = warmupCalls().map(([url, init]) => [String(url), init.headers['x-opencode-directory']]);
     // Each warmed directory boots its whole MCP fleet on OpenCode 2 (#4018).
     // v2 reads the directory from the header, and only location routes start
     // one: `/api/session` is a global list.
@@ -483,7 +481,7 @@ describe('OpenCode lifecycle', () => {
       ['http://127.0.0.1:45678/api/location', encodeURIComponent(lastUsed)],
     ]);
     // Server-side reads without a directory of their own go to the warmed one.
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(lastUsed);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(lastUsed);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -508,20 +506,19 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    // While the directory is usable, it scopes default reads.
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(stale);
+        // While the directory is usable, it scopes default reads.
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(stale);
 
     // The project directory is removed while the server keeps running. The
     // cached default must not keep being handed to OpenCode: a stale path
     // makes every directory-scoped read answer 500 (the bug behind the quota
     // endpoints' "UnexpectedStatus: 500").
     await fs.rm(stale, { recursive: true, force: true });
-    expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBeNull();
 
     // A path that now points at a regular file is not a directory either.
     await fs.writeFile(stale, 'x');
-    expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBeNull();
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -550,17 +547,15 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
     // No project: a read without a directory would start OpenCode over the
     // whole home, its working directory.
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(chats);
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(chats);
     expect(globalThis.fetch.mock.calls.filter(([url]) => String(url).endsWith('/api/location'))).toEqual([]);
 
     // A project opened later takes over once the warmup source names it.
     warmup = [project];
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(project);
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(project);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -589,15 +584,14 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(leftChat);
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(leftChat);
 
-    runtime.noteCurrentDirectory(current);
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(current);
+    await runtime.noteCurrentDirectory(current);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(current);
 
     // A directory that is not there is never sent.
-    runtime.noteCurrentDirectory(path.join(root, 'missing'));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(current);
+    await runtime.noteCurrentDirectory(path.join(root, 'missing'));
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(current);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -625,13 +619,12 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(stale);
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(stale);
 
     // Removing the first still leaves a valid directory: default reads keep
     // their location scope rather than dropping it entirely.
     await fs.rm(stale, { recursive: true, force: true });
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(surviving);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(surviving);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -661,17 +654,16 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(stale);
+    await expect.poll(() => globalThis.fetch.mock.calls.some(([url]) => String(url).endsWith('/api/location'))).toBe(true);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(stale);
 
     // The user navigated to another project while the old one vanished.
     await fs.rm(stale, { recursive: true, force: true });
     current = navigated;
     // First read drops the stale default and kicks the refresh; the next read
     // sees the re-resolved, currently-valid directory and scopes to it.
-    expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(navigated);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBeNull();
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(navigated);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -698,14 +690,13 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(locked);
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(locked);
 
     // OpenCode answers 500 FileSystem.realPath for a directory it cannot read
     // or traverse, same as for a missing one, so it must not be sent.
     await fs.chmod(locked, 0o000);
     try {
-      expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+      expect(await runtime.getDefaultOpenCodeDirectory()).toBeNull();
     } finally {
       await fs.chmod(locked, 0o755);
       await fs.rm(root, { recursive: true, force: true });
@@ -1568,52 +1559,56 @@ describe('killProcessOnPort on Windows', () => {
     Object.defineProperty(process, 'platform', { value: platform, configurable: true });
   };
 
-  it('force-kills the process listening on the target port via taskkill', async () => {
+  const answerNetstat = (stdout) => execFileMock.mockImplementation((command, _args, _options, done) => {
+    done(null, command.endsWith('NETSTAT.EXE') ? stdout : '');
+  });
+  const killedPids = () => execFileMock.mock.calls
+    .filter(([command]) => command.endsWith('taskkill.exe'))
+    .map(([, args]) => args);
+
+  it('stops only the processes listening on the port, on any Windows language', async () => {
     setPlatform('win32');
-    const orphanPid = 54321;
-    execFileMock.mockImplementation((cmd, _args, _options, callback) => {
-      queueMicrotask(() => callback(null, { stdout: cmd === 'powershell' ? `${orphanPid}\r\n` : '' }));
-    });
+    answerNetstat([
+      '  Proto  Lokale Adresse         Remoteadresse          Status           PID',
+      '  TCP    127.0.0.1:45678        0.0.0.0:0              ABHÖREN         54321',
+      '  TCP    [::1]:45678            [::]:0                 ABHÖREN         54322',
+      '  TCP    0.0.0.0:45678          0.0.0.0:0              ABHÖREN         54321',
+      '  TCP    0.0.0.0:456780         0.0.0.0:0              ABHÖREN         1',
+      '  TCP    0.0.0.0:5678           0.0.0.0:0              ABHÖREN         2',
+      '  TCP    127.0.0.1:45678        127.0.0.1:60001        HERGESTELLT     3',
+      '  TCP    127.0.0.1:60001        127.0.0.1:45678        HERGESTELLT     4',
+      '  TCP    127.0.0.1:45678        127.0.0.1:60002        WARTEND         0',
+      '  UDP    0.0.0.0:45678          *:*                                    5',
+      `  TCP    0.0.0.0:45678          0.0.0.0:0              ABHÖREN         ${process.pid}`,
+    ].join('\r\n'));
 
-    const runtime = createRuntime();
-    await runtime.killProcessOnPort(45678);
+    await createRuntime().killProcessOnPort(45678);
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      'powershell',
-      expect.arrayContaining([expect.stringContaining('-LocalPort 45678')]),
-      expect.objectContaining({ windowsHide: true }),
-      expect.any(Function),
-    );
-    expect(execFileMock).toHaveBeenCalledWith(
-      'taskkill',
-      ['/PID', String(orphanPid), '/F'],
-      expect.objectContaining({ windowsHide: true }),
-      expect.any(Function),
-    );
+    expect(killedPids()).toEqual([['/PID', '54321', '/F'], ['/PID', '54322', '/F']]);
   });
 
-  it('never force-kills its own process id', async () => {
+  it('stops a listener once when a quit joins a restart', async () => {
     setPlatform('win32');
-    execFileMock.mockImplementation((cmd, _args, _options, callback) => {
-      queueMicrotask(() => callback(null, { stdout: cmd === 'powershell' ? `${process.pid}\r\n` : '' }));
+    const replies = [];
+    execFileMock.mockImplementation((command, _args, _options, done) => {
+      if (command.endsWith('NETSTAT.EXE')) replies.push(done);
+      else done(null, '');
     });
-
     const runtime = createRuntime();
-    await runtime.killProcessOnPort(45678);
+    const cleanups = [runtime.killProcessOnPort(45678), runtime.killProcessOnPort(45678)];
+    for (const reply of replies) reply(null, '  TCP    127.0.0.1:45678   0.0.0.0:0   LISTENING   54321\r\n');
+    await Promise.all(cleanups);
 
-    expect(execFileMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
+    expect(killedPids()).toEqual([['/PID', '54321', '/F']]);
   });
 
-  it('does nothing when no process is listening on the target port', async () => {
+  it('stops nothing when the listeners cannot be read', async () => {
     setPlatform('win32');
-    execFileMock.mockImplementation((_cmd, _args, _options, callback) => {
-      queueMicrotask(() => callback(null, { stdout: '' }));
-    });
+    execFileMock.mockImplementation((_command, _args, _options, done) => done(new Error('timed out'), ''));
 
-    const runtime = createRuntime();
-    await runtime.killProcessOnPort(45678);
+    await createRuntime().killProcessOnPort(45678);
 
-    expect(execFileMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
+    expect(killedPids()).toEqual([]);
   });
 });
 

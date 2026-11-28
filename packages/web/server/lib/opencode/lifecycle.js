@@ -1,7 +1,7 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
-import { execFile, spawn, spawnSync } from 'node:child_process';
-import { promisify } from 'node:util';
-import { accessSync, constants as fsConstants, statSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { createDefaultDirectory } from './default-directory.js';
+import { stopWindowsProcessesListeningOnPort } from './windows-port-processes.js';
 import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
 import { EXCALIDRAW_ENV_KEYS } from '../builtin-skills/excalidraw-runtime.js';
@@ -63,7 +63,6 @@ const WARMUP_DIRECTORY_LIMIT = 1;
 const WARMUP_REQUEST_TIMEOUT_MS = 30000;
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 256;
-const execFileAsync = promisify(execFile);
 
 const getBoundedTextTail = (value, maxBytes) => {
   const buffer = Buffer.from(String(value ?? ''));
@@ -172,41 +171,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   let managedProcessEnv = null;
   let privateDesktopLaunch = null;
 
-  const killProcessOnPortWin32 = async (port) => {
-    try {
-      // Get-NetTCPConnection reads the same locale-independent WinNT API
-      // netstat's display layer translates (e.g. "LISTENING" renders as
-      // "ABHÖREN"/"ÉCOUTE"/"ESCUTANDO" on non-English Windows), so this
-      // works regardless of the OS display language.
-      const { stdout } = await execFileAsync(
-        'powershell',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          `Get-NetTCPConnection -State Listen -LocalPort ${Number.parseInt(port, 10)} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`,
-        ],
-        { encoding: 'utf8', timeout: 5000, windowsHide: true },
-      );
-      const myPid = process.pid;
-      const pids = new Set();
-      for (const line of String(stdout || '').split(/\r?\n/)) {
-        const pid = Number.parseInt(line.trim(), 10);
-        if (pid && pid !== myPid) pids.add(pid);
-      }
-      await Promise.all([...pids].map((pid) => execFileAsync(
-        'taskkill',
-        ['/PID', String(pid), '/F'],
-        { stdio: 'ignore', timeout: 3000, windowsHide: true },
-      ).catch(() => {})));
-    } catch {
-    }
-  };
-
   const killProcessOnPort = async (port) => {
     if (!port) return;
     if (process.platform === 'win32') {
-      await killProcessOnPortWin32(port);
+      await stopWindowsProcessesListeningOnPort(port);
       return;
     }
     try {
@@ -1140,7 +1108,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     while (Date.now() < deadline) {
       try {
         const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-        const scopedDirectory = getValidatedDefaultDirectory();
+        const scopedDirectory = await defaultDirectory.get();
         if (scopedDirectory) headers['x-opencode-directory'] = encodeURIComponent(scopedDirectory);
         const response = await fetch(buildOpenCodeUrl('/api/agent'), { method: 'GET', headers });
 
@@ -1313,122 +1281,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  // The directory server-side reads use when they have none of their own: the
-  // one warmed at startup, which OpenCode is running anyway. v2 answers a
-  // location read without a directory for its own working directory (the
-  // user's home for a managed OpenCode) and starts it, MCP servers included.
-  //
-  // It is a cache of the directory warmed at startup, but that directory can
-  // stop being usable while the server keeps running: the user deletes or
-  // moves the project, the path is replaced by a regular file, or its
-  // permissions change. Handing that stale path to OpenCode makes every
-  // directory-scoped read answer `500 FileSystem.realPath ... ENOENT`, which
-  // is an avoidable failure of reads that are not about the directory at all
-  // (the integration list behind quota credentials, the small model's model
-  // list). The getter therefore revalidates on each read and, when the cached
-  // path is no longer usable, advances to another directory the warm pass
-  // validated and re-reads the settings-backed warmup source so the
-  // currently-valid `lastDirectory` replaces the stale one. Only a usable
-  // directory is ever sent; a valid directory still scopes the read, which
-  // keeps OpenCode from booting its working directory + MCP fleet.
-  let defaultOpenCodeDirectory = null;
-  // The directories the last warm pass (or a later refresh) found usable,
-  // kept so a stale default can fall back synchronously without another
-  // settings read.
-  let warmedOpenCodeDirectories = [];
-  let defaultDirectoryRefresh = null;
-  let defaultDirectoryRefreshAt = 0;
-  // A stale default is normal once and persistent when the user has no usable
-  // directory at all; the cooldown keeps that state from turning every read
-  // (small-model generations can be frequent) into a settings read.
-  const DEFAULT_DIRECTORY_REFRESH_COOLDOWN_MS = 5000;
+  const defaultDirectory = createDefaultDirectory({ getWarmupDirectories, noProjectDirectory, now });
 
-  const isUsableDirectory = (directory) => {
-    if (!directory) return false;
-    try {
-      // `stat`/`access` reject a non-path value on their own, so the caller
-      // only needs to rule out an empty hint; a throw lands in the catch.
-      if (!statSync(directory).isDirectory()) return false;
-      // A directory whose read/execute bit is gone is not a directory scoped
-      // reads can use; OpenCode answers `500 FileSystem.realPath` for it just
-      // like the missing-path case, so treat it the same.
-      accessSync(directory, fsConstants.R_OK | fsConstants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const usableDirectories = (directories) => (
-    Array.isArray(directories) ? directories.filter((directory) => isUsableDirectory(directory)) : []
-  );
-
-  // The first directory that is usable *right now*, revalidating each
-  // candidate because the warmed list was validated only at warm time.
-  const selectUsableDirectory = (directories) => usableDirectories(directories)[0] || null;
-
-  // Re-reads the settings-backed warmup source when the cached default is no
-  // longer usable, so a directory valid now (`lastDirectory` after a move, a
-  // surviving project) replaces the stale one. Coalesced: concurrent reads
-  // trigger at most one refresh.
-  const refreshDefaultDirectories = () => {
-    if (defaultDirectoryRefresh) return defaultDirectoryRefresh;
-    defaultDirectoryRefresh = (async () => {
-      try {
-        const directories = await getWarmupDirectories();
-        warmedOpenCodeDirectories = usableDirectories(directories);
-        const usable = selectUsableDirectory(warmedOpenCodeDirectories);
-        if (usable) defaultOpenCodeDirectory = usable;
-      } catch {
-        // Best-effort: the caller falls back to the no-project directory or
-        // OpenCode's working directory for this read, and the refresh can
-        // succeed next time.
-      } finally {
-        defaultDirectoryRefresh = null;
-      }
-    })();
-    return defaultDirectoryRefresh;
-  };
-
-  // The warmed directory only while it is still usable; otherwise another
-  // usable directory (from this or a refreshed pass), else the no-project
-  // directory, else null so the caller sends no directory and OpenCode uses
-  // its own working directory.
-  const getValidatedDefaultDirectory = () => {
-    if (isUsableDirectory(defaultOpenCodeDirectory)) return defaultOpenCodeDirectory;
-    const alternate = selectUsableDirectory(warmedOpenCodeDirectories);
-    if (alternate) {
-      defaultOpenCodeDirectory = alternate;
-      return alternate;
-    }
-    const checkedAt = now();
-    if (!defaultDirectoryRefresh && checkedAt - defaultDirectoryRefreshAt >= DEFAULT_DIRECTORY_REFRESH_COOLDOWN_MS) {
-      defaultDirectoryRefreshAt = checkedAt;
-      void refreshDefaultDirectories();
-    }
-    return isUsableDirectory(noProjectDirectory) ? noProjectDirectory : null;
-  };
-
-  // OpenCode initializes each project directory lazily on its first
-  // directory-scoped request, and that initialization takes seconds on large
-  // session stores. Without warming, the user's first session open pays it
-  // interactively (the chat waits on the message fetch until the directory
-  // finishes initializing). Warm the last-used directory right after
-  // readiness so the work overlaps UI startup instead. Sequential and
-  // best-effort: a failed or slow directory never blocks the others for long,
-  // and a restart invalidates the pass via the port/readiness guard.
   const warmOpenCodeDirectories = async () => {
-    let directories = [];
-    try {
-      directories = await getWarmupDirectories();
-    } catch {
-      return;
-    }
-    if (!Array.isArray(directories) || directories.length === 0) return;
-    warmedOpenCodeDirectories = usableDirectories(directories);
-    defaultOpenCodeDirectory = warmedOpenCodeDirectories[0] || null;
-
     const warmedPort = state.openCodePort;
+    const directories = await defaultDirectory.warm();
     for (const directory of directories.slice(0, WARMUP_DIRECTORY_LIMIT)) {
       if (typeof directory !== 'string' || !directory) continue;
       if (!state.isOpenCodeReady || state.openCodePort !== warmedPort) return;
@@ -1625,18 +1482,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     /** The managed OpenCode's launch environment; null for an external OpenCode or before the first launch. */
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
     /** The directory to scope a server-side OpenCode read that has none, or null once none is usable. */
-    getDefaultOpenCodeDirectory: () => getValidatedDefaultDirectory(),
+    getDefaultOpenCodeDirectory: defaultDirectory.get,
     /**
      * The UI saved the directory it now works in. That directory is running
      * already, so reads without a directory of their own go there: the one
      * used last at startup may be a chat the user has left, and the UI stops
      * a left chat's OpenCode location, which such a read would start again.
      */
-    noteCurrentDirectory: (directory) => {
-      if (!isUsableDirectory(directory)) return;
-      defaultOpenCodeDirectory = directory;
-      warmedOpenCodeDirectories = [directory, ...warmedOpenCodeDirectories.filter((entry) => entry !== directory)];
-    },
+    noteCurrentDirectory: defaultDirectory.note,
     getManagedOpenCodePreflight: async () => {
       const preflight = managedPreflight;
       if (!preflight || state.isExternalOpenCode || state.isShuttingDown) return false;

@@ -58,7 +58,7 @@ const mapLimited = async (items, limit, work) => {
  *
  * @param {object} options
  * @param {(directory?: string) => any} options.clientFor
- * @param {() => string | null | undefined} [options.getDefaultDirectory]
+ * @param {() => string | null | undefined | Promise<string | null>} [options.getDefaultDirectory]
  *   Where the project list is read: a location OpenCode already runs.
  */
 export const createOpenCodeSessionArchive = ({ clientFor, getDefaultDirectory = () => null }) => {
@@ -79,7 +79,7 @@ export const createOpenCodeSessionArchive = ({ clientFor, getDefaultDirectory = 
     listLoadedDirectories: async () => (await clientFor().debug.location.list()).map((location) => location.directory),
     /** `projectID → main folder` for every project OpenCode knows. */
     readProjectFolders: async () => {
-      const projects = await clientFor(getDefaultDirectory() || undefined).project.list({ archived: true });
+      const projects = await clientFor(await getDefaultDirectory() || undefined).project.list({ archived: true });
       return new Map(projects.map((project) => [project.id, project.canonical]));
     },
     /** `{ directory, projectID }`, or `undefined` for a session OpenCode does not know. */
