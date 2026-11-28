@@ -1581,15 +1581,7 @@ export const registerFsRoutes = (app, dependencies) => {
     });
   }
 
-  app.post('/api/fs/write', async (req, res) => {
-    const { path: filePath, content } = req.body || {};
-    if (!filePath || typeof filePath !== 'string') {
-      return res.status(400).json({ error: 'Path is required' });
-    }
-    if (typeof content !== 'string') {
-      return res.status(400).json({ error: 'Content is required' });
-    }
-
+  const writeWorkspaceFile = async (req, res, filePath, content) => {
     try {
       const resolved = await resolveWorkspacePathFromContext({
         fsPromises,
@@ -1667,6 +1659,26 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       console.error('Failed to write file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to write file' });
+    }
+  };
+
+  const pendingFileWrites = new Map();
+  app.post('/api/fs/write', async (req, res) => {
+    const { path: filePath, content } = req.body || {};
+    if (!filePath || typeof filePath !== 'string') {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+    if (typeof content !== 'string') {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+
+    const previousWrite = pendingFileWrites.get(filePath) ?? Promise.resolve();
+    const write = previousWrite.catch(() => {}).then(() => writeWorkspaceFile(req, res, filePath, content));
+    pendingFileWrites.set(filePath, write);
+    try {
+      return await write;
+    } finally {
+      if (pendingFileWrites.get(filePath) === write) pendingFileWrites.delete(filePath);
     }
   });
 

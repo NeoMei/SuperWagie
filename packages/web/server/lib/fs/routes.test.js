@@ -531,6 +531,54 @@ describe('fs clone', () => {
 });
 
 describe('fs write', () => {
+  it('saves the same path in arrival order while other paths can proceed', async () => {
+    const repo = await mkdtemp(path.join(tmpdir(), 'openchamber-save-order-'));
+    const file = path.join(repo, 'notes.md');
+    const otherFile = path.join(repo, 'other.md');
+    const firstStarted = Promise.withResolvers();
+    const resumeFirst = Promise.withResolvers();
+    const checks = [];
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => repo },
+      path,
+      fsPromises: nativeFs,
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (targetPath) => targetPath,
+      resolveProjectDirectory: async (req) => {
+        checks.push(req.body.content);
+        if (req.body.content === 'first') {
+          firstStarted.resolve();
+          await resumeFirst.promise;
+        }
+        return { directory: repo };
+      },
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: path.join(repo, '.config'),
+    });
+
+    try {
+      await nativeFs.writeFile(file, 'original');
+      const save = getRoute('POST', '/api/fs/write');
+      const first = callWrite(save, { path: file, content: 'first' });
+      await firstStarted.promise;
+      const second = callWrite(save, { path: file, content: 'second' });
+      const other = await callWrite(save, { path: otherFile, content: 'other' });
+      resumeFirst.resolve();
+      const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+      expect([firstResponse.statusCode, secondResponse.statusCode, other.statusCode]).toEqual([200, 200, 200]);
+      expect(checks).toEqual(['first', 'other', 'second']);
+      expect(await nativeFs.readFile(file, 'utf8')).toBe('second');
+      expect(await nativeFs.readFile(otherFile, 'utf8')).toBe('other');
+    } finally {
+      resumeFirst.resolve();
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
   it('does not rewrite a file when content is unchanged', async () => {
     const fsPromises = {
       readFile: vi.fn(async () => 'same'),
