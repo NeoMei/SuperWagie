@@ -2673,21 +2673,23 @@ type FormSelection = { model?: ModelSelection; agent?: string }
 function resolveFormSelection(record: Session | undefined, sessionId: string): FormSelection {
   const picks = useSelectionStore.getState()
   const pick = picks.getSessionModelPick(sessionId)
-  const agent = picks.getSessionAgentSelection(sessionId) ?? record?.agent
+  const agent = picks.getSessionAgentPick(sessionId)
+  const effortAgent = agent ?? record?.agent
   // Only the open root/review composer owns app-wide configuration.
   if (record && (!record.parentID || isReviewSession(record))
     && useSessionUIStore.getState().currentSessionId === sessionId) {
     const config = useConfigStore.getState()
     return {
-      agent: config.currentAgentName ?? agent,
+      agent,
       model: config.currentProviderId && config.currentModelId
+        && (agent || isAutoModel(config.currentProviderId, config.currentModelId) || (pick?.providerId === config.currentProviderId && pick.modelId === config.currentModelId))
         ? { providerID: config.currentProviderId, id: config.currentModelId,
             variant: config.currentVariantSelection.override === null ? null : config.currentVariant }
         : undefined,
     }
   }
-  if (!pick) return {}
-  const variant = agent ? picks.getAgentModelVariantForSession(sessionId, agent, pick.providerId, pick.modelId) : undefined
+  if (!pick) return { agent }
+  const variant = effortAgent ? picks.getAgentModelVariantForSession(sessionId, effortAgent, pick.providerId, pick.modelId) : undefined
   return { model: { providerID: pick.providerId, id: pick.modelId, variant }, agent }
 }
 
@@ -2696,6 +2698,11 @@ async function applyFormSelection(record: Session | undefined, sessionId: string
   const desired = resolveFormSelection(record, sessionId)
   if (!desired.model && !desired.agent) return () => {}
   const isCurrentRuntime = captureRuntimeInstance()
+  const model = desired.model ? toModelRef(desired.model) : undefined
+  const settle = desired.model
+    ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, desired.model.providerID, desired.model.id, runtimeKey)
+    : undefined
+  const settleAgent = desired.agent ? useSelectionStore.getState().captureSessionAgentPickSettlement(sessionId, desired.agent) : undefined
   let serverRecord: Session
   try {
     serverRecord = await opencodeClient.getSession(sessionId, directory)
@@ -2703,16 +2710,12 @@ async function applyFormSelection(record: Session | undefined, sessionId: string
     throw new Error("The reply was not sent because its session record could not be read.", { cause: error })
   }
   if (!isCurrentRuntime()) throw new Error("The reply was cancelled because the runtime changed.")
-  const model = desired.model ? toModelRef(desired.model) : undefined
-  const settle = desired.model
-    ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, desired.model.providerID, desired.model.id, runtimeKey)
-    : undefined
   await opencodeClient.applySendSelection(sessionId, {
     model: model && (!serverRecord.model || !isSameModelRef(serverRecord.model, model)
       || !record?.model || !isSameModelRef(record.model, model)) ? model : undefined,
     agent: desired.agent && desired.agent !== serverRecord.agent ? desired.agent : undefined,
   }, directory, runtimeKey)
-  return () => settle?.()
+  return () => { settle?.(); settleAgent?.() }
 }
 
 // A dropped reply can already have resumed a paid turn. Read its original form
@@ -2906,6 +2909,8 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
       {
         userInitiated: true,
         queuedGoal: null,
+        keepSessionModel: true,
+        keepSessionAgent: true,
         beforeSend: assertAnswerable,
         metadata: deferred ? { openchamber: { deferredAnswer: { formID: question.form.id } } } : undefined,
         target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },

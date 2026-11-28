@@ -1043,6 +1043,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
+        if (useSelectionStore.getState().getSessionAgentPick(currentSessionId)) return;
+
         const restoreKey = [
             currentSessionId,
             latestLoadedUserChoice.id,
@@ -1069,8 +1071,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const recordModelKey = sessionRecordChoice && latestLoadedUserChoice === sessionRecordChoice
             ? `${sessionRecordChoice.providerID}/${sessionRecordChoice.modelID}#${sessionRecordChoice.variant ?? ''}`
             : null;
-        const recordModelSwitched = recordModelKey !== null
-            && useSelectionStore.getState().isSessionModelSwitched(currentSessionId, recordModelKey);
         const markRecordModelFollowed = () => {
             if (recordModelKey) useSelectionStore.getState().markSessionModelFollowed(currentSessionId, recordModelKey);
         };
@@ -1091,7 +1091,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             markRecordModelFollowed();
             latestLoadedUserChoiceRestoreRef.current = restoreKey;
             return;
-        } else if (!recordModelSwitched && shouldPreserveManualModelOverride({
+        } else if (!recordModelKey && shouldPreserveManualModelOverride({
             selectionSource: useConfigStore.getState().selectionSource,
             savedSessionModel,
             candidate: latestLoadedUserChoice,
@@ -1133,7 +1133,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         // A newer switch brings its own effort; a record without one says
         // nothing about effort, so the saved choice stays.
         let restoredVariant: string | null | undefined = savedVariant !== undefined ? savedVariant : historicalVariant;
-        if (recordModelSwitched && historicalVariant) restoredVariant = historicalVariant;
+        if (recordModelKey && historicalVariant) restoredVariant = historicalVariant;
+        if (recordModelKey && useSelectionStore.getState().isSessionModelSwitched(currentSessionId, recordModelKey)
+            && latestLoadedUserChoice.variant === 'default' && !historicalVariant) restoredVariant = null;
         const applyResult = applyModelSelectionWithVariant(
             latestLoadedUserChoice.providerID,
             latestLoadedUserChoice.modelID,
@@ -1505,15 +1507,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             // Picked in the effort menu, so no effort means the user picked
             // "Default" — a choice, recorded as `null`.
             commitVariantSelectionForModel(currentProviderId, currentModelId, variant ?? null);
+            const sessionId = controlledSessionId ?? currentSessionId;
+            if (sessionId) useSelectionStore.getState().pickSessionModel(sessionId, currentProviderId, currentModelId);
         }
-    }, [commitVariantSelectionForModel, currentModelId, currentProviderId]);
+    }, [commitVariantSelectionForModel, controlledSessionId, currentSessionId, currentModelId, currentProviderId]);
 
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         if (selection) {
             if (!agentSelectable || !controlledSessionId) return;
             // The pick belongs to the controlled session only; the app-wide
             // agent stays the main chat's.
-            saveSessionAgentSelection(controlledSessionId, agentName);
+            useSelectionStore.getState().pickSessionAgent(controlledSessionId, agentName);
             addRecentAgent(agentName);
             if (options?.closeModelSelector ?? true) {
                 setAgentMenuOpen(false);
@@ -1528,7 +1532,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
 
             if (currentSessionId) {
-                saveSessionAgentSelection(currentSessionId, agentName);
+                useSelectionStore.getState().pickSessionAgent(currentSessionId, agentName);
             }
             if (isCompact) {
                 closeMobilePanel();
@@ -1543,7 +1547,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         controlledSessionId,
         currentSessionId,
         isCompact,
-        saveSessionAgentSelection,
         setAgent,
         setAgentMenuOpen,
         selection,
@@ -1961,6 +1964,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 }
                 return;
             }
+            const sessionId = controlledSessionId ?? currentSessionId;
+            if (sessionId) useSelectionStore.getState().pickSessionModel(sessionId, providerId, modelId);
             if (!selection) setLastSelectedModel(providerId, modelId);
 
             setExpandedMobileModelKey(null);
@@ -2320,6 +2325,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 return;
             }
 
+            const sessionId = controlledSessionId ?? currentSessionId;
+            if (sessionId) useSelectionStore.getState().pickSessionModel(sessionId, targetProviderId, targetModelId);
             closeMobilePanel();
             requestAnimationFrame(focusColumnInput);
         };

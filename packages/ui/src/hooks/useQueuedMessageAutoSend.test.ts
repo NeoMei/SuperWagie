@@ -426,10 +426,20 @@ describe('buildQueuedAutoSendPayload', () => {
             restorableAttachments: [],
           },
         ],
+        keepSessionModel: true,
+        keepSessionAgent: true,
         // Queued without a goal: the composer's armed goal is not this message's.
         queuedGoal: null,
       },
     ]);
+  });
+
+  test('queued model and agent intent travel independently to the local sender', async () => {
+    const sendConfig = { providerID: 'p', modelID: 'chosen', agent: 'old-agent', keepSessionAgent: true };
+    const payload = buildQueuedAutoSendPayload([{ id: 'q', createdAt: 1, content: 'hello', text: 'hello', sendConfig }]);
+    if (!payload) throw new Error('Expected a deliverable queue row');
+    await sendQueuedAutoSendPayload({ runtimeKey: 'r', sessionId: 's', directory: '/repo' }, payload, sendConfig);
+    expect(sendMessageCalls[0]?.[9]).toMatchObject({ keepSessionModel: false, keepSessionAgent: true });
   });
 
   test('a message queued as a goal is sent with that goal', async () => {

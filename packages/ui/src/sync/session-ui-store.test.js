@@ -4,7 +4,8 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
-import { expandSlashCommandGoalObjective, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
+import { expandSlashCommandGoalObjective, routeMessage, useSessionUIStore } from './session-ui-store';
+import { captureComposerSelection, compactSession, resolveSendSelection } from './session-selection';
 import { ChildStoreManager } from './child-store';
 import { getDirectoryState, setSyncRefs } from './sync-refs';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
@@ -14,7 +15,7 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSelectionStore } from './selection-store';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -369,6 +370,108 @@ describe('resolveSendSelection thinking level', () => {
   });
 });
 
+describe('composer selection authority', () => {
+  const sessionId = 'session-authority';
+  const directory = '/project';
+  const store = useSelectionStore.getState();
+  const desired = { providerID: 'byok', modelID: 'new', variant: 'high', agent: 'plan' };
+  const capture = () => captureComposerSelection(sessionId, desired.providerID, desired.modelID, desired.agent);
+  beforeEach(() => {
+    store.clearSessionSelections(sessionId);
+    opencodeClient.getSession = async () => ({ id: sessionId, model: { providerID: 'other', id: 'live' }, agent: 'build' });
+  });
+
+  test('a queued model pick leaves the agent alone after another client switches it', async () => {
+    store.pickSessionModel(sessionId, 'byok', 'new');
+    const queued = capture();
+    queued.settle();
+    store.pickSessionAgent(sessionId, 'plan');
+    expect(await resolveSendSelection(sessionId, directory, { ...desired, ...queued })).toEqual({
+      model: { providerID: 'byok', id: 'new', variant: 'high' }, agent: undefined,
+    });
+    expect(store.getSessionAgentPick(sessionId)).toBe('plan');
+  });
+
+  test('an explicit agent brings its model and a later identical pick survives settlement', async () => {
+    store.pickSessionAgent(sessionId, 'plan');
+    const captured = capture();
+    store.pickSessionAgent(sessionId, 'plan');
+    expect(await resolveSendSelection(sessionId, directory, { ...desired, ...captured })).toEqual({
+      model: { providerID: 'byok', id: 'new', variant: 'high' }, agent: 'plan',
+    });
+    captured.settle();
+    expect(store.getSessionAgentPick(sessionId)).toBe('plan');
+    capture().settle();
+    expect(store.getSessionAgentPick(sessionId)).toBeUndefined();
+  });
+
+  test('an unconfigured session uses the shown selection on first send', async () => {
+    opencodeClient.getSession = async () => ({ id: sessionId });
+    expect(await resolveSendSelection(sessionId, directory, { ...desired, ...capture() })).toEqual({
+      model: { providerID: 'byok', id: 'new', variant: 'high' }, agent: 'plan',
+    });
+  });
+
+  test('Auto remains a routing request without an unsent picker change', async () => {
+    const auto = captureComposerSelection(sessionId, 'openchamber', 'auto', 'build');
+    expect((await resolveSendSelection(sessionId, directory, {
+      providerID: 'openchamber', modelID: 'auto', agent: 'build', ...auto,
+    })).model).toEqual({ providerID: 'openchamber', id: 'auto' });
+  });
+
+  test('a runtime round trip during a model write cancels compaction and keeps the pick', async () => {
+    const originalSwitch = opencodeClient.switchSessionModel;
+    const originalCompact = opencodeClient.compactSession;
+    const original = { runtimeKey: getRuntimeKey(), apiBaseUrl: getRuntimeApiBaseUrl() };
+    let compactions = 0;
+    store.pickSessionModel(sessionId, 'byok', 'new');
+    opencodeClient.switchSessionModel = async () => {
+      switchRuntimeEndpoint({ runtimeKey: 'other-compact', apiBaseUrl: 'http://other.test' });
+      switchRuntimeEndpoint(original);
+    };
+    opencodeClient.compactSession = async () => { compactions++; };
+    try {
+      await expect(compactSession(sessionId, directory, desired, capture())).rejects.toThrow('runtime changed');
+      expect(compactions).toBe(0);
+      expect(store.getSessionModelPick(sessionId)?.modelId).toBe('new');
+    } finally {
+      opencodeClient.switchSessionModel = originalSwitch;
+      opencodeClient.compactSession = originalCompact;
+      switchRuntimeEndpoint(original);
+    }
+  });
+
+  test('compact follows the session, then applies a picked effort and retains it on failure', async () => {
+    const originalSwitch = opencodeClient.switchSessionModel;
+    const originalCompact = opencodeClient.compactSession;
+    const operations = [];
+    let refuse = false;
+    opencodeClient.switchSessionModel = async (id, model, dir) => operations.push(['model', id, model, dir]);
+    opencodeClient.compactSession = async (id, dir) => {
+      operations.push(['compact', id, dir]);
+      if (refuse) throw new Error('compact refused');
+    };
+    try {
+      await compactSession(sessionId, directory, desired, capture());
+      expect(operations).toEqual([['compact', sessionId, directory]]);
+      store.pickSessionModel(sessionId, 'byok', 'new');
+      refuse = true;
+      await expect(compactSession(sessionId, directory, desired, capture())).rejects.toThrow('compact refused');
+      expect(store.getSessionModelPick(sessionId)?.modelId).toBe('new');
+      refuse = false;
+      await compactSession(sessionId, directory, desired, capture());
+      expect(operations.slice(-2)).toEqual([
+        ['model', sessionId, { providerID: 'byok', id: 'new', variant: 'high' }, directory],
+        ['compact', sessionId, directory],
+      ]);
+      expect(store.getSessionModelPick(sessionId)).toBeNull();
+    } finally {
+      opencodeClient.switchSessionModel = originalSwitch;
+      opencodeClient.compactSession = originalCompact;
+    }
+  });
+});
+
 describe('routeMessage inline skills', () => {
   test('the command route names inline skills in an instruction after the attached context', async () => {
     const calls = [];
@@ -446,6 +549,24 @@ describe('sendMessage captured target', () => {
     'normal',
     { target },
   );
+
+  test('a stale composer sends on the server selection and leaves a later pick for the next turn', async () => {
+    const sessionId = 'session-captured';
+    const target = { runtimeKey: getRuntimeKey(), sessionId, directory: '/captured/project' };
+    const store = useSelectionStore.getState();
+    store.clearSessionSelections(sessionId);
+    store.saveSessionModelSelection(sessionId, 'provider-a', 'model-a');
+    store.saveSessionAgentSelection(sessionId, 'build');
+    const captured = captureComposerSelection(sessionId, 'provider-a', 'model-a', 'build');
+    store.pickSessionModel(sessionId, 'provider-a', 'model-a');
+    opencodeClient.getSession = async () => ({ id: sessionId, model: { providerID: 'provider-b', id: 'model-b' }, agent: 'plan' });
+    await useSessionUIStore.getState().sendMessage('hello', 'provider-a', 'model-a', 'build',
+      undefined, undefined, undefined, undefined, 'normal', { target, ...captured, settleSelection: captured.settle });
+    expect(calls[0].providerID).toBe('provider-b');
+    expect(await calls[0].resolveSelection()).toEqual({ model: undefined, agent: undefined });
+    expect(store.getSessionModelPick(sessionId)).toEqual({ providerId: 'provider-a', modelId: 'model-a' });
+    store.clearSessionSelections(sessionId);
+  });
 
   test('uses the target captured before the active session changes', async () => {
     await sendToTarget({

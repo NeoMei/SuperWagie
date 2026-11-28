@@ -192,6 +192,7 @@ mock.module("@/lib/opencode/client", () => ({
 }))
 
 let idCounter = 0
+let activeFormSessionId: string | null = null
 
 // Mock useConfigStore
 mock.module("@/stores/useConfigStore", () => ({
@@ -199,6 +200,10 @@ mock.module("@/stores/useConfigStore", () => ({
     getState: () => ({
       isConnected: true,
       hasEverConnected: true,
+      currentProviderId: "old-provider",
+      currentModelId: "old-model",
+      currentAgentName: "old-agent",
+      currentVariantSelection: { override: undefined },
     }),
   },
 }))
@@ -224,7 +229,7 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
-      currentSessionId: null,
+      currentSessionId: activeFormSessionId,
       setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => {
         selectedSessions.push({ sessionId, directoryHint })
       },
@@ -262,6 +267,7 @@ mock.module("./selection-store", () => ({
         const pick = pendingModelPicks.get(sessionId)
         return () => { if (pendingModelPicks.get(sessionId) === pick) pendingModelPicks.delete(sessionId) }
       },
+      getSessionAgentPick: () => undefined,
       getSessionAgentSelection: () => null,
     }),
   },
@@ -3970,6 +3976,17 @@ describe("SW-OC271 pending form reply and retry", () => {
     actions.setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project");
     return { ...actions, store, form };
   };
+
+  test("answering the open form cannot restore the tab's old model or agent", async () => {
+    const { replyToForm, form } = await setup("stale-composer-form");
+    activeFormSessionId = form.sessionID;
+    try {
+      await replyToForm(form.sessionID, form.id, { choice: true });
+      expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"]);
+    } finally {
+      activeFormSessionId = null;
+    }
+  });
 
   test("a lost form reply is read back before any retry and a settled form never starts another turn", async () => {
     const { replyToForm, form, store } = await setup("uncertain-reply");

@@ -14,10 +14,12 @@
 import fs from 'fs';
 import path from 'path';
 import { OpenCode } from '@opencode/client';
+import { z } from 'zod';
 import { prepareAttachmentDelivery } from '../opencode/attachment-delivery.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { isPlatformServiceEnabled } from '../platform-account/service-mode.js';
 import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { createMessageId } from '../dispatch-results/runtime.js';
@@ -54,6 +56,15 @@ const ATTACHMENT_SOURCES = new Set(['local', 'server', 'vscode']);
 const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 const PRE_CONNECT_ERRORS = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+
+const sessionSelectionSchema = z.object({
+  id: z.string().min(1),
+  model: z.object({ providerID: z.string().min(1), id: z.string().min(1), variant: z.string().optional() }).nullish(),
+  agent: z.string().min(1).nullish(),
+});
+
+const isRetiredProvider = (id) => !isPlatformServiceEnabled()
+  && (id === 'unihub' || id === 'llmrouter' || id?.startsWith('superwagie-account-'));
 
 const getQueuedSendRetryDelayMs = (failures) =>
   Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
@@ -105,6 +116,8 @@ const parseSendConfig = (value) => {
   const modelID = asNonEmptyString(raw.modelID);
   if (!providerID || !modelID) return null;
   const sendConfig = { providerID, modelID };
+  if (raw.keepSessionModel === true) sendConfig.keepSessionModel = true;
+  if (raw.keepSessionAgent === true) sendConfig.keepSessionAgent = true;
   const agent = asNonEmptyString(raw.agent);
   if (agent) sendConfig.agent = agent;
   const variant = asNonEmptyString(raw.variant);
@@ -650,9 +663,15 @@ export function createMessageQueueRuntime({
   const sendItem = async (sessionId, directory, item) => {
     if (item.delivery?.promptStarted) throw new Error('Queued prompt receipt must be checked before dispatch');
     const sessionPath = `/api/session/${encodeURIComponent(sessionId)}`;
-    const { providerID, modelID, variant } = item.sendConfig;
-    let agent = item.sendConfig.agent;
-    let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
+    const { providerID, modelID, variant, keepSessionModel, keepSessionAgent } = item.sendConfig;
+    let session;
+    if (keepSessionModel || keepSessionAgent) {
+      session = sessionSelectionSchema.safeParse(await openCodeFetch(sessionPath, { directory })).data;
+      if (session?.id !== sessionId) throw new Error('Could not read the queued session selection');
+    }
+    const inheritedModel = keepSessionModel && !isRetiredProvider(session?.model?.providerID) ? session?.model : undefined;
+    const inheritedAgent = keepSessionAgent ? session?.agent : undefined;
+    const capturedModel = { id: modelID, providerID, ...(variant ? { variant } : {}) };
     const sourceFiles = item.attachments.map((attachment) => ({
       ...toPromptFile(attachment),
       deliverAsPath: attachment.deliverAsPath,
@@ -665,13 +684,14 @@ export function createMessageQueueRuntime({
     const routed = providerID && modelID ? await resolveAutoSelection?.({
       sessionId,
       directory,
-      model,
-      agent,
+      model: capturedModel,
+      agent: inheritedAgent ?? item.sendConfig.agent,
       requestText: `${item.text}${attachmentHint({ files: sourceFiles })}`.trim(),
     }) : null;
-    if (routed) {
-      model = routed.model;
-      agent = routed.agent ?? agent;
+    const model = routed?.model ?? inheritedModel ?? capturedModel;
+    const agent = routed?.agent ?? inheritedAgent ?? item.sendConfig.agent;
+    if (keepSessionModel && isRetiredProvider(model.providerID)) {
+      throw new Error('The queued item needs a model available in standalone mode');
     }
 
     // Prepare only after the real model is known and before any write to
@@ -686,13 +706,13 @@ export function createMessageQueueRuntime({
 
     // v2 selects model and agent on the session, not per prompt: the choice is
     // switched once and then persists.
-    if (!item.scheduledTask || (providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
+    if (routed || (!inheritedModel && providerID && modelID)) await openCodeFetch(`${sessionPath}/model`, {
       directory,
       method: 'POST',
       body: { model },
     });
-    if (agent) {
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/agent`, {
+    if (agent && agent !== inheritedAgent) {
+      await openCodeFetch(`${sessionPath}/agent`, {
         directory,
         method: 'POST',
         body: { agent },

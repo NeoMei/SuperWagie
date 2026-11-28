@@ -347,9 +347,9 @@ without effort entries remain valid; malformed effort entries grant no authority
 Session deletion clears these entries. A saved effort choice precedes older
 message history so a reload cannot undo an unsent picker change, unless the
 session record has since switched to another model and effort. The store also
-persists, per session, the session-record agent and model the composer last
-followed; a different record value is a newer switch and replaces the pick
-(Auto excepted), while an unchanged one keeps an unsent pick
+persists the session-record agent and model the composer last followed. The
+record corrects restored display preferences. A live model pick stays pending
+until its own operation succeeds
 (`packages/ui/src/stores/DOCUMENTATION.md`).
 Agent and model switch events stamp the session's `time.updated`, as OpenCode's
 own record does.
@@ -1020,9 +1020,24 @@ pending pick. Successful sends or model writes settle the exact captured pick;
 a newer pick and an instance round trip survive a late completion. Catalog
 reads, restores and agent pins cannot replace an unapplied pick.
 
-Normal and command sends compare the captured selection with a fresh session
-record and the latest sync record. A stale matching sync record cannot suppress
-a requested switch. Auto remains routing intent. A retry wait can apply an
+The composer captures model and agent intent before attachment preparation. A
+live model or effort pick authorizes that model. A live agent pick authorizes
+the agent and the model shown with it. A send without these picks follows the
+server session. Missing selections can be initialized, and a standalone
+runtime uses its eligible composer model for a retired account provider.
+Attachments and provider error tracking use the provider resolved for the
+send. Model comparisons for explicit switches also check the latest sync
+record. Auto remains routing intent.
+
+Manual compaction applies a picked concrete model and its effort before
+compacting. Only successful compaction settles that model pick. Auto compacts
+on the concrete session model. A queued item records `keepSessionModel` and
+`keepSessionAgent` at enqueue. The shared manual sender and VS Code local
+delivery honor those flags. Older rows with a captured configuration retain
+their explicit selection. A server queue must retain and honor both fields
+for its automatic delivery and for clients reading its rows.
+
+A retry wait can apply an
 explicit BYOK pick by switching configuration, with writes serialized per
 runtime and session. It never dispatches another prompt. Account tasks and Auto
 remain pending for their existing authorized send path; no retry changes their
