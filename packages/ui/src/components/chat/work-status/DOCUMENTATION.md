@@ -163,7 +163,11 @@ which requests only providers enabled for this panel.
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
-| Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
+| Tasks | `useSessionTodosStore` for the displayed session and directory | The desktop card and phone Status tab watch while the visible surface shows Tasks or its sections dialog is open. |
+
+Opening the sections dialog checks whether the current session supports Tasks
+even when the section is hidden. The card and tab own that read so it can start
+before the section list mounts, including when Tasks is the only enabled section.
 
 ### Subagent rows
 

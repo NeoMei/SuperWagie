@@ -83,13 +83,15 @@ const SortableSectionRow: React.FC<{
 export const WorkStatusSectionsDialog: React.FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}> = ({ open, onOpenChange }) => {
+  sessionId: string | null;
+  directory: string | null;
+}> = ({ open, onOpenChange, sessionId, directory }) => {
   const { t } = useI18n();
   const { hidden, setSectionVisible, setHiddenSections } = useWorkStatusHiddenSections();
   const storedOrder = useUIStore((state) => state.workStatusSectionOrder);
   const setSectionOrder = useUIStore((state) => state.setWorkStatusSectionOrder);
   const extensionSections = useWorkStatusExtensionSections();
-  const unavailableSections = useUnavailableWorkStatusSections();
+  const unavailableSections = useUnavailableWorkStatusSections(sessionId, directory);
   const sectionLabel = useSectionLabel(extensionSections);
   const sectionOrder = React.useMemo(
     () => resolveWorkStatusSectionOrder(storedOrder, extensionSections.ids, unavailableSections),

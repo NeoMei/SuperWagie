@@ -1,10 +1,13 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { useUIStore } from '@/stores/useUIStore';
 import { I18nProvider } from '@/lib/i18n';
 import { useGuestsStore } from '@/lib/guests/store';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSessionTodosStore } from '@/stores/useSessionTodosStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { WORK_STATUS_SECTION_IDS } from './sections';
 
 let WorkStatusSectionsDialog: typeof import('./WorkStatusSectionsDialog').WorkStatusSectionsDialog;
@@ -24,7 +27,7 @@ describe('section arrangement dialog', () => {
   };
   const render = async () => {
     await act(async () => root.render(
-      <I18nProvider><WorkStatusSectionsDialog open onOpenChange={() => { closeCount += 1; }} /></I18nProvider>,
+      <I18nProvider><WorkStatusSectionsDialog open onOpenChange={() => { closeCount += 1; }} sessionId={null} directory={null} /></I18nProvider>,
     ));
     // happy-dom has no layout. Supply the vertical list geometry used by the
     // real dnd-kit sensors and collision detector, leaving event handling intact.
@@ -150,6 +153,67 @@ describe('section arrangement dialog', () => {
     await act(async () => subagents.click());
     expect(useUIStore.getState().mobileWorkStatusHiddenSections).toEqual([]);
     expect(useUIStore.getState().workStatusHiddenSections).toEqual([]);
+  });
+
+  test('opening the phone sections dialog lets the user re-enable hidden Tasks', async () => {
+    const { MobileStatusPane } = await import('@/apps/MobileStatusPane');
+    const { SyncProvider } = await import('@/sync/sync-context');
+    const { OpenCode } = await import('@opencode/client');
+    const sessionId = 'ses_hidden_tasks';
+    const directory = '/project';
+    const sdk = OpenCode.make({
+      baseUrl: win.location.origin,
+      fetch: (url) => String(url).includes('/event')
+        ? Promise.resolve(new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } }))
+        : Promise.resolve(Response.json([])),
+    });
+    const previousDirectory = useDirectoryStore.getState().currentDirectory;
+    const previousSelection = useSessionUIStore.getState();
+    const reads: string[] = [];
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), win.location.origin);
+      if (url.pathname === `/api/session-todos/${sessionId}`) {
+        const requestedDirectory = url.searchParams.get('directory') ?? '';
+        reads.push(requestedDirectory);
+        return Response.json(requestedDirectory === directory
+          ? { revision: 1, state: 'ready', todos: [{ content: 'Check the patch', status: 'pending' }] }
+          : { revision: 2, state: 'off' });
+      }
+      if (url.pathname === '/api/session-warming') return Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] });
+      return Response.json([]);
+    });
+    const renderPane = (open: boolean) => act(async () => {
+      root.render(
+        <I18nProvider><SyncProvider sdk={sdk} directory="">
+          <MobileStatusPane visible={false} onLeave={() => {}} sectionsDialogOpen={open} onSectionsDialogOpenChange={() => {}} />
+        </SyncProvider></I18nProvider>,
+      );
+    });
+    try {
+      await act(async () => {
+        useDirectoryStore.setState({ currentDirectory: directory });
+        useSessionUIStore.setState({ currentSessionId: sessionId, currentSessionDirectory: directory });
+        useUIStore.setState({ isMobile: true, mobileWorkStatusHiddenSections: [...WORK_STATUS_SECTION_IDS] });
+      });
+      await renderPane(false);
+      expect(reads).toEqual([]);
+      await renderPane(true);
+      expect(reads).toEqual([directory]);
+      const tasks = rows().find((row) => row.dataset.settingsItem === 'chat.work-status.section.tasks');
+      expect(tasks?.getAttribute('aria-pressed')).toBe('false');
+      await act(async () => tasks?.click());
+      expect(useUIStore.getState().mobileWorkStatusHiddenSections).not.toContain('tasks');
+
+      await act(async () => useDirectoryStore.setState({ currentDirectory: '/other' }));
+      expect(reads).toEqual([directory, '/other']);
+      expect(rows().some((row) => row.dataset.settingsItem === 'chat.work-status.section.tasks')).toBe(false);
+    } finally {
+      await act(async () => root.render(null));
+      useDirectoryStore.setState({ currentDirectory: previousDirectory });
+      useSessionUIStore.setState(previousSelection);
+      useSessionTodosStore.getState().reset();
+      fetch.mockRestore();
+    }
   });
 
   test('touch requires a hold and commits the same order as mouse dragging', async () => {

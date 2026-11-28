@@ -12,6 +12,7 @@ import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
 import { WorkStatusSectionList } from './WorkStatusSectionList';
 import { getWorkStatusPanelPresentation } from './sections';
+import { useLoadSessionTodos } from './useLoadSessionTodos';
 import { useWorkStatusSectionLayout } from './useWorkStatusSectionLayout';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
@@ -65,9 +66,10 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   const panelTransitionMs = useLayoutAnimationMs();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
-  const sectionLayout = useWorkStatusSectionLayout();
+  const sectionLayout = useWorkStatusSectionLayout(sessionId, directory);
   const { allSectionsHidden } = sectionLayout;
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
+  useLoadSessionTodos(sessionId, directory, sectionsDialogOpen || (visible && !sectionLayout.hiddenSections.includes('tasks')));
   // Starts optimistic: sections report after their first commit, and rendering
   // nothing on the way in would make the card flash out and back on arrival.
   const [renderedSections, setRenderedSections] = React.useState(1);
@@ -296,7 +298,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       </div>
       </DockedPanelSurfaceContext.Provider>
 
-      <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={setSectionsDialogOpen} />
+      <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={setSectionsDialogOpen} sessionId={sessionId} directory={directory} />
     </aside>
   );
 };

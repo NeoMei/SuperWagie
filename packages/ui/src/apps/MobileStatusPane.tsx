@@ -7,6 +7,7 @@ import { WorkStatusSectionsDialog } from '@/components/chat/work-status/WorkStat
 import { WorkStatusTouchContext } from '@/components/chat/work-status/touchContext';
 import { LeaveWorkStatusContext } from '@/components/chat/work-status/leaveWorkStatus';
 import { WorkStatusPresenceProvider } from '@/components/chat/work-status/presence';
+import { useLoadSessionTodos } from '@/components/chat/work-status/useLoadSessionTodos';
 import { useWorkStatusSectionLayout } from '@/components/chat/work-status/useWorkStatusSectionLayout';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
@@ -30,7 +31,8 @@ export const MobileStatusPane: React.FC<{
   const { t } = useI18n();
   const sessionId = useSessionUIStore((state) => state.currentSessionId);
   const directory = useEffectiveDirectory() ?? null;
-  const layout = useWorkStatusSectionLayout();
+  const layout = useWorkStatusSectionLayout(sessionId, directory);
+  useLoadSessionTodos(sessionId, directory, sectionsDialogOpen || (visible && !layout.hiddenSections.includes('tasks')));
   // Optimistic until sections report, as on the desktop card, so the empty
   // line does not flash before they do.
   const [renderedSections, setRenderedSections] = React.useState(1);
@@ -76,7 +78,7 @@ export const MobileStatusPane: React.FC<{
         </div>
       ) : null}
 
-      <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={onSectionsDialogOpenChange} />
+      <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={onSectionsDialogOpenChange} sessionId={sessionId} directory={directory} />
     </div>
   );
 };
