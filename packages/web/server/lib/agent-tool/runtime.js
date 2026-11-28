@@ -643,7 +643,7 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
             body: JSON.stringify({ input: args, sessionID: context.sessionID, callID: context.id, tool: ${JSON.stringify(name)} }),
             signal: ${answers ? 'waitSignal' : 'context.signal'},${answers ? ANSWER_FETCH_TIMEOUT : ''}
           })
-          const content = await response.text()
+          const content = (await response.text()).trimStart()
           let result = null
           try { result = JSON.parse(content) } catch {}
           const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
@@ -834,6 +834,7 @@ export const createAgentToolRuntime = (dependencies) => {
     instanceDir,
     getActivePort,
     getActiveHost = () => null,
+    keepAliveMs = 60_000,
     executeAction,
     resolveSessionDirectory,
   } = dependencies;
@@ -997,15 +998,23 @@ export const createAgentToolRuntime = (dependencies) => {
       req.once('aborted', abortOnDisconnect);
       res.once('close', abortOnDisconnect);
       const untrack = trackInflight(asNonEmptyString(req.body?.sessionID), controller);
+      // A long wait for the user must deliver bytes before Node fetch's idle deadline.
+      const timer = setInterval(() => {
+        if (res.writableEnded || res.destroyed) return;
+        if (!res.headersSent) res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-transform' });
+        res.write(' ');
+      }, keepAliveMs);
+      const send = (result) => res.headersSent ? res.end(JSON.stringify(result)) : res.json(result);
       try {
-        return res.json(await execute(req.body, { signal: controller.signal, authenticatedAgent: true }));
+        return send(await execute(req.body, { signal: controller.signal, authenticatedAgent: true }));
       } catch (error) {
-        return res.json(createResult({
+        return send(createResult({
           ok: false,
           action: req.body?.input?.action,
           error: { message: error instanceof Error ? error.message : String(error), kind: 'runtime' },
         }));
       } finally {
+        clearInterval(timer);
         untrack();
         req.off('aborted', abortOnDisconnect);
         res.off('close', abortOnDisconnect);
