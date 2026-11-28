@@ -1,6 +1,5 @@
 import React from 'react';
 import { useSessionTodosStore } from '@/stores/useSessionTodosStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isWorkflowEnabled } from '@/lib/workflows/availability';
 import { useUIStore } from '@/stores/useUIStore';
 import type { WorkStatusSectionId } from './sections';
@@ -13,11 +12,13 @@ import type { WorkStatusSectionId } from './sections';
  * The phone's Status tab also leaves out Usage: the phone has its own Usage
  * page, which reads better there than the panel's compact rows.
  */
-export const useUnavailableWorkStatusSections = (): readonly WorkStatusSectionId[] => {
+export const useUnavailableWorkStatusSections = (sessionId: string | null, directory: string | null): readonly WorkStatusSectionId[] => {
   const workflows = useUIStore(isWorkflowEnabled);
   const isMobile = useUIStore((state) => state.isMobile);
-  const sessionId = useSessionUIStore((state) => state.currentSessionId);
-  const tasks = useSessionTodosStore((state) => sessionId ? state.entries[sessionId]?.state : undefined);
+  const tasks = useSessionTodosStore((state) => {
+    const entry = sessionId ? state.entries[sessionId] : undefined;
+    return entry && entry.directory === directory ? entry.state : undefined;
+  });
   return React.useMemo(() => [
     ...(isMobile ? ['usage' as const] : []),
     ...(workflows ? [] : ['workflows' as const]),

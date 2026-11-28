@@ -30,11 +30,11 @@ export type WorkStatusSectionLayout = {
 };
 
 /** What the panel, or the phone's Status tab, shows and in which order. */
-export const useWorkStatusSectionLayout = (): WorkStatusSectionLayout => {
+export const useWorkStatusSectionLayout = (sessionId: string | null, directory: string | null): WorkStatusSectionLayout => {
   const { hidden } = useWorkStatusHiddenSections();
   const storedOrder = useUIStore((state) => state.workStatusSectionOrder);
   const extensionSections = useWorkStatusExtensionSections();
-  const unavailableSections = useUnavailableWorkStatusSections();
+  const unavailableSections = useUnavailableWorkStatusSections(sessionId, directory);
   const sectionOrder = React.useMemo(
     () => resolveWorkStatusSectionOrder(storedOrder, extensionSections.ids, unavailableSections),
     [extensionSections.ids, storedOrder, unavailableSections],
