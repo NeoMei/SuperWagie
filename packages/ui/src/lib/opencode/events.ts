@@ -908,6 +908,9 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     // events remain authoritative for live state.
     case "experimental.job.updated":
       return []
+    // Push subscription changes have no session or message state.
+    case "experimental.push.updated":
+      return []
     // --- shell commands -------------------------------------------------------
 
     // A session's running commands keep its turn open (background commands),

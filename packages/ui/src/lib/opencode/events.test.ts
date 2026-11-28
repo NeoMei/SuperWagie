@@ -402,6 +402,7 @@ describe("translateWireEvent", () => {
       { ...base, type: "session.step.first-token", durable, data: { sessionID: "ses_1", assistantMessageID: "msg_a1" } },
       { ...base, type: "experimental.mcp.event", data: { id: "sub_1", server: "fixture", name: "changed", eventId: "remote_1",
         timestamp: "2026-11-13T12:00:00Z", data: { value: "plugin payload" }, cursor: null } },
+      { ...base, type: "experimental.push.updated", data: {} },
       { ...base, type: "experimental.job.updated", data: { info: {
         id: "job_1", sessionID: "ses_1", kind: "codemode", status: "running", time: { started: 1000 },
       } } },

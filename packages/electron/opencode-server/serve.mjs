@@ -1,4 +1,5 @@
 import tls from 'node:tls';
+import { applySystemCertificates } from '../../web/server/lib/system-ca.js';
 import { parseArgs, usage } from './args.mjs';
 import { openCodeTlsConnect } from './zen-tls.mjs';
 
@@ -23,6 +24,8 @@ const main = async () => {
     process.stderr.write(`OpenChamber's built-in OpenCode only runs the server. Install the OpenCode CLI for other commands.\n${usage}\n`);
     process.exit(2);
   }
+
+  applySystemCertificates();
 
   // Zen expects the Bun CLI's cipher order. Keep the change inside this
   // server process and preserve explicit process or connection settings.
