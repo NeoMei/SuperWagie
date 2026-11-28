@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDirectoryReachability, isDirectoryPath } from './index.js';
 import { parseProbeAnswer } from './probe-process.js';
@@ -145,16 +145,69 @@ describe('directory reachability', () => {
     expect(starts).toBeGreaterThan(startsBefore);
   });
 
-  it('still answers when the helper process cannot run', async () => {
-    const disk = hangingDisk((target) => target.startsWith('/nas'));
+  it('keeps two local probes when the helper fails and drains the queue as slots free up', async () => {
+    vi.useFakeTimers();
+    const pending = new Map();
+    const calls = [];
+    let peak = 0;
+    const touch = (target) => new Promise((resolve) => {
+      calls.push(target);
+      pending.set(target, () => { pending.delete(target); resolve(); });
+      peak = Math.max(peak, pending.size);
+    });
+    let failures = 0;
     const startProcess = (onExit) => {
-      queueMicrotask(() => onExit(true));
+      queueMicrotask(() => { failures += 1; onExit(true); });
       return { touch: async () => undefined, stop: () => {} };
     };
-    const reachability = create({ touch: disk.answer, startProcess });
-    const dead = ['/nas/a', '/nas/b', '/nas/c'].map(reachability.check);
-    expect(await reachability.check('/home/project')).toBe('available');
-    expect(await Promise.all(dead)).toEqual(['unreachable', 'unreachable', 'unreachable']);
+    try {
+      const reachability = create({ touch, startProcess });
+      const paths = Array.from({ length: 8 }, (_, index) => '/nas/' + index);
+      const checks = paths.map(reachability.check);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(failures).toBe(1);
+      expect(calls).toEqual(paths.slice(0, 2));
+      const healthy = reachability.check('/healthy');
+      for (const target of [...paths, '/healthy']) {
+        pending.get(target)();
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(await healthy).toBe('available');
+      expect(await Promise.all(checks)).toEqual(paths.map(() => 'available'));
+      expect(peak).toBe(2);
+      expect(calls).toEqual([...paths, '/healthy']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries the helper with queued paths while both local probes are still stuck', async () => {
+    vi.useFakeTimers();
+    const local = hangingDisk(() => true);
+    let starts = 0;
+    const startProcess = (onExit) => {
+      starts += 1;
+      if (starts === 1) {
+        queueMicrotask(() => onExit(true));
+        return { touch: async () => undefined, stop: () => {} };
+      }
+      return { touch: async () => null, stop: () => onExit(false) };
+    };
+    try {
+      const reachability = create({ touch: local.answer, startProcess, stuckProcessMs: 600 });
+      const paths = ['/first', '/second', '/queued'];
+      const checks = paths.map(reachability.check);
+      await vi.advanceTimersByTimeAsync(401);
+      expect(await Promise.all(checks)).toEqual(paths.map(() => 'unreachable'));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(await reachability.check('/healthy')).toBe('available');
+      expect(await reachability.check('/queued')).toBe('available');
+      expect(starts).toBe(2);
+      expect(local.waiting.size).toBe(2);
+    } finally {
+      for (const resolve of local.waiting) resolve();
+      vi.useRealTimers();
+    }
   });
 
   it('reads a real folder through the real helper process', async () => {

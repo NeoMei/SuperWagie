@@ -131,7 +131,7 @@ export const createSettingsRuntime = (deps) => {
   // event loop, so hitting it 3+ times/second from fs/list, path, etc.
   // turns into perceptible UI jank for ~10-15 seconds after launch.
   // Cache the outcome for this process lifetime.
-  let orphanRecoveryDone = false;
+  let orphanRecovery = 'pending';
 
   const PROJECTS_ROOT_DIR = path.join(path.dirname(SETTINGS_FILE_PATH), 'projects');
   const PROJECT_ICONS_DIR = path.join(path.dirname(SETTINGS_FILE_PATH), 'project-icons');
@@ -410,10 +410,11 @@ export const createSettingsRuntime = (deps) => {
       nextProjects.push({ ...project, id: nextId });
     }
 
-    if (!orphanRecoveryDone) {
-      orphanRecoveryDone = true; // set before await to close races under concurrent settings reads
+    if (orphanRecovery !== 'done') {
+      const wasOffline = orphanRecovery === 'offline';
+      orphanRecovery = 'done'; // Claim the one-shot scan before concurrent reads can start it.
       try {
-        await recoverOrphanProjectFiles(nextProjects);
+        await recoverOrphanProjectFiles(nextProjects, wasOffline);
       } catch (error) {
         console.warn('[projects] Orphan recovery failed, continuing startup:', error);
       }
@@ -441,7 +442,15 @@ export const createSettingsRuntime = (deps) => {
   // For each canonical project whose current config is empty (lost during the
   // earlier id churn), try to find a single orphan whose setup-worktree command
   // patterns uniquely match the project's basename and merge it in.
-  const recoverOrphanProjectFiles = async (canonicalProjects) => {
+  const recoverOrphanProjectFiles = async (canonicalProjects, wasOffline) => {
+    const deferIfOffline = async () => {
+      const offline = await Promise.all(canonicalProjects.map((project) => isDirectoryOffline(project.path)));
+      if (!offline.some(Boolean)) return false;
+      orphanRecovery = 'offline';
+      return true;
+    };
+    if (wasOffline && await deferIfOffline()) return;
+
     let entries;
     try {
       entries = await fsPromises.readdir(PROJECTS_ROOT_DIR, { withFileTypes: true });
@@ -527,7 +536,7 @@ export const createSettingsRuntime = (deps) => {
       return haystacks.includes(name);
     };
 
-    if ((await Promise.all(canonicalProjects.map((project) => isDirectoryOffline(project.path)))).some(Boolean)) return;
+    if (!wasOffline && await deferIfOffline()) return;
     const matches = new Map();
     for (const orphan of orphans) {
       const matchedProjects = [];

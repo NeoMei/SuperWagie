@@ -54,6 +54,42 @@ const createRuntime = async ({
 };
 
 describe('settings runtime', () => {
+  it('retries deferred orphan recovery once after all candidate projects reconnect', async () => {
+    let offline = true;
+    const readdir = vi.fn(fsPromises.readdir);
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      fs: { ...fsPromises, readdir },
+      isDirectoryOffline: async (directory) => offline && path.basename(directory) === 'disconnected',
+    });
+    try {
+      const projects = ['local', 'disconnected'].map((name) => {
+        const directory = path.join(tempRoot, name);
+        return { path: directory, id: createProjectIdFromPath(directory) };
+      });
+      const storage = path.join(tempRoot, 'projects');
+      await fsPromises.mkdir(storage);
+      await Promise.all(projects.map((project) => fsPromises.mkdir(project.path)));
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ projects }));
+      const orphan = path.join(storage, 'old-id.json');
+      const legacy = { projectNotes: 'Recovered notes', 'setup-worktree': ['build local'] };
+      await fsPromises.writeFile(orphan, JSON.stringify(legacy));
+      const projectScans = () => readdir.mock.calls.filter(([dir]) => dir === storage).length;
+      await runtime.readSettingsFromDiskMigrated();
+      await runtime.readSettingsFromDiskMigrated();
+      expect(projectScans()).toBe(1);
+      expect(JSON.parse(await fsPromises.readFile(orphan, 'utf8'))).toEqual(legacy);
+      offline = false;
+      await Promise.all(Array.from({ length: 3 }, () => runtime.readSettingsFromDiskMigrated()));
+      await runtime.readSettingsFromDiskMigrated();
+      const recovered = path.join(storage, projectConfigFileStemOf(projects[0].id) + '.json');
+      expect(JSON.parse(await fsPromises.readFile(recovered, 'utf8'))).toMatchObject(legacy);
+      expect(await fsPromises.readdir(storage)).toEqual([path.basename(recovered)]);
+      expect(projectScans()).toBe(2);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('keeps the active project on an offline drive and removes a deleted neighbor on save', async () => {
     const offline = 'Z:\\offline-project';
     const { runtime, tempRoot, cleanup } = await createRuntime({ isDirectoryOffline: async (directory) => directory === offline });

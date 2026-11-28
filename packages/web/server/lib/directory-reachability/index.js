@@ -61,7 +61,6 @@ export const createDirectoryReachability = ({
   const queue = [];
   const started = new Set();
   const inHelper = new Set();
-  let inProcess = 0;
   let processFailed = false;
   let probeProcess = null;
   let stuckMs = stuckProcessMs;
@@ -78,7 +77,7 @@ export const createDirectoryReachability = ({
     }
   };
 
-  const hasUnanswered = () => inProcess > 0 || [...entries.values()].some((entry) => entry.running !== null);
+  const hasUnanswered = () => started.size > 0 || [...entries.values()].some((entry) => entry.running !== null);
 
   const stopProcessWhenIdle = () => {
     if (idleTimer) clearTimeout(idleTimer);
@@ -92,13 +91,12 @@ export const createDirectoryReachability = ({
   };
 
   const startInProcess = (queued) => {
-    inProcess += 1;
+    queued.startedLocally = true;
     started.add(queued);
     const jam = setTimeout(moveToProcess, JAM_AFTER_MS);
     jam.unref?.();
     void touchInProcess(queued.target).then((code) => {
       clearTimeout(jam);
-      inProcess -= 1;
       started.delete(queued);
       queued.resolve(code);
       const next = queue.shift();
@@ -107,7 +105,7 @@ export const createDirectoryReachability = ({
   };
 
   const touchInProcessOrQueue = (queued) => {
-    if (processFailed || inProcess < IN_PROCESS_PROBES) startInProcess(queued);
+    if (started.size < IN_PROCESS_PROBES) startInProcess(queued);
     else queue.push(queued);
   };
 
@@ -132,9 +130,12 @@ export const createDirectoryReachability = ({
         queued.resolve(code);
         return;
       }
-      if (disposed) return;
-      if (processFailed) touchInProcessOrQueue(queued);
-      else touchInHelper(runningProcess(), queued);
+      if (disposed || (queued.startedLocally && !started.has(queued))) return;
+      if (processFailed) {
+        if (!queued.startedLocally) touchInProcessOrQueue(queued);
+      } else {
+        touchInHelper(runningProcess(), queued);
+      }
     });
   };
 
@@ -149,7 +150,6 @@ export const createDirectoryReachability = ({
           if (started.size > 0) moveToProcess();
         }, stuckProcessMs);
         retry.unref?.();
-        for (const queued of queue.splice(0)) startInProcess(queued);
       });
       probeProcess = starting;
     }
@@ -165,8 +165,9 @@ export const createDirectoryReachability = ({
   }
 
   const touchCode = (target) => new Promise((resolve) => {
-    if (probeProcess) touchInHelper(probeProcess, { target, resolve });
-    else touchInProcessOrQueue({ target, resolve });
+    const queued = { target, resolve, startedLocally: false };
+    if (probeProcess) touchInHelper(probeProcess, queued);
+    else touchInProcessOrQueue(queued);
   });
 
   const judge = async (target) => {

@@ -627,6 +627,8 @@ ConPTY or Console Window Host behavior.
 
 Default directory selection rechecks read and execute access asynchronously. An unavailable Windows drive is skipped during startup warmup and on later default-directory reads. Project validation retains its saved entry. A confirmed missing folder on a reachable drive can still be removed.
 
+Recovery of legacy project files needs all registered projects online to identify a unique owner. While a project is offline, settings reads leave those files in place. A later settings read retries the scan after the projects reconnect. Concurrent reads share the one recovery attempt.
+
 On Windows the desktop shares its asynchronous registry PATH lookup with the embedded server. Standalone startup queries the same registry keys. Windows opens mapped drives when PowerShell starts, so these queries run System32's `reg.exe` directly. Port cleanup runs System32's `netstat.exe` and `taskkill.exe` with hidden windows. An IPv4 or IPv6 TCP row with remote port zero identifies a listener regardless of the localized state name.
 
 ## Public exports (env-runtime.js)
