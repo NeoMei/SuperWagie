@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, test, vi } from 'bun:test';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -189,21 +189,28 @@ test('pilot cookie state never shadows full readers and pilot B never falls back
 });
 
 test('cookie-based host authority expires during held source IO before any selected bytes are sent', async () => {
-  const f = await fixture({ sessionTtlMs: 1000 });
-  const hostCookie = await f.loginCookie();
-  const pilotCookie = cookieHeader(await f.call('get', '/api/mobile-official/auth/session', '', hostCookie).expect(200));
-  const cookie = `${hostCookie}; ${pilotCookie}`;
-  await f.call('post', '/api/mobile-official/auth/password-login', '', cookie).send({ username: 'owner', password: 'synthetic-password' }).expect(200);
-  await f.call('get', `/api/mobile-official/reader/${f.selected[0].id}/content`, '', cookie).expect(200, 'a selected bytes');
-  const pause = f.pauseSettings();
-  const response = f.call('get', `/api/mobile-official/reader/${f.selected[0].id}/content`, '', cookie).then((result) => result);
-  await pause.entered;
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-  pause.release();
-  const denied = await response;
-  expect(denied.status).toBe(401);
-  expect(denied.text).not.toContain('a selected bytes');
-  await f.call('get', '/api/mobile-official/reader/projects', '', cookie).expect(401);
+  const issuedAt = Math.floor(Date.now() / 1000) * 1000;
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    vi.setSystemTime(issuedAt);
+    const f = await fixture({ sessionTtlMs: 1000 });
+    const hostCookie = await f.loginCookie();
+    const pilotCookie = cookieHeader(await f.call('get', '/api/mobile-official/auth/session', '', hostCookie).expect(200));
+    const cookie = `${hostCookie}; ${pilotCookie}`;
+    await f.call('post', '/api/mobile-official/auth/password-login', '', cookie).send({ username: 'owner', password: 'synthetic-password' }).expect(200);
+    await f.call('get', `/api/mobile-official/reader/${f.selected[0].id}/content`, '', cookie).expect(200, 'a selected bytes');
+    const pause = f.pauseSettings();
+    const response = f.call('get', `/api/mobile-official/reader/${f.selected[0].id}/content`, '', cookie).then((result) => result);
+    await pause.entered;
+    vi.setSystemTime(issuedAt + 1500);
+    pause.release();
+    const denied = await response;
+    expect(denied.status).toBe(401);
+    expect(denied.text).not.toContain('a selected bytes');
+    await f.call('get', '/api/mobile-official/reader/projects', '', cookie).expect(401);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test('bearer revocation during held source IO ends the pilot transport authority', async () => {
