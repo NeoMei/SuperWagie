@@ -25,12 +25,13 @@ const main = async () => {
     process.exit(2);
   }
 
+  applySystemCertificates();
+
   // Zen expects the Bun CLI's cipher order. Keep the change inside this
   // server process and preserve explicit process or connection settings.
   if (!/--tls[-_]cipher[-_]list/.test([...process.execArgv, process.env.NODE_OPTIONS ?? ''].join(' '))) {
     tls.connect = openCodeTlsConnect(tls.connect);
   }
-  applySystemCertificates();
   const { configureAssets } = await import('./assets.mjs');
   configureAssets(new URL('./assets/', import.meta.url));
   const { run } = await import('./server.mjs');
