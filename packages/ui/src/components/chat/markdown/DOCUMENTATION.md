@@ -15,6 +15,9 @@ access and authorization.
   file-tab navigation for every artifact type.
 - External schemes and protocol-relative hrefs stay external. File URLs accept
   only local hosts. Existing workspace and symlink authorization remains.
+- Streamed blocks return to their resting styles after the entrance effect.
+  Backwards fill keeps delayed blocks hidden before they enter and lets
+  Chromium release the finished animation.
 
 ## Decisions
 
