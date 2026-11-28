@@ -2235,7 +2235,8 @@ diffs-container {
    stream the follow scroll masks the entrance anyway, so the effect only
    really shows on short replies, and those must not pay for a GPU filter.
    Blocks committed in the same tick cascade via --oc-md-enter-delay set
-   inline by the renderer. */
+   inline by the renderer. Backwards fill holds the first frame during that
+   delay and releases the animation when the block reaches its resting style. */
 @keyframes oc-md-block-enter {
   from {
     opacity: 0;
@@ -2248,7 +2249,7 @@ diffs-container {
 }
 
 .oc-md-block-enter {
-  animation: oc-md-block-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: oc-md-block-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
   animation-delay: var(--oc-md-enter-delay, 0ms);
 }
 
