@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parse as parseJsonc } from 'jsonc-parser';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
+
+import { isPluginTypeScriptFile, isRelativePluginImport, pluginImportCandidates } from './plugin-imports.js';
 
 const configNames = ['opencode.json', 'opencode.jsonc'];
 const agentDirectories = ['agent', 'agents', 'mode', 'modes'];
@@ -180,8 +182,18 @@ const repositoryIdentity = async (io, directory) => {
   return { root: directory, key: directory };
 };
 
-const localPlugin = (spec) => spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('file:') || path.isAbsolute(spec);
+const localPlugin = (spec) => isRelativePluginImport(spec) || spec.startsWith('file:') || path.isAbsolute(spec);
 const pluginPath = (spec, directory) => spec.startsWith('file:') ? fileURLToPath(spec) : path.resolve(directory, spec);
+
+// ESM interprets relative specifiers as URLs. A literal CommonJS path may
+// contain characters that cannot be decoded as a file URL.
+const relativeEsmFile = (specifier, parent) => {
+  try {
+    return fileURLToPath(new URL(specifier, pathToFileURL(parent)));
+  } catch {
+    return null;
+  }
+};
 
 const pluginDigest = async (io, target) => {
   const seen = new Set();
@@ -205,10 +217,23 @@ const pluginDigest = async (io, target) => {
     if (bytes > 16 * 1024 * 1024) throw new Error('OpenCode plugin content is too large to assess');
     const data = await io.readFile(resolved);
     contents.push([path.relative(base, candidate), hash(data)]);
-    if (!scriptExtension.test(candidate)) return;
+    if (!scriptExtension.test(resolved) && !scriptExtension.test(candidate)) return;
     for (const match of data.toString('utf8').matchAll(/\b(?:from|import|require)\s*\(?\s*(['"])([^'"\n]+)\1/g)) {
       const spec = match[2];
       if (!localPlugin(spec)) continue;
+      // Resolve from the physical importer just as Node does for symlinked entries.
+      // Check the ordinary ESM file first, then the bundled TS fallback.
+      if (isRelativePluginImport(spec)) {
+        const direct = relativeEsmFile(spec, resolved);
+        const fallbacks = isPluginTypeScriptFile(resolved) ? pluginImportCandidates(resolved, spec) : [];
+        for (const file of [direct, ...fallbacks]) {
+          if (file && (await optional(() => io.stat(file)))?.isFile()) {
+            await visit(file);
+            break;
+          }
+        }
+      }
+      // Also cover local directory packages and the existing non-ESM resolutions.
       const child = pluginPath(spec, path.dirname(candidate));
       for (const suffix of importExtensions) {
         if (await optional(() => io.stat(child + suffix))) {

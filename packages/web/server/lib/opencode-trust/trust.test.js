@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
@@ -27,6 +27,50 @@ afterEach(async () => {
 });
 
 describe('OpenCode folder admission', () => {
+  it.each([
+    ['checkout', './part.js', 'part.ts', []],
+    ['checkout', './part.js', 'part.mts', []],
+    ['checkout', './part.mjs', 'part.mts', []],
+    ['checkout', './part.js', 'part.js', ['part.ts']],
+    ['checkout', './part', 'part.mts', ['part.ts', 'part.js']],
+    ['node_modules/example', './part', 'part.mjs', ['part.ts', 'part.mts']],
+    ['checkout', './part/', 'part/index.mts', ['part.ts', 'part/index.js']],
+  ])('fingerprints the resolved constant in %s for %s (%s)', async (folder, spec, selected, neighbors) => {
+    const { repo, trust } = await fixture();
+    const directory = path.join(repo, folder);
+    const entry = path.join(directory, 'entry.ts');
+    for (const name of [selected, ...neighbors]) {
+      const file = path.join(directory, name);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, 'export const value = 1;');
+    }
+    await writeFile(entry, 'export { value } from ' + JSON.stringify(spec) + ';');
+    await writeFile(path.join(repo, 'opencode.json'), JSON.stringify({ plugin: [['./' + folder + '/entry.ts']] }));
+    const before = (await trust.inspect(repo)).fingerprint;
+    expect(before).toMatch(/^[0-9a-f]{64}$/);
+    expect((await trust.inspect(repo)).fingerprint).toBe(before);
+    await writeFile(path.join(directory, selected), 'export const value = 2;');
+    expect((await trust.inspect(repo)).fingerprint).not.toBe(before);
+  });
+
+  it('follows static imports from the physical target of a linked package entry', async () => {
+    const { repo, trust } = await fixture();
+    const checkout = path.join(repo, 'src');
+    const bundle = path.join(repo, 'example-package');
+    await mkdir(bundle);
+    await writeFile(path.join(bundle, 'package.json'), JSON.stringify({ type: 'module', exports: './entry.ts' }));
+    await writeFile(path.join(checkout, 'entry.ts'), "export { value } from './part.js';");
+    await writeFile(path.join(checkout, 'part.ts'), "export { value } from './constant.mjs';");
+    const constant = path.join(checkout, 'constant.mts');
+    await writeFile(constant, 'export const value = 1;');
+    await symlink(path.join(checkout, 'entry.ts'), path.join(bundle, 'entry.ts'));
+    await writeFile(path.join(repo, 'opencode.json'), JSON.stringify({ plugins: [{ package: './example-package' }] }));
+    const before = (await trust.inspect(repo)).fingerprint;
+    expect(before).toMatch(/^[0-9a-f]{64}$/);
+    await writeFile(constant, 'export const value = 2;');
+    expect((await trust.inspect(repo)).fingerprint).not.toBe(before);
+  });
+
   it('admits a repository with model settings and no executable configuration', async () => {
     const { trust, repo } = await fixture();
     await writeFile(path.join(repo, 'opencode.jsonc'), '{ // repository preferences\n "model": "provider/model", }');

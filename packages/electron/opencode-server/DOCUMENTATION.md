@@ -59,4 +59,4 @@ User-installed plugins can import `@opencode/plugin` without a copy installed be
 
 The server reads `.claude` directories only for skills, so either `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` disables those roots.
 
-TypeScript plugin entries can import sibling files and directory indexes using Bun's resolution order. The fallback applies to unresolved relative ESM imports from installed TypeScript or an OpenCode-marked local plugin. Node keeps its normal behavior for CommonJS and other modules.
+TypeScript plugin entries can import sibling files and directory indexes using Bun's resolution order. The bundled loader and the folder trust assessment share the ordered file candidates. The fallback applies to unresolved relative ESM imports from installed TypeScript or an OpenCode-marked local plugin. Node keeps its normal behavior for CommonJS and other modules.
