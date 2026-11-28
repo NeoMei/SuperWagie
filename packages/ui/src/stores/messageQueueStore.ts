@@ -59,9 +59,17 @@ export const isServerOwnedMessageQueue = (): boolean => !isVSCodeRuntime();
 export interface QueuedMessageSendConfig {
     providerID: string;
     modelID: string;
+    keepSessionModel?: boolean;
+    keepSessionAgent?: boolean;
     agent?: string;
     variant?: string;
 }
+
+/** Rows without a saved config use the session. Older captured configs named an explicit model. */
+export const queuedSelectionPolicy = (config?: QueuedMessageSendConfig) => ({
+    keepSessionModel: config?.keepSessionModel ?? !config,
+    keepSessionAgent: config?.keepSessionAgent ?? !config,
+});
 
 /**
  * "Run as goal" captured with a queued message: the goal starts when this
@@ -173,6 +181,8 @@ export const parseMessageQueueKey = (key: string): MessageQueueTarget | null => 
 const serverSendConfigSchema = z.object({
     providerID: z.string().min(1),
     modelID: z.string().min(1),
+    keepSessionModel: z.boolean().optional(),
+    keepSessionAgent: z.boolean().optional(),
     agent: z.string().optional(),
     variant: z.string().optional(),
 });

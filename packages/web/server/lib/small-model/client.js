@@ -47,11 +47,19 @@ export function getSmallModelClient(directory) {
   // Model and provider lists are read through a location; without a directory
   // OpenCode would start its own working directory, MCP servers included.
   const requested = typeof directory === 'string' ? directory.trim() : '';
-  const scope = requested || connection.getDefaultDirectory?.() || null;
-  if (scope) {
-    headers['x-opencode-directory'] = encodeURIComponent(scope);
-  }
-  return OpenCode.make({ baseUrl, headers });
+  if (requested) headers['x-opencode-directory'] = encodeURIComponent(requested);
+  const { getDefaultDirectory } = connection;
+  if (requested || !getDefaultDirectory) return OpenCode.make({ baseUrl, headers });
+  return OpenCode.make({
+    baseUrl,
+    headers,
+    fetch: async (input, init) => {
+      const scope = await getDefaultDirectory();
+      const scopedHeaders = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      if (scope) scopedHeaders.set('x-opencode-directory', encodeURIComponent(scope));
+      return globalThis.fetch(input, { ...init, headers: scopedHeaders });
+    },
+  });
 }
 
 const MODEL_CACHE_TTL_MS = 30_000;

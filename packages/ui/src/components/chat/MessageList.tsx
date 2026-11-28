@@ -453,7 +453,7 @@ const TurnRow = React.memo(({
     ...rendererInput
 }: TurnRowProps) => {
     const { turn } = entry;
-    const groups = getActivityGroups(turn.assistantMessages);
+    const groups = getActivityGroups(turn.assistantMessages, row.reasoningMode, row.liveActivity);
     const { renderMessage, streamPhaseOf } = useTurnMessageRenderer({
         ...rendererInput,
         turn,
@@ -1143,12 +1143,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         const next = buildTimelineRows(allEntries, {
             collapsedActivity: !defaultActivityExpanded,
             keepActivityText,
+            collapsibleThinkingBlocks,
+            working: sessionIsWorking,
             expandedTurns: turnExpansion,
             showReasoningTraces,
         }, previousRowsRef.current);
         previousRowsRef.current = next;
         return next;
-    }), [allEntries, defaultActivityExpanded, keepActivityText, showReasoningTraces, turnExpansion]);
+    }), [allEntries, collapsibleThinkingBlocks, defaultActivityExpanded, keepActivityText, sessionIsWorking, showReasoningTraces, turnExpansion]);
 
     // The prompt rows the list keeps on top while their turn scrolls under them.
     const stickyRowIndices = React.useMemo(() => {
@@ -1229,12 +1231,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     // turn's messages, the last one included, sits in that fold too.
     const {
         messageIndexMap,
+        reasoningIndexMap,
         turnIndexMap,
         rowIndexByKey,
         collapsibleTurnByMessageId,
         turnByAssistantMessageId,
     } = React.useMemo(() => {
         const messageIndexes = new Map<string, number>();
+        const reasoningIndexes = new Map<string, number>();
         const turnIndexes = new Map<string, number>();
         const rowIndexes = new Map<string, number>();
         const collapsible = new Map<string, string>();
@@ -1255,7 +1259,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             } else if (row.kind === 'turn-message' && !row.slice?.from) {
                 messageIndexes.set(row.messageId, index);
             }
-            if (row.kind === 'turn-message') for (const id of row.messageAliases ?? []) messageIndexes.set(id, index);
+            if (row.kind === 'turn-message') {
+                for (const id of row.messageAliases ?? []) messageIndexes.set(id, index);
+                for (const id of row.reasoningSources ?? []) if (!reasoningIndexes.has(id)) reasoningIndexes.set(id, index);
+            }
         });
         for (const entry of allEntries) {
             if (entry.kind !== 'turn') continue;
@@ -1270,6 +1277,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         }
         return {
             messageIndexMap: messageIndexes,
+            reasoningIndexMap: reasoningIndexes,
             turnIndexMap: turnIndexes,
             rowIndexByKey: rowIndexes,
             collapsibleTurnByMessageId: collapsible,
@@ -1311,11 +1319,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // than the top of its message.
         if (isReasoningRevealTarget(messageId)) {
             const reasoning = container.querySelector<HTMLElement>(`[data-reasoning-message-id="${messageId}"]`);
-            if (reasoning) return reasoning.closest<HTMLElement>('[data-reasoning-block-id]') ?? reasoning;
+            if (reasoning) return reasoning;
+            if (reasoningIndexMap.has(messageId)) return null;
         }
         // A long answer's later rows carry its id too; its start is the one without a slice.
         return container.querySelector(`[data-message-id="${messageId}"]:not([data-message-slice], [data-message-hoisted])`);
-    }, [resolveScrollContainer]);
+    }, [reasoningIndexMap, resolveScrollContainer]);
 
     // A slice that no longer exists (the message is cut elsewhere now: the
     // reasoning was hidden) falls back to the message's first row, as its index does.
@@ -1509,7 +1518,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => {
                 cancelNavigationRef.current?.();
                 const behavior = options?.behavior ?? 'auto';
-                const index = messageIndexMap.get(messageId);
+                const index = (isReasoningRevealTarget(messageId) ? reasoningIndexMap.get(messageId) : undefined) ?? messageIndexMap.get(messageId);
                 if (index === undefined) {
                     return false;
                 }
@@ -1568,7 +1577,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             if (objectRef.current === handle) objectRef.current = null;
         };
-    }, [alignViewportAnchor, findAnchorElement, findMessageElement, messageIndexMap, resolveScrollContainer, revealFoldedMessage, rowIndexByKey, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
+    }, [alignViewportAnchor, findAnchorElement, findMessageElement, messageIndexMap, reasoningIndexMap, resolveScrollContainer, revealFoldedMessage, rowIndexByKey, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
 
     const rowContext = React.useMemo(() => ({
         scrollToBottom: stableScrollToBottom,

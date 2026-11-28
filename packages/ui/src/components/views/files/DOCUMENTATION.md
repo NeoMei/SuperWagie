@@ -466,8 +466,9 @@ the source toggle does, and the other slot remounts from it.
 panel keeps one FilesView that follows the selected path, so during a file
 switch the draft and the file briefly belong to different files. React to real
 edits through CodeMirror transactions (`isUserEvent('input' | 'delete' | 'undo'
-| 'redo' | 'move')`). Autosave refuses to write an empty draft over a non-empty
-file (`shouldScheduleFileAutosave`); an explicit save still can.
+| 'redo' | 'move')`). Autosave writes an empty draft when the user clears a
+loaded text file. A pending or failed text read leaves the selected path
+unloaded. The path and save-owner checks keep its empty draft off disk.
 
 Canvas edits never enter the text draft. A separate `canvasDirty` flag feeds
 the shared `isDirty`, so autosave, Cmd/Ctrl+S, the unsaved-changes prompt,

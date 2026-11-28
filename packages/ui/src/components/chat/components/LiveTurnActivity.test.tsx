@@ -417,7 +417,7 @@ describe('live Activity with the real message body', () => {
         expect(header?.getAttribute('aria-expanded')).toBe('true');
     });
 
-    test('counts a command run once when folding the rows before the seven-row preview', async () => {
+    test('counts exploration and execution as two rows within the seven-row preview', async () => {
         const calls: Part[] = [
             ...Array.from({ length: 7 }, (_, index): Part => ({ ...readPart, id: `read-${index}`, callID: `read-${index}` })),
             ...Array.from({ length: 30 }, (_, index): Part => ({
@@ -427,7 +427,8 @@ describe('live Activity with the real message body', () => {
         ];
         await act(async () => root.render(<Harness record={turn([assistant('progress', calls, 'tool-calls')])} />));
         const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
-        expect(header?.textContent).toContain('+1 more');
+        expect(header?.textContent).not.toContain('more');
+        expect(container.querySelectorAll('[data-command-header]')).toHaveLength(2);
     });
 
     test('draws a page the agent showed above the answer, outside the folded Activity', async () => {

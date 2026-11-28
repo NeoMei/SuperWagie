@@ -11,7 +11,7 @@ import { useSessionWorkflowRuns } from '@/lib/workflows/store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
-import { getToolMetadata } from '@/lib/toolHelpers';
+import { appToolDisplayName, getToolMetadata } from '@/lib/toolHelpers';
 import { normalizePath } from '@/lib/pathNormalization';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
@@ -58,7 +58,7 @@ const SubagentRow: React.FC<SubagentRowProps> = ({
     const tool = state.tools.get(child.id);
     return tool?.directory === toolDirectory ? tool.name : undefined;
   });
-  const toolLabel = toolName ? getToolMetadata(toolName).displayName : undefined;
+  const toolLabel = toolName ? appToolDisplayName(toolName, t) ?? getToolMetadata(toolName).displayName : undefined;
   const detail = toolLabel ? t('chat.workStatus.subagent.currentTool', { tool: toolLabel }) : undefined;
   const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
   let icon: IconName = 'time';

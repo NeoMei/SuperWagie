@@ -76,7 +76,7 @@ const createLifecycleRuntime = (warmupDirectories) => {
     waitForReady: vi.fn(async () => true),
     normalizeApiPrefix: vi.fn(() => ''),
     applyOpencodeBinaryFromSettings: vi.fn(async () => null),
-    checkOpenCodeBinary: async () => '2.0.23',
+    checkOpenCodeBinary: async () => '2.2.4',
     ensureOpencodeCliEnv: vi.fn(),
     ensureLocalOpenCodeServerPassword: vi.fn(async () => 'password'),
     resolveManagedOpenCodeLaunchSpec: vi.fn((binary) => ({ binary, args: [], wrapperType: null })),
@@ -165,10 +165,10 @@ describe('credential read through the lifecycle default directory', () => {
     lifecycle = createLifecycleRuntime([stale]);
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.0.23', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.4', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     await lifecycle.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect.poll(() => globalThis.fetch.mock.calls.some(([url]) => String(url).endsWith('/api/location'))).toBe(true);
     // The lifecycle only needs the stub while it bootstraps; `@opencode/client`
     // (used by the credential source) makes real HTTP calls to the fake
     // OpenCode above, so restore the real fetch before any credential read.
@@ -208,7 +208,7 @@ describe('credential read through the lifecycle default directory', () => {
     });
     // The stale path was never sent: the read falls back to OpenCode's own
     // working directory rather than a header that only fails.
-    expect(lifecycle.getDefaultOpenCodeDirectory()).toBeNull();
+    expect(await lifecycle.getDefaultOpenCodeDirectory()).toBeNull();
   });
 
   it('still rejects when OpenCode cannot answer the authoritative credential read', async () => {

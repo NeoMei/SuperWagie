@@ -90,6 +90,8 @@ import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
 import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
 import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
+import { isUsableDirectory } from './lib/opencode/default-directory.js';
+import { createServerCanonicalPaths } from './lib/opencode/canonical-paths.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
 import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
 import { createThemeRuntime } from './lib/opencode/theme-runtime.js';
@@ -359,6 +361,7 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   os,
   path,
   processLike: process,
+  canonicalPaths: process.platform === 'win32' ? createServerCanonicalPaths() : null,
   realpathSync: fs.realpathSync,
   readdirSync: fs.readdirSync,
   tunnelBootstrapTtlDefaultMs: TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS,
@@ -519,7 +522,6 @@ const validateDirectoryPath = (...args) => projectDirectoryRuntime.validateDirec
 const resolveProjectDirectory = (...args) => projectDirectoryRuntime.resolveProjectDirectory(...args);
 const resolveOptionalProjectDirectory = (...args) => projectDirectoryRuntime.resolveOptionalProjectDirectory(...args);
 
-let lastDirectoryTrustCheck = 0;
 const settingsRuntime = createSettingsRuntime({
   fsPromises,
   path,
@@ -529,6 +531,7 @@ const settingsRuntime = createSettingsRuntime({
   sanitizeSettingsUpdate,
   mergePersistedSettings,
   normalizeSettingsPaths,
+  refreshCanonicalPaths: settingsNormalizationRuntime.refreshCanonicalPaths,
   normalizeStringArray,
   formatSettingsResponse,
   resolveDirectoryCandidate,
@@ -555,11 +558,10 @@ const settingsRuntime = createSettingsRuntime({
   },
   // Declared further down; settings are only saved once the server serves requests.
   onLastDirectoryChanged: (directory) => {
-    const check = ++lastDirectoryTrustCheck;
-    if (!directory || isSpaceDirectory(directory)) return;
-    void openCodeTrust.isTrusted(directory).then((trusted) => {
-      if (trusted && check === lastDirectoryTrustCheck) openCodeLifecycleRuntime.noteCurrentDirectory(directory);
-    }).catch(() => {});
+    void openCodeLifecycleRuntime.noteCurrentDirectory(
+      directory && !isSpaceDirectory(directory) ? directory : null,
+      openCodeTrust.isTrusted,
+    ).catch(() => {});
   },
 });
 
@@ -1725,6 +1727,7 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   longRequestTimeoutMs: LONG_REQUEST_TIMEOUT_MS,
   getRuntime: () => ({
     openCodePort,
+    isExternalOpenCode,
     openCodeBaseUrl,
     openCodeWorkingDirectory,
     openCodeNotReadySince,
@@ -1955,7 +1958,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     // A deleted project would fail every read scoped to it, and the first entry
     // also scopes server-side reads that have no directory of their own.
     const existing = await Promise.all([...new Set(directories)].map(async (directory) => {
-      if (isSpaceDirectory(directory) || !(await fsPromises.stat(directory).catch(() => null))?.isDirectory()) return null;
+      if (isSpaceDirectory(directory) || !await isUsableDirectory(directory)) return null;
       return (await openCodeTrust.isTrusted(directory).catch(() => false)) ? directory : null;
     }));
     return existing.filter(Boolean);
@@ -2350,7 +2353,7 @@ const openChamberControlService = createOpenChamberControlService({
   notifyUser: async (input) => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     if (settings?.agentNotifyToolEnabled !== true) {
-      return { status: 403, body: { error: 'The notify tool is turned off in OpenChamber settings' } };
+      return { status: 403, body: { error: 'The notify tool is turned off in SuperWagie settings' } };
     }
     return pluginNotificationEmitter.emit(input);
   },

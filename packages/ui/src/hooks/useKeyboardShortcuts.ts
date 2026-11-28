@@ -280,7 +280,7 @@ export const useKeyboardShortcuts = () => {
       state.addRecentAgent(next);
       const sessionId = useSessionUIStore.getState().currentSessionId;
       if (sessionId) {
-        useSelectionStore.getState().saveSessionAgentSelection(sessionId, next);
+        useSelectionStore.getState().pickSessionAgent(sessionId, next);
       }
     },
     toggle_terminal: () => {
@@ -314,6 +314,9 @@ export const useKeyboardShortcuts = () => {
       const nextVariantOverride = config.cycleCurrentVariant();
       const sessionId = useSessionUIStore.getState().currentSessionId;
       const { currentAgentName, currentProviderId, currentModelId } = useConfigStore.getState();
+      if (sessionId && currentProviderId && currentModelId) {
+        useSelectionStore.getState().pickSessionModel(sessionId, currentProviderId, currentModelId);
+      }
       if (sessionId && currentAgentName && currentProviderId && currentModelId) {
         useSelectionStore.getState().saveAgentModelVariantForSession(
           sessionId,

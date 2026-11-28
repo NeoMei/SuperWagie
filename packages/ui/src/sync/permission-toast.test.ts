@@ -34,6 +34,21 @@ describe('permission needed toast', () => {
     expect(opened).toEqual([['inactive-session', '/project', 'permission-1']]);
   });
 
+  test('shows the app tool label only as a fallback for the agent message', () => {
+    const descriptions: string[] = [];
+    for (const message of [undefined, 'Allow OpenChamber in the test workspace']) {
+      showPermissionNeededToast({
+        permission: { ...permission, action: 'openchamber_secret', message },
+        directory: '/project',
+        isViewed: false,
+        pendingIds: new Set(),
+        show: (_title, options) => { descriptions.push(options.description); },
+        openSession: () => {},
+      });
+    }
+    expect(descriptions).toEqual(['Secrets', 'Allow OpenChamber in the test workspace']);
+  });
+
   test('does not show for the viewed session or duplicate a pending toast', () => {
     const shown: string[] = [];
     const show: Parameters<typeof showPermissionNeededToast>[0]['show'] = (title) => { shown.push(title); };

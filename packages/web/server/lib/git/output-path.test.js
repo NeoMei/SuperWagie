@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeGitOutputPath } from './output-path.js';
+import { normalizeGitOutputPath, resolveGitOutputPath } from './output-path.js';
 
 describe('Git filesystem output paths', () => {
   it.each([
@@ -20,6 +20,12 @@ describe('Git filesystem output paths', () => {
     ['', ''],
   ])('converts %j to %j on Windows', (input, expected) => {
     expect(normalizeGitOutputPath(input, 'win32')).toBe(expected);
+  });
+
+  it('resolves Git common directories before conflict checkout validation on Windows', () => {
+    expect(resolveGitOutputPath('D:\\temp\\pick', '/c/repos/project/.git', 'win32')).toBe('C:\\repos\\project\\.git');
+    expect(resolveGitOutputPath('C:\\repos\\project', '.git', 'win32')).toBe('C:\\repos\\project\\.git');
+    expect(resolveGitOutputPath('D:\\temp\\pick', '//server/share/repo/.git', 'win32')).toBe('\\\\server\\share\\repo\\.git');
   });
 
   it.each(['linux', 'darwin'])('preserves POSIX paths on %s', (platform) => {

@@ -22,7 +22,7 @@ afterEach(async () => {
 const worktree = '/repo/worktree with spaces';
 const projectConfig = { mcp: { projectOnly: { type: 'local', command: ['test-mcp'], enabled: false } } };
 
-async function createFixture({ timeoutMs = 1000 } = {}) {
+async function createFixture({ timeoutMs = 1000, isDirectoryOffline } = {}) {
   let bootstrap = { status: 'pending', phase: 'directory-created', error: null };
   let instance;
   const forwarded = [];
@@ -50,6 +50,7 @@ async function createFixture({ timeoutMs = 1000 } = {}) {
     fs: {}, os: {}, path,
     OPEN_CODE_READY_GRACE_MS: 0,
     WORKTREE_READY_TIMEOUT_MS: timeoutMs,
+    isDirectoryOffline,
     getRuntime: () => ({ openCodePort: new URL(upstreamUrl).port, isOpenCodeReady: true }),
     getOpenCodeAuthHeaders: () => ({}),
     buildOpenCodeUrl: (requestPath) => `${upstreamUrl}${requestPath}`,
@@ -93,6 +94,21 @@ describe('issue #3464 worktree OpenCode initialization', () => {
     fixture.setBootstrap({ status: 'ready', phase: 'setup-ready', error: null });
     expect((await response).status).toBe(200);
     expect(fixture.forwarded).toEqual(['/api/session']);
+  });
+
+  it('returns an offline checkout without reading its bootstrap state, then retries after remount', async () => {
+    let offline = true;
+    const fixture = await createFixture({ isDirectoryOffline: async (directory) => directory === worktree && offline });
+    const url = fixture.url + '/api/config?directory=' + encodeURIComponent(worktree);
+    const refused = await fetch(url);
+    expect(refused.status).toBe(503);
+    expect(await refused.json()).toMatchObject({ code: 'DIRECTORY_UNREACHABLE', directory: worktree });
+    expect(fixture.probed).toEqual([]);
+    expect(fixture.forwarded).toEqual([]);
+    offline = false;
+    fixture.setBootstrap({ status: 'ready', phase: 'setup-ready' });
+    expect((await fetch(url)).status).toBe(200);
+    expect(fixture.probed).toEqual([worktree]);
   });
 
   it('does not block unrelated directories while a worktree is pending', async () => {

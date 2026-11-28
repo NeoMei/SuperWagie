@@ -357,6 +357,8 @@ Command and operational failures use the same envelope with `ok: false` and
 an `error` object. OpenCode-level cancellation can still produce a native tool
 error state.
 
+The managed callback sends JSON whitespace once a minute while an action waits. Node fetch receives headers and body progress during long page or secret prompts. A disconnected caller cancels the action, and the plugin removes the heartbeat before returning the JSON result.
+
 ## Runtime parity
 
 - Web and Desktop managed OpenCode: injected automatically.

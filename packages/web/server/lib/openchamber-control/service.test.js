@@ -642,6 +642,14 @@ describe('OpenChamber control service', () => {
     expect(client.session.active).toHaveBeenCalledTimes(2);
   });
 
+  it('reports a cancelled session wait before polling the session', async () => {
+    const { service, client } = createService();
+    await expect(service.execute('session.messages', { sessionId: 'ses_1', wait: true }, '/repo', {
+      signal: AbortSignal.abort(),
+    })).rejects.toMatchObject({ statusCode: 499, message: 'SuperWagie action was cancelled' });
+    expect(client.session.active).not.toHaveBeenCalled();
+  });
+
   it('filters archived sessions, with the archive file over OpenCode, and adds global statuses', async () => {
     const entries = { ses_archived: 100, ses_restored: null };
     const { service, client } = createService({

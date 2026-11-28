@@ -2138,7 +2138,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       selectedFilePath: selectedFile?.path,
       loadedFilePath,
       isNonEditableBinary: selectedIsBinary,
-      wouldEmptyFile: draftContent === '' && fileContent !== '',
     })) {
       return;
     }
@@ -2171,7 +2170,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         autoSaveTimerRef.current = null;
       }
     };
-  }, [autoSaveEnabled, isCurrentSaveContext, contentDetectedBinary, draftContent, fileContent, fileLoading, isDirty, loadedFilePath, selectedFile, files.writeFile, isSaving, saveDraft]);
+  }, [autoSaveEnabled, isCurrentSaveContext, contentDetectedBinary, fileLoading, isDirty, loadedFilePath, selectedFile, files.writeFile, isSaving, saveDraft]);
 
   // Reset auto-save status when switching files
   React.useEffect(() => {

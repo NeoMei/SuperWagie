@@ -1616,6 +1616,27 @@ const AssistantMessageBody = React.memo(({
             }
             rendered = splitLiveActivity && part.type !== 'text' ? activityRendered : answerRendered;
 
+            const groupedParts = activityGroup?.members.map((member) => member.part)
+                ?? (part.type === 'tool' && isShellTool(part.tool) && isToolRowShown(part) ? [part] : null);
+            if (groupedParts) {
+                rendered.push(
+                    <FadeInOnReveal key={`tool-${part.id}`}>
+                        <CommandActivityGroup
+                            id={part.id}
+                            parts={groupedParts}
+                            isExpanded={expandedTools.has(part.id)}
+                            onToggle={onToggleTool}
+                            isMobile={isMobile}
+                            alwaysShowActions={alwaysShowMessageActions}
+                            onShowPopup={onShowPopup}
+                            animateTailText={false}
+                        />
+                    </FadeInOnReveal>
+                );
+                i++;
+                continue;
+            }
+
             if (part.type === 'text') {
                 // Text with a UI block that a collapsed Activity keeps in view
                 // is drawn outside the fold (`getShownPages`), not here too.
@@ -1737,31 +1758,13 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                if (isShellTool(toolName)) {
-                    rendered.push(
-                        <FadeInOnReveal key={`tool-${toolPart.id}`}>
-                            <CommandActivityGroup
-                                id={toolPart.id}
-                                parts={activityGroup?.kind === 'command' ? activityGroup.members.map((member) => member.part) : [toolPart]}
-                                isExpanded={expandedTools.has(toolPart.id)}
-                                onToggle={onToggleTool}
-                                isMobile={isMobile}
-                                alwaysShowActions={alwaysShowMessageActions}
-                                onShowPopup={onShowPopup}
-                                animateTailText={false}
-                            />
-                        </FadeInOnReveal>
-                    );
-                    i++;
-                    continue;
-                }
-
                 // Expandable tools: bash, edit, write, task, question — individual rows
-                if (isExpandableTool(toolName)) {
+                if (isExpandableTool(toolName) || toolPart.state.status === 'error') {
                     rendered.push(
                         <FadeInOnReveal key={`tool-${toolPart.id}`}>
                             <ToolPart
                                 part={toolPart}
+                                failureReason={toolPart.state.status === 'error' ? t('chat.toolPart.status.failed') : undefined}
                                 isExpanded={expandedTools.has(toolPart.id)}
                                 onToggle={onToggleTool}
                                 isMobile={isMobile}
@@ -1832,6 +1835,7 @@ const AssistantMessageBody = React.memo(({
         shouldShowStandaloneMessageActions,
         effectiveStreamPhase,
         showReasoningTraces,
+        t,
         slice,
         turnGroupingContext,
         visibleParts,

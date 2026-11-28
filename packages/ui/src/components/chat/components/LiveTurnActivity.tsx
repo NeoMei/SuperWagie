@@ -18,7 +18,7 @@ import { useActivityRowGlide, useLiveRowsFloor } from './useActivityRowGlide';
 import { foldContentId, finalActivityContentId, useTurnFold } from './useTurnFold';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
 import type { ShownPart } from '../lib/turns/liveActivity';
-import { getActivityGroups, isActivityContinuationOnlyMessage } from '../lib/turns/activityGroups';
+import { isActivityContinuationOnlyMessage } from '../lib/turns/activityGroups';
 import { ActivityGroupsContext } from './activityGroupsContext';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
@@ -44,7 +44,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, ke
     // Folded, a working turn shows only its latest rows (the header counts
     // the earlier ones) and a settled one shows none.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    const groups = getActivityGroups(turn.assistantMessages);
+    const groups = React.useContext(ActivityGroupsContext);
     const trim = React.useMemo(() => {
         if (expanded) return null;
         const shownBelow = keepText ? new Set(pages.map((part) => part.id)) : null;
@@ -127,7 +127,6 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, ke
     const headerClass = 'w-full justify-start normal-case !ps-px !pe-2 text-[var(--tools-description)] hover:!bg-transparent active:!bg-transparent';
     const contentId = foldContentId(turn.turnId);
     return (
-        <ActivityGroupsContext.Provider value={groups}>
         <div className="relative z-0" data-live-turn-activity={turn.turnId}>
             <div className="chat-message-column @container">
                 <div className="mt-1">
@@ -146,7 +145,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, ke
                             <div ref={rowsRef}>
                                 <ActivityRowSkipContext.Provider value={rowSkip}>
                                     {messagesAbovePages.map((message) => (
-                                        isActivityContinuationOnlyMessage(message, groups) ? null
+                                        groups && isActivityContinuationOnlyMessage(message, groups) ? null
                                             : <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
                                     ))}
                                 </ActivityRowSkipContext.Provider>
@@ -156,7 +155,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, ke
                         {messagesBelowPages.length > 0 && (isExpanded || !keepText) ? (
                             <ActivityRowSkipContext.Provider value={rowSkip}>
                                 {messagesBelowPages.map((message) => (
-                                    isActivityContinuationOnlyMessage(message, groups) ? null
+                                    groups && isActivityContinuationOnlyMessage(message, groups) ? null
                                         : <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
                                 ))}
                             </ActivityRowSkipContext.Provider>
@@ -165,7 +164,6 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, ke
                 </div>
             )}
         </div>
-        </ActivityGroupsContext.Provider>
     );
 }
 

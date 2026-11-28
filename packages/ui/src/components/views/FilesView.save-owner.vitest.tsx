@@ -612,6 +612,45 @@ test('source edits made during a save remain in the actual CodeMirror draft', as
   } finally { await view.cleanup(); }
 });
 
+test('autosave writes an emptied source file to its loaded path', async () => {
+  const view = await setup('source');
+  try {
+    expect(view.disk.get(view.a)).toBe('A');
+    await act(async () => useUIStore.setState({ autoSaveEnabled: true }));
+    await view.editSource('');
+    const timer = view.timers.slice().reverse().find((entry) => entry.delay === 1500);
+    if (!timer) throw new Error('Clearing the editor did not schedule autosave');
+    await act(async () => timer.run());
+    expect(view.writes.map(({ path, content }) => ({ path, content }))).toEqual([{ path: view.a, content: '' }]);
+    await act(async () => view.writes[0].finish.resolve({ success: true, path: view.a }));
+    expect(view.disk.get(view.a)).toBe('');
+    expect(view.container.textContent).toContain('Saved');
+  } finally { await view.cleanup(); }
+});
+
+test('an empty draft cannot autosave across a pending or failed replacement read', async () => {
+  const view = await setup('source');
+  try {
+    await act(async () => useUIStore.setState({ autoSaveEnabled: true }));
+    await view.editSource('');
+    const timer = view.timers.slice().reverse().find((entry) => entry.delay === 1500);
+    if (!timer) throw new Error('Clearing the editor did not schedule autosave');
+    const held = view.holdRead('unreadable-file');
+    await view.switchRuntime(['unreadable-file']);
+    expect(view.reads).toContainEqual({ runtime: 'unreadable-file', path: view.a });
+    await act(async () => timer.run());
+    expect(view.writes).toEqual([]);
+    await act(async () => held.reject(new Error('File read failed')));
+    await view.flush();
+    expect(view.container.textContent).toContain('File read failed');
+    for (const entry of view.timers.filter((entry) => entry.delay === 1500)) {
+      await act(async () => entry.run());
+    }
+    expect(view.writes).toEqual([]);
+    expect(view.disk.get(view.a)).toBe('A');
+  } finally { await view.cleanup(); }
+});
+
 test('native text autosave on a new runtime keeps its busy state after the old write completes', async () => {
   const view = await setup('source');
   try {

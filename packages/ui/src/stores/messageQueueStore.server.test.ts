@@ -107,6 +107,12 @@ beforeEach(() => {
 describe("server-owned message queue", () => {
   // First: the one-time upload of a legacy local queue happens before this
   // runtime is known to be server-owned, which the later hydrations establish.
+  test('a queue update keeps the selection policy for manual delivery', () => {
+    const sendConfig = { providerID: "p", modelID: "m", agent: "plan", keepSessionAgent: true, keepSessionModel: true }
+    applyMessageQueueUpdatedEvent(updated(10, session([serverItem("q1", "follow up", { sendConfig })])), "runtime-a")
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.[0]?.sendConfig).toEqual(sendConfig)
+  })
+
   test("hydrate uploads messages queued by an older build before reading the server", async () => {
     useMessageQueueStore.setState({
       queuedMessages: {

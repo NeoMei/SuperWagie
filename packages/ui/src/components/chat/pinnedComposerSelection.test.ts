@@ -8,7 +8,7 @@ const record = {
 
 describe('pinned composer selection', () => {
     test('follows the session record when nothing was picked in the composer', () => {
-        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: undefined, record })).toEqual({
+        expect(resolvePinnedComposerSelection({ modelPicked: false, agentPicked: false, savedAgent: null, savedModel: null, savedVariant: undefined, record })).toEqual({
             agent: 'build',
             model: { providerId: 'anthropic', modelId: 'claude' },
             variant: 'high',
@@ -17,6 +17,7 @@ describe('pinned composer selection', () => {
 
     test('a pick saved for the session wins over the record', () => {
         expect(resolvePinnedComposerSelection({
+            modelPicked: true, agentPicked: true,
             savedAgent: 'plan',
             savedModel: { providerId: 'openai', modelId: 'gpt' },
             savedVariant: 'low',
@@ -28,12 +29,19 @@ describe('pinned composer selection', () => {
         });
     });
 
+    test('restored values in a pinned tab yield to a newer session model and agent', () => {
+        expect(resolvePinnedComposerSelection({
+            modelPicked: false, agentPicked: false, savedAgent: 'plan',
+            savedModel: { providerId: 'old-provider', modelId: 'old-model' }, savedVariant: 'low', record,
+        })).toEqual({ agent: 'build', model: { providerId: 'anthropic', modelId: 'claude' }, variant: 'high' });
+    });
+
     test('an effort saved as Default stays Default instead of the record\'s', () => {
-        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: null, record }).variant).toBeNull();
+        expect(resolvePinnedComposerSelection({ modelPicked: true, agentPicked: false, savedAgent: null, savedModel: { providerId: 'anthropic', modelId: 'claude' }, savedVariant: null, record }).variant).toBeNull();
     });
 
     test('a session without a record or picks has no model of its own', () => {
-        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: undefined, record: undefined })).toEqual({
+        expect(resolvePinnedComposerSelection({ modelPicked: false, agentPicked: false, savedAgent: null, savedModel: null, savedVariant: undefined, record: undefined })).toEqual({
             agent: undefined,
             model: null,
             variant: undefined,

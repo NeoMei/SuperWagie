@@ -1,3 +1,4 @@
+import { DIRECTORY_UNREACHABLE, isWindowsDirectoryOffline, readProjectPath } from '../directory-reachability/index.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 
 // Browser transport percent-encodes directory hints and marks them explicitly.
@@ -20,6 +21,7 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     // or null. It runs before the path is looked at, so a refused directory is never touched and
     // never falls back to another one. The isolated-spaces host refuses `/spaces/...` with it.
     refuseDirectory = () => null,
+    isDirectoryOffline = isWindowsDirectoryOffline,
   } = dependencies;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
@@ -47,19 +49,15 @@ export const createProjectDirectoryRuntime = (dependencies) => {
       return { ok: false, error: refusal };
     }
     try {
-      const stats = await fsPromises.stat(resolved);
-      if (!stats.isDirectory()) {
-        return { ok: false, error: 'Specified path is not a directory' };
-      }
-      const realPath = await realpathCache.resolve(resolved);
-      // `requestedDirectory` is the pre-realpath candidate the caller asked
-      // for. Callers that address files in the user-visible path space (the
-      // file tree, the read-family FS routes) need it when the project root
-      // is itself a symlink and the canonical `directory` no longer contains
-      // the paths the client sends.
-      return { ok: true, directory: realPath, requestedDirectory: resolved };
+      return await readProjectPath(resolved, async () => {
+        const stats = await fsPromises.stat(resolved);
+        if (!stats.isDirectory()) return { ok: false, error: 'Specified path is not a directory' };
+        // File-tree paths are relative to the requested root, even when it is a symlink.
+        return { ok: true, directory: await realpathCache.resolve(resolved), requestedDirectory: resolved };
+      }, isDirectoryOffline);
     } catch (error) {
       const err = error;
+      if (err?.code === DIRECTORY_UNREACHABLE) return { ok: false, error: err.message };
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return { ok: false, error: 'Directory not found' };
       }

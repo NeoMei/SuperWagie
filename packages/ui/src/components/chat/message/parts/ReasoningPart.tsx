@@ -124,6 +124,7 @@ type ReasoningTimelineBlockProps = {
         icon: IconName;
         iconClassName?: string;
         title: React.ReactNode;
+        fullTitle?: string;
         expandLabel: string;
         collapseLabel: string;
         markdownVariant: MarkdownVariant;
@@ -251,6 +252,15 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     const title = presentation?.title ?? t('chat.reasoningTrace.thinking');
 
     const rowRef = React.useRef<HTMLDivElement>(null);
+    React.useLayoutEffect(() => {
+        if (!revealRequest || !reasoningMessageId) return;
+        const row = rowRef.current;
+        const box = row?.closest<HTMLElement>('[data-command-scroll]');
+        if (!box || !row) return;
+        if (box.querySelector('[data-reasoning-message-id="' + CSS.escape(reasoningMessageId) + '"]') !== row) return;
+        const top = row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+        if (top < 0 || top + row.offsetHeight > box.clientHeight) box.scrollTop += top;
+    }, [reasoningMessageId, revealRequest]);
     const handleToggle = React.useCallback(() => {
         if (!isExpanded) dispatchRowExpand(rowRef.current);
         setShouldRenderExpandedContent(true);
@@ -428,7 +438,8 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 tabIndex={0}
                 aria-expanded={isExpanded}
                 aria-controls={contentId}
-                aria-label={toggleAriaLabel}
+                aria-label={presentation?.fullTitle ? toggleAriaLabel + ' · ' + presentation.fullTitle : toggleAriaLabel}
+                title={presentation?.fullTitle}
                 className={cn(
                     'group/tool flex gap-1.5 pe-2 ps-px py-1.5 rounded-xl cursor-pointer items-center',
                 )}
@@ -460,13 +471,13 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     </div>
 
                     {isStreaming ? (
-                        <span className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: 'var(--tools-description)' }}>
-                            <span>{title}</span>
+                        <span className={cn('flex min-w-0 items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: 'var(--tools-description)' }}>
+                            <span className={presentation?.fullTitle ? 'truncate' : undefined}>{title}</span>
                             <BusyDots />
                         </span>
                     ) : (
                         <span
-                            className={TOOL_ROW_TITLE_CLASS}
+                            className={cn(TOOL_ROW_TITLE_CLASS, presentation?.fullTitle && 'truncate')}
                             style={{ color: 'var(--tools-description)' }}
                         >
                             {title}
@@ -546,7 +557,7 @@ const ReasoningPart = React.memo(({
     streamPhase,
 }: ReasoningPartProps) => {
     const expandWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
-    const revealRequest = useReasoningReveal(messageId);
+    const revealRequest = useReasoningReveal((sourceId) => sourceId === messageId);
     const rawText = part.text || '';
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = part.time;

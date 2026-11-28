@@ -1,8 +1,10 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import express from 'express';
+import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createMessageQueueRuntime, parseQueuedItemInput } from './runtime.js';
+import { createMessageQueueRuntime, parseQueuedItemInput, registerMessageQueueRoutes } from './runtime.js';
 
 const SESSION = 'ses_queue_test_1';
 const DIRECTORY = '/repo';
@@ -35,6 +37,7 @@ const createOpenCode = () => {
   const state = {
     // `/api/session/active` lists only running sessions; an absent id is idle.
     active: {},
+    sessionSelection: {},
     // Subagent sessions per parent, as `GET /api/session?parentID=` lists them.
     children: {},
     tail: [],
@@ -82,7 +85,7 @@ const createOpenCode = () => {
     if (/^\/api\/session\/[^/]+$/.test(pathname) && method === 'GET') {
       const id = decodeURIComponent(pathname.split('/').at(-1));
       const parentID = Object.keys(state.children).find((parent) => state.children[parent].includes(id));
-      return wrapped({ id, parentID });
+      return wrapped({ id, parentID, ...state.sessionSelection });
     }
     if (pathname.endsWith('/message')) return Response.json({ data: state.tail, cursor: {} });
     if (pathname.includes('/message/')) {
@@ -168,6 +171,169 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
 const settle = async (ms = 30) => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
+
+describe('queued session selection through the HTTP routes', () => {
+  const itemsUrl = `/api/message-queue/sessions/${SESSION}/items`;
+  const both = { ...item().sendConfig, keepSessionModel: true, keepSessionAgent: true };
+  const tokenProvider = 'superwagie-account-fixture-operation';
+  const servers = [];
+  const start = (options) => {
+    const fixture = createRuntime(options);
+    const app = express();
+    app.use(express.json());
+    registerMessageQueueRoutes(app, fixture.runtime);
+    fixture.runtime.start();
+    servers.push(fixture.runtime);
+    return { ...fixture, writer: request.agent(app), reader: request.agent(app) };
+  };
+  afterEach(async () => {
+    for (const runtime of servers.splice(0)) {
+      runtime.stop();
+      await runtime.flush();
+    }
+    vi.unstubAllEnvs();
+  });
+
+  const enqueue = (writer, sendConfig, extra = {}) => writer.post(itemsUrl)
+    .send({ directory: DIRECTORY, item: item({ sendConfig, ...extra }) }).expect(200);
+  const waitForDelivery = (fixture) => vi.waitFor(() => expect(fixture.promptSent).toEqual([SESSION]));
+
+  it('restores both flags and delivers a stale tab’s PDF using the current Token Key model', async () => {
+    vi.stubEnv('OPENCHAMBER_UNIHUB_MODE', 'on');
+    vi.stubEnv('OPENCHAMBER_UNIHUB_DISABLED', '0');
+    const first = start();
+    const { state } = first.openCode;
+    state.active = { [SESSION]: { type: 'running' } };
+    const pdf = { filename: 'plan.pdf', mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,AQID' };
+    const { body: added } = await enqueue(first.writer, both, { attachments: [pdf] });
+    const publicItem = { id: added.itemId, sendConfig: both };
+    expect(added.session.items[0]).toMatchObject(publicItem);
+    expect((await first.reader.get('/api/message-queue').expect(200)).body.sessions[0].items[0]).toMatchObject(publicItem);
+    expect(first.broadcasts[0].properties.session.items[0]).toMatchObject(publicItem);
+    first.runtime.stop();
+    await first.runtime.flush();
+    const archive = JSON.parse(fs.readFileSync(path.join(first.dataDir, 'message-queue.json'), 'utf8'));
+    expect(archive.version).toBe(1);
+    expect(archive.sessions[SESSION].items[0]).toMatchObject(publicItem);
+
+    const second = start({ dataDir: first.dataDir, openCode: first.openCode });
+    expect((await second.reader.get('/api/message-queue').expect(200)).body.sessions[0].items[0]).toMatchObject(publicItem);
+    state.sessionSelection = { model: { providerID: tokenProvider, id: both.modelID, variant: 'high' }, agent: 'plan' };
+    state.models = [
+      { providerID: both.providerID, modelID: both.modelID, capabilities: { input: ['pdf'] } },
+      { providerID: tokenProvider, modelID: both.modelID, capabilities: { input: ['text'] } },
+    ];
+    state.active = {};
+    second.emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await waitForDelivery(second);
+    const sessionRead = first.openCode.fetchImpl.mock.calls.find(([url]) => new URL(url).pathname === `/api/session/${SESSION}`);
+    expect(new URL(sessionRead[0]).searchParams.get('directory')).toBe(DIRECTORY);
+    expect(state.switched).toEqual([]);
+    expect(state.writes).toHaveLength(1);
+    expect(state.sent).toEqual([{ path: `/api/session/${SESSION}/prompt`, body: {
+      id: expect.stringMatching(/^msg_/), text: `follow up\n\n[plan.pdf](<${state.writes[0].target}>)`,
+    } }]);
+    expect((await second.reader.get('/api/message-queue').expect(200)).body.sessions).toEqual([]);
+  });
+
+  it.each([
+    { flags: { keepSessionModel: true }, writes: [{ agent: 'build' }] },
+    { flags: { keepSessionAgent: true }, writes: [{ model: { providerID: 'anthropic', id: 'claude' } }] },
+  ])('applies only the explicit selection with $flags on a command', async ({ flags, writes }) => {
+    const fixture = start();
+    const { state } = fixture.openCode;
+    state.sessionSelection = { model: { providerID: 'local', id: 'new' }, agent: 'plan' };
+    state.commands = [{ name: 'review' }];
+    const { body: added } = await enqueue(fixture.writer, { ...item().sendConfig, ...flags }, { text: '/review changes' });
+    expect(added.session.items[0].sendConfig).toEqual({ ...item().sendConfig, ...flags });
+    await waitForDelivery(fixture);
+    expect(state.switched.map(({ body }) => body)).toEqual(writes);
+    expect(state.sent).toEqual([{ path: `/api/session/${SESSION}/command`, body: { name: 'review', text: 'changes' } }]);
+  });
+
+  it('keeps a v1 item with no flags explicit after restart', async () => {
+    const dataDir = makeDataDir();
+    const stored = { id: 'queued-old', createdAt: 1, ...item() };
+    fs.writeFileSync(path.join(dataDir, 'message-queue.json'), JSON.stringify({
+      version: 1, revision: 1, sessions: { [SESSION]: { directory: DIRECTORY, items: [stored] } },
+    }));
+    const fixture = start({ dataDir });
+    fixture.openCode.state.sessionSelection = { model: { id: 'new', providerID: 'other' }, agent: 'plan' };
+    await waitForDelivery(fixture);
+    expect(fixture.openCode.state.switched.map(({ body }) => body)).toEqual([
+      { model: { id: 'claude', providerID: 'anthropic' } }, { agent: 'build' },
+    ]);
+    expect(fixture.openCode.state.sent).toHaveLength(1);
+  });
+
+  it.each(['unihub', 'llmrouter', tokenProvider])('replaces a retired %s session model in standalone mode', async (providerID) => {
+    vi.stubEnv('OPENCHAMBER_UNIHUB_DISABLED', '1');
+    const fixture = start();
+    fixture.openCode.state.sessionSelection = { model: { providerID, id: 'old' }, agent: 'plan' };
+    await enqueue(fixture.writer, both);
+    await waitForDelivery(fixture);
+    expect(fixture.openCode.state.switched.map(({ body }) => body)).toEqual([{ model: { id: 'claude', providerID: 'anthropic' } }]);
+  });
+
+  it('initializes missing selections from the queued item', async () => {
+    const fixture = start();
+    await enqueue(fixture.writer, both);
+    await waitForDelivery(fixture);
+    expect(fixture.openCode.state.switched.map(({ body }) => body)).toEqual([
+      { model: { id: 'claude', providerID: 'anthropic' } }, { agent: 'build' },
+    ]);
+  });
+
+  it.each([
+    { label: 'another session', selection: { id: 'ses_other' }, config: both },
+    { label: 'an incomplete model', selection: { model: { providerID: 'local' } }, config: both },
+    { label: 'two retired providers', selection: { model: { providerID: 'llmrouter', id: 'old' } }, config: { ...both, providerID: tokenProvider } },
+  ])('allows another client to take the intact item after reading $label', async ({ selection, config }) => {
+    vi.stubEnv('OPENCHAMBER_UNIHUB_DISABLED', '1');
+    const backoff = vi.fn(() => 60_000);
+    const fixture = start({ retryDelayMs: backoff });
+    fixture.openCode.state.sessionSelection = selection;
+    const { body: added } = await enqueue(fixture.writer, config);
+    await vi.waitFor(() => expect(backoff).toHaveBeenCalled());
+    const { body: taken } = await fixture.reader.post(`${itemsUrl}/${added.itemId}/take`).expect(200);
+    expect(taken.item.sendConfig).toEqual(config);
+    expect(fixture.openCode.state.switched).toEqual([]);
+    expect(fixture.openCode.state.sent).toEqual([]);
+  });
+
+  it.each([undefined, 'build'])('routes Auto with the current agent and a classifier override of %s', async (override) => {
+    const model = { providerID: 'custom', id: 'routed' };
+    const resolveAutoSelection = vi.fn(async ({ agent }) => ({ model, agent: override ?? agent }));
+    const fixture = start({ resolveAutoSelection });
+    fixture.openCode.state.sessionSelection = { agent: 'plan', model: { providerID: 'other', id: 'current' } };
+    await enqueue(fixture.writer, { providerID: 'openchamber', modelID: 'auto', agent: 'build', keepSessionAgent: true });
+    await waitForDelivery(fixture);
+    expect(resolveAutoSelection).toHaveBeenCalledWith(expect.objectContaining({ agent: 'plan' }));
+    expect(fixture.openCode.state.switched.map(({ body }) => body)).toEqual(override ? [{ model }, { agent: override }] : [{ model }]);
+  });
+
+  it.each(['cancel', 'retry'])('keeps the item available for %s when the session read fails', async (action) => {
+    // Keep the retry behind a controlled clock until the second client has read the item.
+    let clock = Date.now();
+    const backoff = vi.fn(() => 60_000);
+    const fixture = start({ now: () => clock, retryDelayMs: backoff });
+    const { state } = fixture.openCode;
+    state.failNext = new RegExp(`/api/session/${SESSION}$`);
+    const { body: added } = await enqueue(fixture.writer, both);
+    await vi.waitFor(() => expect(backoff).toHaveBeenCalled());
+    expect(state.switched).toEqual([]);
+    expect(state.sent).toEqual([]);
+    expect((await fixture.reader.get('/api/message-queue').expect(200)).body.sessions[0].items[0].sendConfig).toEqual(both);
+    state.sessionSelection = { model: { providerID: 'local', id: 'new' }, agent: 'plan' };
+    if (action === 'cancel') await fixture.reader.delete(`${itemsUrl}/${added.itemId}`).expect(200);
+    clock += 60_000;
+    fixture.emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    if (action === 'retry') await waitForDelivery(fixture);
+    expect(state.switched).toEqual([]);
+    expect(state.sent).toHaveLength(action === 'retry' ? 1 : 0);
+    expect((await fixture.reader.get('/api/message-queue').expect(200)).body.sessions).toEqual([]);
+  });
+});
 
 describe('scheduled task items', () => {
   const scheduled = (projectId = 'project-1', overrides = {}) => item({

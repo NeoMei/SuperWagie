@@ -116,9 +116,10 @@ describe('work.name', () => {
 
     it('leaves any other branch alone, and says it did when one was passed', async () => {
       const { namer, renamePlaceholderBranch } = placeholderSetup({ placeholder: false });
+      const branchNote = 'Only a placeholder branch SuperWagie generated is renamed here; this one stays as it is.';
       expect(await namer.name({ sessionId: 'wt', title: 'Task' })).toEqual({ task: 'worktree', title: 'Task', named: true });
-      expect(await namer.name({ sessionId: 'wt', title: 'Task', branch: 'fix/x' })).toMatchObject({ named: true, branchRenamed: false });
-      expect(await namer.name({ sessionId: 'main', title: 'Task', branch: 'fix/x' })).toMatchObject({ task: 'session', branchRenamed: false });
+      expect(await namer.name({ sessionId: 'wt', title: 'Task', branch: 'fix/x' })).toMatchObject({ named: true, branchRenamed: false, branchNote });
+      expect(await namer.name({ sessionId: 'main', title: 'Task', branch: 'fix/x' })).toMatchObject({ task: 'session', branchRenamed: false, branchNote });
       expect(renamePlaceholderBranch).not.toHaveBeenCalled();
     });
   });

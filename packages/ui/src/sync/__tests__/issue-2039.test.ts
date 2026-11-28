@@ -321,6 +321,7 @@ mock.module("../sync-refs", () => ({
   getSyncMessages: () => [],
   getSyncParts: () => [],
   getAllSyncSessions: () => [],
+  getAllSyncSessionMap: () => new Map(),
   getSyncSessionDirectory: (sessionId: string) => sessionDirectoryRegistry.get(sessionId) ?? null,
   registerSessionDirectory: (sessionId: string, directory: string) => {
     sessionDirectoryRegistry.set(sessionId, directory)

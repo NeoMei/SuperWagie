@@ -11,6 +11,8 @@ and execution state.
 
 ## Invariants
 
+- Code Mode script details preserve the original source, including outer whitespace. The one-line activity preview trims its own text.
+
 - Ordinary message reads, pins and existence checks remain session-strict.
 - Shell summaries inspect a bounded command string without executing it or
   reading output. Inferred labels contain only action categories or validated

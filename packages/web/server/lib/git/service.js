@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { simpleGit } from 'simple-git';
 import { createSerialRefresh } from './serial-refresh.js';
+import { createIntegratePublisher } from './integrate-publish.js';
 import { stripAppImageLauncherEnv } from '../inherited-env.js';
 import fs from 'fs';
 import path from 'path';
@@ -12,7 +13,7 @@ import crypto from 'node:crypto';
 import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/shared.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
-import { normalizeGitOutputPath } from './output-path.js';
+import { normalizeGitOutputPath, resolveGitOutputPath } from './output-path.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { randomUUID } from 'crypto';
@@ -1604,25 +1605,6 @@ const normalizeIntegratePath = (value, fieldName) => {
 
 const runGitOk = (result) => Boolean(result?.success);
 
-const listGitWorktreesForIntegrate = async (repoRoot) => {
-  const out = await runGitCommandOrThrow(repoRoot, ['worktree', 'list', '--porcelain'], 'Failed to list git worktrees');
-  const entries = [];
-  let current = null;
-  for (const line of String(out.stdout || '').split(/\r?\n/)) {
-    if (line.startsWith('worktree ')) {
-      if (current) entries.push(current);
-      current = { path: line.slice('worktree '.length).trim(), branchRef: null };
-      continue;
-    }
-    if (!current) continue;
-    if (line.startsWith('branch ')) {
-      current.branchRef = line.slice('branch '.length).trim();
-    }
-  }
-  if (current) entries.push(current);
-  return entries.filter((entry) => Boolean(entry.path));
-};
-
 const ensureLocalIntegrateBranch = async (repoRoot, candidate) => {
   const raw = normalizeIntegrateBranch(candidate, 'targetBranch');
   if (raw === 'HEAD') {
@@ -1676,33 +1658,40 @@ export async function computeIntegratePlan(input = {}) {
   return { repoRoot, sourceBranch, targetBranch, commits };
 }
 
-const createIntegrateTempWorktree = async (repoRoot, targetBranch) => {
-  const tmpParent = path.join(os.homedir(), '.config', 'openchamber', 'tmp');
-  await fsp.mkdir(tmpParent, { recursive: true });
-  const tmpDir = await fsp.mkdtemp(path.join(tmpParent, 'oc-integrate-'));
+const integratePublisher = createIntegratePublisher({
+  runGit: async (cwd, args, env) => runGitCommand(cwd, args, { env: { ...(await buildGitEnv(cwd)), GIT_ALLOW_PROTOCOL: 'file', ...env } }),
+  runGitOrThrow: runGitCommandOrThrow,
+});
+const integrateTempParent = () => path.join(os.homedir(), '.config', 'openchamber', 'tmp');
+const integrateBaseRef = (branch) => `refs/worktree/openchamber-integrate/base/${branch}`;
+const INTEGRATE_READY_REF = 'refs/worktree/openchamber-integrate/ready';
+
+const removeIntegrateTempWorktree = async (repoRoot, tmpDir, force = false) => {
+  await runGitCommandOrThrow(repoRoot, ['worktree', 'remove', ...(force ? ['--force'] : []), tmpDir], `Failed to remove the temporary checkout at ${tmpDir}`);
+};
+
+const createIntegrateTempWorktree = async (repoRoot, targetBranch, base) => {
+  await fsp.mkdir(integrateTempParent(), { recursive: true });
+  const tmpDir = await fsp.mkdtemp(path.join(integrateTempParent(), 'oc-integrate-'));
   try {
-    await runGitCommandOrThrow(repoRoot, ['worktree', 'add', '--force', tmpDir, targetBranch], 'Failed to create temp worktree');
+    await runGitCommandOrThrow(repoRoot, ['worktree', 'add', '--detach', tmpDir, base], 'Failed to create temp worktree');
+  } catch (error) {
+    await fsp.rmdir(tmpDir).catch(() => undefined);
+    throw error;
+  }
+  try {
+    await runGitCommandOrThrow(tmpDir, ['update-ref', integrateBaseRef(targetBranch), base], 'Failed to record the integration base');
     return tmpDir;
   } catch (error) {
-    await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    await removeIntegrateTempWorktree(repoRoot, tmpDir);
     throw error;
   }
 };
 
-const removeIntegrateTempWorktree = async (repoRoot, tmpDir) => {
-  await runGitCommand(repoRoot, ['worktree', 'remove', '--force', tmpDir]).catch(() => undefined);
-  await runGitCommand(repoRoot, ['worktree', 'prune']).catch(() => undefined);
-};
-
-const maybeFastForwardIntegrateUpstream = async (tmpDir) => {
-  const upstream = await runGitCommand(tmpDir, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
-  const upstreamRef = gitStdoutText(upstream);
-  if (!upstreamRef) {
-    return;
-  }
-  const ff = await runGitCommand(tmpDir, ['merge', '--ff-only', upstreamRef]);
-  if (!runGitOk(ff)) {
-    throw new Error(gitStderrText(ff) || 'Fast-forward failed');
+const maybeFastForwardIntegrateUpstream = async (tmpDir, targetBranch) => {
+  const upstream = await runGitCommand(tmpDir, ['rev-parse', '--verify', '--quiet', `${targetBranch}@{upstream}`]);
+  if (upstream.success) {
+    await runGitCommandOrThrow(tmpDir, ['merge', '--ff-only', gitStdoutText(upstream)], 'Fast-forward failed');
   }
 };
 
@@ -1730,32 +1719,82 @@ export async function getIntegrateConflictDetails(tmpDir) {
 export async function isCherryPickInProgress(tmpDir) {
   const target = normalizeIntegratePath(tmpDir, 'tempWorktreePath');
   const head = await runGitCommand(target, ['rev-parse', '--verify', '--quiet', 'CHERRY_PICK_HEAD']);
-  return { inProgress: runGitOk(head) };
+  if (head.success) return { inProgress: true };
+  const ready = await runGitCommand(target, ['rev-parse', '--verify', '--quiet', INTEGRATE_READY_REF]);
+  return { inProgress: ready.success };
 }
 
-const computeCleanIntegrateWorktreesToSync = async ({ repoRoot, targetBranch, excludePaths }) => {
-  const targetRef = `refs/heads/${targetBranch}`;
-  const exclude = new Set(excludePaths);
-  const entries = await listGitWorktreesForIntegrate(repoRoot);
-  const candidates = entries
-    .filter((entry) => entry.branchRef === targetRef)
-    .map((entry) => entry.path)
-    .filter((candidate) => candidate && !exclude.has(candidate));
-
-  const clean = [];
-  for (const candidate of candidates) {
-    const status = await runGitCommand(candidate, ['status', '--porcelain']);
-    if (!gitStdoutText(status)) {
-      clean.push(candidate);
-    }
+// Conflict state is stored by existing clients. Never use its old list of
+// clean worktrees to choose a checkout to write or reset.
+const verifyIntegrateTempWorktree = async ({ repoRoot, tempWorktreePath }) => {
+  const [checkout, parent] = await Promise.all([fsp.realpath(tempWorktreePath), fsp.realpath(integrateTempParent())]);
+  if (path.dirname(checkout) !== parent || !/^oc-integrate-[a-zA-Z0-9]{6}$/.test(path.basename(checkout))) {
+    throw new Error('Expected an integration temporary worktree');
   }
-  return clean;
+  const common = async (cwd) => {
+    const result = await runGitCommandOrThrow(cwd, ['rev-parse', '--git-common-dir'], 'Failed to identify integration repository');
+    return fsp.realpath(resolveGitOutputPath(cwd, gitStdoutText(result)));
+  };
+  if (await common(repoRoot) !== await common(checkout)) throw new Error('Integration checkout belongs to another repository');
 };
 
-const syncCleanIntegrateTargetWorktrees = async (paths) => {
-  for (const target of paths) {
-    await runGitCommand(target, ['reset', '--hard']).catch(() => undefined);
+const readIntegrateBase = async ({ tempWorktreePath: tmpDir, targetBranch, currentCommit }) => {
+  const baseRef = integrateBaseRef(targetBranch);
+  const head = await runGitCommand(tmpDir, ['symbolic-ref', '--quiet', 'HEAD']);
+  if (head.exitCode === 1) {
+    return gitStdoutText(await runGitCommandOrThrow(tmpDir, ['rev-parse', '--verify', baseRef], 'Missing integration base'));
   }
+
+  // Older versions picked directly on the target. The checkout's own HEAD
+  // reflog identifies the commit its conflicted index was built on, even if
+  // another holder has since advanced the shared branch.
+  const picking = await runGitCommand(tmpDir, ['rev-parse', '--verify', 'CHERRY_PICK_HEAD']);
+  if (!head.success || gitStdoutText(head) !== `refs/heads/${targetBranch}` || !picking.success
+    || !gitStdoutText(picking).startsWith(currentCommit.toLowerCase())) {
+    throw new Error(`Cannot identify the old conflict. Inspect the checkout at ${tmpDir} before continuing.`);
+  }
+  const log = await runGitCommandOrThrow(tmpDir, ['reflog', 'show', '-1', '--format=%H', 'HEAD'], 'Missing checkout HEAD reflog');
+  const base = gitStdoutText(log);
+  if (!base || await integratePublisher.branchTip(tmpDir, targetBranch) !== base) {
+    throw new Error(`The old integration base cannot be confirmed. Inspect the conflict checkout at ${tmpDir}.`);
+  }
+  await runGitCommandOrThrow(tmpDir, ['update-ref', baseRef, base], 'Failed to record the old integration base');
+  await runGitCommandOrThrow(tmpDir, ['update-ref', '--no-deref', 'HEAD', base, base], 'The old target moved. The conflict checkout has been kept.');
+  return base;
+};
+
+const finishIntegrate = async ({ repoRoot, targetBranch, tempWorktreePath: tmpDir }, base, moved, { continuing = false, readyResult } = {}) => {
+  const result = gitStdoutText(await runGitCommandOrThrow(tmpDir, ['rev-parse', '--verify', 'HEAD'], 'Failed to read integrated commit'));
+  if (readyResult && readyResult !== result) {
+    throw new Error(`The resolved checkout at ${tmpDir} moved. Its earlier integrated commit is ${readyResult}.`);
+  }
+  if (continuing && !readyResult) {
+    // A refused publish may be retried without replaying an already resolved pick.
+    await runGitCommandOrThrow(tmpDir, ['update-ref', INTEGRATE_READY_REF, result], 'Failed to record the resolved integration');
+  }
+  try {
+    await integratePublisher.publish(repoRoot, targetBranch, base, tmpDir, result);
+  } catch (error) {
+    const branch = `openchamber/integrate-recovery-${path.basename(tmpDir)}-${result.slice(0, 12)}`;
+    const saved = await runGitCommand(tmpDir, ['branch', '--no-track', branch, result]);
+    if (!saved.success && await integratePublisher.branchTip(tmpDir, branch).catch(() => '') !== result) {
+      throw new Error(`${error.message} The integrated commit ${result} is kept in ${tmpDir}. Could not create recovery branch ${branch}.`);
+    }
+    if (!continuing) {
+      try {
+        await removeIntegrateTempWorktree(repoRoot, tmpDir);
+      } catch {
+        throw new Error(`${error.message} Integrated commits are on local recovery branch ${branch}. Inspect the remaining checkout at ${tmpDir}.`);
+      }
+    }
+    throw new Error(`${error.message} Integrated commits are on local recovery branch ${branch}.`);
+  }
+  try {
+    await removeIntegrateTempWorktree(repoRoot, tmpDir);
+  } catch (error) {
+    console.warn(`Integrated commits into ${targetBranch}. Temporary checkout remains at ${tmpDir}:`, error.message);
+  }
+  return { kind: 'success', moved };
 };
 
 const normalizeIntegratePlan = async (plan = {}) => {
@@ -1771,9 +1810,7 @@ const normalizeIntegrateState = (state = {}) => ({
   tempWorktreePath: normalizeIntegratePath(state.tempWorktreePath, 'tempWorktreePath'),
   sourceBranch: normalizeIntegrateBranch(state.sourceBranch, 'sourceBranch'),
   targetBranch: normalizeIntegrateBranch(state.targetBranch, 'targetBranch'),
-  cleanTargetWorktrees: Array.isArray(state.cleanTargetWorktrees)
-    ? state.cleanTargetWorktrees.map((entry) => normalizeIntegratePath(entry, 'cleanTargetWorktree'))
-    : [],
+  cleanTargetWorktrees: [],
   remainingCommits: Array.isArray(state.remainingCommits) ? state.remainingCommits.map(normalizeIntegrateSha) : [],
   currentCommit: normalizeIntegrateSha(state.currentCommit),
 });
@@ -1785,24 +1822,18 @@ export async function integrateWorktreeCommits(inputPlan = {}) {
     return { kind: 'noop', reason: 'No commits to move' };
   }
 
-  const tmpDir = await createIntegrateTempWorktree(plan.repoRoot, plan.targetBranch);
-  let cleanTargetWorktrees = [];
-  let remaining = [];
+  await integratePublisher.holderOf(plan.repoRoot, plan.targetBranch);
+  const base = await integratePublisher.branchTip(plan.repoRoot, plan.targetBranch);
+  const tmpDir = await createIntegrateTempWorktree(plan.repoRoot, plan.targetBranch, base);
   try {
-    await maybeFastForwardIntegrateUpstream(tmpDir);
+    await maybeFastForwardIntegrateUpstream(tmpDir, plan.targetBranch);
 
-    const clean = await runGitCommand(tmpDir, ['status', '--porcelain']);
+    const clean = await runGitCommandOrThrow(tmpDir, ['status', '--porcelain'], 'Failed to inspect the temporary checkout');
     if (gitStdoutText(clean)) {
       throw new Error('Target branch has local changes; abort integration and retry');
     }
 
-    cleanTargetWorktrees = await computeCleanIntegrateWorktreesToSync({
-      repoRoot: plan.repoRoot,
-      targetBranch: plan.targetBranch,
-      excludePaths: [tmpDir],
-    }).catch(() => []);
-
-    remaining = [...plan.commits];
+    const remaining = [...plan.commits];
     while (remaining.length > 0) {
       const sha = remaining[0];
       const pick = await runGitCommand(tmpDir, ['cherry-pick', sha]);
@@ -1822,7 +1853,7 @@ export async function integrateWorktreeCommits(inputPlan = {}) {
             tempWorktreePath: tmpDir,
             sourceBranch: plan.sourceBranch,
             targetBranch: plan.targetBranch,
-            cleanTargetWorktrees,
+            cleanTargetWorktrees: [],
             remainingCommits: remaining,
             currentCommit: sha,
           },
@@ -1832,27 +1863,35 @@ export async function integrateWorktreeCommits(inputPlan = {}) {
 
       throw new Error(gitStderrText(pick) || 'Cherry-pick failed');
     }
-
-    await removeIntegrateTempWorktree(plan.repoRoot, tmpDir);
-    await syncCleanIntegrateTargetWorktrees(cleanTargetWorktrees).catch(() => undefined);
-    return { kind: 'success', moved: plan.commits.length };
   } catch (error) {
     await removeIntegrateTempWorktree(plan.repoRoot, tmpDir).catch(() => undefined);
     throw error;
   }
+  return finishIntegrate({ ...plan, tempWorktreePath: tmpDir }, base, plan.commits.length);
 }
 
 /** @public */
 export async function abortIntegrate(stateInput = {}) {
   const state = normalizeIntegrateState(stateInput);
-  await runGitCommand(state.tempWorktreePath, ['cherry-pick', '--abort']).catch(() => undefined);
-  await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath);
+  try {
+    await verifyIntegrateTempWorktree(state);
+  } catch (error) {
+    if (error?.code === 'ENOENT' && error.path === state.tempWorktreePath) return { success: true };
+    throw error;
+  }
+  await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath, true);
   return { success: true };
 }
 
 /** @public */
 export async function continueIntegrate(stateInput = {}) {
   const state = normalizeIntegrateState(stateInput);
+  await verifyIntegrateTempWorktree(state);
+  const base = await readIntegrateBase(state);
+  const ready = await runGitCommand(state.tempWorktreePath, ['rev-parse', '--verify', '--quiet', INTEGRATE_READY_REF]);
+  if (ready.success) {
+    return finishIntegrate(state, base, state.remainingCommits.length, { continuing: true, readyResult: gitStdoutText(ready) });
+  }
   const cont = await runGitCommand(state.tempWorktreePath, ['cherry-pick', '--continue']);
   if (!runGitOk(cont)) {
     const unmerged = await runGitCommand(state.tempWorktreePath, ['diff', '--name-only', '--diff-filter=U']);
@@ -1892,9 +1931,7 @@ export async function continueIntegrate(stateInput = {}) {
     throw new Error(gitStderrText(pick) || 'Cherry-pick failed');
   }
 
-  await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath);
-  await syncCleanIntegrateTargetWorktrees(state.cleanTargetWorktrees).catch(() => undefined);
-  return { kind: 'success', moved: state.remainingCommits.length };
+  return finishIntegrate(state, base, state.remainingCommits.length, { continuing: true });
 }
 
 const ensureOpenCodeProjectId = async (primaryWorktree) => {

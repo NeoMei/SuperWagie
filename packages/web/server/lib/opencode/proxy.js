@@ -10,6 +10,7 @@ import {
   PROXY_CLIENT_CREDENTIAL_HEADERS,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
+import { directoryUnreachableError, isWindowsDirectoryOffline } from '../directory-reachability/index.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
 import { createOpenCodeRequestReadiness, markUnforwardedPrompt } from './request-readiness.js';
@@ -198,7 +199,7 @@ const createOpenCodeProxyAgentResolver = (resolveTarget) => {
   };
 };
 
-export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
+export const createDirectoryQueryCanonicalizer = ({ realpath, isDirectoryOffline = isWindowsDirectoryOffline, ...cacheOptions } = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
 
   return async (requestUrl) => {
@@ -212,6 +213,7 @@ export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } 
       return requestUrl;
     }
 
+    if (await isDirectoryOffline(directory)) return requestUrl;
     const canonicalDirectory = await realpathCache.resolve(directory);
     if (!canonicalDirectory || canonicalDirectory === directory) {
       return requestUrl;
@@ -415,6 +417,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     SESSION_UPSTREAM_TIMEOUT_MS: sessionUpstreamTimeoutOverrideMs,
     getSseUpstreamStallTimeoutMs = () => SSE_UPSTREAM_STALL_TIMEOUT_MS,
     readWorktreeBootstrapStatus = getWorktreeBootstrapStatus,
+    isDirectoryOffline = isWindowsDirectoryOffline,
     WORKTREE_READY_TIMEOUT_MS = 5 * 60 * 1000,
     waitForWorktreeRemovalToSettle = waitForWorktreeRemoval,
     WORKTREE_REMOVAL_HOLD_MS = 60 * 1000,
@@ -557,7 +560,9 @@ export const registerOpenCodeProxy = (app, deps) => {
     return isProxyTimeoutError(error) ? 504 : 503;
   };
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
+  const isLocalDirectoryOffline = (directory) => !getRuntime().isExternalOpenCode && isDirectoryOffline(directory);
   const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
+    isDirectoryOffline: isLocalDirectoryOffline,
     realpath: fs?.promises?.realpath?.bind(fs.promises),
   });
 
@@ -1002,6 +1007,10 @@ export const registerOpenCodeProxy = (app, deps) => {
   const waitForCheckout = async (directory, req, res) => {
     const checked = prepared.get(req) || new Set();
     if (checked.has(directory)) return null;
+    if (await isLocalDirectoryOffline(directory)) {
+      const { code, message } = directoryUnreachableError(directory);
+      return { status: 503, body: { code, error: message, directory } };
+    }
     const deadline = Date.now() + WORKTREE_READY_TIMEOUT_MS;
     while (!abandoned(req, res)) {
       const status = await readWorktreeBootstrapStatus(directory);

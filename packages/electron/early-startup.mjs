@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { createShellEnvironmentLoader } from './shell-environment.mjs';
 import { isSplashColor } from './remote-page-policy.mjs';
 import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
+import { WINDOWS_REGISTRY_PATH_KEYS, expandWindowsEnvReferences, parseWindowsRegistryPath, windowsRegistryPathQuery } from '@openchamber/web/server/lib/opencode/windows-registry-path.js';
 import { APP_NAME, DEEP_LINK_PROTOCOL } from './branding.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -584,33 +585,23 @@ const execFileAsync = promisify(execFile);
 // Registry reads run while the splash is painting. Keep them asynchronous so
 // a slow or unavailable Windows registry helper cannot hold Chromium's first
 // frame on the logo.
-const queryWindowsRegistryValue = async (key, name) => {
-  let stdout;
+const readWindowsRegistryPath = async (key) => {
+  const { command, args } = windowsRegistryPathQuery(key);
   try {
-    ({ stdout } = await execFileAsync('reg.exe', ['query', key, '/v', name], {
+    const { stdout } = await execFileAsync(command, args, {
       encoding: 'utf8',
       windowsHide: true,
       timeout: 10_000,
-    }));
+      signal: shellEnvironmentAbort.signal,
+    });
+    return parseWindowsRegistryPath(stdout).value;
   } catch {
     return '';
   }
-  const line = String(stdout || '')
-    .split(/\r?\n/)
-    .map((entry) => entry.trim())
-    .find((entry) => entry.toLowerCase().startsWith(name.toLowerCase()));
-  if (!line) return '';
-  const match = line.match(/^\S+\s+REG_\S+\s+(.+)$/);
-  return match?.[1]?.trim() || '';
 };
 
-const expandWindowsEnvRefs = (value) => String(value || '').replace(/%([^%]+)%/g, (_match, key) => process.env[key] || '');
-
 const loadWindowsEnv = async () => {
-  const [machinePath, userPath] = await Promise.all([
-    queryWindowsRegistryValue('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'Path'),
-    queryWindowsRegistryValue('HKCU\\Environment', 'Path'),
-  ]);
+  const registryPaths = await Promise.all(WINDOWS_REGISTRY_PATH_KEYS.map(readWindowsRegistryPath));
   const homeDir = os.homedir();
   const localAppData = process.env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local');
   const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
@@ -623,9 +614,9 @@ const loadWindowsEnv = async () => {
     path.join(appData, 'npm'),
   ];
   return {
-    PATH: [machinePath, userPath, process.env.PATH, ...commonPaths]
-      .map(expandWindowsEnvRefs)
+    PATH: [...registryPaths, process.env.PATH, ...commonPaths]
       .filter(Boolean)
+      .map(expandWindowsEnvReferences)
       .join(path.delimiter),
   };
 };

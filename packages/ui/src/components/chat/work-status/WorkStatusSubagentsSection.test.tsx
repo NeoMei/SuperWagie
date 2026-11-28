@@ -111,11 +111,14 @@ describe('subagent status rows', () => {
     expect(row().getAttribute('aria-label')).toContain('Failed');
   });
 
-  test('shows the current child tool after execution starts and hides it at settlement', async () => {
+  test.each([
+    ['shell', 'Shell Command'],
+    ['openchamber_secret', 'Secrets'],
+  ])('shows %s during execution and hides it at settlement', async (name, label) => {
     const data = { sessionID: child.id, assistantMessageID: 'assistant', id: 'call' };
     const base = { id: 'evt_tool', created: 100, durable: { aggregateID: child.id, seq: 1, version: 1 as const } };
     const opening = translateWireEvent({
-      ...base, type: 'session.tool.input.started', data: { ...data, name: 'shell' },
+      ...base, type: 'session.tool.input.started', data: { ...data, name },
     });
     const starting = translateWireEvent({
       ...base, type: 'session.tool.called', data: { ...data, executed: true, input: { command: 'private-command' } },
@@ -129,19 +132,19 @@ describe('subagent status rows', () => {
     });
     await publish({ session_status: { child: { type: 'busy' } } });
     await act(async () => applyGlobalSessionStatusEvents(directory, opening));
-    expect(rowContent().textContent).not.toContain('Shell Command');
+    expect(rowContent().textContent).not.toContain(label);
     row().focus();
     await act(async () => applyGlobalSessionStatusEvents(directory, starting));
-    expect(rowContent().textContent).toContain('Shell Command');
+    expect(rowContent().textContent).toContain(label);
     expect(document.activeElement === row()).toBe(true);
     expect(rowContent().textContent).toContain('$0.25');
     expect(rowContent().textContent).not.toContain('private-command');
     await publish({ form: { child: [childForm] } });
-    expect(rowContent().textContent).not.toContain('Shell Command');
+    expect(rowContent().textContent).not.toContain(label);
     await publish({ form: {} });
-    expect(rowContent().textContent).toContain('Shell Command');
+    expect(rowContent().textContent).toContain(label);
     await act(async () => applyGlobalSessionStatusEvents(directory, settling));
-    expect(rowContent().textContent).not.toContain('Shell Command');
+    expect(rowContent().textContent).not.toContain(label);
   });
 
   test('keeps the other child tool visible when parallel work settles', async () => {

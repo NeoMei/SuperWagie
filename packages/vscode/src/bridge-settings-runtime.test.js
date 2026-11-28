@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
+import * as os from 'os';
 import path from 'node:path';
 
 mock.module('vscode', () => ({
+  ColorThemeKind: { Light: 1, HighContrastLight: 4 },
+  window: { activeColorTheme: { kind: 1 } },
   workspace: {
     workspaceFolders: [],
     getConfiguration: () => ({ get: () => undefined }),
@@ -16,7 +18,10 @@ const scratchConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vsc
 process.env.XDG_CONFIG_HOME = path.join(scratchConfigRoot, 'xdg');
 process.env.OPENCODE_CONFIG_DIR = '';
 
-const { fetchOpenCodeSkillsFromApi } = await import('./bridge-settings-runtime.ts');
+const home = spyOn(os, 'homedir').mockReturnValue(scratchConfigRoot);
+const { fetchOpenCodeSkillsFromApi, persistSettings, readSettings } = await import('./bridge-settings-runtime.ts');
+home.mockRestore();
+afterAll(() => fs.rmSync(scratchConfigRoot, { recursive: true, force: true }));
 
 const originalFetch = globalThis.fetch;
 
@@ -42,6 +47,43 @@ const stubSkillListResponse = (data) => {
   globalThis.fetch = fetchMock;
   return fetchMock;
 };
+
+test('settings reads retain projects while the shared file is unreadable and writes wait for recovery', async () => {
+  const directory = path.join(scratchConfigRoot, '.config', 'openchamber');
+  const file = path.join(directory, 'settings.json');
+  const profile = path.join(directory, 'preferences.json');
+  const saved = { projects: [{ id: 'project', path: '/one' }], activeProjectId: 'project' };
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(file, '{');
+  const globalState = { get: () => ({ fontSize: 112 }), update: mock(async () => {}) };
+  const ctx = { context: { globalState } };
+  expect(() => readSettings()).toThrow();
+  expect(readSettings(ctx).fontSize).toBe(112);
+  expect(fs.existsSync(profile)).toBe(false);
+  await expect(persistSettings({ fontSize: 130 }, ctx)).rejects.toThrow();
+  expect(globalState.update).not.toHaveBeenCalled();
+  fs.writeFileSync(file, JSON.stringify({ ...saved, fontSize: 115 }));
+  expect(readSettings(ctx)).toMatchObject({ ...saved, fontSize: 115 });
+  const profileBefore = fs.readFileSync(profile, 'utf8');
+  fs.writeFileSync(file, '[]');
+  const cached = readSettings(ctx);
+  expect(cached).toMatchObject(saved);
+  cached.projects.length = 0;
+  expect(readSettings(ctx).projects).toEqual(saved.projects);
+  await expect(persistSettings({ fontSize: 130 }, ctx)).rejects.toThrow();
+  expect(fs.readFileSync(file, 'utf8')).toBe('[]');
+  expect(fs.readFileSync(profile, 'utf8')).toBe(profileBefore);
+  fs.writeFileSync(file, JSON.stringify({ ...saved, customInstanceKey: 'recovered' }));
+  await persistSettings({ fontSize: 130 }, ctx);
+  expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({ ...saved, customInstanceKey: 'recovered' });
+  expect(readSettings(ctx).fontSize).toBe(130);
+  expect(globalState.update).toHaveBeenCalledTimes(1);
+  fs.unlinkSync(file);
+  expect(readSettings().projects).toEqual(saved.projects);
+  expect(fs.existsSync(file)).toBe(false);
+  await persistSettings({ fontSize: 135 }, ctx);
+  expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({ ...saved, customInstanceKey: 'recovered' });
+});
 
 describe('fetchOpenCodeSkillsFromApi payload mapping', () => {
   test('reads the v2 `path` field, keeps the v1 `location` fallback, and drops unlocated items', async () => {

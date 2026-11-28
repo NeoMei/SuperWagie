@@ -159,6 +159,8 @@ type SelectionState = {
   sessionFollowedAgents: Map<string, string>;
   sessionFollowedModels: Map<string, string>;
   getSessionModelSelection: () => { providerId: string; modelId: string } | null;
+  pickSessionAgent: (sessionId: string, agentName: string) => void;
+  getSessionAgentPick: (sessionId: string) => string | undefined;
   getSessionAgentSelection: (sessionId: string) => string | null;
   followSessionAgent: (sessionId: string, agent: string) => boolean;
   isSessionModelSwitched: (sessionId: string, model: string) => boolean;
@@ -182,6 +184,8 @@ const useSelectionStore = create<SelectionState>((set, get) => ({
   pendingModels: new Map(),
   pickSessionModel: (sessionId, providerId, modelId) => set((state) => ({ pendingModels: new Map(state.pendingModels).set(sessionId, { providerId, modelId }) })),
   getSessionModelPick: (sessionId) => get().pendingModels.get(sessionId) ?? null,
+  pickSessionAgent: (sessionId, agentName) => get().saveSessionAgentSelection(sessionId, agentName),
+  getSessionAgentPick: () => undefined,
   sessionAgentSelections: new Map([[SESSION_ID, AGENT]]),
   sessionFollowedAgents: new Map(),
   sessionFollowedModels: new Map(),
@@ -917,6 +921,7 @@ describe('ModelControls effort restore', () => {
         const defaultButton = Array.from(dom.container.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Default');
         await act(async () => defaultButton?.click());
         expect(saveVariant.mock.calls.at(-1)).toEqual([btwSessionId, 'plan', PROVIDER_ID, MODEL_ID, null]);
+        expect(selections.getSessionModelPick(btwSessionId)).toEqual({ providerId: PROVIDER_ID, modelId: MODEL_ID });
         const config = useConfigStore.getState();
         expect([config.currentProviderId, config.currentModelId, config.currentAgentName, config.currentVariant])
           .toEqual(['main-provider', 'main-model', AGENT, 'low']);
@@ -1037,14 +1042,14 @@ describe('ModelControls effort restore', () => {
       providers: [{ ...provider, models: [model, ...[OTHER_MODEL_ID, THIRD_MODEL_ID].map((id) => ({ ...model, id, name: id }))] }],
     });
 
-    test('a model switch made elsewhere wins over a model picked here, an unchanged record does not', async () => {
+    test('a live session record outranks a restored manual model without a pending pick', async () => {
       withModels();
-      // The picker holds a model the session has not been sent with yet.
+      // Only the saved preference remains after a reload.
       useConfigStore.setState({ selectionSource: 'manual' });
       setSessionRecord(recordWith(OTHER_MODEL_ID));
       const { cleanup } = await renderModelControls();
       try {
-        expect(useConfigStore.getState().currentModelId).toBe(MODEL_ID);
+        expect(useConfigStore.getState().currentModelId).toBe(OTHER_MODEL_ID);
 
         await act(async () => setSessionRecord(recordWith(THIRD_MODEL_ID)));
         expect(useConfigStore.getState().currentModelId).toBe(THIRD_MODEL_ID);

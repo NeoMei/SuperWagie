@@ -70,7 +70,7 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, co
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
     const firstLine = getQueuedMessagePreview(message);
-    const capturedAgentName = message.sendConfig?.agent;
+    const capturedAgentName = message.sendConfig?.keepSessionAgent ? undefined : message.sendConfig?.agent;
     const attachmentCount = message.attachments?.length ?? 0;
     // `[image-1.png]` citations of the message's own files read as file chips.
     const attachmentFilenames = React.useMemo(

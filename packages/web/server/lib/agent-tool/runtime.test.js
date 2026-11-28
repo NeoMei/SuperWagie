@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import express from 'express';
+import compression from 'compression';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -105,6 +106,63 @@ describe('agent tool action allowlist', () => {
 });
 
 describe('managed agent tool runtime', () => {
+  it('answers a waiting call before the answer and reports a lost connection', async () => {
+    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' } });
+    const { runtime, dataDir } = await createRuntime({
+      keepAliveMs: 100,
+      resolveSessionDirectory: async () => '/repo',
+      executeAction: (...args) => service.execute(...args),
+    });
+    const prepared = await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true });
+    const tools = await loadTools(dataDir, 'render-keep-alive');
+    const app = express();
+    app.use(compression({ threshold: 1024 }));
+    runtime.registerRoutes(app, express);
+    const server = await new Promise((resolve) => {
+      const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+    });
+    vi.stubEnv('OPENCHAMBER_AGENT_TOOL_URL', `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`);
+    vi.stubEnv('OPENCHAMBER_AGENT_TOOL_TOKEN', prepared.OPENCHAMBER_AGENT_TOOL_TOKEN);
+    const ask = (id) => tools.openchamber_render.execute(
+      { action: 'render.page', parameters: { html: '<p>Pick</p>', title: 'Pick a layout', awaitAnswer: true } },
+      { sessionID: 'ses_caller', id, signal: new AbortController().signal, progress: async () => {} },
+    );
+    // The plugin reads the body itself, so a copy of each response shows what reached it while it waits.
+    const realFetch = globalThis.fetch;
+    const bodies = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (...args) => {
+      const response = await realFetch(...args);
+      const body = { encoding: response.headers.get('content-encoding'), text: '' };
+      bodies.push(body);
+      void (async () => {
+        const decoder = new TextDecoder();
+        for await (const chunk of response.clone().body) body.text += decoder.decode(chunk);
+      })().catch(() => {});
+      return response;
+    });
+    try {
+      const answered = ask('call_1');
+      // Node's fetch ends a request after five minutes without headers, or without a body chunk after them.
+      await vi.waitFor(() => expect(bodies[0]?.text.length).toBeGreaterThan(1), { timeout: 4000 });
+      expect(bodies[0]).toMatchObject({ encoding: null, text: expect.stringMatching(/^ +$/) });
+      service.answerPage({ sessionId: 'ses_caller', callId: 'call_1', summary: 'Layout B' });
+      const result = await answered;
+      expect(result.content.startsWith('{')).toBe(true);
+      expect(JSON.parse(result.content)).toMatchObject({ ok: true, data: { answer: { answered: true, summary: 'Layout B' } } });
+
+      const lost = ask('call_2');
+      await vi.waitFor(() => expect(bodies[1]?.text).toMatch(/^ +$/), { timeout: 4000 });
+      server.closeAllConnections();
+      const lostResult = JSON.parse((await lost).content);
+      expect(lostResult).toMatchObject({ ok: false, error: { kind: 'runtime' } });
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+      server.closeAllConnections();
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it('rejects a stale note replacement from a second session without a write or event', async () => {
     const owner = createProjectIdFromPath('/repo');
     const onChanged = vi.fn();
@@ -1012,7 +1070,7 @@ describe('managed agent tool runtime', () => {
   it('forwards cancellation to the shared control service', async () => {
     const executeAction = vi.fn(async (_action, _input, _directory, options) => {
       await new Promise((resolve, reject) => {
-        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('OpenChamber action was cancelled'), { statusCode: 499 })), { once: true });
+        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('SuperWagie action was cancelled'), { statusCode: 499 })), { once: true });
       });
     });
     const { runtime } = await createRuntime({ executeAction });
@@ -1024,7 +1082,7 @@ describe('managed agent tool runtime', () => {
     await expect(pending).resolves.toEqual(expect.objectContaining({
       ok: false,
       action: 'projects.list',
-      error: { message: 'OpenChamber action was cancelled', kind: 'runtime' },
+      error: { message: 'SuperWagie action was cancelled', kind: 'runtime' },
     }));
     expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, undefined, { signal: controller.signal });
   });
@@ -1034,7 +1092,7 @@ describe('managed agent tool runtime', () => {
     // ends the action itself when the event stream reports the cancel.
     const executeAction = vi.fn(async (_action, _input, _directory, options) => {
       await new Promise((resolve, reject) => {
-        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('OpenChamber action was cancelled'), { statusCode: 499 })), { once: true });
+        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('SuperWagie action was cancelled'), { statusCode: 499 })), { once: true });
       });
     });
     const { runtime } = await createRuntime({ executeAction });
@@ -1058,7 +1116,7 @@ describe('managed agent tool runtime', () => {
 
     expect(runtime.abortSession('ses_cancel')).toBe(1);
     const response = await pending;
-    expect(response.body).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ message: 'OpenChamber action was cancelled' }) }));
+    expect(response.body).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ message: 'SuperWagie action was cancelled' }) }));
 
     // The other session's action is untouched until it is told otherwise.
     expect(runtime.abortSession('ses_other')).toBe(1);

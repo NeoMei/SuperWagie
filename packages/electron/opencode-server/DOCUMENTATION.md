@@ -23,6 +23,8 @@ The web server owns starting and stopping it. `lib/opencode/env-runtime.js` reso
 - The staged natives match the target platform and architecture, not the build host's: Windows arm64 builds on x64 and macOS x64 on arm64. `verify-opencode-server.mjs` reads every native file's header to prove it.
 - The bundle carries the JavaScript of the Claude Agent SDK, at the version `@opencode/core` names as its optional peer, so OpenCode's Claude Agent provider works. The SDK's platform package (a Claude Code binary) stays out: the provider runs the user's `claude`.
 
+On Windows, deleting a watched project can make Node send its absolute folder name in a continuous stream of change events. Before OpenCode loads, the bundled server wraps `fs.watch` to close that handle on its first absolute-name event. Relative names still reach the listener, and watches using other encodings retain their original behavior. This wrapper runs only in the bundled Node server.
+
 ## Decisions
 
 ### Why a script on Electron's Node and not OpenCode's CLI binary
