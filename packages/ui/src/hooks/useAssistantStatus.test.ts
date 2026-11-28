@@ -306,6 +306,11 @@ describe('createParsedStatus', () => {
         const servers = ['linear', 'claude_in_chrome', 'claude', 'my.server'];
         const statusWith = (parts: Part[]) => english(createParsedStatus(parts, 'ses_1:msg_1', servers).status);
 
+        test('uses the localized app tool name when there is no specific activity phrase', () => {
+            expect(statusWith([tool('1', 'openchamber_library')])).toBe('using Knowledge library');
+            expect(statusWith([script('openchamber_workflow_answer')])).toBe('using Workflow answer');
+        });
+
         test('the opencode namespace says what OpenCode does to itself', () => {
             expect(statusWith([script('opencode_session_rename')])).toBe('renaming the session');
             expect(statusWith([script('opencode_worktree_list')])).toBe('checking worktrees');

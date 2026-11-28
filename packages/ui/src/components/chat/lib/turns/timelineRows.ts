@@ -1,7 +1,7 @@
 import { isHiddenUserMessage } from '../../message/hiddenUserMessage';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
 import { answerChunkCuts } from './answerChunks';
-import { getActivityGroups, isActivityContinuationOnlyMessage, isActivityGroupContinuation, type ActivityGroups } from './activityGroups';
+import { getActivityGroups, isActivityContinuationOnlyMessage, isActivityGroupContinuation, type ActivityGroups, type ReasoningMode } from './activityGroups';
 import { getLiveFinalMessage, getShownPages, hasLiveActivity } from './liveActivity';
 import type { TimelineEntry } from './timelineEntries';
 import type { ChatMessageEntry } from './types';
@@ -45,12 +45,16 @@ export type TimelineRow =
         messageId: string;
         /** Original messages drawn entirely by a group in this row. */
         messageAliases?: readonly string[];
+        /** Search can target a thought here even if its source owns a separate answer row. */
+        reasoningSources?: readonly string[];
         slice: MessageSlice | null;
         /** The turn's final answer under a fold (collapsed activity mode). */
         final: boolean;
     } & TurnRowFields);
 
 type TurnRowFields = {
+    reasoningMode: ReasoningMode;
+    liveActivity: boolean;
     entry: TurnEntry;
     /**
      * The turn's work folds (collapsed activity mode): its rows draw the
@@ -67,6 +71,8 @@ type TurnRowFields = {
 
 export type TimelineRowsOptions = {
     collapsedActivity: boolean;
+    collapsibleThinkingBlocks?: boolean;
+    working?: boolean;
     keepActivityText?: boolean;
     expandedTurns: ReadonlyMap<string, boolean>;
     showReasoningTraces: boolean;
@@ -129,21 +135,26 @@ const attachGroupMessageAliases = (rows: TimelineRow[], groups: ActivityGroups):
         const owner = rowsByMessage.get(first.message.info.id)?.find((row) => rowContainsPart(row, first.message, first.part.id));
         if (!owner) continue;
         const aliases = new Set(owner.messageAliases);
-        for (const { message } of group.members) {
-            if (!rowsByMessage.has(message.info.id) && isActivityContinuationOnlyMessage(message, groups)) aliases.add(message.info.id);
+        const reasoningSources = new Set(owner.reasoningSources);
+        for (const { message, part } of group.members) {
+            if (part.type === 'reasoning') reasoningSources.add(message.info.id);
+            if (!rowsByMessage.has(message.info.id) && !aliases.has(message.info.id) && isActivityContinuationOnlyMessage(message, groups)) aliases.add(message.info.id);
         }
+        if (reasoningSources.size > 0) owner.reasoningSources = [...reasoningSources];
         if (aliases.size > 0) owner.messageAliases = [...aliases];
     }
 };
 
 const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[] => {
     const { turn } = entry;
-    const groups = getActivityGroups(turn.assistantMessages);
+    const reasoningMode: ReasoningMode = !options.showReasoningTraces ? 'hidden' : options.collapsibleThinkingBlocks === false ? 'plain' : 'group';
+    const liveActivity = entry.isLastTurn && options.working === true && !getLiveFinalMessage(turn.assistantMessages);
+    const groups = getActivityGroups(turn.assistantMessages, reasoningMode, liveActivity);
     const underFold = options.collapsedActivity && hasLiveActivity(turn, options.showReasoningTraces);
     const finalMessage = underFold ? getLiveFinalMessage(turn.assistantMessages) : undefined;
     const expanded = options.expandedTurns.get(turn.turnId) === true;
     const keepText = underFold && !expanded && options.keepActivityText === true;
-    const fields = { entry, underFold, keepText, finalMessageId: finalMessage?.info.id, gapBelow: false };
+    const fields = { entry, reasoningMode, liveActivity, underFold, keepText, finalMessageId: finalMessage?.info.id, gapBelow: false };
     const rows: TimelineRow[] = [{ kind: 'turn-head', key: entry.key, ...fields }];
     const addMessage = (message: ChatMessageEntry, final = false) => {
         if (isActivityContinuationOnlyMessage(message, groups)) return;
@@ -207,9 +218,12 @@ const isSameSlice = (previous: MessageSlice | null, next: MessageSlice | null): 
 const isSameRow = (previous: TimelineRow, next: TimelineRow): boolean => {
     if (previous.kind !== next.kind || previous.entry !== next.entry) return false;
     if (previous.kind === 'ungrouped' || next.kind === 'ungrouped') return true;
+    if (previous.reasoningMode !== next.reasoningMode || previous.liveActivity !== next.liveActivity) return false;
     if (previous.gapBelow !== next.gapBelow || previous.underFold !== next.underFold || previous.keepText !== next.keepText || previous.finalMessageId !== next.finalMessageId) return false;
     if (previous.kind === 'turn-message' && next.kind === 'turn-message') {
         return previous.messageId === next.messageId && previous.final === next.final && isSameSlice(previous.slice, next.slice)
+            && previous.reasoningSources?.length === next.reasoningSources?.length
+            && (previous.reasoningSources?.every((id, index) => id === next.reasoningSources?.[index]) ?? true)
             && previous.messageAliases?.length === next.messageAliases?.length
             && (previous.messageAliases?.every((id, index) => id === next.messageAliases?.[index]) ?? true);
     }

@@ -24,13 +24,13 @@ const assistant = (id: string, parts: Part[]): ChatMessageEntry => {
     return { info, parts };
 };
 
-const rowsOf = (messages: ChatMessageEntry[], prompt = 'Explain'): TimelineRow[] => {
+const rowsOf = (messages: ChatMessageEntry[], prompt = 'Explain', collapsibleThinkingBlocks = true): TimelineRow[] => {
     const turn = projectTurnRecords([
         { info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 } }, parts: prompt ? [text('prompt', prompt)] : [] },
         ...messages,
     ]).turns[0]!;
     const entry: TimelineEntry = { kind: 'turn', key: `turn:${turn.turnId}`, turn, isLastTurn: true };
-    return buildTimelineRows([entry], { collapsedActivity: false, expandedTurns: new Map(), showReasoningTraces: true }, []);
+    return buildTimelineRows([entry], { collapsedActivity: false, collapsibleThinkingBlocks, expandedTurns: new Map(), showReasoningTraces: true }, []);
 };
 
 const messageRow = (rows: TimelineRow[], messageId: string) => rows.find((row) => row.kind === 'turn-message' && row.messageId === messageId)!;
@@ -43,21 +43,21 @@ test('a tool step is one line, and reasoning the model kept to itself adds nothi
     expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(36);
 });
 
-test('reasoning shown and each tool add a line', () => {
+test('a folded exploration phase estimates one header', () => {
     const rows = rowsOf([
         assistant('step', [reasoning('thought', 'Looking at the file first.'), tool('read', 'read'), tool('grep', 'grep')]),
         assistant('answer', [text('done', 'Done.')]),
     ]);
-    expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(108);
+    expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(36);
 });
 
-test('each upstream reasoning part and one command group estimate their own header', () => {
-    const rows = rowsOf([
+test('grouped reasoning estimates one header and plain reasoning retains its paragraphs', () => {
+    const messages = [
         assistant('step', [reasoning('r1', 'First thought'), reasoning('r2', 'Second thought'), tool('s1', 'shell'), tool('s2', 'shell')]),
         assistant('answer', [text('done', 'Done.')]),
-    ]);
-    expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(108);
-    const plain = estimateTimelineRowSize(messageRow(rows, 'step'), { ...metrics, collapsibleThinkingBlocks: false });
+    ];
+    expect(estimateTimelineRowSize(messageRow(rowsOf(messages), 'step'), metrics)).toBe(36);
+    const plain = estimateTimelineRowSize(messageRow(rowsOf(messages, 'Explain', false), 'step'), { ...metrics, collapsibleThinkingBlocks: false });
     expect(plain).toBe(112);
 });
 
@@ -65,6 +65,7 @@ test('a patch across many files grows with the rows of files it lists', () => {
     const files = (count: number) => ({ files: Array.from({ length: count }, (_, index) => ({ filePath: `/f${index}.ts` })) });
     const rows = rowsOf([
         assistant('one', [tool('p1', 'patch', files(1))]),
+        assistant('note', [text('note', 'Another change')]),
         assistant('many', [tool('p15', 'patch', files(15))]),
         assistant('answer', [text('done', 'Done.')]),
     ]);
@@ -93,12 +94,12 @@ test('nothing is estimated before the column has a width', () => {
 });
 
 test('reasoning drawn as text when thinking blocks do not fold', () => {
-    const rows = rowsOf([
+    const messages = [
         assistant('step', [reasoning('thought', 'Thinking it through. '.repeat(40)), tool('shell', 'shell')]),
         assistant('answer', [text('done', 'Done.')]),
-    ]);
-    const folded = estimateTimelineRowSize(messageRow(rows, 'step'), metrics)!;
-    const open = estimateTimelineRowSize(messageRow(rows, 'step'), { ...metrics, collapsibleThinkingBlocks: false })!;
-    expect(folded).toBe(72);
+    ];
+    const folded = estimateTimelineRowSize(messageRow(rowsOf(messages), 'step'), metrics)!;
+    const open = estimateTimelineRowSize(messageRow(rowsOf(messages, 'Explain', false), 'step'), { ...metrics, collapsibleThinkingBlocks: false })!;
+    expect(folded).toBe(36);
     expect(open).toBeGreaterThan(400);
 });

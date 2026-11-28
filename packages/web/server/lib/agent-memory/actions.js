@@ -249,7 +249,7 @@ export const createAgentMemoryActions = (dependencies) => {
         enabled = false;
       }
       if (!enabled) {
-        return fail('Agent memory is switched off in OpenChamber settings', 403);
+        return fail('Agent memory is switched off in SuperWagie settings', 403);
       }
     }
 

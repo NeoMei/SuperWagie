@@ -2350,7 +2350,7 @@ const openChamberControlService = createOpenChamberControlService({
   notifyUser: async (input) => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     if (settings?.agentNotifyToolEnabled !== true) {
-      return { status: 403, body: { error: 'The notify tool is turned off in OpenChamber settings' } };
+      return { status: 403, body: { error: 'The notify tool is turned off in SuperWagie settings' } };
     }
     return pluginNotificationEmitter.emit(input);
   },

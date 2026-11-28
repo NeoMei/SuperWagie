@@ -13,6 +13,7 @@ import { getVisiblePermissionPatterns } from './permissionCardPatterns';
 import { permissionFilePreviewsSchema } from './permissionFilePreviews';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo, type ShortcutActionId } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
+import { appToolDisplayName } from '@/lib/toolHelpers';
 import { toolFileDiffs } from '@/lib/opencode/tools';
 import { getPermissionToolPresentation, getToolDisplayName } from './permissionToolPresentation';
 import { canSavePermission, describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission, type PermissionTarget } from './permissionSummary';
@@ -318,7 +319,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
 
         <div className="mb-2">
           <div className="typography-meta font-medium text-foreground">
-            {summary.tool ? t(summary.titleKey, { tool: summary.tool }) : t(summary.titleKey)}
+            {summary.tool ? t(summary.titleKey, { tool: appToolDisplayName(summary.tool, t) ?? summary.tool }) : t(summary.titleKey)}
             {summary.scope ? (
               <span className="font-normal text-muted-foreground"> {t('chat.permissionCard.summary.inPath', { path: formatPathForDisplay(summary.scope, homeDirectory) })}</span>
             ) : null}
@@ -456,7 +457,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({ permission, onRe
   const { t } = useI18n();
   const { isResponding, hasResponded, respond } = usePermissionResponse(permission, onResponse);
   const isFromSubagent = usePermissionFromSubagent(permission);
-  const tool = getPermissionToolPresentation(permission);
+  const tool = getPermissionToolPresentation(permission, t);
 
   if (hasResponded) {
     return null;

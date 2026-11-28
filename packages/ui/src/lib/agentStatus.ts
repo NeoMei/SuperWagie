@@ -1,3 +1,4 @@
+import { appToolDisplayName } from '@/lib/toolHelpers';
 import type { I18nKey, I18nParams, Locale } from '@/lib/i18n';
 
 /**
@@ -9,7 +10,7 @@ export type AgentStatus = {
   key: I18nKey;
   /** Parallel calls of one kind, for a counted phrase (`*.count`). */
   count?: number;
-  /** A tool or integration nobody described, read as words. */
+  /** Wire name of a tool or integration without a more specific status. */
   name?: string;
   /** The reasoning part behind "thinking", which keys its occasional joke. */
   seed?: string;
@@ -41,7 +42,10 @@ export const formatAgentStatusPhrase = (t: Translate, locale: Locale, status: Ag
   const raw = t(status.key);
   const counted = status.count === undefined ? raw : applyPlural(raw, status.count, locale);
   // A function, so `$&` or `$$` in a tool's name stay as written.
-  return counted.replace(/\{name\}/g, () => status.name ?? '');
+  return counted.replace(/\{name\}/g, () => {
+    const name = status.name ?? '';
+    return appToolDisplayName(name, t) ?? name.replace(/[_-]+/g, ' ').trim();
+  });
 };
 
 /**

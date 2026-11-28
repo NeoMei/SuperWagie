@@ -1,9 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 
+import { dict as zh } from '@/lib/i18n/messages/zh-CN';
 import type { JsonValue } from '@/lib/opencode/model';
-import { hasOpenChamberView, parseOpenChamberEnvelope, secretRowView, sessionsListedSchema, tightestWindow } from './openChamberToolEnvelope';
+import { appToolErrorText, hasOpenChamberView, parseOpenChamberEnvelope, secretRowView, sessionsListedSchema, tightestWindow } from './openChamberToolEnvelope';
 
 const envelope = (body: { [key: string]: JsonValue }) => JSON.stringify({ schemaVersion: 1, ...body });
+
+test('only known service errors get display copy and a recorded branch name stays literal', () => {
+  const label = (message: string) => appToolErrorText(message, key => zh[key]);
+  expect(label('OpenChamber action was cancelled')).toBe(label('SuperWagie action was cancelled'));
+  expect(label('OpenChamber action was cancelled')).toBe('操作已取消');
+  expect(label('Third-party error in /tmp/OpenChamber')).toBe('Third-party error in /tmp/OpenChamber');
+  const prefix = "This worktree's branch `feature/OpenChamber` is a placeholder ";
+  const suffix = ' generated, and it is not pushed. Call work.name again. Nothing was named yet.';
+  expect(label(prefix + 'OpenChamber' + suffix)).toBe(prefix + 'SuperWagie' + suffix);
+});
 
 describe('parseOpenChamberEnvelope', () => {
   test('reads the envelope as the tool answers it, and once more quoted, as an execute script can return it', () => {

@@ -8,7 +8,7 @@ import { MinDurationShineText } from './MinDurationShineText';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Text } from '@/components/ui/text';
 import { getToolIcon } from './toolPresentation';
-import { getToolMetadata, isImageFile } from '@/lib/toolHelpers';
+import { appToolDisplayName, getToolMetadata, isImageFile } from '@/lib/toolHelpers';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
@@ -252,7 +252,7 @@ const StaticToolRowInner: React.FC<{
     // name OpenCode reported, which every activity in the group carries.
     const firstPart = activities[0]?.part;
     const presentation = useGuestToolPresentation(firstPart?.type === 'tool' ? firstPart.tool : null);
-    const displayName = presentation?.name ?? getToolMetadata(toolName).displayName;
+    const displayName = presentation?.name ?? appToolDisplayName(toolName, t) ?? getToolMetadata(toolName).displayName;
     const icon = getToolIcon(toolName, presentation);
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);

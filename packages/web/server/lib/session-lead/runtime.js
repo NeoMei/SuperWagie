@@ -93,7 +93,7 @@ export const createSessionLead = ({
   };
 
   const requireAvailable = async () => {
-    if (!await isEnabled()) throw error('Leads need the managed OpenCode runtime and the OpenChamber control tool', 501);
+    if (!await isEnabled()) throw error('Leads need the managed OpenCode runtime and the SuperWagie control tool', 501);
   };
   const requireSession = async (id) => {
     const session = await readSession(parse(idSchema, id));

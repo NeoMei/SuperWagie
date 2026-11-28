@@ -44,6 +44,14 @@ const fixture = async () => {
 };
 
 describe('session lead', () => {
+  it('explains why a Lead tool call is unavailable before reading the session', async () => {
+    const { deps, readSession } = await fixture();
+    const lead = createSessionLead({ ...deps, isEnabled: async () => false });
+    await expect(lead.executeTool('lead.brief', {}, '/repo', { contextSessionId: 'ses_lead' }))
+      .rejects.toMatchObject({ statusCode: 501, message: 'Leads need the managed OpenCode runtime and the SuperWagie control tool' });
+    expect(readSession).not.toHaveBeenCalled();
+  });
+
   it('persists brief edits across runtime recreation and writes bounded digest into metadata', async () => {
     const { tool, deps, sessions } = await fixture();
     const digest = { needsYou: [{ question: 'Ship?', options: ['Yes', 'Wait'], recommended: 'Wait' }], now: ['Checking'], news: [], suggestions: ['Update docs'] };

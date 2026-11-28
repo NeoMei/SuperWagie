@@ -8,7 +8,7 @@ import { fenceUiBlocks } from '../../uiBlocks/taggedBlocks';
 import { BlockBody } from './BlockLine';
 import { FormMarkdown } from '../../FormMarkdown';
 import { MessageFilesDisplay } from '../../FileAttachment';
-import { getToolMetadata } from '@/lib/toolHelpers';
+import { appToolDisplayName, getToolMetadata } from '@/lib/toolHelpers';
 import type { FilePart, Metadata, Part, ToolInput, ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@/lib/opencode/model';
 import { toolDisplayStyles } from '@/lib/typography';
 import { HighlightedCode } from '@/components/code/HighlightedCode';
@@ -119,7 +119,7 @@ import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { OpenChamberToolOutput } from './OpenChamberToolOutput';
 import { OpencodeToolOutput } from './OpencodeToolOutput';
 import { opencodeCallSucceeded, opencodeToolVerb, parseOpencodeToolResult } from './opencodeToolResult';
-import { hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope, secretRowView } from './openChamberToolEnvelope';
+import { appToolErrorText, hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope, secretRowView } from './openChamberToolEnvelope';
 import { Field, QuietAction } from './ToolResultParts';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
@@ -152,7 +152,7 @@ interface ToolPartProps {
     alwaysShowActions?: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
     animateTailText?: boolean;
-    /** Why a failed row failed, shown while it stays collapsed. Only `!command` rows pass one. */
+    /** Failure detail or status shown beside the collapsed tool title. */
     failureReason?: string;
 }
 
@@ -497,11 +497,11 @@ const describeTool = (described: ToolDescription | null, currentDirectory: strin
             const counts = new Map<string, number>();
             const add = (label: string, count: number) => counts.set(label, (counts.get(label) ?? 0) + count);
             for (const { name, count, completed, actions } of described.calls) {
+                const localName = namespace && name.toLowerCase().startsWith(`${namespace}.`) ? name.slice(namespace.length + 1) : name;
                 const opencode = opencodeToolVerb(name);
                 if (opencode) add(completed ? t(opencode.key) : opencode.tool, count);
                 else if (isOpenChamberTool(name) && namespace && actions.length > 0) actions.forEach(({ action, count: times }) => add(action, times));
-                else if (isOpenChamberTool(name)) add(getToolMetadata(name).displayName, count);
-                else add(namespace && name.toLowerCase().startsWith(`${namespace}.`) ? name.slice(namespace.length + 1) : name, count);
+                else add(appToolDisplayName(localName, t, true) ?? localName, count);
             }
             const named = [...counts]
                 .map(([name, count]) => (count > 1 ? `${name} \u00d7${count}` : name))
@@ -518,12 +518,18 @@ const describeTool = (described: ToolDescription | null, currentDirectory: strin
  * since both show the same list side by side.
  */
 const toolDisplayName = (toolName: string, t: DescriptionTranslate): string => (
-    isTodoWriteTool(toolName) ? t('chat.workStatus.section.tasks') : getToolMetadata(toolName).displayName
+    appToolDisplayName(toolName, t) ?? (isTodoWriteTool(toolName) ? t('chat.workStatus.section.tasks')
+        : getToolMetadata(normalizeToolName(toolName) || 'tool').displayName)
 );
 
 const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string, t: DescriptionTranslate, namespace?: string): string => {
     const stateWithData = state as ToolStateWithMetadata;
-    return describeTool(toolDescription(part.tool, stateWithData.input, stateWithData.metadata), currentDirectory, t, namespace);
+    const description = toolDescription(part.tool, stateWithData.input, stateWithData.metadata);
+    // Before Code Mode reports its calls, the description is a preview of the script.
+    if (isExecuteTool(part.tool) && description?.kind === 'text' && /openchamber/i.test(description.value)) {
+        return t('chat.toolPart.appTool.general');
+    }
+    return describeTool(description, currentDirectory, t, namespace);
 };
 
 /**
@@ -1614,7 +1620,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 return renderScrollableBlock(
                     <div className="space-y-1.5">
                         <div className="typography-meta whitespace-pre-wrap break-words" style={{ color: 'var(--status-error)' }}>
-                            {openChamberEnvelope.errorMessage}
+                            {appToolErrorText(openChamberEnvelope.errorMessage, t)}
                         </div>
                         {showRaw}
                     </div>
@@ -1660,6 +1666,16 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         );
     };
 
+    const scriptBlock = executeCode ? renderScrollableBlock(
+        <HighlightedCode
+            language="javascript"
+            code={executeCode}
+            style={TOOL_COLLAPSED_CUSTOM_STYLE}
+            codeStyle={CODE_TAG_PROPS.style}
+            wrap
+        />,
+        { maxHeightClass: 'max-h-60', className: 'tool-input-surface' },
+    ) : null;
     const hasVisibleOutput = outputString.trim().length > 0;
     const shouldRenderResult = (state.status === 'completed' && 'output' in state)
         || (isShellTool(part.tool) && hasVisibleOutput);
@@ -1672,16 +1688,12 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 <>
                     {isExecute ? (
                         <div className="space-y-2">
-                            {executeCode ? renderScrollableBlock(
-                                <HighlightedCode
-                                    language="javascript"
-                                    code={executeCode}
-                                    style={TOOL_COLLAPSED_CUSTOM_STYLE}
-                                    codeStyle={CODE_TAG_PROPS.style}
-                                    wrap
-                                />,
-                                { maxHeightClass: 'max-h-60', className: 'tool-input-surface' },
-                            ) : null}
+                            {scriptBlock && /openchamber/i.test(executeCode ?? '') ? (
+                                <details>
+                                    <summary className="cursor-pointer typography-meta text-muted-foreground">{t('chat.toolPart.appTool.source')}</summary>
+                                    {scriptBlock}
+                                </details>
+                            ) : scriptBlock}
                             {executeCalls.length > 0 ? (
                                 <div>
                                     <div className="typography-meta font-medium text-muted-foreground mb-1">
@@ -1694,7 +1706,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                                     className="typography-code flex-shrink-0"
                                                     style={call.status === 'error' ? TOOL_ERROR_TITLE_STYLE : undefined}
                                                 >
-                                                    {call.tool}
+                                                    {appToolDisplayName(call.tool, t, true) ?? call.tool}
                                                 </span>
                                                 {call.status && call.status !== 'error' && call.status !== 'completed' ? (
                                                     <span className="typography-micro flex-shrink-0 text-muted-foreground">
@@ -1757,7 +1769,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 backgroundColor: 'var(--status-error-background)',
                                 color: 'var(--status-error)',
                             }}>
-                                {coerceToText(state.error)}
+                                {appToolDisplayName(part.tool, t) ? appToolErrorText(coerceToText(state.error), t) : coerceToText(state.error)}
                             </div>
                         </div>
                     )}
@@ -1956,7 +1968,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     );
     const description = guestHeader?.subtitle ?? builtInDescription;
     const rowTool = scriptNamespace ?? (normalizedPartTool || part.tool);
-    const displayName = guestHeader?.title ?? toolDisplayName(rowTool, t);
+    const displayName = guestHeader?.title ?? toolDisplayName(scriptNamespace ?? part.tool, t);
 
     // Opened, the body already carries the whole error and output.
     const failureDetail = isError && !isExpanded ? failureReason : undefined;
@@ -2661,7 +2673,7 @@ const ToolPart: React.FC<ToolPartProps> = (incoming) => {
     const part = useShownToolPart(incoming.part);
     const props = part === incoming.part ? incoming : { ...incoming, part };
     const toolName = normalizeToolName(props.part.tool) || 'tool';
-    const displayName = toolDisplayName(toolName, t);
+    const displayName = toolDisplayName(props.part.tool, t);
     const backgroundShellID = isShellTool(toolName) ? readBackgroundShellID(props.part) : undefined;
 
     return (

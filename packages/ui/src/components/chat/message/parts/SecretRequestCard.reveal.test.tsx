@@ -161,11 +161,17 @@ test.each([
     const selected = options.find((option) => option.textContent === label);
     expect(selected).toBeDefined();
     await act(async () => selected?.click());
-    expect(container.textContent).toContain('Saved values are stored unencrypted');
+    expect(container.textContent).toContain('Saved values are stored unencrypted on this server. Programs running as the server user can read them.');
+    await act(async () => {
+      useI18nStore.getState().setLocale('zh-CN');
+      await import('@/lib/i18n/messages/zh-CN');
+    });
+    expect(container.textContent).toContain('保存的密钥以未加密形式存放在当前服务器上。以服务器用户身份运行的程序可以读取它们。');
     await act(async () => container.querySelector<HTMLButtonElement>('button[type="submit"]')?.click());
     expect(answerBody).toMatchObject({ values: { API_TOKEN: 'test-value' }, save, saveGlobally });
   } finally {
     await act(async () => root.unmount());
+    useI18nStore.getState().setLocale('en');
     container.remove();
   }
 });

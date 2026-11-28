@@ -101,7 +101,9 @@ describe('secret.request', () => {
 
   it('refuses while the tool is turned off', async () => {
     const { requests } = await createHarness({ enabled: false });
-    await expect(requests.request(ask, call)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(requests.request(ask, call)).rejects.toMatchObject({
+      statusCode: 403, message: 'The secret tool is turned off in SuperWagie settings',
+    });
   });
 });
 

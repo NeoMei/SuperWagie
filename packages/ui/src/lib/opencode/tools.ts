@@ -162,7 +162,7 @@ const inputSchema = z
     pattern: optionalText,
     query: optionalText,
     url: optionalText,
-    code: optionalText,
+    code: z.string().regex(/\S/).optional().catch(undefined),
     questions: z.array(z.unknown()).optional().catch(undefined),
     // OpenChamber's own tools: one `action` plus its `parameters`.
     action: optionalText,
@@ -1062,7 +1062,7 @@ function describeExecute(calls: ExecuteToolCall[], code: string | undefined): To
     counts.set(call.tool, entry)
   }
   if (counts.size === 0) {
-    return code ? { kind: "text", value: code.split("\n")[0].slice(0, MAX_COMMAND_LENGTH) } : null
+    return code ? { kind: "text", value: code.trim().split("\n")[0].slice(0, MAX_COMMAND_LENGTH) } : null
   }
   const named = [...counts.values()].slice(0, MAX_DESCRIBED_TOOL_CALLS)
   return { kind: "tools", calls: named, overflow: counts.size - named.length }

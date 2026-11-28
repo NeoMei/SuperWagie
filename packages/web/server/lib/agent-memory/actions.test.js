@@ -399,7 +399,7 @@ describe('when the user switches memory off', () => {
     // still call this after the switch goes off. Those writes would land on
     // disk while the panel showing them is hidden.
     await expect(disabled().execute('memory.save', { scope: 'global', title: 'T', body: 'b' }, DIRECTORY))
-      .rejects.toThrow('switched off');
+      .rejects.toMatchObject({ status: 403, message: 'Agent memory is switched off in SuperWagie settings' });
     expect((await runtime.read({ scope: 'global' })).entries).toHaveLength(0);
   });
 

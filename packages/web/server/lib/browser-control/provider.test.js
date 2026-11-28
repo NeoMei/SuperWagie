@@ -224,7 +224,9 @@ describe('browser control router', () => {
 
   test('a settings read that fails runs nothing anywhere and changes nothing', async () => {
     const { router, brokerCalls, proxied, persisted, resets } = createRouter({ readSettingsError: new Error('disk') });
-    await expect(router.request('browser.click', { selector: '#save' })).rejects.toMatchObject({ status: 503 });
+    await expect(router.request('browser.click', { selector: '#save' })).rejects.toMatchObject({
+      status: 503, message: 'SuperWagie could not read which browser answers agent actions, so the action was not run. Try again.',
+    });
     expect(brokerCalls).toHaveLength(0);
     expect(proxied).toHaveLength(0);
     expect(persisted).toHaveLength(0);
@@ -233,7 +235,9 @@ describe('browser control router', () => {
 
   test('a catalog read that fails runs nothing anywhere and keeps the choice', async () => {
     const { router, brokerCalls, proxied, persisted, resets } = createRouter({ findGuestError: new Error('catalog') });
-    await expect(router.request('browser.click', { selector: '#save' })).rejects.toMatchObject({ status: 503 });
+    await expect(router.request('browser.click', { selector: '#save' })).rejects.toMatchObject({
+      status: 503, message: 'SuperWagie could not read the extension catalog, so the action was not run. Try again.',
+    });
     expect(brokerCalls).toHaveLength(0);
     expect(proxied).toHaveLength(0);
     expect(persisted).toHaveLength(0);
