@@ -44,8 +44,8 @@ and execution state.
   malformed data, timeouts and read failures cannot establish idleness.
 - Session placement reads accept a caller signal so a queued-move confirmation
   deadline also bounds the in-flight response body.
-- `session.step.first-token`, `experimental.mcp.event` and
-  `experimental.job.updated` explicitly produce no sync events. Session,
+- `session.step.first-token`, `experimental.mcp.event`,
+  `experimental.job.updated` and push subscription updates explicitly produce no sync events. Session,
   shell and MCP events retain authority over their corresponding live state.
 
 - Durably sequenced execution boundaries, retry schedules and step starts

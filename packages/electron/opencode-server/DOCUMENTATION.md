@@ -6,7 +6,7 @@ This folder is the OpenCode the desktop app ships: `opencode serve` assembled fr
 
 The web server owns starting and stopping it. `lib/opencode/env-runtime.js` resolves `resources/opencode-server/serve.mjs` (or `OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR`) as the `bundled` OpenCode and runs it through `resolveManagedOpenCodeLaunchSpec` on the host's own Node: Electron's executable with `ELECTRON_RUN_AS_NODE=1` in the app, the dev machine's Node under HMR. From there `lib/opencode/lifecycle.js` treats it like any OpenCode binary.
 
-- `serve.mjs`: the entry. Answers `--version` without loading OpenCode, refuses every command but `serve`, sets the native paths, then loads the server. It runs as a bundle; the bundler defines `__OPENCODE_SERVER_VERSION__` from the pinned `@opencode/server` version.
+- `serve.mjs`: the entry. Answers `--version` without loading OpenCode, refuses every command but `serve`, adds the operating system trust store using the same certificate policy as the web server, sets the native paths, then loads the server. It runs as a bundle; the bundler defines `__OPENCODE_SERVER_VERSION__` from the pinned `@opencode/server` version.
 - `args.mjs`: the command line, `serve [--stdio] [--hostname] [--port] [--cors]...` and `--version`.
 - `assets.mjs`: points OpenCode at the staged natives (`OPENCODE_NODE_PTY_PATH`, `OPENCODE_PARCEL_WATCHER_PATH`, `OPENCODE_PHOTON_WASM_PATH`, `FFF_BINARY_PATH`, `OPENCODE_FFF_FFI_PATH`, `OPENCODE_PTY_BIN`) from `assets/manifest.json`.
 - `plugin-runtime.mjs`: publishes OpenCode's plugin SDK so plugins that import `@opencode/plugin` get the host's copy.
@@ -56,3 +56,5 @@ User-installed plugins can import `@opencode/plugin` without a copy installed be
 ### Why both Claude Code flags gate the same roots
 
 The server reads `.claude` directories only for skills, so either `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` disables those roots.
+
+TypeScript plugin entries can import sibling files and directory indexes using Bun's resolution order. The fallback applies to unresolved relative ESM imports from installed TypeScript or an OpenCode-marked local plugin. Node keeps its normal behavior for CommonJS and other modules.

@@ -1,4 +1,4 @@
-// external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/cli/src/server-process.ts
+// external: https://github.com/anomalyco/opencode/blob/v2.4.2/packages/cli/src/server-process.ts
 import './plugin-runtime.mjs';
 
 import { randomBytes } from 'node:crypto';

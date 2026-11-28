@@ -22,7 +22,7 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Standard engine API contract
 
 The standard runtime pins the official client, schema and packaged CLI to
-2.4.1. External and standalone engines must be 2.2.4 or newer within 2.x;
+2.4.2. External and standalone engines must be 2.2.4 or newer within 2.x;
 `compatibility.js` owns this minimum and the VS Code CLI preflight uses the
 same predicate. The frozen Intel local source retains its separate 2.1.4
 engine and compatibility guard until it is ported independently.
@@ -75,7 +75,7 @@ If a package was staged without the server, the bundled CLI remains a bounded
 compatibility fallback. A missing server and CLI fails managed startup with
 `OPENCODE_BINARY_MISSING`; it never falls through to a system installation.
 
-The bundled server is staged from the pinned `@opencode/server@2.4.1` package
+The bundled server is staged from the pinned `@opencode/server@2.4.2` package
 and its platform-native assets. Its launch entry owns the server-only contract,
 so the desktop package does not need a CLI command path for ordinary operation.
 The existing CLI staging remains available for explicit development and recovery

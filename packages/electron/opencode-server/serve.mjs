@@ -1,4 +1,5 @@
 import tls from 'node:tls';
+import { applySystemCertificates } from '../../web/server/lib/system-ca.js';
 import { parseArgs, usage } from './args.mjs';
 import { openCodeTlsConnect } from './zen-tls.mjs';
 
@@ -29,6 +30,7 @@ const main = async () => {
   if (!/--tls[-_]cipher[-_]list/.test([...process.execArgv, process.env.NODE_OPTIONS ?? ''].join(' '))) {
     tls.connect = openCodeTlsConnect(tls.connect);
   }
+  applySystemCertificates();
   const { configureAssets } = await import('./assets.mjs');
   configureAssets(new URL('./assets/', import.meta.url));
   const { run } = await import('./server.mjs');

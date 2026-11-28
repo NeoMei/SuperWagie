@@ -1,5 +1,8 @@
-// external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/cli/vite.node.config.ts
-import { registerHooks } from 'node:module';
+// external: https://github.com/anomalyco/opencode/blob/v2.4.2/packages/cli/vite.node.config.ts
+import { readFileSync, statSync } from 'node:fs';
+import { registerHooks, stripTypeScriptTypes } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as PromiseSdk from '@opencode/plugin';
 import * as EffectSdk from '@opencode/plugin/effect';
 import { Tool } from '@opencode/schema/tool';
@@ -42,13 +45,97 @@ const specifiers = {
   '@opencode/plugin/effect/tool': 'opencode:plugin-v2-effect-tool',
 };
 
+const TYPESCRIPT_EXTENSIONS = new Set(['.ts', '.mts']);
+
+const TYPESCRIPT_MODE = (() => {
+  try {
+    stripTypeScriptTypes('enum Marker {}', { mode: 'transform' });
+    return 'transform';
+  } catch {
+    return 'strip';
+  }
+})();
+
+const typescriptFile = (url) => {
+  if (!url?.startsWith('file:')) return null;
+  const filename = fileURLToPath(url);
+  return TYPESCRIPT_EXTENSIONS.has(path.extname(filename)) ? filename : null;
+};
+
+const installedTypeScript = (url) => {
+  const filename = typescriptFile(url);
+  return filename?.split(path.sep).includes('node_modules') ? filename : null;
+};
+
+// external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/plugin/src/source.node.ts prepareSource marks a local plugin's modules with this query
+const LOCAL_PLUGIN_PARAMETER = '__opencode_reload';
+
+const localPluginTypeScript = (url) => {
+  const filename = typescriptFile(url);
+  return filename && new URL(url).searchParams.has(LOCAL_PLUGIN_PARAMETER) ? filename : null;
+};
+
+const pluginTypeScript = (url) => installedTypeScript(url) ?? localPluginTypeScript(url);
+
+// external: https://bun.com/docs/runtime/module-resolution Bun's order for these suffixes, as Bun 1.4.4 resolves them inside node_modules and in a checkout
+const INSTALLED_EXTENSIONS = ['.mjs', '.mts', '.js', '.cjs', '.ts', '.json'];
+const CHECKOUT_EXTENSIONS = ['.mts', '.ts', '.mjs', '.js', '.cjs', '.json'];
+
+const TYPESCRIPT_SUBSTITUTIONS = new Map([
+  ['.js', ['.ts', '.mts']],
+  ['.mjs', ['.mts']],
+]);
+
+const UNRESOLVED_CODES = new Set(['ERR_MODULE_NOT_FOUND', 'ERR_UNSUPPORTED_DIR_IMPORT']);
+
+const isFile = (filename) => statSync(filename, { throwIfNoEntry: false })?.isFile() === true;
+
+const resolvePluginImport = (specifier, context, error) => {
+  if (!UNRESOLVED_CODES.has(error?.code)) return null;
+  if (context.conditions?.includes('require')) return null;
+  if (!context.parentURL || !pluginTypeScript(context.parentURL)) return null;
+  if (!specifier.startsWith('./') && !specifier.startsWith('../')) return null;
+  const target = path.resolve(path.dirname(fileURLToPath(context.parentURL)), specifier);
+  const extensions = installedTypeScript(context.parentURL) ? INSTALLED_EXTENSIONS : CHECKOUT_EXTENSIONS;
+  const indexFiles = extensions.map((candidate) => path.join(target, `index${candidate}`));
+  if (specifier.endsWith('/')) {
+    const index = indexFiles.find(isFile);
+    return index ? pathToFileURL(index).href : null;
+  }
+  const extension = path.extname(specifier);
+  if (extension) {
+    const substitutions = TYPESCRIPT_SUBSTITUTIONS.get(extension);
+    if (!substitutions) return null;
+    const substituted = substitutions.map((candidate) => `${target.slice(0, -extension.length)}${candidate}`).find(isFile);
+    return substituted ? pathToFileURL(substituted).href : null;
+  }
+  const found = extensions.map((candidate) => `${target}${candidate}`).concat(indexFiles).find(isFile);
+  return found ? pathToFileURL(found).href : null;
+};
+
 registerHooks({
   resolve(specifier, context, nextResolve) {
     const url = specifiers[specifier];
-    return url ? { url, shortCircuit: true } : nextResolve(specifier, context);
+    if (url) return { url, shortCircuit: true };
+    try {
+      return nextResolve(specifier, context);
+    } catch (error) {
+      const pluginImport = resolvePluginImport(specifier, context, error);
+      if (pluginImport) return nextResolve(pluginImport, context);
+      throw error;
+    }
   },
   load(url, context, nextLoad) {
     const source = sources[url];
-    return source ? { format: 'module', source, shortCircuit: true } : nextLoad(url, context);
+    if (source) return { format: 'module', source, shortCircuit: true };
+    const installed = installedTypeScript(url);
+    if (installed) {
+      return {
+        format: 'module',
+        source: stripTypeScriptTypes(readFileSync(installed, 'utf8'), { mode: TYPESCRIPT_MODE }),
+        shortCircuit: true,
+      };
+    }
+    return nextLoad(url, context);
   },
 });
