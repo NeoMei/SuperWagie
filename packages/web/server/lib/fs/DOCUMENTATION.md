@@ -186,6 +186,11 @@ leaving the original bytes and ordinary mode intact. Exclusive upload publicatio
 continues to use a hard link; a temporary-file cleanup error after publication
 does not turn the committed operation into failure.
 
+Text saves for the same requested path run in arrival order within this server.
+Workspace resolution is part of the queued operation because a slow path check
+can let a later save commit ahead of an earlier one. Other paths can save while
+a path is busy.
+
 ### Why creation has a separate endpoint
 
 The New file action must preserve an existing destination atomically. A separate
