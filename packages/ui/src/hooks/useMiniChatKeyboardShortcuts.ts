@@ -87,6 +87,9 @@ export const useMiniChatKeyboardShortcuts = () => {
         currentProviderId,
         currentModelId,
       } = useConfigStore.getState();
+      if (sessionId && currentProviderId && currentModelId) {
+        useSelectionStore.getState().pickSessionModel(sessionId, currentProviderId, currentModelId);
+      }
       if (sessionId && currentAgentName && currentProviderId && currentModelId) {
         useSelectionStore.getState().saveAgentModelVariantForSession(
           sessionId,

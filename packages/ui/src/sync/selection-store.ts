@@ -34,6 +34,7 @@ type SelectionState = {
   sessionModelSelections: Map<string, ModelSelection>
   /** Runtime-local user choices awaiting a confirmed session write. */
   sessionPickedModels: Map<string, ModelSelection>
+  sessionPickedAgents: Map<string, { agent: string }>
   sessionAgentSelections: Map<string, string>
   /** The agent OpenCode's session record held when the composer last followed it. */
   sessionFollowedAgents: Map<string, string>
@@ -48,15 +49,16 @@ type SelectionState = {
   pickSessionModel: (sessionId: string, providerId: string, modelId: string) => void
   getSessionModelPick: (sessionId: string) => ModelSelection | null
   captureSessionModelPickSettlement: (sessionId: string, providerId: string, modelId: string, runtimeKey?: string) => () => void
+  pickSessionAgent: (sessionId: string, agent: string) => void
+  getSessionAgentPick: (sessionId: string) => string | undefined
+  captureSessionAgentPickSettlement: (sessionId: string, agent?: string | null) => () => void
   saveSessionAgentSelection: (sessionId: string, agentName: string) => void
   getSessionAgentSelection: (sessionId: string) => string | null
   /**
    * Reconciles the composer with the agent on OpenCode's session record.
-   * Returns true, and selects `agent` for the session, only when the record
-   * holds a different agent than the one last followed (or none was followed
-   * yet): the session switched since the composer last looked, so that newer
-   * switch wins. An unchanged record returns false and leaves a picker choice
-   * made after it in place.
+   * A new record switch replaces an earlier pick. A first or unchanged
+   * record leaves a live pick in place. Without one the record also
+   * corrects a display preference restored by an older tab.
    */
   followSessionAgent: (sessionId: string, agent: string) => boolean
   /**
@@ -88,6 +90,7 @@ export const useSelectionStore = create<SelectionState>()(
     (set, get) => ({
       sessionModelSelections: new Map(),
       sessionPickedModels: new Map(),
+      sessionPickedAgents: new Map(),
       sessionAgentSelections: new Map(),
       sessionFollowedAgents: new Map(),
       sessionFollowedModels: new Map(),
@@ -117,18 +120,43 @@ export const useSelectionStore = create<SelectionState>()(
         const key = JSON.stringify([runtimeKey, sessionId])
         const isCurrentRuntime = captureRuntimeInstance()
         const pick = get().sessionPickedModels.get(key)
-        return () => set((state) => {
+        return () => {
           if (!isCurrentRuntime() || runtimeKey !== getRuntimeKey() || !pick || pick.providerId !== providerId || pick.modelId !== modelId
-            || state.sessionPickedModels.get(key) !== pick) return state
-          const sessionPickedModels = new Map(state.sessionPickedModels)
+            || get().sessionPickedModels.get(key) !== pick) return
+          const sessionPickedModels = new Map(get().sessionPickedModels)
           sessionPickedModels.delete(key)
-          return { sessionPickedModels }
-        })
+          set({ sessionPickedModels })
+        }
+      },
+
+      pickSessionAgent: (sessionId, agent) => set((state) => {
+        const key = variantSessionKey(sessionId)
+        const picked = new Map(state.sessionPickedAgents)
+        picked.set(key, { agent })
+        const selections = new Map(state.sessionAgentSelections)
+        selections.delete(sessionId)
+        selections.set(sessionId, agent)
+        return { sessionPickedAgents: picked, sessionAgentSelections: selections }
+      }),
+
+      getSessionAgentPick: (sessionId) => get().sessionPickedAgents.get(variantSessionKey(sessionId))?.agent,
+
+      captureSessionAgentPickSettlement: (sessionId, agent) => {
+        const key = variantSessionKey(sessionId)
+        const pick = get().sessionPickedAgents.get(key)
+        const isCurrent = captureRuntimeInstance()
+        return () => {
+          if (!pick || pick.agent !== agent || !isCurrent() || get().sessionPickedAgents.get(key) !== pick) return
+          const picked = new Map(get().sessionPickedAgents)
+          picked.delete(key)
+          set({ sessionPickedAgents: picked })
+        }
       },
 
       saveSessionAgentSelection: (sessionId, agentName) =>
         set((s) => {
-          if (s.sessionAgentSelections.get(sessionId) === agentName) return s
+          const pick = s.sessionPickedAgents.get(variantSessionKey(sessionId))
+          if ((pick && pick.agent !== agentName) || s.sessionAgentSelections.get(sessionId) === agentName) return s
           const map = new Map(s.sessionAgentSelections)
           map.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
           map.set(sessionId, agentName)
@@ -138,7 +166,15 @@ export const useSelectionStore = create<SelectionState>()(
       getSessionAgentSelection: (sessionId) => get().sessionAgentSelections.get(sessionId) ?? null,
 
       followSessionAgent: (sessionId, agent) => {
-        if (get().sessionFollowedAgents.get(sessionId) === agent) return false
+        const state = get()
+        const baseline = state.sessionFollowedAgents.get(sessionId)
+        const key = variantSessionKey(sessionId)
+        const pick = state.sessionPickedAgents.get(key)
+        if (pick && pick.agent !== agent && baseline === undefined) {
+          set({ sessionFollowedAgents: new Map(state.sessionFollowedAgents).set(sessionId, agent) })
+          return false
+        }
+        if (baseline === agent && (pick || state.sessionAgentSelections.get(sessionId) === agent)) return false
         set((s) => {
           const followed = new Map(s.sessionFollowedAgents)
           followed.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
@@ -146,7 +182,9 @@ export const useSelectionStore = create<SelectionState>()(
           const selections = new Map(s.sessionAgentSelections)
           selections.delete(sessionId)
           selections.set(sessionId, agent)
-          return { sessionFollowedAgents: followed, sessionAgentSelections: selections }
+          const picked = new Map(s.sessionPickedAgents)
+          picked.delete(variantSessionKey(sessionId))
+          return { sessionFollowedAgents: followed, sessionAgentSelections: selections, sessionPickedAgents: picked }
         })
         return true
       },
@@ -185,13 +223,15 @@ export const useSelectionStore = create<SelectionState>()(
         const variantKey = variantSessionKey(sessionId)
         const hadVariant = state.agentModelVariantSelections.has(variantKey)
         const hadPick = state.sessionPickedModels.has(variantKey)
-        if (!hadVariant && !hadPick && !state.sessionModelSelections.has(sessionId)
+        if (!hadVariant && !hadPick && !state.sessionPickedAgents.has(variantKey) && !state.sessionModelSelections.has(sessionId)
           && !state.sessionAgentSelections.has(sessionId)
           && !state.sessionFollowedAgents.has(sessionId)
           && !state.sessionFollowedModels.has(sessionId)
           && !state.sessionAgentModelSelections.has(sessionId)) return state
         const sessionPickedModels = new Map(state.sessionPickedModels)
         sessionPickedModels.delete(variantKey)
+        const sessionPickedAgents = new Map(state.sessionPickedAgents)
+        sessionPickedAgents.delete(variantKey)
         const sessionModelSelections = new Map(state.sessionModelSelections)
         const sessionAgentSelections = new Map(state.sessionAgentSelections)
         const sessionFollowedAgents = new Map(state.sessionFollowedAgents)
@@ -204,7 +244,7 @@ export const useSelectionStore = create<SelectionState>()(
         sessionFollowedModels.delete(sessionId)
         sessionAgentModelSelections.delete(sessionId)
         agentModelVariantSelections.delete(variantKey)
-        return { sessionPickedModels, sessionModelSelections, sessionAgentSelections, sessionFollowedAgents, sessionFollowedModels, sessionAgentModelSelections, agentModelVariantSelections }
+        return { sessionPickedAgents, sessionPickedModels, sessionModelSelections, sessionAgentSelections, sessionFollowedAgents, sessionFollowedModels, sessionAgentModelSelections, agentModelVariantSelections }
       }),
 
       saveAgentModelVariantForSession: (sessionId, agentName, providerId, modelId, variant) => set((state) => {

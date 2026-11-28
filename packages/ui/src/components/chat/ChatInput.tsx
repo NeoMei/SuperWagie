@@ -9,10 +9,11 @@ import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
+import { queuedSelectionPolicy, isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { DraftSendError, AttachmentPathPreparationError, useSessionUIStore, type SendMessageOptions } from '@/sync/session-ui-store';
+import { captureComposerSelection, compactSession } from '@/sync/session-selection';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useRetryModelPick } from '@/hooks/useRetryModelPick';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
@@ -592,7 +593,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const attachedFiles = useDraftAttachedFiles(chatDraftIdentity);
     const addAttachedFile = useInputStore((s) => s.addAttachedFile);
     const clearAttachedFiles = useInputStore((s) => s.clearAttachedFiles);
-    const saveSessionAgentSelection = useSelectionStore((s) => s.saveSessionAgentSelection);
+    const pickSessionAgent = useSelectionStore((s) => s.pickSessionAgent);
     const btwModelSelection = useSelectionStore(React.useCallback(
         (s) => btwComposerSessionId ? s.sessionModelSelections.get(btwComposerSessionId) ?? null : null,
         [btwComposerSessionId],
@@ -1449,6 +1450,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // The comment's exit paths are attach/cancel; queueing a real prompt
         // underneath comment mode must never fire.
         if (isMobileCommentOpen()) return;
+        const selection = currentSessionId && currentProviderId && currentModelId
+            ? captureComposerSelection(currentSessionId, currentProviderId, currentModelId, currentAgentName)
+            : undefined;
         const admission = waitForAttachmentIntake();
         if (admission && !await admission) return;
         const inputSnapshot = getCurrentInputSnapshot();
@@ -1581,6 +1585,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 sendConfig: currentProviderId && currentModelId ? {
                     providerID: currentProviderId,
                     modelID: currentModelId,
+                    ...(selection?.keepSessionModel && { keepSessionModel: true }),
+                    ...(selection?.keepSessionAgent && { keepSessionAgent: true }),
                     agent: currentAgentName ?? undefined,
                     variant: currentVariant ?? undefined,
                 } : undefined,
@@ -1602,6 +1608,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setLinkedReferences((current) => withComposerReferences(linked, current));
             return;
         }
+        selection?.settle();
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
     }, [pastedReferences.manager, isBtwActive, getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, consumeComposerSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, referenceDraftKey, restoreDraft, setLinkedReferences, t, waitForAttachmentIntake]);
@@ -1737,6 +1744,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const submitRuntimeKey = getRuntimeKey();
         const isCurrentSubmitRuntime = captureRuntimeInstance();
         const queuedOnly = options?.queuedOnly ?? false;
+        const composerSelection = !queuedOnly && !isBtwActive && currentSessionId && currentProviderId && currentModelId
+            ? captureComposerSelection(currentSessionId, currentProviderId, currentModelId, currentAgentName)
+            : undefined;
         const admission = queuedOnly ? null : waitForAttachmentIntake();
         if (admission && !await admission) return;
         const queuedMessageId = options?.queuedMessageId;
@@ -1896,8 +1906,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const capturedSendConfig = queuedOnly ? queuedProjection[0]?.sendConfig : undefined;
         const providerIdToSend = capturedSendConfig?.providerID ?? (isBtwActive ? effectiveBtwSelection.model?.providerId : currentProviderId);
         const modelIdToSend = capturedSendConfig?.modelID ?? (isBtwActive ? effectiveBtwSelection.model?.modelId : currentModelId);
-        const agentNameToSend = capturedSendConfig?.agent ?? (isBtwActive ? effectiveBtwSelection.agent : currentAgentName);
-        const variantToSend = capturedSendConfig?.variant ?? (isBtwActive ? effectiveBtwSelection.variant : currentVariant);
+        const agentNameToSend = capturedSendConfig ? capturedSendConfig.agent : (isBtwActive ? effectiveBtwSelection.agent : currentAgentName);
+        const variantToSend = capturedSendConfig ? capturedSendConfig.variant : (isBtwActive ? effectiveBtwSelection.variant : currentVariant);
 
         // The isolated space the message targets, if any: a session by its directory, a draft by
         // the creation request it still waits on or by its directory.
@@ -2021,7 +2031,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 } else if (actionName === 'compact') {
                     await sessionActions.waitForConnectionOrThrow();
                     const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                    await opencodeClient.compactSession(currentSessionId, compactDirectory);
+                    if (!isCurrentSubmitRuntime()) throw new Error('Compaction was cancelled because the runtime changed.');
+                    await compactSession(currentSessionId, compactDirectory, {
+                        providerID: providerIdToSend, modelID: modelIdToSend, variant: variantToSend,
+                    }, composerSelection);
                 }
             } catch (error) {
                 restoreCommand();
@@ -2052,6 +2065,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         sendMessageOptions = {
             ...sendMessageOptions,
             userInitiated: true,
+            ...(queuedOnly ? queuedSelectionPolicy(capturedSendConfig) : {
+                keepSessionModel: composerSelection?.keepSessionModel,
+                keepSessionAgent: composerSelection?.keepSessionAgent,
+                settleSelection: composerSelection?.settle,
+            }),
             onPromptAdmitted: deferredQuestions.length > 0
                 ? () => { void sessionActions.deferQuestionsAfterSend(deferredQuestions); }
                 : undefined,
@@ -2879,9 +2897,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (!columnPinned) setAgent(nextAgentName);
 
         if (currentSessionId) {
-            saveSessionAgentSelection(currentSessionId, nextAgentName);
+            pickSessionAgent(currentSessionId, nextAgentName);
         }
-    }, [agents, columnPinned, currentAgentName, currentModelId, currentProviderId, currentSessionId, setAgent, saveSessionAgentSelection]);
+    }, [agents, columnPinned, currentAgentName, currentModelId, currentProviderId, currentSessionId, setAgent, pickSessionAgent]);
 
     // Height the failed-dictation salvage text needs. Its overlay sits
     // absolutely over the composer, so the composer must be able to grow for

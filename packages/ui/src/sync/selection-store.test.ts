@@ -5,6 +5,7 @@ beforeEach(() => {
   useSelectionStore.setState({
     sessionModelSelections: new Map(),
     sessionPickedModels: new Map(),
+    sessionPickedAgents: new Map(),
     sessionAgentSelections: new Map(),
     sessionFollowedAgents: new Map(),
     sessionFollowedModels: new Map(),
@@ -48,11 +49,10 @@ test('a session agent switch is followed once, and a later pick survives an unch
   expect(store.followSessionAgent('one', 'plan')).toBe(true);
   expect(store.getSessionAgentSelection('one')).toBe('plan');
   // The user picks Build without sending; the record still says Plan.
-  store.saveSessionAgentSelection('one', 'build');
+  store.pickSessionAgent('one', 'build');
   expect(store.followSessionAgent('one', 'plan')).toBe(false);
   expect(store.getSessionAgentSelection('one')).toBe('build');
   // A plugin or another client switches the session: the newer switch wins.
-  store.saveSessionAgentSelection('one', 'plan');
   expect(store.followSessionAgent('one', 'review')).toBe(true);
   expect(store.getSessionAgentSelection('one')).toBe('review');
   expect(store.getSessionAgentSelection('two')).toBeNull();
@@ -61,15 +61,15 @@ test('a session agent switch is followed once, and a later pick survives an unch
 test('the followed agent survives the persisted round trip and goes with the session', () => {
   const store = useSelectionStore.getState();
   store.followSessionAgent('one', 'plan');
-  store.saveSessionAgentSelection('one', 'build');
+  store.pickSessionAgent('one', 'build');
   const { partialize, merge } = useSelectionStore.persist.getOptions();
   if (!partialize || !merge) throw new Error('Expected persisted selection options');
   const saved = JSON.parse(JSON.stringify(partialize(useSelectionStore.getState())));
-  useSelectionStore.setState({ sessionFollowedAgents: new Map(), sessionAgentSelections: new Map() });
+  useSelectionStore.setState({ sessionPickedAgents: new Map(), sessionFollowedAgents: new Map(), sessionAgentSelections: new Map() });
   useSelectionStore.setState(merge(saved, useSelectionStore.getState()));
-  // After a reload the unsent pick is still newer than the unchanged record.
-  expect(store.followSessionAgent('one', 'plan')).toBe(false);
-  expect(store.getSessionAgentSelection('one')).toBe('build');
+  // A reload restores the display preference. Only a live gesture can switch the server.
+  expect(store.followSessionAgent('one', 'plan')).toBe(true);
+  expect(store.getSessionAgentSelection('one')).toBe('plan');
   // Payloads written before this field existed keep what memory holds.
   useSelectionStore.setState(merge({ sessionAgentSelections: [['one', 'build']] }, useSelectionStore.getState()));
   expect(useSelectionStore.getState().sessionFollowedAgents.get('one')).toBe('plan');

@@ -2,27 +2,28 @@ import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import type { BtwSelection } from '@/stores/useBtwStore';
 import { useSelectionStore } from '@/sync/selection-store';
+import { isAutoModel } from '@/lib/routing/autoModel';
 import { useSession } from '@/sync/sync-context';
 
-/**
- * What a pinned composer sends with: the picks saved for its session first,
- * then the session record, which is what OpenCode 2 runs the next prompt on.
- * An effort saved for the picked agent and model wins over the record's; an
- * effort saved as `null` is an explicit "Default".
- */
-export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVariant, record }: {
+/** The pinned chat owns its unsent picks. Its record supplies the applied selection. */
+export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVariant, modelPicked, agentPicked, record }: {
     savedAgent: string | null;
     savedModel: { providerId: string; modelId: string } | null;
     savedVariant: string | null | undefined;
+    modelPicked: boolean;
+    agentPicked: boolean;
     record: Pick<Session, 'agent' | 'model'> | undefined;
 }): BtwSelection => {
     const recordModel = record?.model?.providerID && record.model.id
         ? { providerId: record.model.providerID, modelId: record.model.id }
         : null;
+    const useSavedModel = savedModel && (modelPicked || agentPicked || !recordModel || isAutoModel(savedModel.providerId, savedModel.modelId));
+    const recordAgent = record?.agent?.trim();
+    const recordVariant = record?.model?.variant?.trim() || undefined;
     return {
-        agent: savedAgent ?? (record?.agent?.trim() || undefined),
-        model: savedModel ?? recordModel,
-        variant: savedVariant !== undefined ? savedVariant : record?.model?.variant?.trim() || undefined,
+        agent: (agentPicked ? savedAgent : recordAgent) ?? recordAgent ?? savedAgent ?? undefined,
+        model: useSavedModel ? savedModel : recordModel,
+        variant: useSavedModel ? savedVariant : recordVariant ?? savedVariant,
     };
 };
 
@@ -42,11 +43,14 @@ export const usePinnedComposerSelection = ({ enabled, sessionId, directory }: {
     const record = useSession(key ?? undefined, directory ?? undefined);
     const savedAgent = useSelectionStore((state) => (key ? state.sessionAgentSelections.get(key) ?? null : null));
     const savedModel = useSelectionStore((state) => (key ? state.sessionModelSelections.get(key) ?? null : null));
-    const base = resolvePinnedComposerSelection({ savedAgent, savedModel, savedVariant: undefined, record });
+    const modelPick = useSelectionStore((state) => key ? state.getSessionModelPick(key) : null);
+    const agentPick = useSelectionStore((state) => key ? state.getSessionAgentPick(key) : undefined);
+    const choices = { savedAgent, savedModel: modelPick ?? savedModel, modelPicked: Boolean(modelPick), agentPicked: Boolean(agentPick), record };
+    const base = resolvePinnedComposerSelection({ ...choices, savedVariant: undefined });
     const savedVariant = useSelectionStore((state) => (key && base.agent && base.model
         ? state.getAgentModelVariantForSession(key, base.agent, base.model.providerId, base.model.modelId)
         : undefined));
-    const { agent, model, variant } = resolvePinnedComposerSelection({ savedAgent, savedModel, savedVariant, record });
+    const { agent, model, variant } = resolvePinnedComposerSelection({ ...choices, savedVariant });
     const providerId = model?.providerId;
     const modelId = model?.modelId;
     return React.useMemo(() => {

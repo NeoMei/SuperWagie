@@ -1,6 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { getMessageQueueKey, parseMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
+import { queuedSelectionPolicy, getMessageQueueKey, parseMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -130,6 +130,7 @@ export const sendQueuedAutoSendPayload = (
       target,
       historySubmissions: payload.historySubmissions,
       queuedGoal: payload.goal,
+      ...queuedSelectionPolicy(payload.sendConfig),
       ...(payload.skills?.length ? { skills: { names: payload.skills, instructionFor: buildSkillMentionInstruction } } : {}),
     },
   );

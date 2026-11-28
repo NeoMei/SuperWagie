@@ -18,7 +18,7 @@ import { attachmentBasename, attachmentWireName } from "@/lib/attachmentIdentity
 import type { ComposerSendProgress } from "@/lib/unconfirmedSends"
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { create } from "zustand"
-import { isSameModelRef, toModelRef, type Metadata, type ModelRef, type Part, type Session, type TextPart } from "@/lib/opencode/model"
+import { type Metadata, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import { permissionModeForNewSession, type PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import type { WorktreeMetadata } from "@/types/worktree"
@@ -101,6 +101,8 @@ import { setSessionGoal } from "@/lib/sessionGoalActions"
 import { wrapSystemReminder } from "@/lib/systemReminder"
 import { useUIStore } from "@/stores/useUIStore"
 import { useSelectionStore } from "./selection-store"
+import { resolveSessionDelivery, resolveSendSelection, type SessionSelectionPolicy } from "./session-selection"
+export { resolveSendSelection } from "./session-selection"
 import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
@@ -150,35 +152,6 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
-/** A fresh record prevents a stale synced match from suppressing a user switch. */
-export async function resolveSendSelection(
-  sessionId: string,
-  directory: string | undefined,
-  desired: { providerID: string; modelID: string; variant?: string | null; agent?: string },
-): Promise<{ model?: ModelRef; agent?: string }> {
-  const model = toModelRef({ providerID: desired.providerID, id: desired.modelID, variant: desired.variant })
-  const isCurrentRuntime = captureRuntimeInstance()
-  let serverSession: Session
-  try {
-    serverSession = await opencodeClient.getSession(sessionId, directory)
-  } catch (error) {
-    if (desired.agent) {
-      if (error instanceof Error) markDefiniteTransportFailure(error)
-      throw error
-    }
-    if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
-    return { model }
-  }
-  if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
-  const session = getDirectoryState(directory)?.session.find((candidate) => candidate.id === sessionId)
-    ?? getAllSyncSessions().find((candidate) => candidate.id === sessionId)
-  const runsOn = (record: Session | undefined) => Boolean(record?.model && isSameModelRef(record.model, model))
-  return {
-    model: !runsOn(serverSession) || !runsOn(session) ? model : undefined,
-    agent: desired.agent && serverSession.agent !== desired.agent ? desired.agent : undefined,
-  }
-}
-
 export class AttachmentPathPreparationError extends Error {
   constructor(public readonly filenames: readonly string[]) {
     super("Could not prepare attachment paths.")
@@ -217,7 +190,7 @@ const fileUriPath = (uri: string): string | undefined => {
   }
 }
 
-export async function routeMessage(params: {
+export async function routeMessage(params: SessionSelectionPolicy & {
   runtimeKey?: string
   sessionId: string
   directory?: string | null
@@ -275,12 +248,15 @@ export async function routeMessage(params: {
   // show, so only a genuine change travels with the prompt. Resolved when the
   // request is about to leave: a session created from a draft has its record,
   // with the model it was created on, only once `ready` settles.
-  const sendSelection = () => resolveSendSelection(params.sessionId, sendDirectory(), {
+  const desired = {
     providerID: params.providerID,
     modelID: params.modelID,
     variant: params.variant,
     agent: params.agent,
-  })
+    keepSessionModel: params.keepSessionModel,
+    keepSessionAgent: params.keepSessionAgent,
+  }
+  const sendSelection = () => resolveSendSelection(params.sessionId, sendDirectory(), desired)
   // A context item becomes a synthetic message, which carries text only. Any
   // file it brought rides with the send so the attachment still arrives.
   const contextItems = (params.additionalParts ?? [])
@@ -297,8 +273,20 @@ export async function routeMessage(params: {
   const prepareDelivery = async (text: string, directory: string | undefined) => {
     const retired = () => markDefiniteTransportFailure(new Error("Message was not sent because the runtime changed."))
     if (!isCurrent()) throw retired()
-    if (sendFiles.length === 0) return { text, files: sendFiles }
-    const auto = isAutoModel(params.providerID, params.modelID) && !isVSCodeRuntime()
+    // Attachments and the provider circuit breaker need the model that will run
+    // the prompt. A stale tab may display a provider with different input types.
+    const inherited = params.keepSessionModel
+      ? await resolveSessionDelivery(params.sessionId, directory, desired) : undefined
+    if (!isCurrent()) throw retired()
+    const providerID = inherited?.effectiveModel.providerID ?? params.providerID
+    const modelID = inherited?.effectiveModel.id ?? params.modelID
+    // An inherited selection with no writes remains valid if another send
+    // switches the session. Any requested write is checked in SDK send order.
+    const resolveSelection = inherited && !inherited.switches.model && !inherited.switches.agent && params.keepSessionAgent
+      ? async () => inherited.switches : sendSelection
+    const selection = { providerID, resolveSelection }
+    if (sendFiles.length === 0) return { text, files: sendFiles, ...selection }
+    const auto = isAutoModel(providerID, modelID) && !isVSCodeRuntime()
     if (auto) {
       // The server sees Auto's actual model only after selecting it. The
       // parameter carries copy intent through the SDK's file URI field.
@@ -307,13 +295,13 @@ export async function routeMessage(params: {
         preserveMime: true,
         url: file.saveCopy ? file.url.replace(/^(data:image\/[^;,]+)(;base64,)/i, "$1;x-openchamber-save-copy=1$2") : file.url,
       }))
-      return { text, files }
+      return { text, files, ...selection }
     }
-    const metadata = useConfigStore.getState().getModelMetadata(params.providerID, params.modelID)?.modalities?.input
+    const metadata = useConfigStore.getState().getModelMetadata(providerID, modelID)?.modalities?.input
     const media = sendFiles.some((file) => /^(image\/|application\/pdf)/i.test(file.mime)
       || (file.url.startsWith("file:") && /\.(pdf|png|jpe?g|gif|webp)$/i.test(file.filename)))
     const live = media
-      ? await opencodeClient.getModelInputModalities(params.providerID, params.modelID, directory).catch(() => undefined)
+      ? await opencodeClient.getModelInputModalities(providerID, modelID, directory).catch(() => undefined)
       : undefined
     if (!isCurrent()) throw retired()
     const preparation = await prepareAttachmentDelivery({
@@ -338,7 +326,7 @@ export async function routeMessage(params: {
     })
     if (preparation.status === "retired") throw retired()
     if (preparation.status === "failed") throw markDefiniteTransportFailure(new AttachmentPathPreparationError(preparation.filenames))
-    return { text: preparation.text, files: preparation.attachments.map(({ filePart }) => filePart) }
+    return { text: preparation.text, files: preparation.attachments.map(({ filePart }) => filePart), ...selection }
   }
 
   if (params.inputMode === "shell") {
@@ -421,7 +409,7 @@ export async function routeMessage(params: {
       await opencodeClient.sendCommand({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
-        resolveSelection: sendSelection,
+        resolveSelection: delivery.resolveSelection,
         command: cmdName,
         arguments: delivery.text,
         files: delivery.files,
@@ -464,8 +452,8 @@ export async function routeMessage(params: {
       return opencodeClient.sendMessage({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
-        providerID: params.providerID,
-        resolveSelection: sendSelection,
+        providerID: delivery.providerID,
+        resolveSelection: delivery.resolveSelection,
         text: delivery.text,
         agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
         files: delivery.files,
@@ -488,7 +476,9 @@ type CapturedSendTarget = {
   directory: string
 }
 
-export type SendMessageOptions = {
+export type SendMessageOptions = SessionSelectionPolicy & {
+  /** Settles the picks captured by the composer before preparing attachments. */
+  settleSelection?: () => void
   /** Explicit composer intent; automated continuations must not restore archives. */
   userInitiated?: boolean
   /** Revalidates captured request authority immediately before dispatch. */
@@ -2419,16 +2409,18 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
         : null
       const configAgentName = useConfigStore.getState().currentAgentName
-      const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
+      const effectiveAgent = options?.keepSessionAgent === undefined
+        ? trimmedAgent || sessionAgentSelection || configAgentName || undefined
+        : trimmedAgent
 
-      const settleModelPick = targetSessionId
+      const settleSelection = options?.settleSelection ?? (targetSessionId && options?.keepSessionModel === undefined
         ? useSelectionStore.getState().captureSessionModelPickSettlement(targetSessionId, providerID, modelID, capturedRuntimeKey)
-        : undefined
-      if (targetSessionId) {
+        : undefined)
+      if (targetSessionId && !options?.keepSessionModel) {
         useSelectionStore.getState().saveSessionModelSelection(targetSessionId, providerID, modelID)
       }
 
-      if (targetSessionId && effectiveAgent) {
+      if (targetSessionId && effectiveAgent && !options?.keepSessionAgent) {
         useSelectionStore.getState().saveSessionAgentSelection(targetSessionId, effectiveAgent)
         useSelectionStore.getState().saveAgentModelVariantForSession(
           targetSessionId,
@@ -2502,6 +2494,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         providerID,
         modelID,
         agent: effectiveAgent,
+        keepSessionModel: options?.keepSessionModel,
+        keepSessionAgent: options?.keepSessionAgent,
         agentMentionName,
         variant,
         inputMode,
@@ -2519,7 +2513,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })),
       })
       if (isCurrentOwner() && route === "prompt") options?.onPromptAdmitted?.()
-      if (isCurrentRuntime()) settleModelPick?.()
+      if (isCurrentRuntime() && route !== "shell") settleSelection?.()
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
     })

@@ -624,8 +624,8 @@ record through `session.agent.selected`, and `ModelControls` follows the
 record through `useSelectionStore.followSessionAgent`. That store remembers,
 per session and persisted, the record agent the composer last followed: a
 record agent it has not followed yet is a newer switch and replaces the pick,
-an unchanged record leaves a pick made after it in place across session
-switches and reloads. Following moves the agent only (`setAgent(name, {
+an unchanged record leaves a live pick in place across session switches. A
+reload restores the saved name for display until the record arrives. Following moves the agent only (`setAgent(name, {
 keepModel: true })`): the session keeps running on its own model, so neither
 the agent's pinned nor its remembered model is applied, and Auto stays.
 
@@ -642,7 +642,8 @@ The model follows the same rule through `isSessionModelSwitched` /
 `markSessionModelFollowed`, keyed `provider/model#variant`. A record model the
 composer has not reconciled with yet outranks a manual model and its effort
 (an effort only when the record carries one); with nothing reconciled yet,
-a manual model that disagrees with the record keeps winning, as before. A
+an unsent model pick still wins. A restored model without a live pick yields
+to the session record. A
 saved Auto is never replaced: the router itself switches the session's model
 every turn, so those switches are only recorded as reconciled.
 

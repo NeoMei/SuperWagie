@@ -31,9 +31,9 @@ not consume or block the queued item.
 
 `resolveAutoSelection` (the routing runtime) runs right before the send when
 the queued send config names `openchamber/auto`, and answers with the real
-model and agent. OpenCode 2.x holds both on the session, so the queue applies
-them with the `POST /api/session/:id/model` and `/agent` calls it already
-makes. The queue captures the sentinel like any other send config. The request
+model and agent. The queue switches to the routed model. If the item inherits
+its agent, the current session agent is the routing fallback. The queue
+switches agents when the route chooses a different one. The request
 text it routes on carries the same image attachment fact as a direct send
 (`attachmentHint`).
 
@@ -56,10 +56,19 @@ send never re-resolves mutable UI state:
     { kind: 'instruction', text },                       // legacy skill instruction
     { kind: 'synthetic', text },                         // handed to the composer by another surface
   ],
-  sendConfig: { providerID, modelID, agent?, variant? },  // required
+  sendConfig: { providerID, modelID, agent?, variant?, keepSessionModel?, keepSessionAgent? },
   goal?: { objective?, tokenBudget }  // queued with "run as goal" armed
 }
 ```
+
+The two optional flags travel independently through v1 storage, snapshots,
+broadcasts and takes. Each true flag tells the sender to use that field from
+the OpenCode session at delivery. A missing flag keeps the explicit choice
+from the composer, including on older v1 items. A missing session selection
+can be initialized from the item. In standalone mode an inherited retired
+provider also needs an eligible captured model. A failed session read, an
+invalid record or a different session ID leaves the item queued for retry.
+Attachment preparation and goal creation use the resolved model.
 
 `goal` is the composer's armed goal, taken off the composer when the message
 is queued so it belongs to this message and no other. `objective` is present
@@ -174,11 +183,11 @@ persisted "sending" flag would strand a message forever.
    links, including idle intermediate subagents; a deeper chain counts as
    unrelated, as in the UI. Unreadable lineage, cycles and the shared fetch
    deadline keep the queue held with the existing retry policy. It does not scan historical child pages.
-5. The head is marked in flight (broadcast), then sent. The captured model and
-   agent are switched onto the session first (`POST /session/:id/model`,
-   `/agent`), because v2 holds both on the session rather than in the body; a
-   captured `openchamber/auto` is resolved into a real pair by the routing
-   runtime beforehand. The session's project knowledge is written into its
+5. The head is marked in flight (broadcast), then sent. Items with an
+   inheritance flag read `GET /api/session/:id` in the queue directory.
+   Explicit or newly initialized selections use `POST /api/session/:id/model`
+   and `/agent` as needed. Auto resolves before attachment preparation.
+   The session's project knowledge is written into its
    instruction entries (`sessionKnowledgeRuntime.sync`, which never fails the
    send). Then the captured context goes ahead as synthetic messages
    (`POST /session/:id/synthetic` with `resume: false`, an attached item's
