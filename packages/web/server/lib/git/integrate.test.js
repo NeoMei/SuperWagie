@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { createIntegratePublisher } from './integrate-publish.js';
 import { abortIntegrate, computeIntegratePlan, continueIntegrate, integrateWorktreeCommits, isCherryPickInProgress } from './service.js';
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd();
@@ -84,6 +85,62 @@ it.each(['staged', 'untracked', 'ignored'])('preserves a later %s collision, inc
   if (kind === 'staged') expect(git(repo, 'show', ':shared')).toBe('staged');
   else expect(git(repo, 'ls-files', '--', file)).toBe('');
   expect(git(repo, 'stash', 'list')).toBe('');
+});
+
+// Both branches start at the same commit, so a tip comparison alone cannot
+// detect the switch. Interleave real Git commands at the publication boundary.
+it.each(['before locking', 'before merge'])('binds publication to the target when another client switches %s', async (when) => {
+  const base = git(repo, 'rev-parse', 'HEAD');
+  git(repo, 'branch', 'unrelated');
+  const holder = path.join(root, 'holder');
+  git(repo, 'worktree', 'add', '-qb', 'target', holder);
+  commit(source, 'shared', 'incoming');
+  const result = git(source, 'rev-parse', 'HEAD');
+  let switched;
+  const runGit = async (cwd, args, env) => {
+    if (cwd === holder && args[0] === (when === 'before locking' ? 'status' : 'merge') && switched === undefined) {
+      try { git(holder, 'switch', '-q', 'unrelated'); switched = true; }
+      catch (error) { expect(error.stderr).toContain('index.lock'); switched = false; }
+    }
+    try {
+      const stdout = execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+      return { success: true, stdout };
+    } catch (error) {
+      return { success: false, exitCode: error.status, stderr: error.stderr };
+    }
+  };
+  const publisher = createIntegratePublisher({ runGit, runGitOrThrow: async (...args) => {
+    const response = await runGit(...args);
+    if (!response.success) throw new Error(response.stderr);
+    return response;
+  } });
+  const publish = publisher.publish(repo, 'target', base, source, result);
+  if (when === 'before locking') {
+    await expect(publish).rejects.toThrow(/switched branches/);
+    expect(switched).toBe(true);
+    expect(git(holder, 'branch', '--show-current')).toBe('unrelated');
+    expect(git(repo, 'rev-parse', 'target')).toBe(base);
+    expect(read(holder, 'shared')).toBe('base');
+  } else {
+    await publish;
+    expect(switched).toBe(false);
+    expect(git(holder, 'branch', '--show-current')).toBe('target');
+    expect(git(repo, 'rev-parse', 'target')).toBe(result);
+    expect(read(holder, 'shared')).toBe('incoming');
+  }
+  expect(git(repo, 'rev-parse', 'unrelated')).toBe(base);
+  expect(git(holder, 'status', '--porcelain')).toBe('');
+  git(holder, 'switch', '-q', 'unrelated');
+});
+
+it('preserves the checkout squash message and split index during publication', async () => {
+  git(repo, 'update-index', '--split-index');
+  write(repo, '.git/SQUASH_MSG', 'earlier squash');
+  commit(source, 'shared', 'incoming');
+  expect(await integrate()).toEqual({ kind: 'success', moved: 1 });
+  expect(read(repo, '.git/SQUASH_MSG')).toBe('earlier squash');
+  expect(git(repo, 'show', ':shared')).toBe('incoming');
+  expect(git(repo, 'status', '--porcelain')).toBe('');
 });
 
 it('preserves a target branch that received another commit during the picks', async () => {

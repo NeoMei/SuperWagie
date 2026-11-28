@@ -13,7 +13,7 @@ import crypto from 'node:crypto';
 import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/shared.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
-import { normalizeGitOutputPath } from './output-path.js';
+import { normalizeGitOutputPath, resolveGitOutputPath } from './output-path.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { randomUUID } from 'crypto';
@@ -1659,7 +1659,7 @@ export async function computeIntegratePlan(input = {}) {
 }
 
 const integratePublisher = createIntegratePublisher({
-  runGit: async (cwd, args) => runGitCommand(cwd, args, { env: { ...(await buildGitEnv(cwd)), GIT_ALLOW_PROTOCOL: 'file' } }),
+  runGit: async (cwd, args, env) => runGitCommand(cwd, args, { env: { ...(await buildGitEnv(cwd)), GIT_ALLOW_PROTOCOL: 'file', ...env } }),
   runGitOrThrow: runGitCommandOrThrow,
 });
 const integrateTempParent = () => path.join(os.homedir(), '.config', 'openchamber', 'tmp');
@@ -1733,7 +1733,7 @@ const verifyIntegrateTempWorktree = async ({ repoRoot, tempWorktreePath }) => {
   }
   const common = async (cwd) => {
     const result = await runGitCommandOrThrow(cwd, ['rev-parse', '--git-common-dir'], 'Failed to identify integration repository');
-    return fsp.realpath(path.resolve(cwd, gitStdoutText(result)));
+    return fsp.realpath(resolveGitOutputPath(cwd, gitStdoutText(result)));
   };
   if (await common(repoRoot) !== await common(checkout)) throw new Error('Integration checkout belongs to another repository');
 };
